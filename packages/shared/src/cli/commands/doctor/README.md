@@ -14,7 +14,7 @@ so the reported problem is the *root* cause, not a symptom.
 | ------------ | ----------------------------------------------------- | ---------------------------------------------------------- |
 | `auth`       | Can we authenticate to the workspace at all?          | validate `DATABRICKS_HOST` is a real URL, then `currentUser.me()` — once, app-wide; a failure skips the live layer |
 | `config`     | Are the resource's field env vars **present**?        | offline presence check of `process.env` (presence only — see note) |
-| `existence`  | Does the resource exist and is it reachable?          | cheapest per-type live probe (`warehouses.get`, `servingEndpoints.get`, …); Lakebase runs a real `SELECT 1` |
+| `existence`  | Does the resource exist and is it reachable?          | cheapest per-type live probe (`warehouses.getWarehouse`, `GET /api/2.0/serving-endpoints/{name}`, …); Lakebase runs a real `SELECT 1` |
 
 `config` checks env-var presence only; whether a value points at a real resource
 is the `existence` layer's job. (`DATABRICKS_HOST` is the exception — `auth`
@@ -217,15 +217,16 @@ skipped outright, not merged.)
 
 Because of that, a failed or conflicted auth row reports **both** `host:` and
 `profile:`. The host shown is the one the SDK actually resolved, read from
-`client.config.host` — which the SDK populates lazily on the first API call, so
-it's read *after* `me()`, not at construction. When the client never got built,
-the host is recovered from the `host=…` fragment the SDK appends to its
-`ConfigError`; failing that, it falls back to `DATABRICKS_HOST`. Every path is
-passed through `sanitizeHost`, so embedded `user:pass@` credentials can't leak.
+`client.getHost()`. That resolves from env + profile only (no network), so it's
+available even when the credentials are rejected. When resolution itself fails
+(missing profile, no host anywhere), it falls back to `DATABRICKS_HOST`. Every
+path is passed through `sanitizeHost`, so embedded `user:pass@` credentials
+can't leak.
 
 `HOST_PROFILE_CONFLICT` compares `DATABRICKS_HOST` against the profile's own
-declared host, read offline from `~/.databrickscfg` via the SDK's exported
-`loadConfigFile` (the resolved config is useless here — env has already won).
+declared host, read offline from `~/.databrickscfg` via sdk-core's profile
+`resolve` with the env overlay disabled (the resolved config is useless here —
+env has already won).
 Comparison ignores scheme, case, and trailing slash. It's a **warning**, not an
 error: the credentials do work, so it must not gate CI, but a green tick would
 hide a real misconfiguration. When auth *also* fails, the conflict replaces the

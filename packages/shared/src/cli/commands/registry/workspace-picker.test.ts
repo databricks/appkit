@@ -70,7 +70,9 @@ describe("listWorkspaceResources", () => {
   it("returns choices from a successful warehouse list (SDK)", async () => {
     const factory = () =>
       fakeClient({
-        warehouses: { list: asyncList([{ id: "w1", name: "One" }]) },
+        warehouses: {
+          listWarehousesIter: asyncList([{ id: "w1", name: "One" }]),
+        },
       });
     const res = await listWorkspaceResources(
       "sql_warehouse",
@@ -83,10 +85,12 @@ describe("listWorkspaceResources", () => {
     });
   });
 
-  it("maps job_id + settings.name for jobs", async () => {
+  it("maps jobId (bigint) + settings.name for jobs", async () => {
     const factory = () =>
       fakeClient({
-        jobs: { list: asyncList([{ job_id: 42, settings: { name: "ETL" } }]) },
+        jobs: {
+          listJobsIter: asyncList([{ jobId: 42n, settings: { name: "ETL" } }]),
+        },
       });
     const res = await listWorkspaceResources("job", undefined, factory);
     expect(res.choices).toEqual([{ value: "42", label: "ETL (42)" }]);
@@ -96,8 +100,8 @@ describe("listWorkspaceResources", () => {
     const factory = () =>
       fakeClient({
         genie: {
-          listSpaces: async () => ({
-            spaces: [{ space_id: "s1", title: "Sales" }],
+          genieListSpaces: async () => ({
+            spaces: [{ spaceId: "s1", title: "Sales" }],
           }),
         },
       });
@@ -105,23 +109,21 @@ describe("listWorkspaceResources", () => {
     expect(res.choices).toEqual([{ value: "s1", label: "Sales (s1)" }]);
   });
 
-  // genie listSpaces is single-page; the adapter must follow next_page_token
+  // genie listSpaces is single-page; the adapter must follow nextPageToken
   // so large workspaces aren't capped at one page.
-  it("follows genie next_page_token across pages", async () => {
-    const pages: Record<
-      string,
-      { spaces: unknown[]; next_page_token?: string }
-    > = {
-      "": { spaces: [{ space_id: "s1" }], next_page_token: "p2" },
-      p2: { spaces: [{ space_id: "s2" }] },
-    };
+  it("follows genie nextPageToken across pages", async () => {
+    const pages: Record<string, { spaces: unknown[]; nextPageToken?: string }> =
+      {
+        "": { spaces: [{ spaceId: "s1" }], nextPageToken: "p2" },
+        p2: { spaces: [{ spaceId: "s2" }] },
+      };
     const seen: (string | undefined)[] = [];
     const factory = () =>
       fakeClient({
         genie: {
-          listSpaces: async (req: { page_token?: string }) => {
-            seen.push(req.page_token);
-            return pages[req.page_token ?? ""];
+          genieListSpaces: async (req: { pageToken?: string }) => {
+            seen.push(req.pageToken);
+            return pages[req.pageToken ?? ""];
           },
         },
       });
@@ -134,9 +136,9 @@ describe("listWorkspaceResources", () => {
     const factory = () =>
       fakeClient({
         genie: {
-          listSpaces: async () => ({
-            spaces: [{ space_id: "s1" }],
-            next_page_token: "same",
+          genieListSpaces: async () => ({
+            spaces: [{ spaceId: "s1" }],
+            nextPageToken: "same",
           }),
         },
       });
@@ -145,9 +147,34 @@ describe("listWorkspaceResources", () => {
     expect(res.choices.length).toBeGreaterThan(0);
   });
 
+  // Services without a modular client go through the facade's raw request().
+  it("lists REST-backed types via request(), following next_page_token", async () => {
+    const calls: unknown[] = [];
+    const pages: Record<string, unknown> = {
+      "": { apps: [{ name: "a1" }], next_page_token: "p2" },
+      p2: { apps: [{ name: "a2" }] },
+    };
+    const factory = () =>
+      fakeClient({
+        request: async (req: {
+          path: string;
+          query?: { page_token?: string };
+        }) => {
+          calls.push(req);
+          return Response.json(pages[req.query?.page_token ?? ""]);
+        },
+      });
+    const res = await listWorkspaceResources("app", undefined, factory);
+    expect(res.choices.map((c) => c.value)).toEqual(["a1", "a2"]);
+    expect(calls).toEqual([
+      { method: "GET", path: "/api/2.0/apps", query: undefined },
+      { method: "GET", path: "/api/2.0/apps", query: { page_token: "p2" } },
+    ]);
+  });
+
   it("passes the profile to the client factory", async () => {
     const factory = vi.fn(() =>
-      fakeClient({ warehouses: { list: asyncList([]) } }),
+      fakeClient({ warehouses: { listWarehousesIter: asyncList([]) } }),
     );
     await listWorkspaceResources("sql_warehouse", "my-profile", factory);
     expect(factory).toHaveBeenCalledWith("my-profile");
@@ -159,7 +186,7 @@ describe("listWorkspaceResources", () => {
     const factory = () =>
       fakeClient({
         warehouses: {
-          list: () =>
+          listWarehousesIter: () =>
             (async function* () {
               for (let i = 0; i < 10_000; i++) {
                 yielded++;
@@ -190,7 +217,7 @@ describe("listWorkspaceResources", () => {
     const factory = () =>
       fakeClient({
         warehouses: {
-          list: () => {
+          listWarehousesIter: () => {
             throw new Error("auth failed");
           },
         },
@@ -205,7 +232,7 @@ describe("listWorkspaceResources", () => {
     const factory = () =>
       fakeClient({
         warehouses: {
-          list: () => {
+          listWarehousesIter: () => {
             throw new Error(
               "default auth: cannot configure default credentials",
             );

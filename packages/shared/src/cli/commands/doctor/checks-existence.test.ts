@@ -35,7 +35,7 @@ function apiError(statusCode: number, message = "boom"): Error {
 describe("runExistenceProbe — sql_warehouse", () => {
   it("ok when the warehouse exists and is RUNNING", async () => {
     const client = {
-      warehouses: { get: async () => ({ state: "RUNNING" }) },
+      warehouses: { getWarehouse: async () => ({ state: "RUNNING" }) },
     };
     const r = await runExistenceProbe(client, target());
     expect(r.status).toBe("ok");
@@ -43,7 +43,7 @@ describe("runExistenceProbe — sql_warehouse", () => {
 
   it("warns when the warehouse exists but is STOPPED", async () => {
     const client = {
-      warehouses: { get: async () => ({ state: "STOPPED" }) },
+      warehouses: { getWarehouse: async () => ({ state: "STOPPED" }) },
     };
     const r = await runExistenceProbe(client, target());
     expect(r.status).toBe("warn");
@@ -53,7 +53,7 @@ describe("runExistenceProbe — sql_warehouse", () => {
   it("errors NOT_FOUND on a 404", async () => {
     const client = {
       warehouses: {
-        get: async () => {
+        getWarehouse: async () => {
           throw apiError(404);
         },
       },
@@ -66,7 +66,7 @@ describe("runExistenceProbe — sql_warehouse", () => {
   it("errors INVALID_VALUE on a 400, quoting the value (no type/blob leak)", async () => {
     const client = {
       warehouses: {
-        get: async () => {
+        getWarehouse: async () => {
           throw Object.assign(
             new Error(
               'Response from server (Bad Request) {"error_code":"INVALID_PARAMETER_VALUE","message":"bogus is not a valid endpoint id."}',
@@ -90,7 +90,7 @@ describe("runExistenceProbe — sql_warehouse", () => {
   it("errors ACCESS_DENIED on a 403", async () => {
     const client = {
       warehouses: {
-        get: async () => {
+        getWarehouse: async () => {
           throw apiError(403);
         },
       },
@@ -103,7 +103,7 @@ describe("runExistenceProbe — sql_warehouse", () => {
   it("hedges on a 403, which several APIs also return for a missing resource", async () => {
     const client = {
       warehouses: {
-        get: async () => {
+        getWarehouse: async () => {
           throw apiError(403);
         },
       },
@@ -114,8 +114,31 @@ describe("runExistenceProbe — sql_warehouse", () => {
     expect(r.detail).toContain("wh-1");
   });
 
+  // The modular SDK's ApiError carries `httpStatusCode` / `code`, not the
+  // legacy `statusCode` / `errorCode`; both must classify the same.
+  it("classifies the modular ApiError shape (httpStatusCode / code)", async () => {
+    const modular = (httpStatusCode: number, code: string) => ({
+      getWarehouse: async () => {
+        throw Object.assign(new Error("boom"), { httpStatusCode, code });
+      },
+    });
+    const cases: Array<[number, string, string]> = [
+      [404, "RESOURCE_DOES_NOT_EXIST", "NOT_FOUND"],
+      [400, "INVALID_PARAMETER_VALUE", "INVALID_VALUE"],
+      [403, "PERMISSION_DENIED", "ACCESS_DENIED"],
+      [-1, "RESOURCE_DOES_NOT_EXIST", "NOT_FOUND"],
+    ];
+    for (const [status, code, expected] of cases) {
+      const r = await runExistenceProbe(
+        { warehouses: modular(status, code) },
+        target(),
+      );
+      expect(r.code, `${status}/${code}`).toBe(expected);
+    }
+  });
+
   it("skips when the id field is missing", async () => {
-    const client = { warehouses: { get: async () => ({}) } };
+    const client = { warehouses: { getWarehouse: async () => ({}) } };
     const r = await runExistenceProbe(client, target({ fieldValues: {} }));
     expect(r.status).toBe("skipped");
     expect(r.code).toBe("MISSING_FIELD");
@@ -124,7 +147,7 @@ describe("runExistenceProbe — sql_warehouse", () => {
 
 describe("runExistenceProbe — job", () => {
   it("errors on a non-integer job id", async () => {
-    const client = { jobs: { get: async () => ({}) } };
+    const client = { jobs: { getJob: async () => ({}) } };
     const r = await runExistenceProbe(
       client,
       target({ type: "job", fieldValues: { id: "not-a-number" } }),
@@ -134,7 +157,7 @@ describe("runExistenceProbe — job", () => {
   });
 
   it("ok for a valid integer job id", async () => {
-    const client = { jobs: { get: async () => ({}) } };
+    const client = { jobs: { getJob: async () => ({}) } };
     const r = await runExistenceProbe(
       client,
       target({ type: "job", fieldValues: { id: "42" } }),
@@ -149,8 +172,8 @@ describe("runExistenceProbe — job", () => {
     let seen: unknown;
     const client = {
       jobs: {
-        get: async (req: { job_id: unknown }) => {
-          seen = req.job_id;
+        getJob: async (req: { jobId: unknown }) => {
+          seen = req.jobId;
           return {};
         },
       },
@@ -164,7 +187,7 @@ describe("runExistenceProbe — job", () => {
   });
 
   it("rejects numeric forms the API can't take (1e3, 0x10)", async () => {
-    const client = { jobs: { get: async () => ({}) } };
+    const client = { jobs: { getJob: async () => ({}) } };
     for (const id of ["1e3", "0x10", "4.5", "-1"]) {
       const r = await runExistenceProbe(
         client,
@@ -260,7 +283,7 @@ describe("runExistenceProbe — postgres (Lakebase)", () => {
 
 describe("runExistenceProbe — per-type coverage with real manifest keys", () => {
   it("serving_endpoint: ok via `name`", async () => {
-    const client = { servingEndpoints: { get: async () => ({}) } };
+    const client = { request: async () => ({}) };
     const r = await runExistenceProbe(
       client,
       target({
@@ -273,10 +296,8 @@ describe("runExistenceProbe — per-type coverage with real manifest keys", () =
 
   it("serving_endpoint: hints id-vs-name when configured by id and the probe fails", async () => {
     const client = {
-      servingEndpoints: {
-        get: async () => {
-          throw Object.assign(new Error("not found"), { statusCode: 404 });
-        },
+      request: async () => {
+        throw Object.assign(new Error("not found"), { statusCode: 404 });
       },
     };
     const r = await runExistenceProbe(
@@ -289,10 +310,8 @@ describe("runExistenceProbe — per-type coverage with real manifest keys", () =
 
   it("serving_endpoint: no id-vs-name hint when configured by name", async () => {
     const client = {
-      servingEndpoints: {
-        get: async () => {
-          throw Object.assign(new Error("not found"), { statusCode: 404 });
-        },
+      request: async () => {
+        throw Object.assign(new Error("not found"), { statusCode: 404 });
       },
     };
     const r = await runExistenceProbe(
@@ -304,7 +323,7 @@ describe("runExistenceProbe — per-type coverage with real manifest keys", () =
   });
 
   it("genie_space: ok via `id`", async () => {
-    const client = { genie: { getSpace: async () => ({}) } };
+    const client = { genie: { genieGetSpace: async () => ({}) } };
     const r = await runExistenceProbe(
       client,
       target({ type: "genie_space", fieldValues: { id: "01ef" } }),
@@ -313,7 +332,7 @@ describe("runExistenceProbe — per-type coverage with real manifest keys", () =
   });
 
   it("volume: ok via `path` (real manifest key)", async () => {
-    const client = { volumes: { read: async () => ({}) } };
+    const client = { request: async () => ({}) };
     const r = await runExistenceProbe(
       client,
       target({
@@ -325,7 +344,7 @@ describe("runExistenceProbe — per-type coverage with real manifest keys", () =
   });
 
   it("uc_function: ok via `name`", async () => {
-    const client = { functions: { get: async () => ({}) } };
+    const client = { request: async () => ({}) };
     const r = await runExistenceProbe(
       client,
       target({ type: "uc_function", fieldValues: { name: "cat.sch.fn" } }),
@@ -334,8 +353,8 @@ describe("runExistenceProbe — per-type coverage with real manifest keys", () =
   });
 
   it("vector_search_index: probes via camelCase `indexName`", async () => {
-    const getIndex = vi.fn(async () => ({}));
-    const client = { vectorSearchIndexes: { getIndex } };
+    const request = vi.fn(async () => ({}));
+    const client = { request };
     const r = await runExistenceProbe(
       client,
       target({
@@ -344,11 +363,14 @@ describe("runExistenceProbe — per-type coverage with real manifest keys", () =
       }),
     );
     expect(r.status).toBe("ok");
-    expect(getIndex).toHaveBeenCalledWith({ index_name: "main.default.idx" });
+    expect(request).toHaveBeenCalledWith({
+      method: "GET",
+      path: "/api/2.0/vector-search/indexes/main.default.idx",
+    });
   });
 
   it("vector_search_index: skips MISSING_FIELD when index name absent", async () => {
-    const client = { vectorSearchIndexes: { getIndex: async () => ({}) } };
+    const client = { request: async () => ({}) };
     const r = await runExistenceProbe(
       client,
       target({ type: "vector_search_index", fieldValues: {} }),

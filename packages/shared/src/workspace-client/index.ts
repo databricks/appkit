@@ -7,6 +7,7 @@
 export { ApiError } from "./errors";
 export { ModularApiError } from "./modular";
 export { createWorkspaceClient } from "./factory";
+export { resolveProfile } from "./modular";
 export type {
   CancellationToken,
   ClientOptions,

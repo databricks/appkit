@@ -2,7 +2,7 @@
  * Layer: existence — per-resource-type probes that prove a declared resource
  * exists and is reachable via the cheapest read the SDK offers.
  *
- * The client is typed structurally (not via the SDK) so `shared` stays SDK-free.
+ * The client is typed structurally (the facade's modular clients + `request()`).
  */
 
 import {
@@ -18,26 +18,29 @@ const EXISTENCE_OK: LayerResult = { layer: "existence", status: "ok" };
 
 interface DoctorWorkspaceClient {
   warehouses: {
-    get: (r: { id: string }) => Promise<{ state?: string }>;
-  };
-  servingEndpoints: {
-    get: (r: { name: string }) => Promise<unknown>;
+    getWarehouse: (r: { id: string }) => Promise<{ state?: string }>;
   };
   genie: {
-    getSpace: (r: { space_id: string }) => Promise<unknown>;
+    genieGetSpace: (r: { spaceId: string }) => Promise<unknown>;
   };
   jobs: {
-    get: (r: { job_id: number }) => Promise<unknown>;
+    getJob: (r: { jobId: bigint }) => Promise<unknown>;
   };
-  volumes: {
-    read: (r: { name: string }) => Promise<unknown>;
-  };
-  vectorSearchIndexes: {
-    getIndex: (r: { index_name: string }) => Promise<unknown>;
-  };
-  functions: {
-    get: (r: { name: string }) => Promise<unknown>;
-  };
+  /** Raw REST GET for services the facade has no modular client for yet
+   * (serving, volumes, vector search, UC functions). Throws on non-2xx. */
+  request: (r: { method: string; path: string }) => Promise<unknown>;
+}
+
+/** A REST `GET` on a resource path, with the name URL-encoded. */
+function getResource(
+  client: DoctorWorkspaceClient,
+  basePath: string,
+  name: string,
+): Promise<unknown> {
+  return client.request({
+    method: "GET",
+    path: `${basePath}/${encodeURIComponent(name)}`,
+  });
 }
 
 type ExistenceProbe = (
@@ -45,21 +48,21 @@ type ExistenceProbe = (
   target: ResourceTarget,
 ) => Promise<LayerResult>;
 
-// Read statusCode/errorCode off the SDK's ApiError structurally.
+// Read the HTTP status / Databricks error code off an ApiError structurally.
+// Two shapes reach here: the wrapper's `ApiError` (from `request()`:
+// `statusCode` / `errorCode`) and the modular SDK's (`httpStatusCode` / `code`).
 function statusCodeOf(err: unknown): number | undefined {
-  if (err && typeof err === "object" && "statusCode" in err) {
-    const code = (err as { statusCode?: unknown }).statusCode;
-    if (typeof code === "number") return code;
-  }
-  return undefined;
+  if (!err || typeof err !== "object") return undefined;
+  const e = err as { statusCode?: unknown; httpStatusCode?: unknown };
+  const code = e.statusCode ?? e.httpStatusCode;
+  return typeof code === "number" && code >= 0 ? code : undefined;
 }
 
 function errorCodeOf(err: unknown): string | undefined {
-  if (err && typeof err === "object" && "errorCode" in err) {
-    const code = (err as { errorCode?: unknown }).errorCode;
-    if (typeof code === "string" && code.length > 0) return code;
-  }
-  return undefined;
+  if (!err || typeof err !== "object") return undefined;
+  const e = err as { errorCode?: unknown; code?: unknown };
+  const code = e.errorCode ?? e.code;
+  return typeof code === "string" && code.length > 0 ? code : undefined;
 }
 
 // The SDK message often embeds a JSON blob; pull the inner `message` out so
@@ -153,7 +156,7 @@ const probeWarehouse: ExistenceProbe = async (client, target) => {
   const id = field(target, "id");
   if (!id) return missingField("id");
   try {
-    const wh = await client.warehouses.get({ id });
+    const wh = await client.warehouses.getWarehouse({ id });
     const state = wh.state;
     if (state && state !== "RUNNING") {
       return {
@@ -177,7 +180,7 @@ const probeServing: ExistenceProbe = async (client, target) => {
   const value = name ?? idOnly;
   if (!value) return missingField("name");
   try {
-    await client.servingEndpoints.get({ name: value });
+    await getResource(client, "/api/2.0/serving-endpoints", value);
     return EXISTENCE_OK;
   } catch (err) {
     const result = classifyError(err, target);
@@ -193,7 +196,7 @@ const probeGenie: ExistenceProbe = async (client, target) => {
   const spaceId = field(target, "id");
   if (!spaceId) return missingField("id");
   try {
-    await client.genie.getSpace({ space_id: spaceId });
+    await client.genie.genieGetSpace({ spaceId });
     return EXISTENCE_OK;
   } catch (err) {
     return classifyError(err, target);
@@ -217,10 +220,8 @@ const probeJob: ExistenceProbe = async (client, target) => {
     };
   }
   try {
-    // Pass the digits through unconverted to preserve int64 precision; the SDK
-    // serialises them straight into the request, so a string works even though
-    // the type says number.
-    await client.jobs.get({ job_id: id as unknown as number });
+    // BigInt keeps int64 precision (the digits were validated above).
+    await client.jobs.getJob({ jobId: BigInt(id) });
     return EXISTENCE_OK;
   } catch (err) {
     return classifyError(err, target);
@@ -242,7 +243,7 @@ const probeVolume: ExistenceProbe = async (client, target) => {
     };
   }
   try {
-    await client.volumes.read({ name });
+    await getResource(client, "/api/2.1/unity-catalog/volumes", name);
     return EXISTENCE_OK;
   } catch (err) {
     return classifyError(err, target);
@@ -253,7 +254,7 @@ const probeVectorIndex: ExistenceProbe = async (client, target) => {
   const name = field(target, "indexName", "index_name", "name");
   if (!name) return missingField("indexName");
   try {
-    await client.vectorSearchIndexes.getIndex({ index_name: name });
+    await getResource(client, "/api/2.0/vector-search/indexes", name);
     return EXISTENCE_OK;
   } catch (err) {
     return classifyError(err, target);
@@ -264,7 +265,7 @@ const probeFunction: ExistenceProbe = async (client, target) => {
   const name = field(target, "name");
   if (!name) return missingField("name");
   try {
-    await client.functions.get({ name });
+    await getResource(client, "/api/2.1/unity-catalog/functions", name);
     return EXISTENCE_OK;
   } catch (err) {
     return classifyError(err, target);

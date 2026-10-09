@@ -375,7 +375,7 @@ describe("checkAuth", () => {
     delete process.env.DATABRICKS_HOST;
     mockGetServiceClient.mockResolvedValue({
       client: {
-        config: { host: "https://from-profile.cloud.databricks.com" },
+        getHost: async () => "https://from-profile.cloud.databricks.com",
         currentUser: { me: async () => ({ userName: "u" }) },
       },
     });
@@ -384,33 +384,35 @@ describe("checkAuth", () => {
     expect(result.host).toBe("https://from-profile.cloud.databricks.com");
   });
 
-  it("reads the resolved host only after me(), which is when the SDK resolves", async () => {
-    // The SDK populates config.host lazily on the first API call, so reading it
-    // at construction time would always yield undefined.
-    delete process.env.DATABRICKS_HOST;
-    const client: {
-      config: { host?: string };
-      currentUser: { me: () => Promise<{ userName: string }> };
-    } = {
-      config: {},
-      currentUser: {
-        me: async () => {
-          client.config.host = "https://resolved-late.cloud.databricks.com";
-          return { userName: "u" };
+  it("falls back to DATABRICKS_HOST when host resolution itself fails", async () => {
+    process.env.DATABRICKS_HOST = "https://env.cloud.databricks.com";
+    mockGetServiceClient.mockResolvedValue({
+      client: {
+        getHost: async () => {
+          throw new Error(
+            'profile not found: "prod" in /home/u/.databrickscfg',
+          );
+        },
+        currentUser: {
+          me: async () => {
+            throw new Error(
+              'profile not found: "prod" in /home/u/.databrickscfg',
+            );
+          },
         },
       },
-    };
-    mockGetServiceClient.mockResolvedValue({ client });
+    });
 
     const { result } = await checkAuth({ profile: "prod" });
-    expect(result.host).toBe("https://resolved-late.cloud.databricks.com");
+    expect(result.status).toBe("error");
+    expect(result.host).toBe("https://env.cloud.databricks.com");
   });
 
   it("keeps the resolved host on a failure after the client was built", async () => {
     delete process.env.DATABRICKS_HOST;
     mockGetServiceClient.mockResolvedValue({
       client: {
-        config: { host: "https://from-profile.cloud.databricks.com" },
+        getHost: async () => "https://from-profile.cloud.databricks.com",
         currentUser: {
           me: async () => {
             throw new Error("boom");
@@ -424,35 +426,24 @@ describe("checkAuth", () => {
     expect(result.host).toBe("https://from-profile.cloud.databricks.com");
   });
 
-  it("recovers the host from the SDK error when no client was built", async () => {
-    delete process.env.DATABRICKS_HOST;
+  // sdk-core's profile resolver words this differently from the legacy SDK
+  // ("profile not found: …" vs "has no … profile configured").
+  it("hints an existing --profile when the modular SDK can't find the profile", async () => {
     mockGetServiceClient.mockRejectedValue(
-      new Error(
-        "default auth: cannot configure default credentials. Config: host=https://dbc-abc123.cloud.databricks.com, profile=DEFAULT",
-      ),
+      new Error('profile not found: "nope" in /home/u/.databrickscfg'),
     );
 
-    const { result } = await checkAuth({});
-    expect(result.host).toBe("https://dbc-abc123.cloud.databricks.com");
-  });
-
-  it("strips prose punctuation off a host recovered from an error", async () => {
-    delete process.env.DATABRICKS_HOST;
-    mockGetServiceClient.mockRejectedValue(
-      new Error(
-        "cannot configure default credentials. host=https://foo.cloud.databricks.com.",
-      ),
+    const { result } = await checkAuth({ profile: "nope" });
+    expect(result.hint).toBe(
+      "Run `databricks auth login --profile nope`, or pass an existing profile via --profile.",
     );
-
-    const { result } = await checkAuth({});
-    expect(result.host).toBe("https://foo.cloud.databricks.com");
   });
 
   it("never leaks credentials embedded in a resolved host", async () => {
     delete process.env.DATABRICKS_HOST;
     mockGetServiceClient.mockResolvedValue({
       client: {
-        config: { host: "https://user:secret@foo.cloud.databricks.com" },
+        getHost: async () => "https://user:secret@foo.cloud.databricks.com",
         currentUser: { me: async () => ({ userName: "u" }) },
       },
     });

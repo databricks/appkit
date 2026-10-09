@@ -711,6 +711,12 @@ export function buildDatabaseClient(
 }
 
 /**
+ * Resolve a `~/.databrickscfg` profile (+ env overlay, unless disabled). Exposed
+ * so the CLI can read a profile offline without importing the SDK directly.
+ */
+export { resolve as resolveProfile } from "@databricks/sdk-core/profiles";
+
+/**
  * Build a modular Lakebase Postgres (autoscaling: projects, branches,
  * endpoints) client from wrapper options. Distinct from the provisioned
  * `/api/2.0/database` instance API.
