@@ -70,6 +70,7 @@ const FACADE_SERVICES = [
   "genie",
   "database",
   "jobs",
+  "experiments",
   "vectorSearch",
   "tables",
   "volumes",

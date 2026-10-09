@@ -23,6 +23,7 @@ import type {
   DatabaseClient,
   JobsClient,
   ModelServingClient,
+  ExperimentsClient,
   FilesClient,
   TablesClient,
   VolumesClient,
@@ -69,6 +70,9 @@ export interface WorkspaceClient extends WorkspaceAuth {
 
   /** Jobs (modular SDK, Jobs API 2.2). */
   readonly jobs: JobsClient;
+
+  /** MLflow Experiments (modular SDK). */
+  readonly experiments: ExperimentsClient;
 
   /** Vector Search (modular SDK; index metadata only, queries use `request()`). */
   readonly vectorSearch: VectorSearchClient;

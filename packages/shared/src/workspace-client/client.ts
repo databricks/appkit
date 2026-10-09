@@ -25,6 +25,8 @@ import {
   type FunctionsClient,
   type GenieClient,
   buildJobsClient,
+  buildExperimentsClient,
+  type ExperimentsClient,
   type JobsClient,
   buildModelServingClient,
   type ModelServingClient,
@@ -56,6 +58,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
   #database?: DatabaseClient;
   #jobs?: JobsClient;
   #modelServing?: ModelServingClient;
+  #experiments?: ExperimentsClient;
   #files?: FilesClient;
   #vectorSearch?: VectorSearchClient;
   #tables?: TablesClient;
@@ -105,6 +108,14 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
       this.#jobs = buildJobsClient(this.#opts);
     }
     return this.#jobs;
+  }
+
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  get experiments(): ExperimentsClient {
+    if (!this.#experiments) {
+      this.#experiments = buildExperimentsClient(this.#opts);
+    }
+    return this.#experiments;
   }
 
   // Migrated to the modular SDK — built lazily, independent of the legacy client.

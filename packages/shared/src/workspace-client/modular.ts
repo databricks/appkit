@@ -44,6 +44,7 @@ import {
 } from "@databricks/sdk-core/http";
 import { resolve } from "@databricks/sdk-core/profiles";
 import { DatabaseClient } from "@databricks/sdk-database/v1";
+import { ExperimentsClient } from "@databricks/sdk-experiments/v1";
 import { FilesClient } from "@databricks/sdk-files/v2";
 import { GenieClient } from "@databricks/sdk-genie/v1";
 import { JobsClient } from "@databricks/sdk-jobs/v2";
@@ -400,6 +401,13 @@ export function buildModelServingClient(
   return new ModelServingClient(mapToClientOptions(opts));
 }
 
+/** Build a modular MLflow Experiments client from wrapper options. */
+export function buildExperimentsClient(
+  opts: WorkspaceClientOptions,
+): ExperimentsClient {
+  return new ExperimentsClient(mapToClientOptions(opts));
+}
+
 /** Build a modular Unity Catalog Tables client from wrapper options. */
 export function buildTablesClient(opts: WorkspaceClientOptions): TablesClient {
   return new TablesClient(mapToClientOptions(opts));
@@ -435,6 +443,7 @@ export function buildDatabaseClient(
 
 // ── Client type re-exports (for the facade accessor types) ───────────────
 export type { DatabaseClient } from "@databricks/sdk-database/v1";
+export type { ExperimentsClient } from "@databricks/sdk-experiments/v1";
 export type { FilesClient } from "@databricks/sdk-files/v2";
 export type { GenieClient } from "@databricks/sdk-genie/v1";
 export type { JobsClient } from "@databricks/sdk-jobs/v2";
@@ -489,6 +498,11 @@ export type {
   FunctionInfo,
   GetFunctionRequest,
 } from "@databricks/sdk-uc-functions/v1";
+export type {
+  Experiment,
+  ListExperimentsRequest,
+  ListExperimentsResponse,
+} from "@databricks/sdk-experiments/v1";
 export type {
   GetJobRequest,
   GetRunRequest,
