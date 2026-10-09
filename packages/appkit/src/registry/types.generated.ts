@@ -16,6 +16,7 @@ export enum ResourceType {
   GENIE_SPACE = "genie_space",
   EXPERIMENT = "experiment",
   APP = "app",
+  MODEL_SERVICE = "model_service",
 }
 
 // ============================================================================
@@ -64,6 +65,9 @@ export type ExperimentPermission = "CAN_READ" | "CAN_EDIT" | "CAN_MANAGE";
 /** Permissions for APP resources */
 export type AppPermission = "CAN_USE";
 
+/** Permissions for MODEL_SERVICE resources */
+export type ModelServicePermission = "EXECUTE";
+
 /** Union of all possible permission levels across all resource types. */
 export type ResourcePermission =
   | SecretPermission
@@ -78,7 +82,8 @@ export type ResourcePermission =
   | PostgresPermission
   | GenieSpacePermission
   | ExperimentPermission
-  | AppPermission;
+  | AppPermission
+  | ModelServicePermission;
 
 /** Permission hierarchy per resource type (weakest to strongest). Schema enum order. */
 export const PERMISSION_HIERARCHY_BY_TYPE: Record<
@@ -98,6 +103,7 @@ export const PERMISSION_HIERARCHY_BY_TYPE: Record<
   [ResourceType.GENIE_SPACE]: ["CAN_VIEW", "CAN_RUN", "CAN_EDIT", "CAN_MANAGE"],
   [ResourceType.EXPERIMENT]: ["CAN_READ", "CAN_EDIT", "CAN_MANAGE"],
   [ResourceType.APP]: ["CAN_USE"],
+  [ResourceType.MODEL_SERVICE]: ["EXECUTE"],
 } as const;
 
 /** Set of valid permissions per type (for validation). */

@@ -2,7 +2,9 @@ import { describe, expect, test } from "vitest";
 
 import {
   APP_ONLY_RESOURCE_TYPES,
+  DABS_BINDING_BY_TYPE,
   pluginManifestSchema,
+  resourceRequirementSchema,
   SCOPE_BY_TYPE,
 } from "./manifest";
 
@@ -85,5 +87,47 @@ describe("manifest execution capabilities", () => {
     expect(
       pluginManifestSchema.safeParse({ ...manifest, authMode: "obo" }).success,
     ).toBe(false);
+  });
+
+  test("model_service resource type validates with EXECUTE permission", () => {
+    const resource = {
+      type: "model_service",
+      alias: "Model Service",
+      resourceKey: "model-service",
+      description: "Unity AI Gateway model service",
+      permission: "EXECUTE",
+      fields: { name: { env: "DATABRICKS_MODEL_SERVICE_NAME" } },
+    };
+    const result = resourceRequirementSchema.safeParse(resource);
+    expect(result.success).toBe(true);
+  });
+
+  test("model_service resource type rejects non-EXECUTE permissions", () => {
+    const resource = {
+      type: "model_service",
+      alias: "Model Service",
+      resourceKey: "model-service",
+      description: "Unity AI Gateway model service",
+      permission: "CAN_USE",
+      fields: { name: { env: "DATABRICKS_MODEL_SERVICE_NAME" } },
+    };
+    const result = resourceRequirementSchema.safeParse(resource);
+    expect(result.success).toBe(false);
+  });
+
+  test("model_service has correct DABs binding with uc_securable", () => {
+    expect(DABS_BINDING_BY_TYPE.model_service).toEqual({
+      yamlKey: "uc_securable",
+      varFields: [["name", "securable_full_name"]],
+      staticFields: [["securable_type", "MODEL_SERVICE"]],
+    });
+  });
+
+  test("model_service is not in SCOPE_BY_TYPE (SP-only, no OBO)", () => {
+    expect(SCOPE_BY_TYPE).not.toHaveProperty("model_service");
+  });
+
+  test("model_service is not in APP_ONLY_RESOURCE_TYPES", () => {
+    expect(APP_ONLY_RESOURCE_TYPES.has("model_service")).toBe(false);
   });
 });
