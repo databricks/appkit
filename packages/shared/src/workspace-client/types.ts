@@ -19,6 +19,7 @@ import type {
   WarehousesClient,
   WorkspaceAuth,
   ScimClient,
+  AppsClient,
   GenieClient,
   DatabaseClient,
   JobsClient,
@@ -67,6 +68,9 @@ export interface WorkspaceClient extends WorkspaceAuth {
 
   /** Lakebase provisioned database instances + credentials (modular SDK). */
   readonly database: DatabaseClient;
+
+  /** Databricks Apps (modular SDK). */
+  readonly apps: AppsClient;
 
   /** Jobs (modular SDK, Jobs API 2.2). */
   readonly jobs: JobsClient;

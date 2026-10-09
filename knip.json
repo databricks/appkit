@@ -10,6 +10,7 @@
     "packages/appkit": {
       "ignoreDependencies": [
         "vitest",
+        "@databricks/sdk-apps",
         "@databricks/sdk-auth",
         "@databricks/sdk-core",
         "@databricks/sdk-experimental",

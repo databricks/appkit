@@ -280,6 +280,9 @@ importers:
       '@databricks/lakebase':
         specifier: workspace:*
         version: link:../lakebase
+      '@databricks/sdk-apps':
+        specifier: 0.54.0
+        version: 0.54.0
       '@databricks/sdk-auth':
         specifier: 0.51.0
         version: 0.51.0
@@ -649,6 +652,9 @@ importers:
       '@clack/prompts':
         specifier: 1.0.1
         version: 1.0.1
+      '@databricks/sdk-apps':
+        specifier: 0.54.0
+        version: 0.54.0
       '@databricks/sdk-auth':
         specifier: 0.51.0
         version: 0.51.0
@@ -2067,6 +2073,10 @@ packages:
     resolution: {integrity: sha512-kOyK3kdDhZDtRAhJ7/GpOPu6PWdc6622Jc9DPNHiua67m3hvEisUgptM7ssyOAdiycXmG9rDpy8t13E4doh/9A==}
     engines: {node: ^20 || ^22 || ^24 || ^25, pnpm: '>=10'}
     hasBin: true
+
+  '@databricks/sdk-apps@0.54.0':
+    resolution: {integrity: sha512-7cz5Smp/OXfwLn7jGKs0yQjOy1dMbOuPz6l6WoiTnVakw5RClagnLp56hePo2D6HlXMcFRMzTNe5BbW89dgveg==}
+    engines: {node: '>=22.0.0'}
 
   '@databricks/sdk-auth@0.51.0':
     resolution: {integrity: sha512-CswN+io9XB7rrcHo9BG/2qIdRCUMb8gFjiZmqVDG2qRmyhzY7Wv1tvwzA+U8uBplmdzAcdhuxMvHQ7vKGFWYqQ==}
@@ -14411,6 +14421,15 @@ snapshots:
       jsonata: 2.1.0
     transitivePeerDependencies:
       - supports-color
+
+  '@databricks/sdk-apps@0.54.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
 
   '@databricks/sdk-auth@0.51.0':
     dependencies:

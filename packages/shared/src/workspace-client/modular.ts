@@ -25,6 +25,7 @@
  */
 import { STATUS_CODES } from "node:http";
 
+import { AppsClient } from "@databricks/sdk-apps/v1";
 import {
   type Credentials,
   newTokenCredentials,
@@ -363,6 +364,11 @@ export function buildScimClient(opts: WorkspaceClientOptions): ScimClient {
   return new ScimClient(mapToClientOptions(opts));
 }
 
+/** Build a modular Apps client from wrapper options. */
+export function buildAppsClient(opts: WorkspaceClientOptions): AppsClient {
+  return new AppsClient(mapToClientOptions(opts));
+}
+
 /** Build a modular Genie client from wrapper options. */
 export function buildGenieClient(opts: WorkspaceClientOptions): GenieClient {
   return new GenieClient(mapToClientOptions(opts));
@@ -444,6 +450,7 @@ export function buildDatabaseClient(
 // ── Client type re-exports (for the facade accessor types) ───────────────
 export type { DatabaseClient } from "@databricks/sdk-database/v1";
 export type { ExperimentsClient } from "@databricks/sdk-experiments/v1";
+export type { AppsClient } from "@databricks/sdk-apps/v1";
 export type { FilesClient } from "@databricks/sdk-files/v2";
 export type { GenieClient } from "@databricks/sdk-genie/v1";
 export type { JobsClient } from "@databricks/sdk-jobs/v2";
@@ -490,6 +497,11 @@ export type {
   ListDatabaseInstancesRequest,
   ListDatabaseInstancesResponse,
 } from "@databricks/sdk-database/v1";
+export type {
+  App,
+  ListAppsRequest,
+  ListAppsResponse,
+} from "@databricks/sdk-apps/v1";
 export type {
   GenieGetMessageQueryResultResponse,
   GenieMessage,

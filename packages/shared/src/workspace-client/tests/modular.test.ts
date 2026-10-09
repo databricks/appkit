@@ -33,6 +33,12 @@ vi.mock("@databricks/sdk-warehouses/v1", () => ({
 vi.mock("@databricks/sdk-statementexecution/v1", () => ({
   StatementExecutionClient: vi.fn().mockImplementation((opts) => ({ opts })),
 }));
+vi.mock("@databricks/sdk-apps/v1", () => ({
+  AppsClient: vi.fn().mockImplementation((opts) => {
+    ctorOpts.push(opts);
+    return { opts };
+  }),
+}));
 vi.mock("@databricks/sdk-experiments/v1", () => ({
   ExperimentsClient: vi.fn().mockImplementation((opts) => {
     ctorOpts.push(opts);
@@ -116,6 +122,7 @@ import {
   buildConnectionsClient,
   buildDatabaseClient,
   buildExperimentsClient,
+  buildAppsClient,
   buildGenieClient,
   buildModelServingClient,
   buildVolumesClient,
@@ -313,6 +320,26 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
         productVersion: "0.64.0",
       },
     } as never);
+    expect(ctorOpts[0].credentials).toMatchObject({
+      kind: "pat",
+      token: "user-token",
+    });
+    expect(m2mOpts).toEqual([]);
+    expect(await sentUserAgent(ctorOpts[0].httpClient)).toBe(
+      "@databricks/appkit/0.64.0",
+    );
+  });
+
+  test("apps passes the mapped options (normalized host, credentials) to the client", async () => {
+    buildAppsClient({
+      host: "x.cloud.databricks.com",
+      token: "user-token",
+      clientOptions: {
+        product: "@databricks/appkit",
+        productVersion: "0.64.0",
+      },
+    } as never);
+    expect(ctorOpts[0].host).toBe("https://x.cloud.databricks.com");
     expect(ctorOpts[0].credentials).toMatchObject({
       kind: "pat",
       token: "user-token",

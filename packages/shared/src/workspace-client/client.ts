@@ -24,6 +24,8 @@ import {
   buildGenieClient,
   type FunctionsClient,
   type GenieClient,
+  buildAppsClient,
+  type AppsClient,
   buildJobsClient,
   buildExperimentsClient,
   type ExperimentsClient,
@@ -56,6 +58,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
   #currentUser?: ScimClient;
   #genie?: GenieClient;
   #database?: DatabaseClient;
+  #apps?: AppsClient;
   #jobs?: JobsClient;
   #modelServing?: ModelServingClient;
   #experiments?: ExperimentsClient;
@@ -92,6 +95,14 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
       this.#genie = buildGenieClient(this.#opts);
     }
     return this.#genie;
+  }
+
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  get apps(): AppsClient {
+    if (!this.#apps) {
+      this.#apps = buildAppsClient(this.#opts);
+    }
+    return this.#apps;
   }
 
   // Migrated to the modular SDK — built lazily, independent of the legacy client.
