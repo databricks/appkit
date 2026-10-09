@@ -19,6 +19,7 @@ import type {
   WarehousesClient,
   WorkspaceAuth,
   ScimClient,
+  GenieClient,
 } from "./modular";
 
 // Legacy SDK type namespaces for un-migrated services, re-exported so AppKit
@@ -30,7 +31,7 @@ import type {
 // that request has no `skip_cannot_use` filter, so it could pick a warehouse
 // the caller can't use. Statement + warehouse service types come from `./modular`.
 export type { files, jobs, serving, sql } from "@databricks/sdk-experimental";
-// Modular SDK client + model types (warehouses, statementExecution).
+// Modular SDK client + model types (warehouses, statementExecution, genie).
 export type * from "./modular";
 
 /**
@@ -48,8 +49,8 @@ export interface WorkspaceClient extends WorkspaceAuth {
   /** SQL Warehouses (modular SDK). */
   readonly warehouses: WarehousesClient;
 
-  /** Genie / dashboards. */
-  readonly genie: LegacyWorkspaceClient["genie"];
+  /** Genie (modular SDK). */
+  readonly genie: GenieClient;
 
   /** Jobs. */
   readonly jobs: LegacyWorkspaceClient["jobs"];

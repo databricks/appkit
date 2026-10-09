@@ -20,9 +20,9 @@ async function collect(
 
 function makeGenieMessage(overrides: Partial<GenieMessage> = {}): GenieMessage {
   return {
-    message_id: "msg-1",
-    conversation_id: "conv-1",
-    space_id: "space-1",
+    messageId: "msg-1",
+    conversationId: "conv-1",
+    spaceId: "space-1",
     status: "COMPLETED",
     content: "Hello from Genie",
     attachments: [],
@@ -36,12 +36,15 @@ function makeGenieMessageWithQuery(
   return makeGenieMessage({
     attachments: [
       {
-        attachment_id: "att-1",
-        query: {
-          title: "Sales Query",
-          description: "Total sales",
-          query: "SELECT sum(amount) FROM sales",
-          statement_id: "stmt-1",
+        attachmentId: "att-1",
+        attachment: {
+          $case: "query",
+          query: {
+            title: "Sales Query",
+            description: "Total sales",
+            query: "SELECT sum(amount) FROM sales",
+            statementId: "stmt-1",
+          },
         },
       },
     ],
@@ -53,37 +56,26 @@ function makeGenieMessageWithQuery(
 function createMockWorkspaceClient() {
   return {
     genie: {
-      startConversation: vi.fn(),
-      createMessage: vi.fn(),
-      getMessage: vi.fn(),
-      listConversationMessages: vi.fn(),
-      getMessageAttachmentQueryResult: vi.fn(),
+      genieStartConversation: vi.fn(),
+      genieCreateConversationMessage: vi.fn(),
+      genieGetConversationMessage: vi.fn(),
+      genieListConversationMessages: vi.fn(),
+      genieGetMessageAttachmentQueryResult: vi.fn(),
     },
   } as any;
 }
 
-/**
- * Builds a mock waiter whose `.wait()` invokes `onProgress` for each
- * progress value, then resolves with the final result.
- */
-function createMockWaiter(opts: {
-  progressValues?: Partial<GenieMessage>[];
-  result: GenieMessage;
-}) {
-  return {
-    wait: vi.fn().mockImplementation(async (options: any = {}) => {
-      if (opts.progressValues) {
-        for (const value of opts.progressValues) {
-          if (options.onProgress) {
-            await options.onProgress(value);
-          }
-        }
-      }
-      return opts.result;
-    }),
-    message_id: opts.result.message_id,
-    conversation_id: opts.result.conversation_id,
-  };
+/** Stubs the start call; every poll then returns `result`. */
+function mockStart(
+  ws: ReturnType<typeof createMockWorkspaceClient>,
+  result: GenieMessage,
+  method = "genieStartConversation",
+) {
+  ws.genie[method].mockResolvedValue({
+    messageId: result.messageId,
+    conversationId: result.conversationId,
+  });
+  ws.genie.genieGetConversationMessage.mockResolvedValue(result);
 }
 
 // ---------------------------------------------------------------------------
@@ -105,17 +97,14 @@ describe("GenieConnector", () => {
 
   describe("streamSendMessage", () => {
     test("yields message_start, status updates, then message_result", async () => {
+      vi.useFakeTimers();
       const completedMsg = makeGenieMessage();
-      const waiter = createMockWaiter({
-        progressValues: [
-          { status: "EXECUTING_QUERY" },
-          { status: "COMPLETED" },
-        ],
-        result: completedMsg,
-      });
-      ws.genie.startConversation.mockResolvedValue(waiter);
+      mockStart(ws, completedMsg);
+      ws.genie.genieGetConversationMessage.mockResolvedValueOnce(
+        makeGenieMessage({ status: "EXECUTING_QUERY" }),
+      );
 
-      const events = await collect(
+      const pending = collect(
         connector.streamSendMessage(
           ws,
           "space-1",
@@ -123,6 +112,9 @@ describe("GenieConnector", () => {
           undefined,
         ),
       );
+      await vi.runAllTimersAsync();
+      const events = await pending;
+      vi.useRealTimers();
 
       expect(events[0]).toEqual({
         type: "message_start",
@@ -144,50 +136,51 @@ describe("GenieConnector", () => {
 
     test("new conversation calls startConversation", async () => {
       const completedMsg = makeGenieMessage();
-      const waiter = createMockWaiter({ result: completedMsg });
-      ws.genie.startConversation.mockResolvedValue(waiter);
+      mockStart(ws, completedMsg);
 
       await collect(
         connector.streamSendMessage(ws, "space-1", "hello", undefined),
       );
 
-      expect(ws.genie.startConversation).toHaveBeenCalledWith({
-        space_id: "space-1",
+      expect(ws.genie.genieStartConversation).toHaveBeenCalledWith({
+        spaceId: "space-1",
         content: "hello",
       });
-      expect(ws.genie.createMessage).not.toHaveBeenCalled();
+      expect(ws.genie.genieCreateConversationMessage).not.toHaveBeenCalled();
     });
 
     test("existing conversation calls createMessage", async () => {
       const completedMsg = makeGenieMessage();
-      const waiter = createMockWaiter({ result: completedMsg });
-      ws.genie.createMessage.mockResolvedValue(waiter);
+      mockStart(ws, completedMsg, "genieCreateConversationMessage");
 
       await collect(
         connector.streamSendMessage(ws, "space-1", "hello", "conv-existing"),
       );
 
-      expect(ws.genie.createMessage).toHaveBeenCalledWith({
-        space_id: "space-1",
-        conversation_id: "conv-existing",
+      expect(ws.genie.genieCreateConversationMessage).toHaveBeenCalledWith({
+        spaceId: "space-1",
+        conversationId: "conv-existing",
         content: "hello",
       });
-      expect(ws.genie.startConversation).not.toHaveBeenCalled();
+      expect(ws.genie.genieStartConversation).not.toHaveBeenCalled();
     });
 
     test("emits query_result for attachments with statementIds", async () => {
       const completedMsg = makeGenieMessageWithQuery();
-      const waiter = createMockWaiter({ result: completedMsg });
-      ws.genie.startConversation.mockResolvedValue(waiter);
+      mockStart(ws, completedMsg);
 
+      // The SDK's camelCase statement response is streamed as-is; bigints are
+      // serialized by the SSE writer.
       const statementResponse = {
+        statementId: "stmt-1",
         manifest: {
-          schema: { columns: [{ name: "total", type_name: "DOUBLE" }] },
+          schema: { columns: [{ name: "total", typeName: "DOUBLE" }] },
+          totalRowCount: 1n,
         },
-        result: { data_array: [["1234.56"]] },
+        result: { dataArray: [["1234.56", null]], rowCount: 1n },
       };
-      ws.genie.getMessageAttachmentQueryResult.mockResolvedValue({
-        statement_response: statementResponse,
+      ws.genie.genieGetMessageAttachmentQueryResult.mockResolvedValue({
+        statementResponse,
       });
 
       const events = await collect(
@@ -203,8 +196,22 @@ describe("GenieConnector", () => {
       });
     });
 
+    test("maps a FAILED poll to the table permissions error", async () => {
+      mockStart(ws, makeGenieMessage({ status: "FAILED" }));
+
+      const events = await collect(
+        connector.streamSendMessage(ws, "space-1", "q", undefined),
+      );
+
+      expect(events.at(-1)).toEqual({
+        type: "error",
+        error:
+          "You may not have access to the data tables. Please verify your table permissions.",
+      });
+    });
+
     test("yields error event on SDK failure", async () => {
-      ws.genie.startConversation.mockRejectedValue(
+      ws.genie.genieStartConversation.mockRejectedValue(
         new Error("Network timeout"),
       );
 
@@ -216,7 +223,7 @@ describe("GenieConnector", () => {
     });
 
     test("classifies RESOURCE_DOES_NOT_EXIST as access denied", async () => {
-      ws.genie.startConversation.mockRejectedValue(
+      ws.genie.genieStartConversation.mockRejectedValue(
         new Error("RESOURCE_DOES_NOT_EXIST: space not found"),
       );
 
@@ -234,9 +241,8 @@ describe("GenieConnector", () => {
 
     test("emits error event when query result fetch fails", async () => {
       const completedMsg = makeGenieMessageWithQuery();
-      const waiter = createMockWaiter({ result: completedMsg });
-      ws.genie.startConversation.mockResolvedValue(waiter);
-      ws.genie.getMessageAttachmentQueryResult.mockRejectedValue(
+      mockStart(ws, completedMsg);
+      ws.genie.genieGetMessageAttachmentQueryResult.mockRejectedValue(
         new Error("statement expired"),
       );
 
@@ -258,12 +264,12 @@ describe("GenieConnector", () => {
 
   describe("streamConversation", () => {
     test("yields message_result for each message, then history_info", async () => {
-      ws.genie.listConversationMessages.mockResolvedValue({
+      ws.genie.genieListConversationMessages.mockResolvedValue({
         messages: [
-          makeGenieMessage({ message_id: "m1", content: "first" }),
-          makeGenieMessage({ message_id: "m2", content: "second" }),
+          makeGenieMessage({ messageId: "m1", content: "first" }),
+          makeGenieMessage({ messageId: "m2", content: "second" }),
         ],
-        next_page_token: null,
+        nextPageToken: null,
       });
 
       const events = await collect(
@@ -286,39 +292,45 @@ describe("GenieConnector", () => {
     });
 
     test("fetches query results in parallel when includeQueryResults=true", async () => {
-      ws.genie.listConversationMessages.mockResolvedValue({
+      ws.genie.genieListConversationMessages.mockResolvedValue({
         messages: [
           makeGenieMessageWithQuery({
-            message_id: "m1",
+            messageId: "m1",
             attachments: [
               {
-                attachment_id: "att-a",
-                query: {
-                  title: "Q1",
-                  query: "SELECT 1",
-                  statement_id: "stmt-a",
+                attachmentId: "att-a",
+                attachment: {
+                  $case: "query",
+                  query: {
+                    title: "Q1",
+                    query: "SELECT 1",
+                    statementId: "stmt-a",
+                  },
                 },
               },
               {
-                attachment_id: "att-b",
-                query: {
-                  title: "Q2",
-                  query: "SELECT 2",
-                  statement_id: "stmt-b",
+                attachmentId: "att-b",
+                attachment: {
+                  $case: "query",
+                  query: {
+                    title: "Q2",
+                    query: "SELECT 2",
+                    statementId: "stmt-b",
+                  },
                 },
               },
             ],
           }),
         ],
-        next_page_token: null,
+        nextPageToken: null,
       });
 
       const stmtResponse = {
         manifest: { schema: { columns: [] } },
-        result: { data_array: [] },
+        result: { dataArray: [] },
       };
-      ws.genie.getMessageAttachmentQueryResult.mockResolvedValue({
-        statement_response: stmtResponse,
+      ws.genie.genieGetMessageAttachmentQueryResult.mockResolvedValue({
+        statementResponse: stmtResponse,
       });
 
       const events = await collect(
@@ -329,13 +341,15 @@ describe("GenieConnector", () => {
 
       const queryResults = events.filter((e) => e.type === "query_result");
       expect(queryResults).toHaveLength(2);
-      expect(ws.genie.getMessageAttachmentQueryResult).toHaveBeenCalledTimes(2);
+      expect(
+        ws.genie.genieGetMessageAttachmentQueryResult,
+      ).toHaveBeenCalledTimes(2);
     });
 
     test("skips query results when includeQueryResults=false", async () => {
-      ws.genie.listConversationMessages.mockResolvedValue({
+      ws.genie.genieListConversationMessages.mockResolvedValue({
         messages: [makeGenieMessageWithQuery()],
-        next_page_token: null,
+        nextPageToken: null,
       });
 
       const events = await collect(
@@ -345,44 +359,52 @@ describe("GenieConnector", () => {
       );
 
       expect(events.filter((e) => e.type === "query_result")).toHaveLength(0);
-      expect(ws.genie.getMessageAttachmentQueryResult).not.toHaveBeenCalled();
+      expect(
+        ws.genie.genieGetMessageAttachmentQueryResult,
+      ).not.toHaveBeenCalled();
     });
 
     test("handles partial query result failures via Promise.allSettled", async () => {
-      ws.genie.listConversationMessages.mockResolvedValue({
+      ws.genie.genieListConversationMessages.mockResolvedValue({
         messages: [
           makeGenieMessage({
-            message_id: "m1",
+            messageId: "m1",
             attachments: [
               {
-                attachment_id: "att-ok",
-                query: {
-                  title: "OK",
-                  query: "SELECT 1",
-                  statement_id: "stmt-ok",
+                attachmentId: "att-ok",
+                attachment: {
+                  $case: "query",
+                  query: {
+                    title: "OK",
+                    query: "SELECT 1",
+                    statementId: "stmt-ok",
+                  },
                 },
               },
               {
-                attachment_id: "att-fail",
-                query: {
-                  title: "Fail",
-                  query: "SELECT 2",
-                  statement_id: "stmt-fail",
+                attachmentId: "att-fail",
+                attachment: {
+                  $case: "query",
+                  query: {
+                    title: "Fail",
+                    query: "SELECT 2",
+                    statementId: "stmt-fail",
+                  },
                 },
               },
             ],
           }),
         ],
-        next_page_token: null,
+        nextPageToken: null,
       });
 
       const stmtResponse = {
         manifest: { schema: { columns: [] } },
-        result: { data_array: [] },
+        result: { dataArray: [] },
       };
 
-      ws.genie.getMessageAttachmentQueryResult
-        .mockResolvedValueOnce({ statement_response: stmtResponse })
+      ws.genie.genieGetMessageAttachmentQueryResult
+        .mockResolvedValueOnce({ statementResponse: stmtResponse })
         .mockRejectedValueOnce(new Error("statement expired"));
 
       const events = await collect(
@@ -400,7 +422,7 @@ describe("GenieConnector", () => {
     });
 
     test("yields error when listConversationMessages fails", async () => {
-      ws.genie.listConversationMessages.mockRejectedValue(
+      ws.genie.genieListConversationMessages.mockRejectedValue(
         new Error("RESOURCE_DOES_NOT_EXIST: conv not found"),
       );
 
@@ -423,7 +445,7 @@ describe("GenieConnector", () => {
 
   describe("streamGetMessage", () => {
     test("polls until COMPLETED, yields status + message_result", async () => {
-      ws.genie.getMessage
+      ws.genie.genieGetConversationMessage
         .mockResolvedValueOnce(makeGenieMessage({ status: "EXECUTING_QUERY" }))
         .mockResolvedValueOnce(makeGenieMessage({ status: "COMPLETED" }));
 
@@ -439,11 +461,11 @@ describe("GenieConnector", () => {
       });
       expect(events[1]).toEqual({ type: "status", status: "COMPLETED" });
       expect(events[2]).toMatchObject({ type: "message_result" });
-      expect(ws.genie.getMessage).toHaveBeenCalledTimes(2);
+      expect(ws.genie.genieGetConversationMessage).toHaveBeenCalledTimes(2);
     });
 
     test("polls until FAILED, yields status + message_result", async () => {
-      ws.genie.getMessage
+      ws.genie.genieGetConversationMessage
         .mockResolvedValueOnce(makeGenieMessage({ status: "EXECUTING_QUERY" }))
         .mockResolvedValueOnce(
           makeGenieMessage({
@@ -472,7 +494,7 @@ describe("GenieConnector", () => {
     test("respects abort signal", async () => {
       const controller = new AbortController();
 
-      ws.genie.getMessage.mockResolvedValue(
+      ws.genie.genieGetConversationMessage.mockResolvedValue(
         makeGenieMessage({ status: "EXECUTING_QUERY" }),
       );
 
@@ -500,7 +522,9 @@ describe("GenieConnector", () => {
     });
 
     test("yields error when getMessage throws", async () => {
-      ws.genie.getMessage.mockRejectedValue(new Error("service unavailable"));
+      ws.genie.genieGetConversationMessage.mockRejectedValue(
+        new Error("service unavailable"),
+      );
 
       const events = await collect(
         connector.streamGetMessage(ws, "space-1", "conv-1", "msg-1", {
@@ -512,7 +536,7 @@ describe("GenieConnector", () => {
     });
 
     test("does not duplicate status events for same status", async () => {
-      ws.genie.getMessage
+      ws.genie.genieGetConversationMessage
         .mockResolvedValueOnce(makeGenieMessage({ status: "EXECUTING_QUERY" }))
         .mockResolvedValueOnce(makeGenieMessage({ status: "EXECUTING_QUERY" }))
         .mockResolvedValueOnce(makeGenieMessage({ status: "COMPLETED" }));
@@ -538,11 +562,10 @@ describe("GenieConnector", () => {
   describe("sendMessage", () => {
     test("returns completed message response", async () => {
       const completedMsg = makeGenieMessage({
-        message_id: "msg-42",
-        conversation_id: "conv-new",
+        messageId: "msg-42",
+        conversationId: "conv-new",
       });
-      const waiter = createMockWaiter({ result: completedMsg });
-      ws.genie.startConversation.mockResolvedValue(waiter);
+      mockStart(ws, completedMsg);
 
       const result = await connector.sendMessage(
         ws,
@@ -566,17 +589,17 @@ describe("GenieConnector", () => {
       // listConversationMessages reverses the SDK response, so mock data
       // is ordered newest-first (as the SDK returns) and results are
       // oldest-first after reversal.
-      ws.genie.listConversationMessages
+      ws.genie.genieListConversationMessages
         .mockResolvedValueOnce({
           messages: [
-            makeGenieMessage({ message_id: "m2" }),
-            makeGenieMessage({ message_id: "m1" }),
+            makeGenieMessage({ messageId: "m2" }),
+            makeGenieMessage({ messageId: "m1" }),
           ],
-          next_page_token: "page2",
+          nextPageToken: "page2",
         })
         .mockResolvedValueOnce({
-          messages: [makeGenieMessage({ message_id: "m3" })],
-          next_page_token: null,
+          messages: [makeGenieMessage({ messageId: "m3" })],
+          nextPageToken: null,
         });
 
       const result = await connector.getConversation(ws, "space-1", "conv-1");
@@ -587,7 +610,7 @@ describe("GenieConnector", () => {
         "m2",
         "m3",
       ]);
-      expect(ws.genie.listConversationMessages).toHaveBeenCalledTimes(2);
+      expect(ws.genie.genieListConversationMessages).toHaveBeenCalledTimes(2);
     });
 
     test("respects maxMessages limit", async () => {
@@ -596,13 +619,13 @@ describe("GenieConnector", () => {
         maxMessages: 2,
       });
 
-      ws.genie.listConversationMessages.mockResolvedValueOnce({
+      ws.genie.genieListConversationMessages.mockResolvedValueOnce({
         messages: [
-          makeGenieMessage({ message_id: "m1" }),
-          makeGenieMessage({ message_id: "m2" }),
-          makeGenieMessage({ message_id: "m3" }),
+          makeGenieMessage({ messageId: "m1" }),
+          makeGenieMessage({ messageId: "m2" }),
+          makeGenieMessage({ messageId: "m3" }),
         ],
-        next_page_token: "page2",
+        nextPageToken: "page2",
       });
 
       const result = await smallConnector.getConversation(
@@ -614,7 +637,7 @@ describe("GenieConnector", () => {
       // Should be sliced to maxMessages
       expect(result.messages).toHaveLength(2);
       // Should NOT fetch a second page since length already >= maxMessages
-      expect(ws.genie.listConversationMessages).toHaveBeenCalledTimes(1);
+      expect(ws.genie.genieListConversationMessages).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -625,14 +648,13 @@ describe("GenieConnector", () => {
   describe("mapAttachments", () => {
     test("handles query attachments", async () => {
       const msg = makeGenieMessageWithQuery();
-      const waiter = createMockWaiter({ result: msg });
-      ws.genie.startConversation.mockResolvedValue(waiter);
+      mockStart(ws, msg);
 
       // We drive through streamSendMessage to exercise mapAttachments
-      ws.genie.getMessageAttachmentQueryResult.mockResolvedValue({
-        statement_response: {
+      ws.genie.genieGetMessageAttachmentQueryResult.mockResolvedValue({
+        statementResponse: {
           manifest: { schema: { columns: [] } },
-          result: { data_array: [] },
+          result: { dataArray: [] },
         },
       });
 
@@ -658,13 +680,15 @@ describe("GenieConnector", () => {
       const msg = makeGenieMessage({
         attachments: [
           {
-            attachment_id: "att-text",
-            text: { content: "Here is the explanation" },
+            attachmentId: "att-text",
+            attachment: {
+              $case: "text",
+              text: { content: "Here is the explanation" },
+            },
           },
         ],
       });
-      const waiter = createMockWaiter({ result: msg });
-      ws.genie.startConversation.mockResolvedValue(waiter);
+      mockStart(ws, msg);
 
       const events = await collect(
         connector.streamSendMessage(ws, "space-1", "q", undefined),
@@ -683,15 +707,17 @@ describe("GenieConnector", () => {
       const msg = makeGenieMessage({
         attachments: [
           {
-            attachment_id: "att-sq",
-            suggested_questions: {
-              questions: ["What is X?", "Show me Y"],
+            attachmentId: "att-sq",
+            attachment: {
+              $case: "suggestedQuestions",
+              suggestedQuestions: {
+                questions: ["What is X?", "Show me Y"],
+              },
             },
           },
         ],
       });
-      const waiter = createMockWaiter({ result: msg });
-      ws.genie.startConversation.mockResolvedValue(waiter);
+      mockStart(ws, msg);
 
       const events = await collect(
         connector.streamSendMessage(ws, "space-1", "q", undefined),
@@ -708,8 +734,7 @@ describe("GenieConnector", () => {
 
     test("returns empty array when message has no attachments", async () => {
       const msg = makeGenieMessage({ attachments: undefined });
-      const waiter = createMockWaiter({ result: msg });
-      ws.genie.startConversation.mockResolvedValue(waiter);
+      mockStart(ws, msg);
 
       const events = await collect(
         connector.streamSendMessage(ws, "space-1", "q", undefined),
@@ -726,7 +751,7 @@ describe("GenieConnector", () => {
 
   describe("classifyGenieError", () => {
     test("maps RESOURCE_DOES_NOT_EXIST to space access denied", async () => {
-      ws.genie.startConversation.mockRejectedValue(
+      ws.genie.genieStartConversation.mockRejectedValue(
         new Error("RESOURCE_DOES_NOT_EXIST: space xyz"),
       );
 
@@ -740,8 +765,25 @@ describe("GenieConnector", () => {
       });
     });
 
+    test("maps an ApiError .code of RESOURCE_DOES_NOT_EXIST to space access denied", async () => {
+      ws.genie.genieStartConversation.mockRejectedValue(
+        Object.assign(new Error("Space xyz not found"), {
+          code: "RESOURCE_DOES_NOT_EXIST",
+        }),
+      );
+
+      const events = await collect(
+        connector.streamSendMessage(ws, "space-1", "hi", undefined),
+      );
+
+      expect(events[0]).toEqual({
+        type: "error",
+        error: "You don't have access to this Genie Space.",
+      });
+    });
+
     test("maps failed-to-reach-COMPLETED + FAILED to table permissions", async () => {
-      ws.genie.startConversation.mockRejectedValue(
+      ws.genie.genieStartConversation.mockRejectedValue(
         new Error("failed to reach COMPLETED state, got FAILED"),
       );
 
@@ -757,7 +799,7 @@ describe("GenieConnector", () => {
     });
 
     test("passes through unknown error messages", async () => {
-      ws.genie.startConversation.mockRejectedValue(
+      ws.genie.genieStartConversation.mockRejectedValue(
         new Error("something unexpected"),
       );
 
@@ -772,7 +814,7 @@ describe("GenieConnector", () => {
     });
 
     test("handles non-Error throwable", async () => {
-      ws.genie.startConversation.mockRejectedValue("string error");
+      ws.genie.genieStartConversation.mockRejectedValue("string error");
 
       const events = await collect(
         connector.streamSendMessage(ws, "space-1", "hi", undefined),

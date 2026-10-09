@@ -1,13 +1,7 @@
 import { createLogger } from "../../logging";
-import {
-  type GenieMessage,
-  Time,
-  TimeUnits,
-  type Waiter,
-  type WorkspaceClient,
-} from "../../workspace-client";
+import type { GenieMessage, WorkspaceClient } from "../../workspace-client";
 import { genieConnectorDefaults } from "./defaults";
-import { pollWaiter } from "./poll-waiter";
+import { type Pollable, pollWaiter } from "./poll-waiter";
 import type {
   GenieAttachmentResponse,
   GenieConversationHistoryResponse,
@@ -26,7 +20,11 @@ const GenieErrors = {
   QUERY_RESULT_FAILED: "Failed to fetch query result",
 } as const;
 
-type CreateMessageWaiter = Waiter<GenieMessage, GenieMessage>;
+type CreateMessageWaiter = Pollable<GenieMessage>;
+
+// Legacy SDK waiter defaults, kept so polling cadence is unchanged.
+const DEFAULT_WAIT_TIMEOUT_MS = 10 * 60_000;
+const MAX_POLL_INTERVAL_MS = 10_000;
 
 interface GenieConnectorConfig {
   timeout?: number;
@@ -35,29 +33,36 @@ interface GenieConnectorConfig {
 
 function mapAttachments(message: GenieMessage): GenieAttachmentResponse[] {
   return (
-    message.attachments?.map((att) => ({
-      attachmentId: att.attachment_id,
-      query: att.query
-        ? {
-            title: att.query.title,
-            description: att.query.description,
-            query: att.query.query,
-            statementId: att.query.statement_id,
-          }
-        : undefined,
-      text: att.text ? { content: att.text.content } : undefined,
-      suggestedQuestions: att.suggested_questions?.questions,
+    message.attachments?.map(({ attachmentId, attachment }) => ({
+      attachmentId,
+      query:
+        attachment?.$case === "query"
+          ? {
+              title: attachment.query.title,
+              description: attachment.query.description,
+              query: attachment.query.query,
+              statementId: attachment.query.statementId,
+            }
+          : undefined,
+      text:
+        attachment?.$case === "text"
+          ? { content: attachment.text.content }
+          : undefined,
+      suggestedQuestions:
+        attachment?.$case === "suggestedQuestions"
+          ? attachment.suggestedQuestions.questions
+          : undefined,
     })) ?? []
   );
 }
 
 function toMessageResponse(message: GenieMessage): GenieMessageResponse {
   return {
-    messageId: message.message_id,
-    conversationId: message.conversation_id,
-    spaceId: message.space_id,
+    messageId: message.messageId ?? "",
+    conversationId: message.conversationId ?? "",
+    spaceId: message.spaceId ?? "",
     status: message.status ?? "COMPLETED",
-    content: message.content,
+    content: message.content ?? "",
     attachments: mapAttachments(message),
     error: message.error?.error,
   };
@@ -65,8 +70,17 @@ function toMessageResponse(message: GenieMessage): GenieMessageResponse {
 
 function classifyGenieError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
+  // Modular ApiError carries the code on `.code`, legacy on `.errorCode`.
+  const { code, errorCode } = (error ?? {}) as {
+    code?: unknown;
+    errorCode?: unknown;
+  };
 
-  if (message.includes("RESOURCE_DOES_NOT_EXIST")) {
+  if (
+    code === "RESOURCE_DOES_NOT_EXIST" ||
+    errorCode === "RESOURCE_DOES_NOT_EXIST" ||
+    message.includes("RESOURCE_DOES_NOT_EXIST")
+  ) {
     return GenieErrors.SPACE_ACCESS_DENIED;
   }
 
@@ -100,26 +114,74 @@ export class GenieConnector {
     conversationId: string;
     messageId: string;
   }> {
-    if (conversationId) {
-      const waiter = await workspaceClient.genie.createMessage({
-        space_id: spaceId,
-        conversation_id: conversationId,
-        content,
-      });
-      return {
-        messageWaiter: waiter,
-        conversationId,
-        messageId: waiter.message_id ?? "",
-      };
-    }
-    const start = await workspaceClient.genie.startConversation({
-      space_id: spaceId,
-      content,
-    });
+    const started = conversationId
+      ? await workspaceClient.genie.genieCreateConversationMessage({
+          spaceId,
+          conversationId,
+          content,
+        })
+      : await workspaceClient.genie.genieStartConversation({
+          spaceId,
+          content,
+        });
     return {
-      messageWaiter: start as unknown as CreateMessageWaiter,
-      conversationId: start.conversation_id,
-      messageId: start.message_id,
+      messageWaiter: this.messagePoller(
+        workspaceClient,
+        spaceId,
+        started.conversationId,
+        started.messageId,
+      ),
+      conversationId: started.conversationId,
+      messageId: started.messageId,
+    };
+  }
+
+  /**
+   * Polls `getConversationMessage` until COMPLETED. Replaces the SDK waiter: the
+   * modular `wait()` has no `onProgress`, which the SSE `status` events need. It
+   * mirrors the legacy waiter: progress on every poll, backoff of `attempt`
+   * seconds + 50-750ms jitter capped at 10s, a 10 minute default timeout, and the
+   * same `failed to reach COMPLETED state` errors `classifyGenieError` matches.
+   */
+  private messagePoller(
+    workspaceClient: WorkspaceClient,
+    spaceId: string,
+    conversationId: string,
+    messageId: string,
+  ): CreateMessageWaiter {
+    return {
+      async wait(options) {
+        const timeout =
+          typeof options?.timeout === "number"
+            ? options.timeout
+            : DEFAULT_WAIT_TIMEOUT_MS;
+        const deadline = Date.now() + timeout;
+        let lastStatus: string | undefined;
+        for (let attempt = 1; Date.now() < deadline; attempt++) {
+          const message =
+            await workspaceClient.genie.genieGetConversationMessage({
+              spaceId,
+              conversationId,
+              messageId,
+            });
+          await options?.onProgress?.(message);
+          lastStatus = message.status;
+          if (lastStatus === "COMPLETED") return message;
+          if (lastStatus === "FAILED") {
+            throw new Error("failed to reach COMPLETED state, got FAILED");
+          }
+          const jitter = 50 + Math.random() * 700;
+          await new Promise((resolve) =>
+            setTimeout(
+              resolve,
+              Math.min(attempt * 1000 + jitter, MAX_POLL_INTERVAL_MS),
+            ),
+          );
+        }
+        throw new Error(
+          `timed out: failed to reach COMPLETED state, got ${lastStatus}`,
+        );
+      },
     };
   }
 
@@ -128,9 +190,7 @@ export class GenieConnector {
     options?: { timeout?: number },
   ): Promise<GenieMessage> {
     const timeout = options?.timeout ?? this.config.timeout;
-    const waitOptions =
-      timeout > 0 ? { timeout: new Time(timeout, TimeUnits.milliseconds) } : {};
-    return messageWaiter.wait(waitOptions);
+    return messageWaiter.wait(timeout > 0 ? { timeout } : {});
   }
 
   async listConversationMessages(
@@ -145,18 +205,18 @@ export class GenieConnector {
     const pageSize =
       options?.pageSize ?? genieConnectorDefaults.initialPageSize;
 
-    const response = await workspaceClient.genie.listConversationMessages({
-      space_id: spaceId,
-      conversation_id: conversationId,
-      page_size: pageSize,
-      ...(options?.pageToken ? { page_token: options.pageToken } : {}),
+    const response = await workspaceClient.genie.genieListConversationMessages({
+      spaceId,
+      conversationId,
+      pageSize,
+      ...(options?.pageToken ? { pageToken: options.pageToken } : {}),
     });
 
     const messages = (response.messages ?? []).reverse().map(toMessageResponse);
 
     return {
       messages,
-      nextPageToken: response.next_page_token ?? null,
+      nextPageToken: response.nextPageToken ?? null,
     };
   }
 
@@ -169,13 +229,13 @@ export class GenieConnector {
     _signal?: AbortSignal,
   ): Promise<GenieStatementResponse> {
     const response =
-      await workspaceClient.genie.getMessageAttachmentQueryResult({
-        space_id: spaceId,
-        conversation_id: conversationId,
-        message_id: messageId,
-        attachment_id: attachmentId,
+      await workspaceClient.genie.genieGetMessageAttachmentQueryResult({
+        spaceId,
+        conversationId,
+        messageId,
+        attachmentId,
       });
-    return response.statement_response as GenieStatementResponse;
+    return response.statementResponse as GenieStatementResponse;
   }
 
   async *streamSendMessage(
@@ -206,10 +266,7 @@ export class GenieConnector {
 
       const timeout =
         options?.timeout != null ? options.timeout : this.config.timeout;
-      const waitOptions =
-        timeout > 0
-          ? { timeout: new Time(timeout, TimeUnits.milliseconds) }
-          : {};
+      const waitOptions = timeout > 0 ? { timeout } : {};
 
       let completedMessage!: GenieMessage;
       for await (const event of pollWaiter(messageWaiter, waitOptions)) {
@@ -402,11 +459,10 @@ export class GenieConnector {
       while (true) {
         if (signal?.aborted) return;
 
-        const message = await workspaceClient.genie.getMessage({
-          space_id: spaceId,
-          conversation_id: conversationId,
-          message_id: messageId,
-        });
+        const message = await workspaceClient.genie.genieGetConversationMessage(
+          { spaceId, conversationId, messageId },
+          { signal },
+        );
 
         if (message.status && message.status !== lastStatus) {
           lastStatus = message.status;

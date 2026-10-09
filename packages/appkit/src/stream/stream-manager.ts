@@ -10,7 +10,7 @@ import { IdentityExpiredError } from "../errors/identity-expired";
 import { createLogger } from "../logging/logger";
 import { EventRingBuffer } from "./buffers";
 import { streamDefaults } from "./defaults";
-import { SSEWriter } from "./sse-writer";
+import { SSEWriter, sseJsonReplacer } from "./sse-writer";
 import { StreamRegistry } from "./stream-registry";
 import { clearGraceTimer, clearRemovalTimer } from "./timers";
 import { SSEErrorCode, type StreamEntry, type StreamOperation } from "./types";
@@ -273,7 +273,7 @@ export class StreamManager {
         for await (const event of streamEntry.generator) {
           if (streamEntry.abortController.signal.aborted) break;
           const eventId = randomUUID();
-          const eventData = JSON.stringify(event);
+          const eventData = JSON.stringify(event, sseJsonReplacer);
           const { maxEventSize } = streamEntry;
 
           // UTF-8 bytes, not `String.length`: non-ASCII payloads used to slip
