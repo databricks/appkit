@@ -25,15 +25,26 @@ export type GenieStreamEvent =
       loadedCount: number;
     };
 
-/** Shape of the Databricks SQL statement_response returned by Genie queries */
+/**
+ * Shape of the Databricks SQL statement response returned by Genie queries.
+ * The server sends the modular SDK's camelCase shape; the snake_case fields are
+ * the legacy raw-API shape, still accepted by appkit-ui for older servers.
+ */
 export interface GenieStatementResponse {
   manifest: {
     schema: {
-      columns: Array<{ name: string; type_name: string }>;
+      columns: Array<{
+        name: string;
+        typeName?: string;
+        /** @deprecated Legacy snake_case shape; use `typeName`. */
+        type_name?: string;
+      }>;
     };
   };
   result: {
-    data_array: (string | null)[][];
+    dataArray?: (string | null)[][];
+    /** @deprecated Legacy snake_case shape; use `dataArray`. */
+    data_array?: (string | null)[][];
   };
 }
 
