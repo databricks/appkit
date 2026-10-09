@@ -14,6 +14,7 @@
         "@databricks/sdk-core",
         "@databricks/sdk-experimental",
         "@databricks/sdk-files",
+        "@databricks/sdk-database",
         "@databricks/sdk-genie",
         "@databricks/sdk-uc-functions",
         "@databricks/sdk-jobs",

@@ -43,6 +43,7 @@ import {
   newFetchHttpClient,
 } from "@databricks/sdk-core/http";
 import { resolve } from "@databricks/sdk-core/profiles";
+import { DatabaseClient } from "@databricks/sdk-database/v1";
 import { FilesClient } from "@databricks/sdk-files/v2";
 import { GenieClient } from "@databricks/sdk-genie/v1";
 import { JobsClient } from "@databricks/sdk-jobs/v2";
@@ -425,7 +426,15 @@ export function buildConnectionsClient(
   return new ConnectionsClient(mapToClientOptions(opts));
 }
 
+/** Build a modular Lakebase (provisioned) Database client from wrapper options. */
+export function buildDatabaseClient(
+  opts: WorkspaceClientOptions,
+): DatabaseClient {
+  return new DatabaseClient(mapToClientOptions(opts));
+}
+
 // ── Client type re-exports (for the facade accessor types) ───────────────
+export type { DatabaseClient } from "@databricks/sdk-database/v1";
 export type { FilesClient } from "@databricks/sdk-files/v2";
 export type { GenieClient } from "@databricks/sdk-genie/v1";
 export type { JobsClient } from "@databricks/sdk-jobs/v2";
@@ -465,6 +474,13 @@ export type {
   StatementStatus,
   StatementStatus_State,
 } from "@databricks/sdk-statementexecution/v1";
+export type {
+  DatabaseCredential,
+  DatabaseInstance,
+  GenerateDatabaseCredentialRequest,
+  ListDatabaseInstancesRequest,
+  ListDatabaseInstancesResponse,
+} from "@databricks/sdk-database/v1";
 export type {
   GenieGetMessageQueryResultResponse,
   GenieMessage,

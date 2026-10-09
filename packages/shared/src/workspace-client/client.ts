@@ -19,6 +19,8 @@ import {
   buildWorkspaceAuth,
   type ScimClient,
   buildFunctionsClient,
+  buildDatabaseClient,
+  type DatabaseClient,
   buildGenieClient,
   type FunctionsClient,
   type GenieClient,
@@ -51,6 +53,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
   #auth?: WorkspaceAuth;
   #currentUser?: ScimClient;
   #genie?: GenieClient;
+  #database?: DatabaseClient;
   #jobs?: JobsClient;
   #modelServing?: ModelServingClient;
   #files?: FilesClient;
@@ -86,6 +89,14 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
       this.#genie = buildGenieClient(this.#opts);
     }
     return this.#genie;
+  }
+
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  get database(): DatabaseClient {
+    if (!this.#database) {
+      this.#database = buildDatabaseClient(this.#opts);
+    }
+    return this.#database;
   }
 
   // Migrated to the modular SDK — built lazily, independent of the legacy client.
