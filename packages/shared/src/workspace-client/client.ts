@@ -22,6 +22,8 @@ import {
   type GenieClient,
   buildJobsClient,
   type JobsClient,
+  buildModelServingClient,
+  type ModelServingClient,
   buildFilesClient,
   type FilesClient,
   buildTablesClient,
@@ -44,6 +46,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
   #currentUser?: ScimClient;
   #genie?: GenieClient;
   #jobs?: JobsClient;
+  #modelServing?: ModelServingClient;
   #files?: FilesClient;
   #vectorSearch?: VectorSearchClient;
   #tables?: TablesClient;
@@ -107,6 +110,15 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
       this.#statementExecution = buildStatementExecutionClient(this.#opts);
     }
     return this.#statementExecution;
+  }
+
+  // Modular serving endpoints client. A new accessor because `servingEndpoints`
+  // is the legacy client's public type and can't change.
+  get modelServing(): ModelServingClient {
+    if (!this.#modelServing) {
+      this.#modelServing = buildModelServingClient(this.#opts);
+    }
+    return this.#modelServing;
   }
 
   get servingEndpoints() {

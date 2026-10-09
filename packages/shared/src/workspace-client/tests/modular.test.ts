@@ -39,6 +39,12 @@ vi.mock("@databricks/sdk-genie/v1", () => ({
     return { opts };
   }),
 }));
+vi.mock("@databricks/sdk-modelserving/v1", () => ({
+  ModelServingClient: vi.fn().mockImplementation((opts) => {
+    ctorOpts.push(opts);
+    return { opts };
+  }),
+}));
 vi.mock("@databricks/sdk-auth/credentials", () => ({
   newPatCredentials: vi.fn((token: string) => {
     patTokens.push(token);
@@ -77,6 +83,7 @@ vi.mock("@databricks/sdk-core/http", () => ({
 import { ApiError } from "../errors";
 import {
   buildGenieClient,
+  buildModelServingClient,
   buildWarehousesClient,
   buildWorkspaceAuth,
 } from "../modular";
@@ -279,6 +286,28 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     expect(await sentUserAgent(ctorOpts[0].httpClient)).toBe(
       "@databricks/appkit/0.64.0",
     );
+  });
+
+  test("modelServing normalizes the host and passes SP M2M credentials", () => {
+    process.env.DATABRICKS_HOST = "envhost.cloud.databricks.com";
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    buildModelServingClient({});
+    expect(ctorOpts[0].host).toBe("https://envhost.cloud.databricks.com");
+    expect((ctorOpts[0].credentials as { name: () => string }).name()).toBe(
+      "oauth-m2m",
+    );
+  });
+
+  test("modelServing (asUser) uses the OBO token as PAT, not the SP env creds", () => {
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    buildModelServingClient({ token: "user-token", host: "https://x" });
+    expect(ctorOpts[0].credentials).toMatchObject({
+      kind: "pat",
+      token: "user-token",
+    });
+    expect(m2mOpts).toEqual([]);
   });
 
   test("no product configured (build-time) → no httpClient override (SDK default UA)", () => {

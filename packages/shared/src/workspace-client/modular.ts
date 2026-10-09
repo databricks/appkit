@@ -46,6 +46,7 @@ import { resolve } from "@databricks/sdk-core/profiles";
 import { FilesClient } from "@databricks/sdk-files/v2";
 import { GenieClient } from "@databricks/sdk-genie/v1";
 import { JobsClient } from "@databricks/sdk-jobs/v2";
+import { ModelServingClient } from "@databricks/sdk-modelserving/v1";
 import type { ClientOptions } from "@databricks/sdk-options/client";
 import { ScimClient } from "@databricks/sdk-scim/v1";
 import { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
@@ -388,6 +389,13 @@ export function buildVectorSearchClient(
   return new VectorSearchClient(mapToClientOptions(opts));
 }
 
+/** Build a modular Model Serving (serving endpoints) client from wrapper options. */
+export function buildModelServingClient(
+  opts: WorkspaceClientOptions,
+): ModelServingClient {
+  return new ModelServingClient(mapToClientOptions(opts));
+}
+
 /** Build a modular Unity Catalog Tables client from wrapper options. */
 export function buildTablesClient(opts: WorkspaceClientOptions): TablesClient {
   return new TablesClient(mapToClientOptions(opts));
@@ -397,6 +405,7 @@ export function buildTablesClient(opts: WorkspaceClientOptions): TablesClient {
 export type { FilesClient } from "@databricks/sdk-files/v2";
 export type { GenieClient } from "@databricks/sdk-genie/v1";
 export type { JobsClient } from "@databricks/sdk-jobs/v2";
+export type { ModelServingClient } from "@databricks/sdk-modelserving/v1";
 export type { ScimClient } from "@databricks/sdk-scim/v1";
 export type { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
 export type { TablesClient } from "@databricks/sdk-uc-tables/v1";
@@ -434,6 +443,13 @@ export type {
   RunNowRequest,
   SubmitRunRequest,
 } from "@databricks/sdk-jobs/v2";
+export type {
+  GetInferenceEndpointRequest,
+  InferenceEndpoint,
+  InferenceEndpointDetailed,
+  ListInferenceEndpointsRequest,
+  ListInferenceEndpointsResponse,
+} from "@databricks/sdk-modelserving/v1";
 export type {
   EndpointHealth,
   EndpointInfo,

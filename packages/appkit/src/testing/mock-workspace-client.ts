@@ -72,6 +72,7 @@ const FACADE_SERVICES = [
   "vectorSearch",
   "tables",
   "statementExecution",
+  "modelServing",
   "servingEndpoints",
   "currentUser",
 ] as const;

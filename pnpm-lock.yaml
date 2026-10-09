@@ -298,6 +298,9 @@ importers:
       '@databricks/sdk-jobs':
         specifier: 0.57.0
         version: 0.57.0
+      '@databricks/sdk-modelserving':
+        specifier: 0.53.0
+        version: 0.53.0
       '@databricks/sdk-options':
         specifier: 0.51.0
         version: 0.51.0
@@ -649,6 +652,9 @@ importers:
       '@databricks/sdk-jobs':
         specifier: 0.57.0
         version: 0.57.0
+      '@databricks/sdk-modelserving':
+        specifier: 0.53.0
+        version: 0.53.0
       '@databricks/sdk-options':
         specifier: 0.51.0
         version: 0.51.0
@@ -2058,6 +2064,10 @@ packages:
 
   '@databricks/sdk-jobs@0.57.0':
     resolution: {integrity: sha512-LUBLNRhJq0OtUUU6+2T/zRzZMEd4UL0lVm7qTxLIfuDPDNDPy/EHGs3rQ1cXt1Fv0t3Rik7QT/SueZixSsH/Bg==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-modelserving@0.53.0':
+    resolution: {integrity: sha512-MDUmAZ/ajNQZFGyFj8MSvPgBiBK/NsKVQ9QaVjiz6Op5Eik/eJlg3jr+xoSbKDLlR/5ulq/Q2uP5JJA6t3vJTg==}
     engines: {node: '>=22.0.0'}
 
   '@databricks/sdk-options@0.51.0':
@@ -14399,6 +14409,15 @@ snapshots:
       zod: 4.3.6
 
   '@databricks/sdk-jobs@0.57.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
+  '@databricks/sdk-modelserving@0.53.0':
     dependencies:
       '@databricks/sdk-auth': 0.51.0
       '@databricks/sdk-core': 0.51.0
