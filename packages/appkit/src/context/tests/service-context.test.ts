@@ -12,34 +12,47 @@ import { ServiceContext } from "../service-context";
 
 // ── Mock the workspace-client wrapper ──────────────────────────────
 
-const { mockMe, mockApiRequest, MockWorkspaceClient, MockConfigError } =
-  vi.hoisted(() => {
-    const mockMe = vi.fn();
-    const mockApiRequest = vi.fn();
+const {
+  mockMe,
+  mockGetHost,
+  mockApiRequest,
+  MockWorkspaceClient,
+  MockConfigError,
+} = vi.hoisted(() => {
+  const mockMe = vi.fn();
+  const mockGetHost = vi.fn();
+  const mockApiRequest = vi.fn();
 
-    const MockWorkspaceClient = vi.fn().mockImplementation(() => ({
-      currentUser: { me: mockMe },
-      // Tests script legacy-style results; adapt them to the raw `Response`
-      // `client.request` returns (org id → response header, else JSON body).
-      request: async (req: unknown) => {
-        const result = await mockApiRequest(req);
-        const orgId = result?.["x-databricks-org-id"];
-        return orgId !== undefined
-          ? new Response(null, { headers: { "x-databricks-org-id": orgId } })
-          : new Response(JSON.stringify(result ?? {}));
-      },
-    }));
+  const MockWorkspaceClient = vi.fn().mockImplementation(() => ({
+    currentUser: { me: mockMe },
+    getHost: mockGetHost,
+    // Tests script legacy-style results; adapt them to the raw `Response`
+    // `client.request` returns (org id → response header, else JSON body).
+    request: async (req: unknown) => {
+      const result = await mockApiRequest(req);
+      const orgId = result?.["x-databricks-org-id"];
+      return orgId !== undefined
+        ? new Response(null, { headers: { "x-databricks-org-id": orgId } })
+        : new Response(JSON.stringify(result ?? {}));
+    },
+  }));
 
-    class MockConfigError extends Error {
-      baseMessage: string;
-      constructor(message: string) {
-        super(message);
-        this.baseMessage = message;
-      }
+  class MockConfigError extends Error {
+    baseMessage: string;
+    constructor(message: string) {
+      super(message);
+      this.baseMessage = message;
     }
+  }
 
-    return { mockMe, mockApiRequest, MockWorkspaceClient, MockConfigError };
-  });
+  return {
+    mockMe,
+    mockGetHost,
+    mockApiRequest,
+    MockWorkspaceClient,
+    MockConfigError,
+  };
+});
 
 vi.mock("../../workspace-client", async (importOriginal) => {
   const actual =
@@ -325,24 +338,63 @@ describe("ServiceContext", () => {
       );
     });
 
-    test("uses the initialized profile host for local callers without DATABRICKS_HOST", () => {
+    // Regression: the dev fallback must come from the modular getHost() at
+    // init, not the legacy Config.host (only filled after a legacy API call).
+    async function initWithProfileHost() {
+      ServiceContext.reset();
+      mockGetHost.mockResolvedValue("https://profile-host.example.com");
+      await ServiceContext.initialize({ warehouseId: true });
+    }
+
+    test("uses the init-resolved profile host for local callers without DATABRICKS_HOST", async () => {
       delete process.env.DATABRICKS_HOST;
       process.env.NODE_ENV = "development";
-      process.env.DATABRICKS_CONFIG_PROFILE = "selected-user";
-      Object.defineProperty(ServiceContext.get().client, "config", {
-        value: { host: "https://profile-workspace.databricks.com" },
-      });
+      await initWithProfileHost();
 
       const caller = ServiceContext.createCallerContext("user-token", "alice");
 
       expect(caller.principal).toMatchObject({ type: "user", userId: "alice" });
       expect(MockWorkspaceClient).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          host: "https://profile-workspace.databricks.com",
+          host: "https://profile-host.example.com",
           token: "user-token",
           authType: "pat",
         }),
       );
+    });
+
+    test("DATABRICKS_HOST wins over the profile host", async () => {
+      process.env.NODE_ENV = "development";
+      await initWithProfileHost();
+      process.env.DATABRICKS_HOST = "https://env-host.example.com";
+
+      ServiceContext.createCallerContext("user-token", "alice");
+
+      expect(MockWorkspaceClient).toHaveBeenLastCalledWith(
+        expect.objectContaining({ host: "https://env-host.example.com" }),
+      );
+    });
+
+    test("outside development the profile host is ignored and it still throws", async () => {
+      process.env.NODE_ENV = "production";
+      await initWithProfileHost();
+      delete process.env.DATABRICKS_HOST;
+
+      expect(() =>
+        ServiceContext.createCallerContext("user-token", "alice"),
+      ).toThrow(ConfigurationError);
+    });
+
+    test("a getHost() failure does not fail startup; callers get missingEnvVar", async () => {
+      ServiceContext.reset();
+      process.env.NODE_ENV = "development";
+      mockGetHost.mockRejectedValue(new Error("no host configured"));
+      await ServiceContext.initialize({ warehouseId: true });
+      delete process.env.DATABRICKS_HOST;
+
+      expect(() =>
+        ServiceContext.createCallerContext("user-token", "alice"),
+      ).toThrow(ConfigurationError);
     });
 
     test("should throw InitializationError when service context is not initialized", () => {
