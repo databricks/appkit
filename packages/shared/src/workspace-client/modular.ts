@@ -33,6 +33,7 @@ import { execFile } from "node:child_process";
 import { STATUS_CODES } from "node:http";
 import { promisify } from "node:util";
 
+import type { AppsClient } from "@databricks/sdk-apps/v1";
 import {
   type Credentials,
   newTokenCredentials,
@@ -547,6 +548,14 @@ export function buildScimClient(opts: WorkspaceClientOptions): ScimClient {
   return new ScimClient(mapToClientOptions(opts));
 }
 
+/** Build a modular Apps client from wrapper options. */
+export function buildAppsClient(opts: WorkspaceClientOptions): AppsClient {
+  return lazyClient(
+    () => import("@databricks/sdk-apps/v1").then((m) => m.AppsClient),
+    mapToClientOptions(opts),
+  );
+}
+
 /**
  * Defer loading an SDK client's module until its first method call, so app
  * boot doesn't pay for clients it never uses. Generated methods return either
@@ -715,6 +724,7 @@ export function buildPostgresClient(
 // ── Client type re-exports (for the facade accessor types) ───────────────
 export type { DatabaseClient } from "@databricks/sdk-database/v1";
 export type { ExperimentsClient } from "@databricks/sdk-experiments/v1";
+export type { AppsClient } from "@databricks/sdk-apps/v1";
 export type { FilesClient } from "@databricks/sdk-files/v2";
 export type {
   DirectoryEntry as FilesDirectoryEntry,
@@ -766,6 +776,11 @@ export type {
   ListDatabaseInstancesRequest,
   ListDatabaseInstancesResponse,
 } from "@databricks/sdk-database/v1";
+export type {
+  App,
+  ListAppsRequest,
+  ListAppsResponse,
+} from "@databricks/sdk-apps/v1";
 export type {
   GenieGetMessageQueryResultResponse,
   GenieMessage,
