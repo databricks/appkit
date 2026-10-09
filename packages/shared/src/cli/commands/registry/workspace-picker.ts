@@ -2,15 +2,15 @@ import { spawnSync } from "node:child_process";
 
 import {
   createWorkspaceClient,
-  type LegacyWorkspaceClient,
+  type WorkspaceClient,
 } from "../../../workspace-client";
 
 /**
  * Lists a user's real Databricks workspace resources so `appkit add` can offer
  * a picker instead of blind free-text entry.
  *
- * Flat resource types are listed via the Databricks SDK client (typed,
- * auto-paginating) obtained through the sanctioned `workspace-client` facade.
+ * Flat resource types are listed through the sanctioned `workspace-client`
+ * facade's modular SDK clients.
  * Parent-context types (volume, uc_function, secret, vector_search_index) still
  * shell out to the `databricks` CLI for their drill-down. Every path fails
  * soft: any error returns an empty list and the caller drops to free-text entry.
@@ -31,7 +31,7 @@ export interface WorkspaceChoice {
  * we simply iterate to completion.
  */
 interface SdkLister {
-  list: (client: LegacyWorkspaceClient) => AsyncIterable<unknown>;
+  list: (client: WorkspaceClient) => AsyncIterable<unknown>;
   toChoice: (item: Record<string, unknown>) => WorkspaceChoice | null;
 }
 
@@ -53,61 +53,77 @@ function choiceFrom(
 }
 
 /**
- * Genie listSpaces returns a single page, not an auto-paginating iterable like
- * the other services. Adapt it to one that follows `next_page_token`; the
- * repeated-token guard avoids an infinite loop if the API echoes a token back.
+ * Follows page tokens until exhausted. The repeated-token guard avoids an
+ * infinite loop if the API echoes a token back.
  */
-async function* iterateGenieSpaces(
-  client: LegacyWorkspaceClient,
+async function* paginate(
+  fetchPage: (
+    pageToken?: string,
+  ) => Promise<{ items?: unknown[]; next?: string }>,
 ): AsyncIterable<unknown> {
   let pageToken: string | undefined;
   do {
-    const res = await client.genie.listSpaces(
-      pageToken ? { page_token: pageToken } : {},
-    );
-    for (const space of res.spaces ?? []) yield space;
-    const next = res.next_page_token;
+    const { items, next } = await fetchPage(pageToken);
+    for (const item of items ?? []) yield item;
     if (next && next === pageToken) break;
     pageToken = next;
   } while (pageToken);
 }
 
+/** listInferenceEndpoints is unpaginated; adapt its single page. */
+async function* iterateServingEndpoints(
+  client: WorkspaceClient,
+): AsyncIterable<unknown> {
+  const res = await client.modelServing.listInferenceEndpoints({});
+  yield* res.endpoints ?? [];
+}
+
+/** Genie listSpaces returns a single page; follow `nextPageToken`. */
+function iterateGenieSpaces(client: WorkspaceClient): AsyncIterable<unknown> {
+  return paginate(async (pageToken) => {
+    const res = await client.genie.genieListSpaces(
+      pageToken ? { pageToken } : {},
+    );
+    return { items: res.spaces, next: res.nextPageToken };
+  });
+}
+
 /** Flat, top-level listable resource types, backed by SDK services. */
 export const SDK_LISTERS: Record<string, SdkLister> = {
   sql_warehouse: {
-    list: (c) => c.warehouses.list({}),
+    list: (c) => c.warehouses.listWarehousesIter({}),
     toChoice: (i) => choiceFrom(i, "id", "name"),
   },
   job: {
-    list: (c) => c.jobs.list({}),
-    // job name lives under settings.name; id is top-level job_id
+    list: (c) => c.jobs.listJobsIter({}),
+    // job name lives under settings.name; id is top-level jobId (a bigint)
     toChoice: (i) => {
       const settings = i.settings as { name?: string } | undefined;
-      return choiceFrom({ ...i, name: settings?.name }, "job_id", "name");
+      return choiceFrom({ ...i, name: settings?.name }, "jobId", "name");
     },
   },
   serving_endpoint: {
-    list: (c) => c.servingEndpoints.list(),
+    list: iterateServingEndpoints,
     toChoice: (i) => choiceFrom(i, "name", "name"),
   },
   uc_connection: {
-    list: (c) => c.connections.list({}),
-    toChoice: (i) => choiceFrom(i, "name", "full_name"),
+    list: (c) => c.connections.listConnectionsIter({}),
+    toChoice: (i) => choiceFrom(i, "name", "fullName"),
   },
   database: {
-    list: (c) => c.database.listDatabaseInstances({}),
+    list: (c) => c.database.listDatabaseInstancesIter({}),
     toChoice: (i) => choiceFrom(i, "name", "name"),
   },
   genie_space: {
     list: iterateGenieSpaces,
-    toChoice: (i) => choiceFrom(i, "space_id", "title"),
+    toChoice: (i) => choiceFrom(i, "spaceId", "title"),
   },
   experiment: {
-    list: (c) => c.experiments.listExperiments({}),
-    toChoice: (i) => choiceFrom(i, "experiment_id", "name"),
+    list: (c) => c.experiments.listExperimentsIter({}),
+    toChoice: (i) => choiceFrom(i, "experimentId", "name"),
   },
   app: {
-    list: (c) => c.apps.list({}),
+    list: (c) => c.apps.listAppsIter({}),
     toChoice: (i) => choiceFrom(i, "name", "name"),
   },
 };
@@ -118,19 +134,15 @@ export function isFlatListable(resourceType: string): boolean {
 }
 
 /**
- * Constructs a raw SDK workspace client for the given profile (or default
- * resolution), via the sanctioned `workspace-client` facade. Uses the legacy
- * escape hatch because the picker needs services (connections, database,
- * experiments, apps) the facade doesn't yet proxy directly.
+ * Constructs a workspace client for the given profile (or default resolution),
+ * via the sanctioned `workspace-client` facade.
  */
-export function makeWorkspaceClient(profile?: string): LegacyWorkspaceClient {
-  return createWorkspaceClient(
-    profile ? { profile } : {},
-  ).toLegacyWorkspaceClient();
+export function makeWorkspaceClient(profile?: string): WorkspaceClient {
+  return createWorkspaceClient(profile ? { profile } : {});
 }
 
 /**
- * Max resources fetched for the picker. `list()` auto-paginates, so on a large
+ * Max resources fetched for the picker. `list()` paginates lazily, so on a large
  * workspace (5000+ warehouses) breaking out at the cap stops pagination early;
  * the picker's "Enter manually" option covers anything beyond it.
  */
@@ -161,9 +173,7 @@ function shortErrorMessage(err: unknown): string {
 export async function listWorkspaceResources(
   resourceType: string,
   profile?: string,
-  clientFactory: (
-    profile?: string,
-  ) => LegacyWorkspaceClient = makeWorkspaceClient,
+  clientFactory: (profile?: string) => WorkspaceClient = makeWorkspaceClient,
 ): Promise<WorkspaceListing> {
   const lister = SDK_LISTERS[resourceType];
   if (!lister) return { choices: [], truncated: false };

@@ -18,14 +18,28 @@ import {
   buildWarehousesClient,
   buildWorkspaceAuth,
   type ScimClient,
+  buildFunctionsClient,
+  buildDatabaseClient,
+  type DatabaseClient,
   buildGenieClient,
+  type FunctionsClient,
   type GenieClient,
+  buildAppsClient,
+  type AppsClient,
   buildJobsClient,
+  buildExperimentsClient,
+  type ExperimentsClient,
   type JobsClient,
+  buildModelServingClient,
+  type ModelServingClient,
   buildFilesClient,
   type FilesClient,
+  buildConnectionsClient,
+  type ConnectionsClient,
   buildTablesClient,
   type TablesClient,
+  buildVolumesClient,
+  type VolumesClient,
   buildVectorSearchClient,
   type VectorSearchClient,
   type StatementExecutionClient,
@@ -43,10 +57,17 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
   #auth?: WorkspaceAuth;
   #currentUser?: ScimClient;
   #genie?: GenieClient;
+  #database?: DatabaseClient;
+  #apps?: AppsClient;
   #jobs?: JobsClient;
+  #modelServing?: ModelServingClient;
+  #experiments?: ExperimentsClient;
   #files?: FilesClient;
   #vectorSearch?: VectorSearchClient;
   #tables?: TablesClient;
+  #volumes?: VolumesClient;
+  #functions?: FunctionsClient;
+  #connections?: ConnectionsClient;
 
   constructor(opts: WorkspaceClientOptions) {
     this.#opts = opts;
@@ -77,11 +98,35 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
   }
 
   // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  get apps(): AppsClient {
+    if (!this.#apps) {
+      this.#apps = buildAppsClient(this.#opts);
+    }
+    return this.#apps;
+  }
+
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  get database(): DatabaseClient {
+    if (!this.#database) {
+      this.#database = buildDatabaseClient(this.#opts);
+    }
+    return this.#database;
+  }
+
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
   get jobs(): JobsClient {
     if (!this.#jobs) {
       this.#jobs = buildJobsClient(this.#opts);
     }
     return this.#jobs;
+  }
+
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  get experiments(): ExperimentsClient {
+    if (!this.#experiments) {
+      this.#experiments = buildExperimentsClient(this.#opts);
+    }
+    return this.#experiments;
   }
 
   // Migrated to the modular SDK — built lazily, independent of the legacy client.
@@ -102,11 +147,44 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
   }
 
   // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  get connections(): ConnectionsClient {
+    if (!this.#connections) {
+      this.#connections = buildConnectionsClient(this.#opts);
+    }
+    return this.#connections;
+  }
+
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  get functions(): FunctionsClient {
+    if (!this.#functions) {
+      this.#functions = buildFunctionsClient(this.#opts);
+    }
+    return this.#functions;
+  }
+
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  get volumes(): VolumesClient {
+    if (!this.#volumes) {
+      this.#volumes = buildVolumesClient(this.#opts);
+    }
+    return this.#volumes;
+  }
+
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
   get statementExecution(): StatementExecutionClient {
     if (!this.#statementExecution) {
       this.#statementExecution = buildStatementExecutionClient(this.#opts);
     }
     return this.#statementExecution;
+  }
+
+  // Modular serving endpoints client. A new accessor because `servingEndpoints`
+  // is the legacy client's public type and can't change.
+  get modelServing(): ModelServingClient {
+    if (!this.#modelServing) {
+      this.#modelServing = buildModelServingClient(this.#opts);
+    }
+    return this.#modelServing;
   }
 
   get servingEndpoints() {

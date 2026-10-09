@@ -33,8 +33,50 @@ vi.mock("@databricks/sdk-warehouses/v1", () => ({
 vi.mock("@databricks/sdk-statementexecution/v1", () => ({
   StatementExecutionClient: vi.fn().mockImplementation((opts) => ({ opts })),
 }));
+vi.mock("@databricks/sdk-apps/v1", () => ({
+  AppsClient: vi.fn().mockImplementation((opts) => {
+    ctorOpts.push(opts);
+    return { opts };
+  }),
+}));
+vi.mock("@databricks/sdk-experiments/v1", () => ({
+  ExperimentsClient: vi.fn().mockImplementation((opts) => {
+    ctorOpts.push(opts);
+    return { opts };
+  }),
+}));
 vi.mock("@databricks/sdk-genie/v1", () => ({
   GenieClient: vi.fn().mockImplementation((opts) => {
+    ctorOpts.push(opts);
+    return { opts };
+  }),
+}));
+vi.mock("@databricks/sdk-modelserving/v1", () => ({
+  ModelServingClient: vi.fn().mockImplementation((opts) => {
+    ctorOpts.push(opts);
+    return { opts };
+  }),
+}));
+vi.mock("@databricks/sdk-uc-volumes/v1", () => ({
+  VolumesClient: vi.fn().mockImplementation((opts) => {
+    ctorOpts.push(opts);
+    return { opts };
+  }),
+}));
+vi.mock("@databricks/sdk-uc-functions/v1", () => ({
+  FunctionsClient: vi.fn().mockImplementation((opts) => {
+    ctorOpts.push(opts);
+    return { opts };
+  }),
+}));
+vi.mock("@databricks/sdk-uc-connections/v1", () => ({
+  ConnectionsClient: vi.fn().mockImplementation((opts) => {
+    ctorOpts.push(opts);
+    return { opts };
+  }),
+}));
+vi.mock("@databricks/sdk-database/v1", () => ({
+  DatabaseClient: vi.fn().mockImplementation((opts) => {
     ctorOpts.push(opts);
     return { opts };
   }),
@@ -76,7 +118,14 @@ vi.mock("@databricks/sdk-core/http", () => ({
 
 import { ApiError } from "../errors";
 import {
+  buildFunctionsClient,
+  buildConnectionsClient,
+  buildDatabaseClient,
+  buildExperimentsClient,
+  buildAppsClient,
   buildGenieClient,
+  buildModelServingClient,
+  buildVolumesClient,
   buildWarehousesClient,
   buildWorkspaceAuth,
 } from "../modular";
@@ -279,6 +328,179 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     expect(await sentUserAgent(ctorOpts[0].httpClient)).toBe(
       "@databricks/appkit/0.64.0",
     );
+  });
+
+  test("apps passes the mapped options (normalized host, credentials) to the client", async () => {
+    buildAppsClient({
+      host: "x.cloud.databricks.com",
+      token: "user-token",
+      clientOptions: {
+        product: "@databricks/appkit",
+        productVersion: "0.64.0",
+      },
+    } as never);
+    expect(ctorOpts[0].host).toBe("https://x.cloud.databricks.com");
+    expect(ctorOpts[0].credentials).toMatchObject({
+      kind: "pat",
+      token: "user-token",
+    });
+    expect(m2mOpts).toEqual([]);
+    expect(await sentUserAgent(ctorOpts[0].httpClient)).toBe(
+      "@databricks/appkit/0.64.0",
+    );
+  });
+
+  test("database maps host normalization + SP M2M credentials through mapToClientOptions", () => {
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    buildDatabaseClient({ host: "ws.cloud.databricks.com" });
+    expect(ctorOpts[0].host).toBe("https://ws.cloud.databricks.com");
+    expect(m2mOpts[0]).toMatchObject({
+      host: "https://ws.cloud.databricks.com",
+      clientId: "sp-client-id",
+      clientSecret: "sp-secret",
+    });
+  });
+
+  test("database (asUser) uses the OBO token as PAT and keeps the AppKit User-Agent", async () => {
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    buildDatabaseClient({
+      token: "user-token",
+      host: "https://x",
+      clientOptions: {
+        product: "@databricks/appkit",
+        productVersion: "0.64.0",
+      },
+    } as never);
+    expect(ctorOpts[0].credentials).toMatchObject({
+      kind: "pat",
+      token: "user-token",
+    });
+    expect(m2mOpts).toEqual([]);
+    expect(await sentUserAgent(ctorOpts[0].httpClient)).toBe(
+      "@databricks/appkit/0.64.0",
+    );
+  });
+
+  test("modelServing normalizes the host and passes SP M2M credentials", () => {
+    process.env.DATABRICKS_HOST = "envhost.cloud.databricks.com";
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    buildModelServingClient({});
+    expect(ctorOpts[0].host).toBe("https://envhost.cloud.databricks.com");
+    expect((ctorOpts[0].credentials as { name: () => string }).name()).toBe(
+      "oauth-m2m",
+    );
+  });
+
+  test("modelServing (asUser) uses the OBO token as PAT, not the SP env creds", () => {
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    buildModelServingClient({ token: "user-token", host: "https://x" });
+    expect(ctorOpts[0].credentials).toMatchObject({
+      kind: "pat",
+      token: "user-token",
+    });
+    expect(m2mOpts).toEqual([]);
+  });
+
+  test("volumes: SP env creds → M2M with the scheme-normalized host", () => {
+    process.env.DATABRICKS_HOST = "envhost.cloud.databricks.com";
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    buildVolumesClient({});
+    expect(ctorOpts[0].host).toBe("https://envhost.cloud.databricks.com");
+    expect(m2mOpts).toEqual([
+      {
+        host: "https://envhost.cloud.databricks.com",
+        clientId: "sp-client-id",
+        clientSecret: "sp-secret",
+      },
+    ]);
+    expect((ctorOpts[0].credentials as { name: () => string }).name()).toBe(
+      "oauth-m2m",
+    );
+  });
+
+  test("volumes (asUser) uses the OBO token as PAT", () => {
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    buildVolumesClient({ token: "user-token", host: "https://x" });
+    expect(ctorOpts[0].credentials).toMatchObject({
+      kind: "pat",
+      token: "user-token",
+    });
+    expect(m2mOpts).toEqual([]);
+  });
+
+  test("functions maps host + SP M2M credentials onto the client", () => {
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    buildFunctionsClient({ host: "my-ws.cloud.databricks.com" } as never);
+    expect(ctorOpts[0].host).toBe("https://my-ws.cloud.databricks.com");
+    expect(ctorOpts[0].credentials).toMatchObject({
+      name: expect.any(Function),
+    });
+    expect(m2mOpts).toHaveLength(1);
+  });
+
+  test("functions (asUser) uses the OBO token as PAT", () => {
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    buildFunctionsClient({ token: "user-token", host: "https://x" } as never);
+    expect(ctorOpts[0].credentials).toMatchObject({
+      kind: "pat",
+      token: "user-token",
+    });
+    expect(m2mOpts).toEqual([]);
+  });
+
+  test("connections normalizes a scheme-less host and uses SP M2M creds", () => {
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    buildConnectionsClient({ host: "my-ws.cloud.databricks.com" });
+    expect(ctorOpts[0].host).toBe("https://my-ws.cloud.databricks.com");
+    expect(m2mOpts).toHaveLength(1);
+    expect(patTokens).toEqual([]);
+  });
+
+  test("connections (asUser) uses the OBO token as PAT", () => {
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    buildConnectionsClient({ token: "user-token", host: "https://x" });
+    expect(ctorOpts[0].credentials).toMatchObject({
+      kind: "pat",
+      token: "user-token",
+    });
+    expect(m2mOpts).toEqual([]);
+  });
+
+  test("experiments normalizes the env host and resolves the SP via M2M", () => {
+    process.env.DATABRICKS_HOST = "x.cloud.databricks.com";
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    buildExperimentsClient({});
+    expect(ctorOpts[0].host).toBe("https://x.cloud.databricks.com");
+    expect(m2mOpts).toEqual([
+      {
+        host: "https://x.cloud.databricks.com",
+        clientId: "sp-client-id",
+        clientSecret: "sp-secret",
+      },
+    ]);
+    expect(ctorOpts[0].credentials).toBeDefined();
+  });
+
+  test("experiments (asUser) uses the OBO token as PAT", () => {
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    buildExperimentsClient({ token: "user-token", host: "https://x" });
+    expect(ctorOpts[0].credentials).toMatchObject({
+      kind: "pat",
+      token: "user-token",
+    });
+    expect(m2mOpts).toEqual([]);
   });
 
   test("no product configured (build-time) → no httpClient override (SDK default UA)", () => {

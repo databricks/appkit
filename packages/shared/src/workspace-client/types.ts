@@ -19,10 +19,17 @@ import type {
   WarehousesClient,
   WorkspaceAuth,
   ScimClient,
+  AppsClient,
   GenieClient,
+  DatabaseClient,
   JobsClient,
+  ModelServingClient,
+  ExperimentsClient,
   FilesClient,
   TablesClient,
+  VolumesClient,
+  FunctionsClient,
+  ConnectionsClient,
   VectorSearchClient,
 } from "./modular";
 
@@ -59,8 +66,17 @@ export interface WorkspaceClient extends WorkspaceAuth {
   /** Genie (modular SDK). */
   readonly genie: GenieClient;
 
+  /** Lakebase provisioned database instances + credentials (modular SDK). */
+  readonly database: DatabaseClient;
+
+  /** Databricks Apps (modular SDK). */
+  readonly apps: AppsClient;
+
   /** Jobs (modular SDK, Jobs API 2.2). */
   readonly jobs: JobsClient;
+
+  /** MLflow Experiments (modular SDK). */
+  readonly experiments: ExperimentsClient;
 
   /** Vector Search (modular SDK; index metadata only, queries use `request()`). */
   readonly vectorSearch: VectorSearchClient;
@@ -68,8 +84,20 @@ export interface WorkspaceClient extends WorkspaceAuth {
   /** Unity Catalog Tables (modular SDK). */
   readonly tables: TablesClient;
 
+  /** Unity Catalog Volumes (modular SDK). */
+  readonly volumes: VolumesClient;
+
+  /** Unity Catalog Functions (modular SDK). */
+  readonly functions: FunctionsClient;
+
+  /** Unity Catalog Connections (modular SDK). */
+  readonly connections: ConnectionsClient;
+
   /** Statement Execution (modular SDK). */
   readonly statementExecution: StatementExecutionClient;
+
+  /** Serving endpoints (modular SDK). `servingEndpoints` below stays legacy-typed. */
+  readonly modelServing: ModelServingClient;
 
   /** Serving Endpoints. */
   readonly servingEndpoints: LegacyWorkspaceClient["servingEndpoints"];

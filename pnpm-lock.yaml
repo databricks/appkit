@@ -280,15 +280,24 @@ importers:
       '@databricks/lakebase':
         specifier: workspace:*
         version: link:../lakebase
+      '@databricks/sdk-apps':
+        specifier: 0.54.0
+        version: 0.54.0
       '@databricks/sdk-auth':
         specifier: 0.51.0
         version: 0.51.0
       '@databricks/sdk-core':
         specifier: 0.51.0
         version: 0.51.0
+      '@databricks/sdk-database':
+        specifier: 0.51.0
+        version: 0.51.0
       '@databricks/sdk-experimental':
         specifier: 0.17.0
         version: 0.17.0
+      '@databricks/sdk-experiments':
+        specifier: 0.52.0
+        version: 0.52.0
       '@databricks/sdk-files':
         specifier: 0.52.0
         version: 0.52.0
@@ -298,6 +307,9 @@ importers:
       '@databricks/sdk-jobs':
         specifier: 0.57.0
         version: 0.57.0
+      '@databricks/sdk-modelserving':
+        specifier: 0.53.0
+        version: 0.53.0
       '@databricks/sdk-options':
         specifier: 0.51.0
         version: 0.51.0
@@ -307,9 +319,18 @@ importers:
       '@databricks/sdk-statementexecution':
         specifier: 0.52.0
         version: 0.52.0(patch_hash=9377a46b883b548d47116662bf73b159a4da51ec28b9ff1896a7e4a7841c240c)
+      '@databricks/sdk-uc-connections':
+        specifier: 0.52.0
+        version: 0.52.0
+      '@databricks/sdk-uc-functions':
+        specifier: 0.51.0
+        version: 0.51.0
       '@databricks/sdk-uc-tables':
         specifier: 0.52.0
         version: 0.52.0
+      '@databricks/sdk-uc-volumes':
+        specifier: 0.51.0
+        version: 0.51.0
       '@databricks/sdk-vectorsearch':
         specifier: 0.51.0
         version: 0.51.0
@@ -631,15 +652,24 @@ importers:
       '@clack/prompts':
         specifier: 1.0.1
         version: 1.0.1
+      '@databricks/sdk-apps':
+        specifier: 0.54.0
+        version: 0.54.0
       '@databricks/sdk-auth':
         specifier: 0.51.0
         version: 0.51.0
       '@databricks/sdk-core':
         specifier: 0.51.0
         version: 0.51.0
+      '@databricks/sdk-database':
+        specifier: 0.51.0
+        version: 0.51.0
       '@databricks/sdk-experimental':
         specifier: 0.17.0
         version: 0.17.0
+      '@databricks/sdk-experiments':
+        specifier: 0.52.0
+        version: 0.52.0
       '@databricks/sdk-files':
         specifier: 0.52.0
         version: 0.52.0
@@ -649,6 +679,9 @@ importers:
       '@databricks/sdk-jobs':
         specifier: 0.57.0
         version: 0.57.0
+      '@databricks/sdk-modelserving':
+        specifier: 0.53.0
+        version: 0.53.0
       '@databricks/sdk-options':
         specifier: 0.51.0
         version: 0.51.0
@@ -658,9 +691,18 @@ importers:
       '@databricks/sdk-statementexecution':
         specifier: 0.52.0
         version: 0.52.0(patch_hash=9377a46b883b548d47116662bf73b159a4da51ec28b9ff1896a7e4a7841c240c)
+      '@databricks/sdk-uc-connections':
+        specifier: 0.52.0
+        version: 0.52.0
+      '@databricks/sdk-uc-functions':
+        specifier: 0.51.0
+        version: 0.51.0
       '@databricks/sdk-uc-tables':
         specifier: 0.52.0
         version: 0.52.0
+      '@databricks/sdk-uc-volumes':
+        specifier: 0.51.0
+        version: 0.51.0
       '@databricks/sdk-vectorsearch':
         specifier: 0.51.0
         version: 0.51.0
@@ -2032,12 +2074,20 @@ packages:
     engines: {node: ^20 || ^22 || ^24 || ^25, pnpm: '>=10'}
     hasBin: true
 
+  '@databricks/sdk-apps@0.54.0':
+    resolution: {integrity: sha512-7cz5Smp/OXfwLn7jGKs0yQjOy1dMbOuPz6l6WoiTnVakw5RClagnLp56hePo2D6HlXMcFRMzTNe5BbW89dgveg==}
+    engines: {node: '>=22.0.0'}
+
   '@databricks/sdk-auth@0.51.0':
     resolution: {integrity: sha512-CswN+io9XB7rrcHo9BG/2qIdRCUMb8gFjiZmqVDG2qRmyhzY7Wv1tvwzA+U8uBplmdzAcdhuxMvHQ7vKGFWYqQ==}
     engines: {node: '>=22.0.0'}
 
   '@databricks/sdk-core@0.51.0':
     resolution: {integrity: sha512-XzsdLcC5vXB+z5P68IlZ4emnXyp2frvY+aJnIwlpc2i3F/ZCR53a8HDrq7ruZPQG/FgGUR75MSFhku0nnYOysw==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-database@0.51.0':
+    resolution: {integrity: sha512-iL7z4BCv+Qv76cHRImtteB36YNTPEdfnND/wispE3A5tGAuDnUxO7cNOSl4KwOvoW434OLaeEndGi1ZgICzE8w==}
     engines: {node: '>=22.0.0'}
 
   '@databricks/sdk-experimental@0.15.0':
@@ -2047,6 +2097,10 @@ packages:
   '@databricks/sdk-experimental@0.17.0':
     resolution: {integrity: sha512-dOJIt4F2nBk6HKObnv7Xbmy/qLYTy2835qhXSuW0Qw1QAXui9plmCet1KqG3yeQcMTyncWGbnhjGdQi8GEGQSA==}
     engines: {node: '>=22.0', npm: '>=10.0.0'}
+
+  '@databricks/sdk-experiments@0.52.0':
+    resolution: {integrity: sha512-RVpS4fMtfTKI/7WdyeZIdLdy7lBV3liO/W/dLH+zNwga7REbp581zAxZNaomCYJG/y7SrqrtMo77CVDDKH4AKg==}
+    engines: {node: '>=22.0.0'}
 
   '@databricks/sdk-files@0.52.0':
     resolution: {integrity: sha512-H3/uAkkl7EI+60/q1FRqtKrG7UdJfWKLug4/87q+P7OXJMF3J8kgECIg1LfU2Ih2Qj42LNhqdjos7LJSC68gyw==}
@@ -2058,6 +2112,10 @@ packages:
 
   '@databricks/sdk-jobs@0.57.0':
     resolution: {integrity: sha512-LUBLNRhJq0OtUUU6+2T/zRzZMEd4UL0lVm7qTxLIfuDPDNDPy/EHGs3rQ1cXt1Fv0t3Rik7QT/SueZixSsH/Bg==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-modelserving@0.53.0':
+    resolution: {integrity: sha512-MDUmAZ/ajNQZFGyFj8MSvPgBiBK/NsKVQ9QaVjiz6Op5Eik/eJlg3jr+xoSbKDLlR/5ulq/Q2uP5JJA6t3vJTg==}
     engines: {node: '>=22.0.0'}
 
   '@databricks/sdk-options@0.51.0':
@@ -2072,8 +2130,20 @@ packages:
     resolution: {integrity: sha512-ymDGDW67PJ/0VujM89mUrE6mbbrabsKJP5LvPv8ZbgzPR0bm0DwXMcQzvS0XUt0UGITjV2gqbx5jQwP3ijtOmg==}
     engines: {node: '>=22.0.0'}
 
+  '@databricks/sdk-uc-connections@0.52.0':
+    resolution: {integrity: sha512-1kdWnXUSsjGWiQBVVrmiONDB+DohE+uMxgBwIg8p6A8d+p/kkcoR4KHDpj9QhJJ6/ae3Iy0vNFE4pIbA+pxlGw==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-uc-functions@0.51.0':
+    resolution: {integrity: sha512-L5Qq3lB8OIiEOW4h8s9EJQ82VeBFiPnA0F5S2Fhqpd8L8bpx3rjG/e88ZYDtDg3bg4xunOdMQS1VWRxSF9IMxA==}
+    engines: {node: '>=22.0.0'}
+
   '@databricks/sdk-uc-tables@0.52.0':
     resolution: {integrity: sha512-Dlqu3+O1krk6ogBX/uJGUDn1xMdt0gVMvrpmf16XkPelmgzwrbdWWtU2LU/zlcCBrb3XvhPPUpxVVHmyNS8Pjg==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-uc-volumes@0.51.0':
+    resolution: {integrity: sha512-Vmk+epraPslz+2pP90XOaZN3wxaoz1UY0mgFnvgUJ/AJHbB5Ei1OTQhtL+Mn5JTVkIaLT6LmJD/xmOqAtaRGLw==}
     engines: {node: '>=22.0.0'}
 
   '@databricks/sdk-vectorsearch@0.51.0':
@@ -14352,6 +14422,15 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@databricks/sdk-apps@0.54.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
   '@databricks/sdk-auth@0.51.0':
     dependencies:
       '@databricks/sdk-core': 0.51.0
@@ -14359,6 +14438,15 @@ snapshots:
 
   '@databricks/sdk-core@0.51.0':
     dependencies:
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
+  '@databricks/sdk-database@0.51.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
       json-bigint: 1.0.0
       zod: 4.3.6
 
@@ -14380,6 +14468,15 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@databricks/sdk-experiments@0.52.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
   '@databricks/sdk-files@0.52.0':
     dependencies:
       '@databricks/sdk-auth': 0.51.0
@@ -14399,6 +14496,15 @@ snapshots:
       zod: 4.3.6
 
   '@databricks/sdk-jobs@0.57.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
+  '@databricks/sdk-modelserving@0.53.0':
     dependencies:
       '@databricks/sdk-auth': 0.51.0
       '@databricks/sdk-core': 0.51.0
@@ -14430,7 +14536,34 @@ snapshots:
       json-bigint: 1.0.0
       zod: 4.3.6
 
+  '@databricks/sdk-uc-connections@0.52.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
+  '@databricks/sdk-uc-functions@0.51.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
   '@databricks/sdk-uc-tables@0.52.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
+  '@databricks/sdk-uc-volumes@0.51.0':
     dependencies:
       '@databricks/sdk-auth': 0.51.0
       '@databricks/sdk-core': 0.51.0

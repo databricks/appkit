@@ -25,6 +25,7 @@
  */
 import { STATUS_CODES } from "node:http";
 
+import { AppsClient } from "@databricks/sdk-apps/v1";
 import {
   type Credentials,
   newTokenCredentials,
@@ -43,13 +44,19 @@ import {
   newFetchHttpClient,
 } from "@databricks/sdk-core/http";
 import { resolve } from "@databricks/sdk-core/profiles";
+import { DatabaseClient } from "@databricks/sdk-database/v1";
+import { ExperimentsClient } from "@databricks/sdk-experiments/v1";
 import { FilesClient } from "@databricks/sdk-files/v2";
 import { GenieClient } from "@databricks/sdk-genie/v1";
 import { JobsClient } from "@databricks/sdk-jobs/v2";
+import { ModelServingClient } from "@databricks/sdk-modelserving/v1";
 import type { ClientOptions } from "@databricks/sdk-options/client";
 import { ScimClient } from "@databricks/sdk-scim/v1";
 import { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
+import { ConnectionsClient } from "@databricks/sdk-uc-connections/v1";
+import { FunctionsClient } from "@databricks/sdk-uc-functions/v1";
 import { TablesClient } from "@databricks/sdk-uc-tables/v1";
+import { VolumesClient } from "@databricks/sdk-uc-volumes/v1";
 import { VectorSearchClient } from "@databricks/sdk-vectorsearch/v1";
 import { WarehousesClient } from "@databricks/sdk-warehouses/v1";
 
@@ -357,6 +364,11 @@ export function buildScimClient(opts: WorkspaceClientOptions): ScimClient {
   return new ScimClient(mapToClientOptions(opts));
 }
 
+/** Build a modular Apps client from wrapper options. */
+export function buildAppsClient(opts: WorkspaceClientOptions): AppsClient {
+  return new AppsClient(mapToClientOptions(opts));
+}
+
 /** Build a modular Genie client from wrapper options. */
 export function buildGenieClient(opts: WorkspaceClientOptions): GenieClient {
   return new GenieClient(mapToClientOptions(opts));
@@ -388,18 +400,73 @@ export function buildVectorSearchClient(
   return new VectorSearchClient(mapToClientOptions(opts));
 }
 
+/** Build a modular Model Serving (serving endpoints) client from wrapper options. */
+export function buildModelServingClient(
+  opts: WorkspaceClientOptions,
+): ModelServingClient {
+  return new ModelServingClient(mapToClientOptions(opts));
+}
+
+/** Build a modular MLflow Experiments client from wrapper options. */
+export function buildExperimentsClient(
+  opts: WorkspaceClientOptions,
+): ExperimentsClient {
+  return new ExperimentsClient(mapToClientOptions(opts));
+}
+
 /** Build a modular Unity Catalog Tables client from wrapper options. */
 export function buildTablesClient(opts: WorkspaceClientOptions): TablesClient {
   return new TablesClient(mapToClientOptions(opts));
 }
 
+/** Build a modular Unity Catalog Volumes client from wrapper options. */
+export function buildVolumesClient(
+  opts: WorkspaceClientOptions,
+): VolumesClient {
+  return new VolumesClient(mapToClientOptions(opts));
+}
+
+/** Build a modular Unity Catalog Functions client from wrapper options. */
+export function buildFunctionsClient(
+  opts: WorkspaceClientOptions,
+): FunctionsClient {
+  return new FunctionsClient(mapToClientOptions(opts));
+}
+
+/** Build a modular Unity Catalog Connections client from wrapper options. */
+export function buildConnectionsClient(
+  opts: WorkspaceClientOptions,
+): ConnectionsClient {
+  return new ConnectionsClient(mapToClientOptions(opts));
+}
+
+/** Build a modular Lakebase (provisioned) Database client from wrapper options. */
+export function buildDatabaseClient(
+  opts: WorkspaceClientOptions,
+): DatabaseClient {
+  return new DatabaseClient(mapToClientOptions(opts));
+}
+
+/**
+ * Resolve a `~/.databrickscfg` profile (+ env overlay, unless disabled). Exposed
+ * so the CLI can read a profile offline without importing the SDK directly.
+ */
+export { resolve as resolveProfile } from "@databricks/sdk-core/profiles";
+
 // ── Client type re-exports (for the facade accessor types) ───────────────
+export type { DatabaseClient } from "@databricks/sdk-database/v1";
+export type { ExperimentsClient } from "@databricks/sdk-experiments/v1";
+export type { AppsClient } from "@databricks/sdk-apps/v1";
 export type { FilesClient } from "@databricks/sdk-files/v2";
 export type { GenieClient } from "@databricks/sdk-genie/v1";
 export type { JobsClient } from "@databricks/sdk-jobs/v2";
+export type { ModelServingClient } from "@databricks/sdk-modelserving/v1";
 export type { ScimClient } from "@databricks/sdk-scim/v1";
 export type { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
+export type { FunctionsClient } from "@databricks/sdk-uc-functions/v1";
+export type { ConnectionsClient } from "@databricks/sdk-uc-connections/v1";
 export type { TablesClient } from "@databricks/sdk-uc-tables/v1";
+export type { VolumesClient } from "@databricks/sdk-uc-volumes/v1";
 export type { VectorSearchClient } from "@databricks/sdk-vectorsearch/v1";
 export type { WarehousesClient } from "@databricks/sdk-warehouses/v1";
 
@@ -408,6 +475,12 @@ export type { WarehousesClient } from "@databricks/sdk-warehouses/v1";
 // than the SDK, so the import boundary holds. Type-only: the connector compares
 // state against string literals, which satisfy the SDK's `Enum | (string & {})`
 // field unions — no runtime enum values needed.
+export type {
+  ConnectionInfo,
+  GetConnectionRequest,
+  ListConnectionsRequest,
+  ListConnectionsResponse,
+} from "@databricks/sdk-uc-connections/v1";
 export type {
   ColumnInfo,
   Disposition,
@@ -424,9 +497,30 @@ export type {
   StatementStatus_State,
 } from "@databricks/sdk-statementexecution/v1";
 export type {
+  DatabaseCredential,
+  DatabaseInstance,
+  GenerateDatabaseCredentialRequest,
+  ListDatabaseInstancesRequest,
+  ListDatabaseInstancesResponse,
+} from "@databricks/sdk-database/v1";
+export type {
+  App,
+  ListAppsRequest,
+  ListAppsResponse,
+} from "@databricks/sdk-apps/v1";
+export type {
   GenieGetMessageQueryResultResponse,
   GenieMessage,
 } from "@databricks/sdk-genie/v1";
+export type {
+  FunctionInfo,
+  GetFunctionRequest,
+} from "@databricks/sdk-uc-functions/v1";
+export type {
+  Experiment,
+  ListExperimentsRequest,
+  ListExperimentsResponse,
+} from "@databricks/sdk-experiments/v1";
 export type {
   GetJobRequest,
   GetRunRequest,
@@ -435,8 +529,19 @@ export type {
   SubmitRunRequest,
 } from "@databricks/sdk-jobs/v2";
 export type {
+  GetInferenceEndpointRequest,
+  InferenceEndpoint,
+  InferenceEndpointDetailed,
+  ListInferenceEndpointsRequest,
+  ListInferenceEndpointsResponse,
+} from "@databricks/sdk-modelserving/v1";
+export type {
   EndpointHealth,
   EndpointInfo,
   EndpointState,
   GetWarehouseResponse,
 } from "@databricks/sdk-warehouses/v1";
+export type {
+  GetVolumeRequest,
+  VolumeInfo,
+} from "@databricks/sdk-uc-volumes/v1";
