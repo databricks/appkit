@@ -68,28 +68,6 @@ function toMessageResponse(message: GenieMessage): GenieMessageResponse {
   };
 }
 
-/**
- * The modular SDK returns the statement response camelCased, but the SSE
- * contract (`GenieStatementResponse`, read by appkit-ui) is the raw snake_case
- * API shape, so rename keys back here. `bigint` counts are handled by the SSE
- * serializer (`sseJsonReplacer`). Recurses into objects only; `data_array` rows
- * pass through as-is.
- *
- * TODO: update appkit-ui (`genie-query-transform.ts`) and `GenieStatementResponse`
- * to accept the camelCase shape, then drop this conversion (non-breaking path:
- * read both shapes first, switch the server later).
- */
-function toWireShape(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(toWireShape);
-  if (value === null || typeof value !== "object") return value;
-  return Object.fromEntries(
-    Object.entries(value).map(([key, v]) => [
-      key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`),
-      toWireShape(v),
-    ]),
-  );
-}
-
 function classifyGenieError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   // Modular ApiError carries the code on `.code`, legacy on `.errorCode`.
@@ -257,7 +235,7 @@ export class GenieConnector {
         messageId,
         attachmentId,
       });
-    return toWireShape(response.statementResponse) as GenieStatementResponse;
+    return response.statementResponse as GenieStatementResponse;
   }
 
   async *streamSendMessage(

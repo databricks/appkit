@@ -169,26 +169,19 @@ describe("GenieConnector", () => {
       const completedMsg = makeGenieMessageWithQuery();
       mockStart(ws, completedMsg);
 
-      // The modular SDK hands back camelCase; the SSE payload keeps the
-      // snake_case wire shape (bigints are serialized by the SSE writer).
-      ws.genie.genieGetMessageAttachmentQueryResult.mockResolvedValue({
-        statementResponse: {
-          statementId: "stmt-1",
-          manifest: {
-            schema: { columns: [{ name: "total", typeName: "DOUBLE" }] },
-            totalRowCount: 1n,
-          },
-          result: { dataArray: [["1234.56", null]], rowCount: 1n },
-        },
-      });
+      // The SDK's camelCase statement response is streamed as-is; bigints are
+      // serialized by the SSE writer.
       const statementResponse = {
-        statement_id: "stmt-1",
+        statementId: "stmt-1",
         manifest: {
-          schema: { columns: [{ name: "total", type_name: "DOUBLE" }] },
-          total_row_count: 1n,
+          schema: { columns: [{ name: "total", typeName: "DOUBLE" }] },
+          totalRowCount: 1n,
         },
-        result: { data_array: [["1234.56", null]], row_count: 1n },
+        result: { dataArray: [["1234.56", null]], rowCount: 1n },
       };
+      ws.genie.genieGetMessageAttachmentQueryResult.mockResolvedValue({
+        statementResponse,
+      });
 
       const events = await collect(
         connector.streamSendMessage(ws, "space-1", "query", undefined),
