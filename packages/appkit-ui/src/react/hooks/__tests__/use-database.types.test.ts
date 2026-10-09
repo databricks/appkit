@@ -36,8 +36,12 @@ function compileTypeProbe(source: string): string[] {
       : getSourceFile(candidate, languageVersion, onError, shouldCreate);
 
   const program = ts.createProgram([filename], parsed.options, host);
+  const probe = program.getSourceFile(filename);
+  if (!probe) {
+    throw new Error("Type probe source file was not loaded");
+  }
   return ts
-    .getPreEmitDiagnostics(program)
+    .getPreEmitDiagnostics(program, probe)
     .map((diagnostic) =>
       ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
     );
