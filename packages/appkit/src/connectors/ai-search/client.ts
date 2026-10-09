@@ -7,10 +7,8 @@ import {
   TelemetryManager,
 } from "../../telemetry";
 import type { WorkspaceClient } from "../../workspace-client";
-import { contextFromAbortSignal } from "../context";
 import type {
   AiSearchConnectorConfig,
-  UcTableInfo,
   VsIndexInfo,
   VsNextPageParams,
   VsQueryParams,
@@ -18,6 +16,28 @@ import type {
 } from "./types";
 
 const logger = createLogger("connectors:ai-search");
+
+/**
+ * POST through the raw `request()` seam, not the typed `VectorSearchClient`:
+ * its generated model has no `debug_level` (request) or `debug_info` (response),
+ * so unmarshal would strip the timings the plugin reports, and its reranker
+ * shape differs. Raw JSON keeps the exact wire shape `VsRawResponse` describes.
+ */
+async function postJson<T>(
+  workspaceClient: WorkspaceClient,
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
+  const res = await workspaceClient.request({
+    method: "POST",
+    path,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  return (await res.json()) as T;
+}
 
 export class AiSearchConnector {
   private readonly telemetry: TelemetryProvider;
@@ -83,17 +103,12 @@ export class AiSearchConnector {
       async (span: Span) => {
         const startTime = Date.now();
         try {
-          const response = (await workspaceClient.apiClient.request(
-            {
-              method: "POST",
-              path: `/api/2.0/vector-search/indexes/${params.indexName}/query`,
-              payload: body,
-              headers: new Headers({ "Content-Type": "application/json" }),
-              raw: false,
-              query: {},
-            },
-            contextFromAbortSignal(signal),
-          )) as VsRawResponse;
+          const response = await postJson<VsRawResponse>(
+            workspaceClient,
+            `/api/2.0/vector-search/indexes/${params.indexName}/query`,
+            body,
+            signal,
+          );
 
           const duration = Date.now() - startTime;
           span.setAttribute("vs.result_count", response.result.row_count);
@@ -153,20 +168,15 @@ export class AiSearchConnector {
       },
       async (span: Span) => {
         try {
-          const response = (await workspaceClient.apiClient.request(
+          const response = await postJson<VsRawResponse>(
+            workspaceClient,
+            `/api/2.0/vector-search/indexes/${params.indexName}/query-next-page`,
             {
-              method: "POST",
-              path: `/api/2.0/vector-search/indexes/${params.indexName}/query-next-page`,
-              payload: {
-                endpoint_name: params.endpointName,
-                page_token: params.pageToken,
-              },
-              headers: new Headers({ "Content-Type": "application/json" }),
-              raw: false,
-              query: {},
+              endpoint_name: params.endpointName,
+              page_token: params.pageToken,
             },
-            contextFromAbortSignal(signal),
-          )) as VsRawResponse;
+            signal,
+          );
 
           span.setAttribute("vs.result_count", response.result.row_count);
           span.setStatus({ code: SpanStatusCode.OK });
@@ -193,16 +203,24 @@ export class AiSearchConnector {
     indexName: string,
     signal?: AbortSignal,
   ): Promise<VsIndexInfo> {
-    return (await workspaceClient.apiClient.request(
-      {
-        method: "GET",
-        path: `/api/2.0/vector-search/indexes/${indexName}`,
-        headers: new Headers({ "Content-Type": "application/json" }),
-        raw: false,
-        query: {},
+    const index = await workspaceClient.vectorSearch.getVectorIndex(
+      { name: indexName },
+      { signal },
+    );
+    // Map the camelCase model back to the snake_case `VsIndexInfo` callers read.
+    const spec =
+      index.indexSpec?.$case === "deltaSyncIndexSpec"
+        ? index.indexSpec.deltaSyncIndexSpec
+        : undefined;
+    return {
+      index_type: index.indexType as VsIndexInfo["index_type"],
+      delta_sync_index_spec: spec && {
+        source_table: spec.sourceTable,
+        embedding_vector_columns: spec.embeddingVectorColumns?.map((c) => ({
+          name: c.name ?? "",
+        })),
       },
-      contextFromAbortSignal(signal),
-    )) as VsIndexInfo;
+    };
   }
 
   /**
@@ -214,16 +232,10 @@ export class AiSearchConnector {
     sourceTable: string,
     signal?: AbortSignal,
   ): Promise<string[]> {
-    const table = (await workspaceClient.apiClient.request(
-      {
-        method: "GET",
-        path: `/api/2.1/unity-catalog/tables/${sourceTable}`,
-        headers: new Headers({ "Content-Type": "application/json" }),
-        raw: false,
-        query: {},
-      },
-      contextFromAbortSignal(signal),
-    )) as UcTableInfo;
-    return (table.columns ?? []).map((c) => c.name);
+    const table = await workspaceClient.tables.getTable(
+      { fullNameArg: sourceTable },
+      { signal },
+    );
+    return (table.columns ?? []).flatMap((c) => (c.name ? [c.name] : []));
   }
 }

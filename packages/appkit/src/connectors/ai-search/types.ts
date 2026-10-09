@@ -31,11 +31,6 @@ export interface VsIndexInfo {
   };
 }
 
-/** Subset of the Unity Catalog get-table response used for column discovery. */
-export interface UcTableInfo {
-  columns?: Array<{ name: string }>;
-}
-
 export interface VsRawResponse {
   manifest: {
     column_count: number;
