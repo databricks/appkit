@@ -17,6 +17,7 @@
         "@databricks/sdk-genie",
         "@databricks/sdk-jobs",
         "@databricks/sdk-postgres",
+        "@databricks/sdk-modelserving",
         "@databricks/sdk-uc-tables",
         "@databricks/sdk-vectorsearch",
         "@databricks/sdk-options",

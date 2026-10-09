@@ -21,6 +21,7 @@ import type {
   ScimClient,
   GenieClient,
   JobsClient,
+  ModelServingClient,
   FilesClient,
   TablesClient,
   VectorSearchClient,
@@ -70,6 +71,9 @@ export interface WorkspaceClient extends WorkspaceAuth {
 
   /** Statement Execution (modular SDK). */
   readonly statementExecution: StatementExecutionClient;
+
+  /** Serving endpoints (modular SDK). `servingEndpoints` below stays legacy-typed. */
+  readonly modelServing: ModelServingClient;
 
   /** Serving Endpoints. */
   readonly servingEndpoints: LegacyWorkspaceClient["servingEndpoints"];

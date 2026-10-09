@@ -73,6 +73,7 @@ const FACADE_SERVICES = [
   "tables",
   "postgres",
   "statementExecution",
+  "modelServing",
   "servingEndpoints",
   "currentUser",
 ] as const;
