@@ -283,7 +283,7 @@ describe("runExistenceProbe — postgres (Lakebase)", () => {
 
 describe("runExistenceProbe — per-type coverage with real manifest keys", () => {
   it("serving_endpoint: ok via `name`", async () => {
-    const client = { request: async () => ({}) };
+    const client = { modelServing: { getInferenceEndpoint: async () => ({}) } };
     const r = await runExistenceProbe(
       client,
       target({
@@ -296,8 +296,10 @@ describe("runExistenceProbe — per-type coverage with real manifest keys", () =
 
   it("serving_endpoint: hints id-vs-name when configured by id and the probe fails", async () => {
     const client = {
-      request: async () => {
-        throw Object.assign(new Error("not found"), { statusCode: 404 });
+      modelServing: {
+        getInferenceEndpoint: async () => {
+          throw Object.assign(new Error("not found"), { statusCode: 404 });
+        },
       },
     };
     const r = await runExistenceProbe(
@@ -310,8 +312,10 @@ describe("runExistenceProbe — per-type coverage with real manifest keys", () =
 
   it("serving_endpoint: no id-vs-name hint when configured by name", async () => {
     const client = {
-      request: async () => {
-        throw Object.assign(new Error("not found"), { statusCode: 404 });
+      modelServing: {
+        getInferenceEndpoint: async () => {
+          throw Object.assign(new Error("not found"), { statusCode: 404 });
+        },
       },
     };
     const r = await runExistenceProbe(
@@ -332,7 +336,8 @@ describe("runExistenceProbe — per-type coverage with real manifest keys", () =
   });
 
   it("volume: ok via `path` (real manifest key)", async () => {
-    const client = { request: async () => ({}) };
+    const getVolume = vi.fn(async () => ({}));
+    const client = { volumes: { getVolume } };
     const r = await runExistenceProbe(
       client,
       target({
@@ -341,15 +346,21 @@ describe("runExistenceProbe — per-type coverage with real manifest keys", () =
       }),
     );
     expect(r.status).toBe("ok");
+    // UC get requests key the name as `fullNameArg`, not `fullName`.
+    expect(getVolume).toHaveBeenCalledWith({
+      fullNameArg: "main.default.files",
+    });
   });
 
   it("uc_function: ok via `name`", async () => {
-    const client = { request: async () => ({}) };
+    const getFunction = vi.fn(async () => ({}));
+    const client = { functions: { getFunction } };
     const r = await runExistenceProbe(
       client,
       target({ type: "uc_function", fieldValues: { name: "cat.sch.fn" } }),
     );
     expect(r.status).toBe("ok");
+    expect(getFunction).toHaveBeenCalledWith({ fullNameArg: "cat.sch.fn" });
   });
 
   it("vector_search_index: probes via camelCase `indexName`", async () => {
@@ -367,7 +378,7 @@ describe("runExistenceProbe — per-type coverage with real manifest keys", () =
   });
 
   it("vector_search_index: skips MISSING_FIELD when index name absent", async () => {
-    const client = { request: async () => ({}) };
+    const client = { vectorSearch: { getVectorIndex: async () => ({}) } };
     const r = await runExistenceProbe(
       client,
       target({ type: "vector_search_index", fieldValues: {} }),

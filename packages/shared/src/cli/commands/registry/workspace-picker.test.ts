@@ -147,29 +147,65 @@ describe("listWorkspaceResources", () => {
     expect(res.choices.length).toBeGreaterThan(0);
   });
 
-  // Services without a modular client go through the facade's raw request().
-  it("lists REST-backed types via request(), following next_page_token", async () => {
-    const calls: unknown[] = [];
-    const pages: Record<string, unknown> = {
-      "": { apps: [{ name: "a1" }], next_page_token: "p2" },
-      p2: { apps: [{ name: "a2" }] },
-    };
+  // listInferenceEndpoints returns one unpaginated page, adapted to an iterable.
+  it("lists serving endpoints from listInferenceEndpoints' single page", async () => {
     const factory = () =>
       fakeClient({
-        request: async (req: {
-          path: string;
-          query?: { page_token?: string };
-        }) => {
-          calls.push(req);
-          return Response.json(pages[req.query?.page_token ?? ""]);
+        modelServing: {
+          listInferenceEndpoints: async () => ({
+            endpoints: [{ name: "e1" }, { name: "e2" }],
+          }),
         },
       });
-    const res = await listWorkspaceResources("app", undefined, factory);
-    expect(res.choices.map((c) => c.value)).toEqual(["a1", "a2"]);
-    expect(calls).toEqual([
-      { method: "GET", path: "/api/2.0/apps", query: undefined },
-      { method: "GET", path: "/api/2.0/apps", query: { page_token: "p2" } },
-    ]);
+    const res = await listWorkspaceResources(
+      "serving_endpoint",
+      undefined,
+      factory,
+    );
+    expect(res.choices.map((c) => c.value)).toEqual(["e1", "e2"]);
+  });
+
+  it("maps the camelCase fields of the typed UC/ML/apps listers", async () => {
+    const cases: Array<[string, Record<string, unknown>, unknown]> = [
+      [
+        "uc_connection",
+        {
+          connections: {
+            listConnectionsIter: asyncList([{ name: "c", fullName: "Conn" }]),
+          },
+        },
+        { value: "c", label: "Conn (c)" },
+      ],
+      [
+        "database",
+        {
+          database: { listDatabaseInstancesIter: asyncList([{ name: "db" }]) },
+        },
+        { value: "db", label: "db (db)" },
+      ],
+      [
+        "experiment",
+        {
+          experiments: {
+            listExperimentsIter: asyncList([
+              { experimentId: "7", name: "Exp" },
+            ]),
+          },
+        },
+        { value: "7", label: "Exp (7)" },
+      ],
+      [
+        "app",
+        { apps: { listAppsIter: asyncList([{ name: "a1" }]) } },
+        { value: "a1", label: "a1 (a1)" },
+      ],
+    ];
+    for (const [type, services, choice] of cases) {
+      const res = await listWorkspaceResources(type, undefined, () =>
+        fakeClient(services),
+      );
+      expect(res.choices, type).toEqual([choice]);
+    }
   });
 
   it("passes the profile to the client factory", async () => {
