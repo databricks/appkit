@@ -1005,25 +1005,26 @@ type ModelStringOptions = Pick<
 /**
  * Resolves a string `model` to a {@link DatabricksAdapter}, routing by name:
  *
- * - UC model names (`system.*`, e.g. `"system.ai.claude-opus-5-5"`) → AI
- *   Gateway ({@link DatabricksAdapter.fromAiGateway}); the model is named in
- *   the request body.
+ * - UC model/resource names (containing a dot, e.g. `"system.ai.claude-opus-5-5"`
+ *   or `"catalog.schema.model_service"`) → AI Gateway
+ *   ({@link DatabricksAdapter.fromAiGateway}); the model is named in the
+ *   request body.
  * - Everything else — serving-endpoint names like
- *   `"databricks-claude-sonnet-4-5"` or a custom endpoint → Model Serving
- *   ({@link DatabricksAdapter.fromModelServing}); the name goes in the URL.
+ *   `"databricks-claude-sonnet-4-5"` or a custom endpoint (no dots) → Model
+ *   Serving ({@link DatabricksAdapter.fromModelServing}); the name goes in
+ *   the URL.
  *
- * Serving-endpoint names are `[a-zA-Z0-9_-]` (no dots), so the `system.`
- * prefix cleanly separates the two namespaces and no existing endpoint name
- * changes routing. This is the single decision point shared by the agents
- * plugin and standalone `runAgent`, so the two never drift. To force a
- * `system.*` name onto a serving endpoint instead, pass a pre-built adapter
+ * Serving-endpoint names are `[a-zA-Z0-9_-]` (no dots), so any dotted name
+ * routes to the AI Gateway. This is the single decision point shared by the
+ * agents plugin and standalone `runAgent`, so the two never drift. To force a
+ * dotted name onto a serving endpoint instead, pass a pre-built adapter
  * (`DatabricksAdapter.fromServingEndpoint(...)`) as the agent's `model`.
  */
 export function adapterFromModelString(
   model: string,
   options?: ModelStringOptions,
 ): Promise<DatabricksAdapter> {
-  return model.startsWith("system.")
+  return model.includes(".")
     ? DatabricksAdapter.fromAiGateway({ model, ...options })
     : DatabricksAdapter.fromModelServing(model, options);
 }

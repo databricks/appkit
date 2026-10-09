@@ -19,7 +19,7 @@
       "ignoreDependencies": ["tailwindcss", "tw-animate-css"]
     }
   },
-  "ignoreDependencies": ["react-docgen-typescript"],
+  "ignoreDependencies": ["react-docgen-typescript", "esbuild", "ora", "zod"],
   "ignore": [
     "**/*.generated.ts",
     "**/*.example.tsx",
@@ -33,10 +33,11 @@
     "packages/appkit/src/core/agent/load-agents.ts",
     "packages/appkit/src/connectors/mcp/index.ts",
     "packages/appkit/src/typedoc.entry.ts",
+    "packages/appkit/bin/appkit.js",
     "template/**",
     "tools/**",
     "docs/**",
     ".github/scripts/**"
   ],
-  "ignoreBinaries": ["tarball", "appkit"]
+  "ignoreBinaries": ["tarball"]
 }
