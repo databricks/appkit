@@ -16,12 +16,11 @@ describe("FilesPlugin shutdown and trackWrite", () => {
     client = createMockWorkspaceClient({
       strict: true,
       responses: {
-        "files.listDirectoryContents": undefined,
-        "files.download": undefined,
-        "files.getMetadata": undefined,
+        "files.listDirectoryContentsIter": undefined,
+        "files.downloadFile": undefined,
         "files.upload": undefined,
         "files.createDirectory": undefined,
-        "files.delete": undefined,
+        "files.deleteFile": undefined,
       },
     });
     serviceContextMock = await setupTestEnv(client);

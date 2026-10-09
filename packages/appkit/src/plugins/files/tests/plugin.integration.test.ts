@@ -20,20 +20,20 @@ import { createApp } from "../../../core";
 import { createApiError } from "../../../testing";
 import { server as serverPlugin } from "../../server";
 import { files } from "../index";
-import { streamFromString } from "./utils";
+import { headResponse, streamFromString } from "./utils";
 
 const { mockFilesApi, mockSdkClient } = vi.hoisted(() => {
   const mockFilesApi = {
-    listDirectoryContents: vi.fn(),
-    download: vi.fn(),
-    getMetadata: vi.fn(),
+    listDirectoryContentsIter: vi.fn(),
+    downloadFile: vi.fn(),
     upload: vi.fn(),
     createDirectory: vi.fn(),
-    delete: vi.fn(),
+    deleteFile: vi.fn(),
   };
 
   const mockSdkClient = {
     files: mockFilesApi,
+    request: vi.fn(),
     config: {
       host: "https://test.databricks.com",
       authenticate: vi.fn(),
@@ -101,12 +101,12 @@ describe("Files Plugin Integration", () => {
   });
 
   beforeEach(() => {
-    mockFilesApi.listDirectoryContents.mockReset();
-    mockFilesApi.download.mockReset();
-    mockFilesApi.getMetadata.mockReset();
+    mockFilesApi.listDirectoryContentsIter.mockReset();
+    mockFilesApi.downloadFile.mockReset();
+    mockSdkClient.request.mockReset().mockResolvedValue(new Response(null));
     mockFilesApi.upload.mockReset();
     mockFilesApi.createDirectory.mockReset();
-    mockFilesApi.delete.mockReset();
+    mockFilesApi.deleteFile.mockReset();
   });
 
   describe("Volumes Endpoint", () => {
@@ -148,10 +148,11 @@ describe("Files Plugin Integration", () => {
         },
       ];
 
-      mockFilesApi.listDirectoryContents.mockReturnValue(
+      mockFilesApi.listDirectoryContentsIter.mockReturnValue(
         (async function* () {
-          for (const entry of MOCKED_ENTRIES) {
-            yield entry;
+          // Modular SDK yields camelCase; the HTTP body stays snake_case.
+          for (const { is_directory, ...rest } of MOCKED_ENTRIES) {
+            yield { ...rest, isDirectory: is_directory };
           }
         })(),
       );
@@ -166,7 +167,7 @@ describe("Files Plugin Integration", () => {
     });
 
     test(`GET /api/files/${VOL}/list?path=/abs/path uses provided path`, async () => {
-      mockFilesApi.listDirectoryContents.mockReturnValue(
+      mockFilesApi.listDirectoryContentsIter.mockReturnValue(
         (async function* () {})(),
       );
 
@@ -176,15 +177,15 @@ describe("Files Plugin Integration", () => {
       );
 
       expect(response.status).toBe(200);
-      expect(mockFilesApi.listDirectoryContents).toHaveBeenCalledWith({
-        directory_path: "/Volumes/other/path",
+      expect(mockFilesApi.listDirectoryContentsIter).toHaveBeenCalledWith({
+        directoryPath: "/Volumes/other/path",
       });
     });
   });
 
   describe("Read File", () => {
     test(`GET /api/files/${VOL}/read?path=/file.txt returns text content`, async () => {
-      mockFilesApi.download.mockResolvedValue({
+      mockFilesApi.downloadFile.mockResolvedValue({
         contents: streamFromString("file content here"),
       });
 
@@ -211,11 +212,13 @@ describe("Files Plugin Integration", () => {
 
   describe("Exists", () => {
     test(`GET /api/files/${VOL}/exists returns { exists: true }`, async () => {
-      mockFilesApi.getMetadata.mockResolvedValue({
-        "content-length": 100,
-        "content-type": "text/plain",
-        "last-modified": "2025-01-01",
-      });
+      mockSdkClient.request.mockResolvedValue(
+        headResponse({
+          "content-length": 100,
+          "content-type": "text/plain",
+          "last-modified": "2025-01-01",
+        }),
+      );
 
       const response = await fetch(
         `${baseUrl}/api/files/${VOL}/exists?path=/Volumes/catalog/schema/vol/file.txt`,
@@ -228,7 +231,7 @@ describe("Files Plugin Integration", () => {
     });
 
     test(`GET /api/files/${VOL}/exists returns { exists: false } on 404`, async () => {
-      mockFilesApi.getMetadata.mockRejectedValue(
+      mockSdkClient.request.mockRejectedValue(
         createApiError({
           statusCode: 404,
           message: "Not found",
@@ -249,11 +252,13 @@ describe("Files Plugin Integration", () => {
 
   describe("Metadata", () => {
     test(`GET /api/files/${VOL}/metadata returns correct metadata`, async () => {
-      mockFilesApi.getMetadata.mockResolvedValue({
-        "content-length": 256,
-        "content-type": "application/json",
-        "last-modified": "2025-06-15T10:00:00Z",
-      });
+      mockSdkClient.request.mockResolvedValue(
+        headResponse({
+          "content-length": 256,
+          "content-type": "application/json",
+          "last-modified": "2025-06-15T10:00:00Z",
+        }),
+      );
 
       const response = await fetch(
         `${baseUrl}/api/files/${VOL}/metadata?path=/Volumes/catalog/schema/vol/file.json`,
@@ -272,12 +277,14 @@ describe("Files Plugin Integration", () => {
 
   describe("Preview", () => {
     test(`GET /api/files/${VOL}/preview returns text preview`, async () => {
-      mockFilesApi.getMetadata.mockResolvedValue({
-        "content-length": 20,
-        "content-type": "text/plain",
-        "last-modified": "2025-01-01",
-      });
-      mockFilesApi.download.mockResolvedValue({
+      mockSdkClient.request.mockResolvedValue(
+        headResponse({
+          "content-length": 20,
+          "content-type": "text/plain",
+          "last-modified": "2025-01-01",
+        }),
+      );
+      mockFilesApi.downloadFile.mockResolvedValue({
         contents: streamFromString("Hello preview!"),
       });
 
@@ -298,11 +305,13 @@ describe("Files Plugin Integration", () => {
     });
 
     test(`GET /api/files/${VOL}/preview returns image metadata`, async () => {
-      mockFilesApi.getMetadata.mockResolvedValue({
-        "content-length": 5000,
-        "content-type": "image/png",
-        "last-modified": "2025-01-01",
-      });
+      mockSdkClient.request.mockResolvedValue(
+        headResponse({
+          "content-length": 5000,
+          "content-type": "image/png",
+          "last-modified": "2025-01-01",
+        }),
+      );
 
       const response = await fetch(
         `${baseUrl}/api/files/${VOL}/preview?path=/Volumes/catalog/schema/vol/image.png`,
@@ -323,7 +332,7 @@ describe("Files Plugin Integration", () => {
 
   describe("Raw Endpoint Security Headers", () => {
     test("safe type (image/png) sets security headers without Content-Disposition", async () => {
-      mockFilesApi.download.mockResolvedValue({
+      mockFilesApi.downloadFile.mockResolvedValue({
         contents: streamFromString("PNG data"),
       });
 
@@ -340,7 +349,7 @@ describe("Files Plugin Integration", () => {
     });
 
     test("dangerous type (text/html) forces download via Content-Disposition", async () => {
-      mockFilesApi.download.mockResolvedValue({
+      mockFilesApi.downloadFile.mockResolvedValue({
         contents: streamFromString("<script>alert('xss')</script>"),
       });
 
@@ -359,7 +368,7 @@ describe("Files Plugin Integration", () => {
     });
 
     test("SVG (image/svg+xml) is treated as dangerous", async () => {
-      mockFilesApi.download.mockResolvedValue({
+      mockFilesApi.downloadFile.mockResolvedValue({
         contents: streamFromString("<svg onload='alert(1)'></svg>"),
       });
 
@@ -377,7 +386,7 @@ describe("Files Plugin Integration", () => {
     });
 
     test("JavaScript (text/javascript) is treated as dangerous", async () => {
-      mockFilesApi.download.mockResolvedValue({
+      mockFilesApi.downloadFile.mockResolvedValue({
         contents: streamFromString("alert('xss')"),
       });
 
@@ -395,7 +404,7 @@ describe("Files Plugin Integration", () => {
     });
 
     test("safe type (application/json) is served inline", async () => {
-      mockFilesApi.download.mockResolvedValue({
+      mockFilesApi.downloadFile.mockResolvedValue({
         contents: streamFromString('{"key":"value"}'),
       });
 
@@ -414,7 +423,7 @@ describe("Files Plugin Integration", () => {
 
   describe("Download Endpoint Security Headers", () => {
     test("sets X-Content-Type-Options: nosniff", async () => {
-      mockFilesApi.download.mockResolvedValue({
+      mockFilesApi.downloadFile.mockResolvedValue({
         contents: streamFromString("file data"),
       });
 
@@ -433,7 +442,7 @@ describe("Files Plugin Integration", () => {
 
   describe("Service principal execution", () => {
     test("header-less request + default publicRead() + list → 200 (policy decides)", async () => {
-      mockFilesApi.listDirectoryContents.mockReturnValue(
+      mockFilesApi.listDirectoryContentsIter.mockReturnValue(
         (async function* () {
           yield {
             name: "sp-file.txt",
@@ -523,7 +532,7 @@ describe("Files Plugin Integration", () => {
         const port = await getListeningPort(appkit.server.getServer());
         const localBase = `http://127.0.0.1:${port}`;
 
-        mockFilesApi.listDirectoryContents.mockReturnValue(
+        mockFilesApi.listDirectoryContentsIter.mockReturnValue(
           (async function* () {
             yield {
               name: "spy-file.txt",
@@ -552,7 +561,7 @@ describe("Files Plugin Integration", () => {
     });
 
     test("requests with user headers also succeed", async () => {
-      mockFilesApi.listDirectoryContents.mockReturnValue(
+      mockFilesApi.listDirectoryContentsIter.mockReturnValue(
         (async function* () {
           yield {
             name: "file.txt",
@@ -631,7 +640,7 @@ describe("Files Plugin Integration", () => {
 
   describe("Error Handling", () => {
     test("SDK exceptions return 500 with generic error", async () => {
-      mockFilesApi.getMetadata.mockRejectedValue(
+      mockSdkClient.request.mockRejectedValue(
         new Error("SDK connection failed"),
       );
 
@@ -647,7 +656,7 @@ describe("Files Plugin Integration", () => {
     });
 
     test("list errors return 500", async () => {
-      mockFilesApi.listDirectoryContents.mockRejectedValue(
+      mockFilesApi.listDirectoryContentsIter.mockRejectedValue(
         new Error("Permission denied"),
       );
 
@@ -663,7 +672,7 @@ describe("Files Plugin Integration", () => {
     });
 
     test("ApiError 404 preserves upstream status code", async () => {
-      mockFilesApi.getMetadata.mockRejectedValue(
+      mockSdkClient.request.mockRejectedValue(
         createApiError({
           statusCode: 404,
           message: "Not found",
@@ -686,7 +695,7 @@ describe("Files Plugin Integration", () => {
     });
 
     test("ApiError 409 preserves upstream status code", async () => {
-      mockFilesApi.getMetadata.mockRejectedValue(
+      mockSdkClient.request.mockRejectedValue(
         createApiError({
           statusCode: 409,
           message: "Conflict",

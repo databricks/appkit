@@ -22,6 +22,8 @@ import {
   type GenieClient,
   buildJobsClient,
   type JobsClient,
+  buildFilesClient,
+  type FilesClient,
   type StatementExecutionClient,
   type WarehousesClient,
   type WorkspaceAuth,
@@ -38,13 +40,18 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
   #currentUser?: ScimClient;
   #genie?: GenieClient;
   #jobs?: JobsClient;
+  #files?: FilesClient;
 
   constructor(opts: WorkspaceClientOptions) {
     this.#opts = opts;
   }
 
-  get files() {
-    return this.#getLegacy().files;
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  get files(): FilesClient {
+    if (!this.#files) {
+      this.#files = buildFilesClient(this.#opts);
+    }
+    return this.#files;
   }
 
   // Migrated to the modular SDK — built lazily, independent of the legacy client.

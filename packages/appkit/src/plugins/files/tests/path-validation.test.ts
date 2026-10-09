@@ -28,12 +28,11 @@ describe("FilesPlugin path validation", () => {
     client = createMockWorkspaceClient({
       strict: true,
       responses: {
-        "files.listDirectoryContents": undefined,
-        "files.download": undefined,
-        "files.getMetadata": undefined,
+        "files.listDirectoryContentsIter": undefined,
+        "files.downloadFile": undefined,
         "files.upload": undefined,
         "files.createDirectory": undefined,
-        "files.delete": undefined,
+        "files.deleteFile": undefined,
       },
     });
     serviceContextMock = await setupTestEnv(client);
@@ -46,13 +45,13 @@ describe("FilesPlugin path validation", () => {
   // Defends against regressions where the handler calls the SDK and *also*
   // returns 400 — the status assertion alone wouldn't catch that.
   function expectNoSdkCall() {
-    expect(getMock(client, "files.download")).not.toHaveBeenCalled();
+    expect(getMock(client, "files.downloadFile")).not.toHaveBeenCalled();
     expect(getMock(client, "files.upload")).not.toHaveBeenCalled();
-    expect(getMock(client, "files.delete")).not.toHaveBeenCalled();
+    expect(getMock(client, "files.deleteFile")).not.toHaveBeenCalled();
     expect(getMock(client, "files.createDirectory")).not.toHaveBeenCalled();
-    expect(getMock(client, "files.getMetadata")).not.toHaveBeenCalled();
+    expect(getMock(client, "request")).not.toHaveBeenCalled();
     expect(
-      getMock(client, "files.listDirectoryContents"),
+      getMock(client, "files.listDirectoryContentsIter"),
     ).not.toHaveBeenCalled();
   }
 

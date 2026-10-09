@@ -29,12 +29,11 @@ describe("FilesPlugin delete", () => {
     client = createMockWorkspaceClient({
       strict: true,
       responses: {
-        "files.listDirectoryContents": undefined,
-        "files.download": undefined,
-        "files.getMetadata": undefined,
+        "files.listDirectoryContentsIter": undefined,
+        "files.downloadFile": undefined,
         "files.upload": undefined,
         "files.createDirectory": undefined,
-        "files.delete": undefined,
+        "files.deleteFile": undefined,
       },
     });
     serviceContextMock = await setupTestEnv(client);
@@ -52,7 +51,7 @@ describe("FilesPlugin delete", () => {
     const generateKey = vi.spyOn(testCache.current, "generateKey");
     const del = vi.spyOn(testCache.current, "delete");
 
-    getMock(client, "files.delete").mockResolvedValue(undefined);
+    getMock(client, "files.deleteFile").mockResolvedValue(undefined);
 
     await handler(
       mockReq("uploads", {
@@ -86,7 +85,7 @@ describe("FilesPlugin delete", () => {
     const handler = getRouteHandler(plugin, "delete", "");
     const res = mockRes();
 
-    getMock(client, "files.delete").mockRejectedValue(
+    getMock(client, "files.deleteFile").mockRejectedValue(
       createApiError({
         statusCode: 404,
         message: "Not found",

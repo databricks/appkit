@@ -8,7 +8,7 @@
  * later means changing that accessor's type here + its getter in `client.ts`
  * and updating the one connector that consumes it.
  *
- * Type-namespace re-exports (`files`, `jobs`, `serving`, `sql`) point at
+ * Type-namespace re-exports (`jobs`, `serving`, `sql`) point at
  * `@databricks/sdk-experimental` so existing AppKit call-site shapes stay
  * stable. They move to the modular `@databricks/sdk-<service>` model exports
  * as each service migrates.
@@ -21,6 +21,7 @@ import type {
   ScimClient,
   GenieClient,
   JobsClient,
+  FilesClient,
 } from "./modular";
 
 // Legacy SDK type namespaces for un-migrated services, re-exported so AppKit
@@ -34,8 +35,8 @@ import type {
 // `jobs` stays as the wire-shape (snake_case, `number` IDs) type of the jobs
 // plugin's public API; appkit's jobs connector translates the modular client's
 // camelCase/`bigint` models back to it.
-export type { files, jobs, serving, sql } from "@databricks/sdk-experimental";
-// Modular SDK client + model types (warehouses, statementExecution, genie, jobs).
+export type { jobs, serving, sql } from "@databricks/sdk-experimental";
+// Modular SDK client + model types (warehouses, statementExecution, genie, jobs, files).
 export type * from "./modular";
 
 /**
@@ -47,8 +48,8 @@ export type * from "./modular";
  * client); see the module docblock.
  */
 export interface WorkspaceClient extends WorkspaceAuth {
-  /** UC Volumes / Files API. */
-  readonly files: LegacyWorkspaceClient["files"];
+  /** UC Volumes / Files API (modular SDK). */
+  readonly files: FilesClient;
 
   /** SQL Warehouses (modular SDK). */
   readonly warehouses: WarehousesClient;
