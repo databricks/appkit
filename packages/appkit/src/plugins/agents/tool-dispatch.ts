@@ -152,18 +152,59 @@ export async function dispatchToolCall(
     );
   } catch (caught) {
     const err = normalizeIdentityError(caught);
-    const error = err instanceof Error ? err.message : String(err);
+    // Surface an actionable hint for the common OBO failure — a plugin-toolkit
+    // or MCP tool whose forwarded user token lacks the resource's scope — while
+    // still logging the original error with its full stack for operators.
+    const toThrow = describeMissingOboScope(entry, name, err) ?? err;
     logger.error(
       "Tool '%s' failed (request %s): %O",
       name,
       runState.requestId,
       err,
     );
-    runState.toolErrors.push({ tool: name, error });
-    throw err;
+    runState.toolErrors.push({
+      tool: name,
+      error: toThrow instanceof Error ? toThrow.message : String(toThrow),
+    });
+    throw toThrow;
   }
 
   return normalizeToolResult(toolResult);
+}
+
+/**
+ * Plugin-toolkit and MCP agent tools execute on behalf of the user, so they
+ * use the user's forwarded OAuth token. When that token lacks the scope the
+ * resource needs, the platform rejects the call with a raw
+ * "...does not have required scopes: <x>" message that never says how to fix
+ * it — the app simply never requested that scope. Turn it into an actionable
+ * hint pointing at `user_api_scopes`. Returns `undefined` for any other error,
+ * and for service-principal tool sources (`function`, `skill`, `subagent`),
+ * leaving those untouched.
+ */
+function describeMissingOboScope(
+  entry: ResolvedToolEntry,
+  name: string,
+  err: unknown,
+): Error | undefined {
+  if (entry.source !== "toolkit" && entry.source !== "mcp") return undefined;
+  const message = err instanceof Error ? err.message : String(err);
+  // Platform wording: "...does not have required scopes: sql" — optionally a
+  // comma-separated list, optionally trailed by a "[ReqId: ...]" suffix.
+  const match = message.match(/required scopes?:\s*([^[\]]+)/i);
+  if (!match) return undefined;
+  const scopes = match[1].trim().replace(/\s+/g, " ");
+  const origin =
+    entry.source === "toolkit"
+      ? `from the '${entry.pluginName}' plugin`
+      : "backed by an MCP server";
+  return new Error(
+    `Agent tool '${name}' (${origin}) runs on behalf of the user, but the ` +
+      `user's token is missing the required scope(s): ${scopes}. Add ${scopes} ` +
+      `to user_api_scopes in your app's databricks.yml and redeploy so the ` +
+      `Databricks Apps proxy forwards a token with that scope.`,
+    { cause: err },
+  );
 }
 
 /**

@@ -424,6 +424,127 @@ describe("dispatchToolCall — toolkit timeout plumbing", () => {
   });
 });
 
+describe("dispatchToolCall — missing-OBO-scope hint", () => {
+  /**
+   * Plugin-toolkit (and MCP) agent tools run on behalf of the user. In an
+   * app scaffolded as service-principal with no `user_api_scopes`, the user
+   * token lacks the resource scope and the platform rejects the call with a
+   * raw "does not have required scopes: sql" message. `dispatchToolCall`
+   * rewraps that into an actionable hint naming the plugin, the scope, and
+   * `user_api_scopes` — without silently falling back to the SP.
+   */
+  const scopeError = () =>
+    new Error(
+      "Statement failed: Provided OAuth token does not have required scopes: sql [ReqId: abc-123]",
+    );
+
+  const toolkitIndex = () =>
+    new Map<string, unknown>([
+      [
+        "analytics.query",
+        {
+          source: "toolkit",
+          pluginName: "analytics",
+          localName: "query",
+          def: {
+            name: "analytics.query",
+            description: "sql",
+            parameters: { type: "object" },
+          },
+        },
+      ],
+    ]);
+
+  test("rewraps a toolkit scope rejection with an actionable user_api_scopes hint", async () => {
+    const plugin = new AgentsPlugin({});
+    const { runState } = makeRunState(plugin);
+
+    const mock = createTestPluginContext({
+      analytics: {
+        query: () => Promise.reject(scopeError()),
+      },
+    });
+    await mock.attach(plugin);
+
+    const caught = (await callDispatch(plugin, {
+      runState,
+      toolIndex: toolkitIndex(),
+      name: "analytics.query",
+      args: { sql: "SELECT 1" },
+    }).catch((e: unknown) => e)) as Error;
+
+    expect(caught).toBeInstanceOf(Error);
+    expect(caught.message).toContain("analytics.query");
+    expect(caught.message).toContain("'analytics' plugin");
+    expect(caught.message).toContain("on behalf of the user");
+    expect(caught.message).toContain("required scope(s): sql");
+    expect(caught.message).toContain("user_api_scopes");
+    // The original error is preserved as the cause for operators / debugging.
+    expect((caught as Error).cause).toBeInstanceOf(Error);
+    expect(((caught as Error).cause as Error).message).toContain(
+      "does not have required scopes: sql",
+    );
+    // The actionable message is also what the non-streaming response records.
+    expect(runState.toolErrors).toHaveLength(1);
+    expect(runState.toolErrors[0].tool).toBe("analytics.query");
+    expect(runState.toolErrors[0].error).toContain("user_api_scopes");
+  });
+
+  test("leaves a non-scope toolkit error untouched", async () => {
+    const plugin = new AgentsPlugin({});
+    const { runState } = makeRunState(plugin);
+
+    const mock = createTestPluginContext({
+      analytics: {
+        query: () => Promise.reject(new Error("syntax error at line 1")),
+      },
+    });
+    await mock.attach(plugin);
+
+    await expect(
+      callDispatch(plugin, {
+        runState,
+        toolIndex: toolkitIndex(),
+        name: "analytics.query",
+        args: { sql: "SELEKT 1" },
+      }),
+    ).rejects.toThrow(/^syntax error at line 1$/);
+    expect(runState.toolErrors[0].error).not.toContain("user_api_scopes");
+  });
+
+  test("does NOT rewrap a function (service-principal) tool, even with a scope-shaped message", async () => {
+    // Function tools execute as the service principal, so a user_api_scopes
+    // hint would be wrong. Only the OBO sources (toolkit, mcp) are rewrapped.
+    const plugin = new AgentsPlugin({});
+    const { runState } = makeRunState(plugin);
+
+    const toolIndex = new Map<string, unknown>([
+      [
+        "boom",
+        {
+          source: "function",
+          def: {
+            name: "boom",
+            description: "throws",
+            parameters: { type: "object" },
+          },
+          functionTool: { execute: vi.fn().mockRejectedValue(scopeError()) },
+        },
+      ],
+    ]);
+
+    const caught = (await callDispatch(plugin, {
+      runState,
+      toolIndex,
+      name: "boom",
+      args: {},
+    }).catch((e: unknown) => e)) as Error;
+
+    expect(caught.message).toContain("does not have required scopes: sql");
+    expect(caught.message).not.toContain("user_api_scopes");
+  });
+});
+
 describe("runSubAgent — sub-agent event forwarding", () => {
   /**
    * The smart-dashboard `query` agent delegates to `dashboard_pilot`, which
