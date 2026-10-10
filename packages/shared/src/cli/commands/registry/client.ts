@@ -1,13 +1,10 @@
 import process from "node:process";
 
 import {
-  REGISTRY_INDEX_API_URL,
   REGISTRY_INDEX_URL,
-  REGISTRY_ITEM_API_TEMPLATE,
   REGISTRY_ITEM_URL_TEMPLATE,
   REGISTRY_NAMESPACE,
   REGISTRY_REPO,
-  type RegistryToken,
 } from "./constants";
 
 export interface RegistryItemFile {
@@ -52,39 +49,15 @@ export function isValidItemName(name: string): boolean {
 }
 
 /**
- * Auth headers for a registry request. With a token the GitHub Contents API is
- * used and `Accept: raw` makes it return file bytes directly; without one the
- * public raw URL needs no headers. Single source for the auth contract shared
- * by every registry fetch.
+ * Fetches and parses a single registry item from the public raw URL. Exits the
+ * process with a helpful message on failure.
  */
-export function registryAuthHeaders(
-  token: RegistryToken | null,
-): Record<string, string> {
-  if (!token) return {};
-  return {
-    Authorization: `Bearer ${token.value}`,
-    Accept: "application/vnd.github.raw",
-  };
-}
-
-/**
- * Fetches and parses a single registry item. When a token is present the GitHub
- * Contents API is used (works for the private/internal repo); otherwise the
- * public raw URL is used. Exits the process with a helpful message on failure.
- */
-export async function fetchRegistryItem(
-  name: string,
-  token: RegistryToken | null,
-): Promise<RegistryItem> {
-  const template = token
-    ? REGISTRY_ITEM_API_TEMPLATE
-    : REGISTRY_ITEM_URL_TEMPLATE;
-  const url = template.replace("{name}", name);
-  const headers = registryAuthHeaders(token);
+export async function fetchRegistryItem(name: string): Promise<RegistryItem> {
+  const url = REGISTRY_ITEM_URL_TEMPLATE.replace("{name}", name);
 
   let res: Awaited<ReturnType<typeof fetch>>;
   try {
-    res = await fetch(url, { headers });
+    res = await fetch(url);
   } catch (err) {
     console.error(`Failed to fetch "${name}" from ${url}`);
     console.error(`  ${err instanceof Error ? err.message : String(err)}`);
@@ -93,18 +66,6 @@ export async function fetchRegistryItem(
 
   if (res.status === 404) {
     console.error(`"${name}" not found in ${REGISTRY_REPO}.`);
-    if (!token) {
-      console.error(
-        "  If the registry repo is private, set APPKIT_REGISTRY_TOKEN (or GITHUB_TOKEN) to a token with read access.",
-      );
-    }
-    process.exit(1);
-  }
-  if (res.status === 401 || res.status === 403) {
-    console.error(
-      `Access denied (HTTP ${res.status}) fetching "${name}" from ${REGISTRY_REPO}.`,
-    );
-    console.error("  Check that your token has read access to the repository.");
     process.exit(1);
   }
   if (!res.ok) {
@@ -129,12 +90,9 @@ export interface RegistryIndexEntry {
  * index can't be read, so the caller can tell "nothing verified" apart from
  * "couldn't check".
  */
-export async function fetchVerifiedNames(
-  token: RegistryToken | null,
-): Promise<Set<string> | null> {
-  const url = token ? REGISTRY_INDEX_API_URL : REGISTRY_INDEX_URL;
+export async function fetchVerifiedNames(): Promise<Set<string> | null> {
   try {
-    const res = await fetch(url, { headers: registryAuthHeaders(token) });
+    const res = await fetch(REGISTRY_INDEX_URL);
     if (!res.ok) return null;
     const data = (await res.json()) as { items?: RegistryIndexEntry[] };
     const verified = new Set<string>();
