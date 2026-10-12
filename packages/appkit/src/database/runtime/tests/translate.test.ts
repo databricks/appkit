@@ -35,27 +35,31 @@ import {
   translateWhere,
 } from "../engine/translate";
 
-const schema = defineSchema((builder) => {
-  const users = builder.table("users", {
-    id: id(),
-    name: text(),
-    age: integer(),
-    active: boolean().notNull(),
-    large: bigint().notNull(),
-    createdAt: timestamp().notNull(),
-    externalId: uuid().notNull(),
-    status: enumColumn("user_status", ["active", "disabled"]).notNull(),
-    metadata: jsonb(),
-    secret: text().private(),
-  });
-  const posts = builder.table("posts", {
-    id: id(),
-    authorId: fk(() => users.id),
-    title: text(),
-    secret: text().private(),
-  });
-  return { users, posts };
-});
+// Explicitly public: the assertions expect unqualified column SQL ("users"."name").
+const schema = defineSchema(
+  (builder) => {
+    const users = builder.table("users", {
+      id: id(),
+      name: text(),
+      age: integer(),
+      active: boolean().notNull(),
+      large: bigint().notNull(),
+      createdAt: timestamp().notNull(),
+      externalId: uuid().notNull(),
+      status: enumColumn("user_status", ["active", "disabled"]).notNull(),
+      metadata: jsonb(),
+      secret: text().private(),
+    });
+    const posts = builder.table("posts", {
+      id: id(),
+      authorId: fk(() => users.id),
+      title: text(),
+      secret: text().private(),
+    });
+    return { users, posts };
+  },
+  { schemaName: "public" },
+);
 
 const users = schema.$tables.users;
 const dialect = new PgDialect();

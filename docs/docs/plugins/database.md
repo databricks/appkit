@@ -84,6 +84,11 @@ public column, list with an explicit non-empty `order`. A keyless table with no
 sortable columns has no list route. `upsert` is available to server code but has
 no generated HTTP route.
 
+Tables live in the Postgres schema `app` unless the second argument of
+`defineSchema()` names another one, for example `{ schemaName: "public" }`. The
+default is not `public` because the deployed app's service principal creates and
+owns `app`, but has no `CREATE` privilege on `public`.
+
 ## Schema discovery and overrides
 
 `database()` and `database({})` use the same defaults. During setup, the plugin
