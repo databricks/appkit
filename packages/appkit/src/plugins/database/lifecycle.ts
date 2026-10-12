@@ -23,6 +23,7 @@ import type {
   SqlTag,
   TransactionClient,
 } from "./entity-types";
+import { migrateOnStart, shouldMigrateOnStart } from "./migrate-on-start";
 import { assertSchemaMatchesDatabase } from "./schema-check";
 import { createMutationScope, type MutationScope } from "./scope";
 import type { DatabaseHooks } from "./types";
@@ -163,8 +164,9 @@ function buildDatabaseExports(context: ExportContext): DatabaseExports {
 }
 
 /**
- * Validate the schema, create one pool-backed API, and verify connectivity and
- * that every declared table and column exists.
+ * Validate the schema, create one pool-backed API, apply committed migrations
+ * when deployed, and verify connectivity and that every declared table and
+ * column exists.
  */
 export async function createDatabaseState<TSchema extends Schema>(
   schema: TSchema,
@@ -188,6 +190,8 @@ export async function createDatabaseState<TSchema extends Schema>(
       statement_timeout: STATEMENT_TIMEOUT_MS,
       idle_in_transaction_session_timeout: IDLE_IN_TRANSACTION_TIMEOUT_MS,
     });
+    // A deployed app applies committed migrations as its own identity before the checks below.
+    if (shouldMigrateOnStart()) await migrateOnStart(pool, schema);
     const db = createDrizzleDb(pool, schema);
     const dataPath = createDrizzleDataPath(db, schema, {
       columnAccess: "trusted",
