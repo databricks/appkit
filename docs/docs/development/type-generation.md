@@ -72,6 +72,17 @@ npx @databricks/appkit generate-types [rootDir] [outFile] [warehouseId]
   npx @databricks/appkit generate-types --no-cache
   ```
 
+### Authentication
+
+Type generation (query `DESCRIBE`, warehouse state/start, metric views, and serving endpoint schemas) uses the Databricks SDK's default auth chain (`DATABRICKS_HOST`, OAuth/PAT env vars, `~/.databrickscfg`) unless one of these optional, dev-only overrides is set. They apply to the CLI, its background refresh, and the Vite plugin, and are checked in this order:
+
+| Variable | Effect |
+| --- | --- |
+| `APPKIT_DEV_PROFILE` | Use this `~/.databrickscfg` profile. |
+| `APPKIT_DEV_HOST` + `APPKIT_DEV_TOKEN` | Use this host and bearer token (PAT auth). Both must be non-empty; if either is missing, they are ignored. |
+
+These variables override **typegen auth only**. Runtime clients (service context, connectors, Lakebase, agents) always use default auth, i.e. the app's service principal once deployed. If an override is set and a request fails, typegen reports the error as usual; it does not retry with default auth.
+
 ### Warehouse readiness and the `--wait` flag
 
 By default, `generate-types` is **non-blocking**: it never waits on — or fails because of — your SQL warehouse. It writes the best types it can immediately (reusing cached types where the query is unchanged, otherwise `result: unknown`) and then spawns a detached background worker that refreshes the real types once the warehouse is ready. This keeps `npm install` (postinstall) and `npm run dev` (predev) fast and resilient to a cold or briefly-unreachable warehouse. The dev Vite plugin behaves the same way: types appear instantly and refresh in place once the warehouse is live.
