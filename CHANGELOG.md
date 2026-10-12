@@ -182,6 +182,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.88.0](https://github.com/databricks/appkit/compare/v0.87.0...v0.88.0) (2026-10-12)
+
+### appkit
+
+* **appkit:** let typegen use APPKIT_DEV_HOST / APPKIT_DEV_TOKEN credentials ([#651](https://github.com/databricks/appkit/issues/651)) ([2557074](https://github.com/databricks/appkit/commit/25570744d3c44db08689cfe94e2196b81c00bf1e))
+
+
 ## [0.87.0](https://github.com/databricks/appkit/compare/v0.86.0...v0.87.0) (2026-10-07)
 
 ### appkit-ui
