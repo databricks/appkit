@@ -37,6 +37,32 @@ declare module "@databricks/appkit/database-tooling" {
     options: { interactive: boolean },
   ): Promise<MigrateReport>;
 
+  export type BranchMode = "dev" | "session";
+  export type SchemaStart = "migrate" | "introspect" | "clean";
+
+  export interface InitChoices {
+    readonly mode: BranchMode;
+    readonly schemaStart: SchemaStart | null;
+  }
+
+  export interface InitReport {
+    readonly mode: BranchMode;
+    readonly branch: string;
+    readonly created: boolean;
+    readonly sourceBranch?: string;
+    readonly endpoint: string;
+    readonly endpointCreated: boolean;
+    readonly host: string;
+    readonly database: string;
+    readonly user: string;
+    readonly role: { readonly name: string; readonly action: "kept" | "created" | "updated" };
+    readonly handedOff: readonly string[];
+    readonly envFile: string;
+    readonly cleaned: boolean;
+    readonly schema: MigrateReport | null;
+    readonly introspect: IntrospectReport | null;
+  }
+
   export interface Skip {
     readonly table: string;
     readonly column?: string;
@@ -62,4 +88,20 @@ declare module "@databricks/appkit/database-tooling" {
     ctx: DbContext,
     options: { interactive: boolean; schemaName?: string },
   ): Promise<IntrospectReport>;
+
+  export function resolveInitDefaults(ctx: DbContext): Promise<{
+    mode: BranchMode | null;
+    hasSchema: boolean;
+  }>;
+  export function schemaStartsFor(hasSchema: boolean): readonly SchemaStart[];
+  export function defaultSchemaStart(hasSchema: boolean): SchemaStart;
+  export function runInit(
+    ctx: DbContext,
+    choices: InitChoices,
+    options?: { interactive: boolean },
+  ): Promise<InitReport>;
+
+  export function runClean(ctx: DbContext): Promise<{ branch: string; schemaName: string }>;
+
+  export function runSeed(ctx: DbContext): Promise<{ branch: string; file: string }>;
 }

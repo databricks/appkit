@@ -53,6 +53,19 @@ export function classifyBranch(input: {
   };
 }
 
+type GuardedAction = "clean" | "seed";
+
+export class BranchGuardError extends Error {
+  constructor(action: GuardedAction, branch: string | null, reason: string) {
+    super(
+      branch
+        ? `Refusing to ${action} ${resourceId(branch)}: ${reason}. \`appkit db ${action}\` only writes to branches \`appkit db init\` created for you (dev-… or session-…).`
+        : `Cannot ${action}: ${reason}.`,
+    );
+    this.name = "BranchGuardError";
+  }
+}
+
 interface BranchCheck {
   readonly branch: LakebaseBranch;
   readonly verdict: BranchVerdict;
@@ -81,4 +94,27 @@ export async function checkAppkitBranch(
       deployBranches: readDeployBranches(ctx.root),
     }),
   };
+}
+
+/** Throws BranchGuardError unless the `.env` branch is AppKit-owned. Never connects to the database. */
+export async function assertAppkitBranch(
+  ctx: DbContext,
+  action: GuardedAction,
+): Promise<LakebaseBranch> {
+  const check = await checkAppkitBranch(ctx);
+  if (!check) {
+    throw new BranchGuardError(
+      action,
+      null,
+      "no branch configured in .env (LAKEBASE_ENDPOINT) — run `appkit db init`",
+    );
+  }
+  if (!check.verdict.appkitOwned) {
+    throw new BranchGuardError(
+      action,
+      check.branch.name,
+      check.verdict.reason ?? "it is not an AppKit branch",
+    );
+  }
+  return check.branch;
 }

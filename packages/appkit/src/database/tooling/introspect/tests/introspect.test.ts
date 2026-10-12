@@ -372,7 +372,7 @@ describe("runIntrospect", () => {
 
     expect(error).toBeInstanceOf(IntrospectRefusedError);
     expect((error as Error).message).toBe(
-      'Schema "app" on dev-alice-3f9a2c has no tables, so introspect would replace config/database/schema.ts with an empty one. Pass --schema-name <name> to read another schema.',
+      'Schema "app" on dev-alice-3f9a2c has no tables, so introspect would replace config/database/schema.ts with an empty one. Run `appkit db introspect --schema-name <name>` to read another schema.',
     );
     expect(fs.readFileSync(path.join(root, SCHEMA), "utf-8")).toBe(
       previousSchema,
@@ -451,7 +451,7 @@ describe("runIntrospect", () => {
 
     expect(error).toBeInstanceOf(IntrospectRefusedError);
     expect((error as Error).message).toBe(
-      'Schema "app" on dev-alice-3f9a2c has no tables, so introspect would write a migration that drops every table. Pass --schema-name <name> to read another schema.',
+      'Schema "app" on dev-alice-3f9a2c has no tables, so introspect would write a migration that drops every table. Run `appkit db introspect --schema-name <name>` to read another schema.',
     );
     expect(tree(root)).toEqual(before);
   });
@@ -539,7 +539,7 @@ describe("runIntrospect", () => {
 
     expect(error).toBeInstanceOf(IntrospectRefusedError);
     expect((error as Error).message).toBe(
-      'Schema "app" on dev-alice-3f9a2c has no tables introspect can write (logs: it has no primary key), so introspect would replace config/database/schema.ts with an empty one. Pass --schema-name <name> to read another schema.',
+      'Schema "app" on dev-alice-3f9a2c has no tables introspect can write (logs: it has no primary key), so introspect would replace config/database/schema.ts with an empty one. Run `appkit db introspect --schema-name <name>` to read another schema.',
     );
     expect(tree(root)).toEqual(before);
   });

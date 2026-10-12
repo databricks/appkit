@@ -357,6 +357,7 @@ describe("applyPendingMigrations", () => {
     expect((error as Error).message).toMatch(
       /^Applying migrations 0000_migration, 0001_migration failed \(SQLSTATE 42501\); none were applied\. The connecting role lacks a privilege this migration needs: /,
     );
+    expect((error as Error).message).toContain("appkit db init");
   });
 
   test("a failed unlock destroys the connection instead of returning it to the pool", async () => {

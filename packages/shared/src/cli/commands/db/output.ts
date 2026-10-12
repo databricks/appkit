@@ -17,7 +17,7 @@ export function relative(file: string): string {
 }
 
 /** The last segment of a Lakebase resource name: projects/p/branches/dev-a → dev-a. */
-function shortName(name: string): string {
+export function shortName(name: string): string {
   return name.slice(name.lastIndexOf("/") + 1);
 }
 

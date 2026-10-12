@@ -8,7 +8,7 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import type { Pool, PoolClient } from "pg";
 
 import { createLogger } from "../../logging/logger";
-import { ownershipHint } from "./ownership";
+import { ownershipHint, quoteIdentifier } from "./ownership";
 import {
   BASELINE_TAG,
   type Journal,
@@ -120,10 +120,6 @@ function sqlStateOf(error: unknown): string | undefined {
     current = (current as { cause?: unknown }).cause;
   }
   return undefined;
-}
-
-function quoteIdentifier(name: string): string {
-  return `"${name.replace(/"/g, '""')}"`;
 }
 
 /** One lock per app schema, so concurrent instances apply in turn. */
