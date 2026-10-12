@@ -83,6 +83,7 @@ export function readLocalTarget(env: NodeJS.ProcessEnv): LocalTarget {
 export interface DeployTarget {
   readonly branch: string;
   readonly database: string | null;
+  readonly appName: string | null;
 }
 
 type Yaml = Record<string, unknown> | undefined;
@@ -123,7 +124,7 @@ function variableOf(
   return typeof value === "string" && value ? value : null;
 }
 
-/** Default target's postgres_branch / postgres_database variables; null without databricks.yml or binding. */
+/** Default target's postgres_branch / postgres_database variables and app name; null without databricks.yml or binding. */
 export function readDeployTarget(root: string): DeployTarget | null {
   const bundle = readBundle(root);
   if (!bundle) return null;
@@ -142,7 +143,14 @@ export function readDeployTarget(root: string): DeployTarget | null {
     parseResourceName(
       variableOf(bundle, target, "postgres_database") ?? undefined,
     )?.database ?? null;
-  return { branch, database };
+  // The default target's override wins over the top-level app definition.
+  const appName = [target, bundle]
+    .flatMap((scope) =>
+      Object.values(record(record(scope?.resources)?.apps) ?? {}),
+    )
+    .map((app) => record(app)?.name)
+    .find((name): name is string => typeof name === "string" && !!name);
+  return { branch, database, appName: appName ?? null };
 }
 
 /**

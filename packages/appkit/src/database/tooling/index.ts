@@ -23,3 +23,4 @@ export {
 export { type MigrateOptions, type MigrateReport, runMigrate } from "./migrate";
 export { runSeed } from "./seed";
 export type { BranchMode } from "./targets";
+export { runVerify, type VerifyOptions, type VerifyReport } from "./verify";

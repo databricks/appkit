@@ -163,8 +163,7 @@ async function lastRecordedMigration(
  *
  * Known gap, shared with drizzle-orm: an entry older than the last recorded one
  * (e.g. merged from a parallel branch) is never applied, and an applied
- * migration edited later goes unnoticed. Comparing the recorded hashes with the
- * journal would catch both.
+ * migration edited later goes unnoticed. strandedMigrations reports both.
  */
 function pendingEntries(
   journal: Journal,
@@ -396,6 +395,59 @@ export async function pendingMigrationTags(
   if (!journal) return [];
   const last = await lastRecordedMigration(client, options.schemaName);
   return pendingEntries(journal, last).map((entry) => entry.tag);
+}
+
+/** A committed migration drizzle-orm's migrator will never run on this database. */
+export interface StrandedMigration {
+  readonly tag: string;
+  /**
+   * "out of order": older than the last recorded migration but not recorded
+   * (merged from a parallel branch). "edited": recorded, but the file changed
+   * since.
+   */
+  readonly reason: "out of order" | "edited";
+}
+
+/**
+ * Committed migrations the migrator skips for good: it runs only entries newer
+ * than the last recorded one, and never compares hashes. Recorded rows carry
+ * the journal's `when` and the file's sha256, so each entry is matched by its
+ * `when`. Read-only.
+ */
+export async function strandedMigrations(
+  client: QueryClient,
+  options: ApplyMigrationsOptions,
+): Promise<StrandedMigration[]> {
+  const journal = readJournal(options.migrationsFolder);
+  if (!journal) return [];
+  const last = await lastRecordedMigration(client, options.schemaName);
+  if (last === null) return [];
+  assertMigrationFiles(options.migrationsFolder, journal);
+  // One file per journal entry, in journal order.
+  const files = readMigrationFiles({
+    migrationsFolder: options.migrationsFolder,
+  });
+  const recorded = await client.query<{
+    hash: string;
+    created_at: string | number;
+  }>(
+    `select hash, created_at from ${quoteIdentifier(options.schemaName)}.${quoteIdentifier(MIGRATIONS_TABLE)}`,
+  );
+  const hashAt = new Map(
+    recorded.rows.map((row) => [Number(row.created_at), row.hash]),
+  );
+  const stranded: StrandedMigration[] = [];
+  journal.entries.forEach((entry, index) => {
+    // Newer entries are pending: the migrator runs them.
+    if (entry.when > last) return;
+    const hash = hashAt.get(entry.when);
+    if (hash === undefined) {
+      stranded.push({ tag: entry.tag, reason: "out of order" });
+    } else if (hash !== files[index]?.hash) {
+      stranded.push({ tag: entry.tag, reason: "edited" });
+    }
+  });
+  return stranded;
 }
 
 /** recordMigrationsApplied in one transaction under the migration lock (introspect on an AppKit branch). */
