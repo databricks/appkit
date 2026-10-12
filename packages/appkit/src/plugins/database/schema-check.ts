@@ -8,19 +8,31 @@ interface CatalogColumn {
   readonly relation_kind: string;
 }
 
+interface SchemaCheck {
+  readonly problems: string[];
+  /** Declared tables with no relation of that name in the schema. */
+  readonly absent: string[];
+}
+
 /**
- * Confirm every declared table and column exists before routes are published.
- * Even after a deployed app applies its migrations, drift would surface on each
- * request as an undefined-table or undefined-column failure, so check up front.
+ * Every declared table or column the database lacks, and every declared table
+ * that is a view or another non-table relation, as human-readable problems.
  * pg_catalog is read rather than information_schema, which hides objects the
  * role cannot access and would report a privilege gap as a missing column.
  */
-export async function assertSchemaMatchesDatabase(
-  dataPath: DataPath,
+export async function findSchemaProblems(
+  dataPath: Pick<DataPath, "raw">,
   schema: Schema,
-): Promise<void> {
+): Promise<string[]> {
+  return (await checkSchema(dataPath, schema)).problems;
+}
+
+async function checkSchema(
+  dataPath: Pick<DataPath, "raw">,
+  schema: Schema,
+): Promise<SchemaCheck> {
   const tables = Object.values(schema.$tables);
-  if (tables.length === 0) return;
+  if (tables.length === 0) return { problems: [], absent: [] };
   const schemaName = schema.$schemaName;
   const tableNames = tables.map((table) => table.$name);
   // Include non-tables so setup can report their kind instead of claiming they are absent.
@@ -74,10 +86,25 @@ export async function assertSchemaMatchesDatabase(
       );
     }
   }
+  return {
+    problems,
+    absent: tableNames.filter((name) => !found.has(name)),
+  };
+}
+
+/**
+ * Confirm every declared table and column exists before routes are published.
+ * Even after a deployed app applies its migrations, drift would surface on each
+ * request as an undefined-table or undefined-column failure, so check up front.
+ */
+export async function assertSchemaMatchesDatabase(
+  dataPath: DataPath,
+  schema: Schema,
+): Promise<void> {
+  const { problems, absent } = await checkSchema(dataPath, schema);
   if (problems.length > 0) {
-    const absent = tableNames.filter((name) => !found.has(name));
     const advice =
-      (await inPublicInstead(dataPath, schemaName, absent)) ??
+      (await inPublicInstead(dataPath, schema.$schemaName, absent)) ??
       "Run `npx appkit db migrate` locally, or commit migrations under config/database/migrations and set APPKIT_DB_MIGRATE_ON_START=true in app.yaml so the deployed app applies them on start.";
     throw databaseSetupFailed(
       `the declared schema does not match the database: ${problems.join("; ")}. ${advice}`,

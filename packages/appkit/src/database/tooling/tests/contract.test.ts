@@ -17,6 +17,7 @@ const contractKeys = {
   runIntrospect: true,
   runMigrate: true,
   runSeed: true,
+  runVerify: true,
 } satisfies Record<keyof DatabaseTooling, true>;
 
 test("every function the CLI is typed with is exported", () => {

@@ -35,6 +35,7 @@ export function hasSchemaFile(root: string): boolean {
 const WITHOUT_SCHEMA = {
   migrate: "there is nothing to migrate",
   clean: "clean cannot tell which schema to drop",
+  verify: "there is nothing to verify",
 } as const;
 
 /** Without schema.ts, point to introspect instead of a load error. */
