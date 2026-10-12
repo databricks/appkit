@@ -179,7 +179,7 @@ export default function App() {
 
 function HomePage() {
   return (
-    <div className="max-w-2xl mx-auto space-y-6 mt-8">
+    <div className="max-w-2xl mx-auto space-y-4 mt-8">
       <div className="text-center">
         <h2 className="text-3xl font-bold mb-2 text-foreground">
           Welcome to your Databricks App
@@ -189,7 +189,7 @@ function HomePage() {
         </p>
       </div>
 
-      <Card className="shadow-lg">
+      <Card>
         <CardHeader>
           <CardTitle>Getting Started</CardTitle>
         </CardHeader>
