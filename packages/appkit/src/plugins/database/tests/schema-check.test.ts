@@ -4,16 +4,20 @@ import type { DataPath } from "../../../database/runtime";
 import { defineSchema, fk, id, text } from "../../../database/schema-builder";
 import { assertSchemaMatchesDatabase } from "../schema-check";
 
-const schema = defineSchema(({ table }) => {
-  const boards = table("boards", { id: id(), title: text().notNull() });
-  const notes = table("notes", {
-    id: id(),
-    board_id: fk(() => boards.id).notNull(),
-    author_email: text().private(),
-    body: text().notNull(),
-  });
-  return { boards, notes };
-});
+// Explicitly public: the assertions name the tables public.boards and public.notes.
+const schema = defineSchema(
+  ({ table }) => {
+    const boards = table("boards", { id: id(), title: text().notNull() });
+    const notes = table("notes", {
+      id: id(),
+      board_id: fk(() => boards.id).notNull(),
+      author_email: text().private(),
+      body: text().notNull(),
+    });
+    return { boards, notes };
+  },
+  { schemaName: "public" },
+);
 
 type CatalogRow = {
   table_name: string;
