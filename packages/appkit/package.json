@@ -101,7 +101,7 @@
     "picocolors": "1.1.1",
     "semver": "7.7.3",
     "shared": "workspace:*",
-    "vite": "npm:rolldown-vite@7.1.14",
+    "vite": "npm:rolldown-vite@7.3.1",
     "ws": "8.21.0",
     "zod": "4.3.6"
   },
@@ -134,7 +134,7 @@
     "vitest": "3.2.4"
   },
   "overrides": {
-    "vite": "npm:rolldown-vite@7.1.14"
+    "vite": "npm:rolldown-vite@7.3.1"
   },
   "module": "./dist/index.js",
   "publishConfig": {

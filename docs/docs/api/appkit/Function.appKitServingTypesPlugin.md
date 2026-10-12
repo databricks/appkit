@@ -1,7 +1,7 @@
 # Function: appKitServingTypesPlugin()
 
 ```ts
-function appKitServingTypesPlugin(options?: AppKitServingTypesPluginOptions): Plugin$1;
+function appKitServingTypesPlugin(options?: AppKitServingTypesPluginOptions): Plugin;
 ```
 
 Vite plugin to generate TypeScript types for AppKit serving endpoints.
@@ -21,4 +21,4 @@ Endpoint discovery order:
 
 ## Returns
 
-`Plugin$1`
+`Plugin`
