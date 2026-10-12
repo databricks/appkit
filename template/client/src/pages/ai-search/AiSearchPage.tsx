@@ -26,7 +26,7 @@ export function AiSearchPage() {
   };
 
   return (
-    <div className="space-y-6 w-full max-w-4xl mx-auto">
+    <div className="space-y-4 w-full max-w-4xl mx-auto">
       <div>
         <h2 className="text-2xl font-bold text-foreground">AI Search</h2>
         <p className="text-sm text-muted-foreground mt-1">
