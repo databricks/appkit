@@ -99,7 +99,7 @@ export class MigrationBaselineMismatchError extends Error {
   constructor(schemaName: string, problems: readonly string[]) {
     super(
       `Cannot adopt ${BASELINE_TAG}: schema "${schemaName}" has no recorded migrations and only part of the baseline: ${problems.join("; ")}. ` +
-        "Create the missing tables and columns (or drop the partial ones), or regenerate the baseline against this database.",
+        "Create the missing tables and columns (or drop the partial ones), or regenerate the baseline with `appkit db introspect` against this database.",
     );
     this.name = "MigrationBaselineMismatchError";
     this.problems = Object.freeze([...problems]);
@@ -389,6 +389,36 @@ async function recordMigrationsApplied(
       [file.hash, file.folderMillis],
     );
   }
+}
+
+/** Tags of the committed migrations the database has not recorded, oldest first. */
+export async function pendingMigrationTags(
+  client: QueryClient,
+  options: ApplyMigrationsOptions,
+): Promise<string[]> {
+  const journal = readJournal(options.migrationsFolder);
+  if (!journal) return [];
+  const last = await lastRecordedMigration(client, options.schemaName);
+  return pendingEntries(journal, last).map((entry) => entry.tag);
+}
+
+/** recordMigrationsApplied in one transaction under the migration lock (introspect on an AppKit branch). */
+export async function markMigrationsApplied(
+  pool: Pick<Pool, "connect">,
+  options: ApplyMigrationsOptions,
+  tags: readonly string[],
+): Promise<void> {
+  const journal = readJournal(options.migrationsFolder);
+  if (!journal) {
+    throw new MigrationFilesError(
+      `Cannot record ${tags.join(", ")} as applied: ${options.migrationsFolder} has no meta/_journal.json.`,
+    );
+  }
+  await withMigrationLock(pool, options.schemaName, (client) =>
+    inTransaction(client, () =>
+      recordMigrationsApplied(client, options, journal, tags),
+    ),
+  );
 }
 
 /**

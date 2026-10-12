@@ -7,9 +7,11 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   applyPendingMigrations,
+  markMigrationsApplied,
   MigrationApplyError,
   MigrationBaselineMismatchError,
   migrationLockKey,
+  pendingMigrationTags,
 } from "../apply";
 import { type Journal, MigrationFilesError } from "../paths";
 
@@ -828,5 +830,116 @@ describe("applyPendingMigrations — failures name their cause", () => {
     expect(log.mock.calls.flat().map(String).join(" ")).toContain(
       "Waiting for another instance to finish migrating schema app",
     );
+  });
+});
+
+describe("pendingMigrationTags", () => {
+  const options = (migrationsFolder: string) => ({
+    migrationsFolder,
+    schemaName: "app",
+  });
+
+  test.each([
+    [
+      "without a journal table, every committed migration",
+      false,
+      null,
+      ["0000_migration", "0001_migration"],
+    ],
+    [
+      "with nothing recorded, every committed migration",
+      true,
+      null,
+      ["0000_migration", "0001_migration"],
+    ],
+    [
+      "only the migrations newer than the last recorded one",
+      true,
+      1000,
+      ["0001_migration"],
+    ],
+    ["nothing once the last one is recorded", true, 2000, []],
+  ] as const)(
+    "lists %s",
+    async (_label, journalTableExists, lastCreatedAt, expected) => {
+      const { client } = fakePool({ journalTableExists, lastCreatedAt });
+
+      await expect(
+        pendingMigrationTags(client as never, options(twoMigrations())),
+      ).resolves.toEqual(expected);
+    },
+  );
+
+  test("without a journal file there is nothing to apply, and it does not query", async () => {
+    const folder = fs.mkdtempSync(path.join(os.tmpdir(), "appkit-apply-"));
+    folders.push(folder);
+    const { client } = fakePool({
+      journalTableExists: true,
+      lastCreatedAt: null,
+    });
+
+    await expect(
+      pendingMigrationTags(client as never, options(folder)),
+    ).resolves.toEqual([]);
+    expect(client.statements).toEqual([]);
+  });
+});
+
+describe("markMigrationsApplied", () => {
+  test("records the tags with the migrator's hash and when, in one transaction under the lock", async () => {
+    const folder = baselineThenMigration();
+    const { pool, client } = fakePool({
+      journalTableExists: false,
+      lastCreatedAt: null,
+    });
+
+    await markMigrationsApplied(
+      pool,
+      { migrationsFolder: folder, schemaName: "app" },
+      ["0001_migration"],
+    );
+
+    const file = fs.readFileSync(
+      path.join(folder, "0001_migration.sql"),
+      "utf-8",
+    );
+    expect(client.recorded).toEqual([
+      [createHash("sha256").update(file).digest("hex"), 2000],
+    ]);
+    expect(steps(client.statements)).toEqual([
+      "SET statement_timeout = 0",
+      "try lock",
+      "SET lock_timeout = '30s'",
+      "begin",
+      `CREATE SCHEMA IF NOT EXISTS "app"`,
+      `CREATE TABLE IF NOT EXISTS "app"."__drizzle_migrations" ( id SERIAL PRIMARY KEY, hash text NOT NULL, created_at bigint )`,
+      `insert into "app"."__drizzle_migrations" ("hash", "created_at") values($1, $2)`,
+      "commit",
+      "unlock",
+      "RESET lock_timeout",
+      "RESET statement_timeout",
+    ]);
+  });
+
+  test("an unknown tag rolls back", async () => {
+    const folder = baselineThenMigration();
+    const { pool, client } = fakePool({
+      journalTableExists: false,
+      lastCreatedAt: null,
+    });
+
+    await expect(
+      markMigrationsApplied(
+        pool,
+        { migrationsFolder: folder, schemaName: "app" },
+        ["0009_missing"],
+      ),
+    ).rejects.toThrow("Migration 0009_missing is not in the journal.");
+    expect(steps(client.statements).slice(-4)).toEqual([
+      "rollback",
+      "unlock",
+      "RESET lock_timeout",
+      "RESET statement_timeout",
+    ]);
   });
 });

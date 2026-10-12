@@ -14,7 +14,7 @@ import { type GeneratedMigration, generateMigrationFiles } from "./migrations";
 import { resourceId } from "./targets";
 
 /** Same application-relative conventions as the plugin and `appkit generate-types`. */
-const SCHEMA_FILE = "config/database/schema.ts";
+export const SCHEMA_FILE = "config/database/schema.ts";
 
 /** Whether the checkout has a config/database/schema.ts yet. */
 function hasSchemaFile(root: string): boolean {
@@ -28,7 +28,7 @@ function requireSchemaFile(root: string): void {
     `No ${SCHEMA_FILE} yet, so there is nothing to migrate. Run \`appkit db introspect\` to write it from the branch's tables, or create it.`,
   );
 }
-const DATABASE_TYPES_PATH = path.join(
+export const DATABASE_TYPES_PATH = path.join(
   "shared/appkit-types",
   DATABASE_TYPES_FILE,
 );
