@@ -3,3 +3,8 @@ command: ['{{or .packageManager "pnpm"}}', 'run', 'start']
 env:
 {{.appEnv}}
 {{- end}}
+{{- if .plugins.database}}
+{{- /* The plugin's postgres resource always renders LAKEBASE_ENDPOINT into .appEnv, so env: is open. */}}
+  - name: APPKIT_DB_MIGRATE_ON_START
+    value: "true"
+{{- end}}

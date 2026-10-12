@@ -32,6 +32,7 @@ function output(spy: MockInstance): string {
 const local = {
   kind: "local" as const,
   branch: "projects/p/branches/dev-alice-3f9a2c",
+  notYours: null,
   schemaProblems: [],
   pendingMigrations: [],
   strandedMigrations: [],
@@ -84,6 +85,21 @@ describe("appkit db verify", () => {
       "dev-alice-3f9a2c has every table and column config/database/schema.ts declares, and every committed migration",
     );
     expect(error).not.toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  test("a .env branch that is not yours is named, with init as the way to your own", async () => {
+    runVerify.mockResolvedValue({
+      ...local,
+      branch: "projects/p/branches/production",
+      notYours: "it is the project's default branch",
+    });
+
+    await dbCommand.parseAsync(["verify"], { from: "user" });
+
+    expect(output(log)).toContain(
+      ".env points at production, not a branch `appkit db init` set up for you: it is the project's default branch. `npx appkit db init` points it at a branch of your own.",
+    );
     expect(process.exitCode).toBeUndefined();
   });
 

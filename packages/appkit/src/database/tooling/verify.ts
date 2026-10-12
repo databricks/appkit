@@ -12,17 +12,12 @@ import {
   readJournal,
 } from "../migrations/paths";
 import type { DataPath } from "../runtime";
-import {
-  type DbContext,
-  hasEnvBranch,
-  NO_ENV_BRANCH,
-  withBranchPool,
-} from "./context";
+import { type DbContext, NO_ENV_BRANCH, withBranchPool } from "./context";
+import { resolveEnvBranch, takesWrites } from "./guard";
 import { requireSchemaFile } from "./migrate";
 import {
   type BundleTarget,
   defaultBundleTarget,
-  parseResourceName,
   readBundle,
   resourceId,
 } from "./targets";
@@ -38,6 +33,8 @@ export interface VerifyOptions {
 interface LocalVerifyReport {
   readonly kind: "local";
   readonly branch: string;
+  /** Why the branch is not your dev or session branch, e.g. "it is the project's default branch"; null when it is. */
+  readonly notYours: string | null;
   /** Declared tables or columns the branch lacks (the plugin's startup check). */
   readonly schemaProblems: readonly string[];
   /** Committed migrations the branch has not run yet, newer than every one it ran. */
@@ -98,10 +95,9 @@ function rawOn(client: Pick<PoolClient, "query">): Pick<DataPath, "raw"> {
 /** Read-only, as the developer, on the `.env` branch: one READ ONLY transaction, rolled back. */
 async function verifyLocal(ctx: DbContext): Promise<LocalVerifyReport> {
   requireSchemaFile(ctx.root, "verify");
-  const branch = parseResourceName(ctx.env.LAKEBASE_ENDPOINT)?.branch;
-  if (!branch || !hasEnvBranch(ctx.env)) {
-    throw new Error(`Did not verify: ${NO_ENV_BRANCH}.`);
-  }
+  const env = await resolveEnvBranch(ctx);
+  if (!env) throw new Error(`Did not verify: ${NO_ENV_BRANCH}.`);
+  const branch = env.branch.name;
   const schema = await loadDefaultDatabaseSchema(ctx.root, {
     showImportError: true,
   });
@@ -117,6 +113,7 @@ async function verifyLocal(ctx: DbContext): Promise<LocalVerifyReport> {
       return {
         kind: "local",
         branch,
+        notYours: takesWrites(env.kind) ? null : (env.reason ?? null),
         schemaProblems,
         pendingMigrations: drift.pending,
         strandedMigrations: drift.stranded,

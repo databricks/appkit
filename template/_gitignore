@@ -9,6 +9,9 @@ build/
 test-results/
 playwright-report/
 
+# `appkit db introspect` keeps the previous schema.ts here
+config/database/*.bak
+
 # Auto-generated types (endpoint-specific, varies per developer)
 shared/appkit-types/serving.d.ts
 
