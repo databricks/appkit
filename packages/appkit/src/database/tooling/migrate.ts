@@ -1,0 +1,127 @@
+import fs from "node:fs";
+import path from "node:path";
+
+import { loadDefaultDatabaseSchema } from "../../plugins/database/load-schema";
+import {
+  DATABASE_TYPES_FILE,
+  generateDatabaseTypes,
+} from "../../type-generator/database";
+import { applyPendingMigrations } from "../migrations/apply";
+import { migrationsFolder, readJournal } from "../migrations/paths";
+import { type DbContext, openBranchPool } from "./context";
+import { checkAppkitBranch } from "./guard";
+import { type GeneratedMigration, generateMigrationFiles } from "./migrations";
+import { resourceId } from "./targets";
+
+/** Same application-relative conventions as the plugin and `appkit generate-types`. */
+const SCHEMA_FILE = "config/database/schema.ts";
+
+/** Whether the checkout has a config/database/schema.ts yet. */
+function hasSchemaFile(root: string): boolean {
+  return fs.existsSync(path.join(root, SCHEMA_FILE));
+}
+
+/** Without schema.ts, point to introspect instead of a load error. */
+function requireSchemaFile(root: string): void {
+  if (hasSchemaFile(root)) return;
+  throw new Error(
+    `No ${SCHEMA_FILE} yet, so there is nothing to migrate. Run \`appkit db introspect\` to write it from the branch's tables, or create it.`,
+  );
+}
+const DATABASE_TYPES_PATH = path.join(
+  "shared/appkit-types",
+  DATABASE_TYPES_FILE,
+);
+
+export interface MigrateReport {
+  /** The migration written by this run; null when schema.ts matches the latest snapshot. */
+  readonly generated: GeneratedMigration | null;
+  /** Tags applied to the `.env` branch by this run. */
+  readonly applied: readonly string[];
+  /** Tags recorded without running because their tables already existed (0000_baseline). */
+  readonly adopted?: readonly string[];
+  /** Why nothing was applied, when applying was skipped. */
+  readonly notApplied?: string;
+  readonly typesFile: string;
+}
+
+export interface MigrateOptions {
+  /** false: an ambiguous rename throws instead of prompting. */
+  readonly interactive: boolean;
+}
+
+type ApplyOutcome = Pick<MigrateReport, "applied" | "adopted" | "notApplied">;
+
+const NO_BRANCH =
+  "no branch configured (PGHOST, PGDATABASE, LAKEBASE_ENDPOINT) — run appkit db init";
+
+/** Why migrations must not be applied to the `.env` branch; undefined when they may. */
+async function applyBlocker(ctx: DbContext): Promise<string | undefined> {
+  const check = await checkAppkitBranch(ctx);
+  if (!check) return NO_BRANCH;
+  if (check.verdict.appkitOwned) return undefined;
+  return `${resourceId(check.branch.name)} is not an AppKit dev or session branch (${check.verdict.reason}). Migrations are applied only to branches \`appkit db init\` created for you; the deployed app applies committed migrations to its own branch`;
+}
+
+/** Apply pending migrations to the `.env` branch, or say why they were not. */
+async function applyToEnvBranch(
+  ctx: DbContext,
+  folder: string,
+  schemaName: string,
+): Promise<ApplyOutcome> {
+  const blocker = readJournal(folder)
+    ? await applyBlocker(ctx)
+    : "no migrations to apply — schema.ts declares no tables yet";
+  if (blocker) return { applied: [], notApplied: blocker };
+  const pool = await openBranchPool(ctx);
+  if (!pool) return { applied: [], notApplied: NO_BRANCH };
+  try {
+    const { applied, adopted } = await applyPendingMigrations(pool, {
+      migrationsFolder: folder,
+      schemaName,
+    });
+    return { applied, ...(adopted.length > 0 ? { adopted } : {}) };
+  } finally {
+    await pool.end().catch(() => undefined);
+  }
+}
+
+/**
+ * `appkit db migrate`: generate a migration when schema.ts changed, regenerate
+ * database.d.ts, and apply pending migrations to the `.env` branch (only AppKit
+ * dev/session branches).
+ */
+export async function runMigrate(
+  ctx: DbContext,
+  options: MigrateOptions,
+): Promise<MigrateReport> {
+  requireSchemaFile(ctx.root);
+  const schema = await loadDefaultDatabaseSchema(ctx.root, {
+    showImportError: true,
+  });
+  const folder = migrationsFolder(ctx.root);
+  const generated = await generateMigrationFiles({
+    folder,
+    schema,
+    interactive: options.interactive,
+  });
+
+  // The types follow schema.ts alone, so they are current even if applying fails.
+  const typesFile = path.join(ctx.root, DATABASE_TYPES_PATH);
+  await generateDatabaseTypes({
+    schemaFile: path.join(ctx.root, SCHEMA_FILE),
+    outFile: typesFile,
+  });
+
+  let outcome: ApplyOutcome;
+  try {
+    outcome = await applyToEnvBranch(ctx, folder, schema.$schemaName);
+  } catch (error) {
+    if (!generated) throw error;
+    throw new Error(
+      `Wrote ${path.relative(ctx.root, generated.file)}, but did not apply it: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  return { generated, ...outcome, typesFile };
+}

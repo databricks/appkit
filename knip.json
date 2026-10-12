@@ -12,7 +12,8 @@
         "vitest",
         "@databricks/sdk-experimental",
         "@mlflow/core",
-        "autoevals"
+        "autoevals",
+        "drizzle-kit"
       ]
     },
     "packages/appkit-ui": {
