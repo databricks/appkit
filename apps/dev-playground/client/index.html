@@ -12,6 +12,10 @@
         const THEME_STORAGE_KEY = "appkit-playground-theme";
         const storedTheme = localStorage.getItem(THEME_STORAGE_KEY);
         const root = document.documentElement;
+
+        if (localStorage.getItem("appkit-playground-density") === "compact") {
+          root.dataset.density = "compact";
+        }
         
         if (storedTheme === "light") {
           root.classList.add("light");
