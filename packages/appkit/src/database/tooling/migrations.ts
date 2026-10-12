@@ -219,6 +219,22 @@ function installedPackage(name: string, from: string): InstalledPackage | null {
 }
 
 /**
+ * Whether the app at `root` has drizzle-kit, at any version. The node_modules
+ * walk is what ESM resolution does; createRequire would also follow NODE_PATH,
+ * which `import("drizzle-kit/api")` ignores.
+ */
+export function hasDrizzleKit(root: string): boolean {
+  for (let dir = path.resolve(root); ; dir = path.dirname(dir)) {
+    if (
+      fs.existsSync(path.join(dir, "node_modules/drizzle-kit/package.json"))
+    ) {
+      return true;
+    }
+    if (dir === path.dirname(dir)) return false;
+  }
+}
+
+/**
  * Why the drizzle-kit that resolves from `from` must not write migrations;
  * undefined when it may, or when it is not installed at all. drizzle-kit reads
  * the schema's tables through whichever drizzle-orm it resolves, and declares

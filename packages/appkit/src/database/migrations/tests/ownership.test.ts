@@ -26,6 +26,9 @@ describe("ownership: one owner per branch", () => {
       "the app's database resource was removed and added again, or the app was recreated",
     );
     expect(hint).toContain("set another schemaName in schema.ts");
+    expect(hint).toContain(
+      "On your dev or session branch, rerun `appkit db init`, which hands you the schema.",
+    );
   });
 
   test("a schema that does not exist yet points at CREATE on the database", () => {

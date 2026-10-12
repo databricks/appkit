@@ -1,4 +1,4 @@
-import { type DbContext, hasEnvBranch } from "./context";
+import { type DbContext, hasEnvBranch, NO_ENV_BRANCH } from "./context";
 import { currentIdentity } from "./identity";
 import type { LakebaseBranch } from "./lakebase-api";
 import { devBranchId, sessionBranchId } from "./naming";
@@ -46,15 +46,12 @@ export function classifyBranch(input: {
   }
   const id = resourceId(branch.name);
   if (id === devBranchId(userName)) return { kind: "dev" };
-  if (sessionId && id === sessionBranchId(sessionId)) {
-    return { kind: "session" };
-  }
+  const session = sessionId ? sessionBranchId(userName, sessionId) : null;
+  if (id === session) return { kind: "session" };
   return {
     kind: "other",
     reason: `it is not your dev branch (${devBranchId(userName)})${
-      sessionId
-        ? ` or this checkout's session branch (${sessionBranchId(sessionId)})`
-        : ""
+      session ? ` or this checkout's session branch (${session})` : ""
     }`,
   };
 }
@@ -105,4 +102,17 @@ export async function resolveEnvBranch(
       deployBranches: readDeployBranches(ctx.root),
     }),
   };
+}
+
+/** The .env branch, for a command that only runs on your dev or session branch. */
+export async function writableEnvBranch(
+  ctx: DbContext,
+  action: string,
+): Promise<LakebaseBranch> {
+  const env = await resolveEnvBranch(ctx);
+  if (!env) throw new Error(`Did not ${action}: ${NO_ENV_BRANCH}.`);
+  if (!takesWrites(env.kind)) {
+    throw new Error(`Refusing to ${action}: ${notYourBranch(env)}.`);
+  }
+  return env.branch;
 }

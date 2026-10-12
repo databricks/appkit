@@ -39,6 +39,55 @@ export interface IntrospectReport {
   readonly typesFile: string;
 }
 
+export type BranchMode = "dev" | "session";
+export type SchemaStart = "migrate" | "introspect" | "clean" | "none";
+
+export interface InitOptions {
+  readonly mode?: BranchMode;
+  readonly schema?: SchemaStart;
+  /** As `--ttl` takes it: 30m, 1h, 7d. */
+  readonly ttl?: string;
+  readonly interactive?: boolean;
+  readonly onStep?: (message: string) => void;
+}
+
+export interface CleanReport {
+  readonly branch: string;
+  readonly schemaName: string;
+  readonly dependents: readonly string[];
+}
+
+export type InitStart =
+  | { readonly kind: "none" }
+  | { readonly kind: "migrate"; readonly migrate: MigrateReport }
+  | { readonly kind: "introspect"; readonly introspect: IntrospectReport }
+  | {
+      readonly kind: "clean";
+      readonly clean: CleanReport;
+      readonly migrate: MigrateReport;
+    };
+
+export interface InitReport {
+  readonly mode: BranchMode;
+  readonly branch: string;
+  readonly created: boolean;
+  readonly sourceBranch?: string;
+  readonly expireTime: string | null;
+  readonly endpoint: string;
+  readonly endpointCreated: boolean;
+  readonly host: string;
+  readonly database: string;
+  readonly user: string;
+  readonly role: {
+    readonly name: string;
+    readonly action: "kept" | "created" | "updated";
+  };
+  readonly handedOff: string | null;
+  readonly envFile: string;
+  readonly installed: string | null;
+  readonly start: InitStart;
+}
+
 /**
  * The exports of `@databricks/appkit/database-tooling` the CLI calls. `shared`
  * must not depend on appkit, so the CLI imports the tooling dynamically and
@@ -59,4 +108,13 @@ export interface DatabaseTooling<Ctx extends DbContext = DbContext> {
     ctx: Ctx,
     options: { interactive: boolean; schemaName?: string },
   ) => Promise<IntrospectReport>;
+  readonly runInit: (ctx: Ctx, options?: InitOptions) => Promise<InitReport>;
+  readonly previewClean: (ctx: Ctx) => Promise<CleanReport>;
+  readonly runClean: (ctx: Ctx) => Promise<CleanReport>;
+  readonly deleteSessionBranch: (
+    ctx: Ctx,
+  ) => Promise<{ readonly branch: string }>;
+  readonly runSeed: (
+    ctx: Ctx,
+  ) => Promise<{ readonly branch: string; readonly file: string }>;
 }
