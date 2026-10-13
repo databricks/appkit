@@ -91,16 +91,15 @@ function summariseErrorPayload(payload: unknown): string {
 
 /**
  * Structural shape of a Databricks SDK client used by {@link fromSupervisorApi}.
- * Only what we need: `request` for streaming and `getHost` to materialise
- * the host/credentials up front. A legacy SDK client (`apiClient.request` +
- * `config.ensureResolved`) is still accepted (deprecated).
+ * Only what we need: `request` for streaming. A legacy SDK client
+ * (`apiClient.request` + `config.ensureResolved`) is still accepted (deprecated).
  *
  * Exported because {@link SupervisorApiAdapterOptions.workspaceClient} (a
  * public type) references it — callers passing their own client can name
  * the shape they need to satisfy.
  */
 export type WorkspaceClientLike =
-  | (WorkspaceRequestClientLike & { getHost(): Promise<string> })
+  | WorkspaceRequestClientLike
   | (ApiClientLike & { config: { ensureResolved(): Promise<void> } });
 
 // ---------------------------------------------------------------------------
@@ -882,10 +881,10 @@ export async function fromSupervisorApi(
   const resolved: WorkspaceClientLike =
     options.workspaceClient ?? createWorkspaceClient();
 
-  // Resolve host + credentials now so misconfiguration fails at construction,
-  // not on the first stream.
-  if ("request" in resolved) await resolved.getHost();
-  else await resolved.config.ensureResolved();
+  // The modular client resolves host + credentials on the first request; an
+  // eager getHost() would throw without a host where the legacy
+  // ensureResolved() does not (e.g. the playground's E2E mode).
+  if (!("request" in resolved)) await resolved.config.ensureResolved();
 
   return new SupervisorApiAdapter({
     streamBody: (body, signal) =>

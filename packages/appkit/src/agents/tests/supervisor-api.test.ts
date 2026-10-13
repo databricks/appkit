@@ -1065,13 +1065,17 @@ describe("SupervisorApiAdapter", () => {
 });
 
 describe("fromSupervisorApi", () => {
-  test("resolves the host on the supplied workspace client", async () => {
-    const getHost = vi.fn(async () => "https://example.databricks.com");
+  test("does not resolve the host before the first request", async () => {
+    const getHost = vi.fn(async () => {
+      throw new Error("Host is required.");
+    });
+    // A real workspace client has getHost(); it must stay unused at construction.
+    const workspaceClient = { getHost, request: vi.fn() };
     const adapter = await fromSupervisorApi({
       model: "databricks-claude-sonnet-4",
-      workspaceClient: { getHost, request: vi.fn() },
+      workspaceClient,
     });
-    expect(getHost).toHaveBeenCalledTimes(1);
+    expect(getHost).not.toHaveBeenCalled();
     expect(adapter).toBeInstanceOf(SupervisorApiAdapter);
   });
 
@@ -1100,7 +1104,7 @@ describe("fromSupervisorApi", () => {
 
     const adapter = await fromSupervisorApi({
       model: "databricks-claude-sonnet-4",
-      workspaceClient: { getHost: vi.fn(async () => "h"), request },
+      workspaceClient: { request },
     });
 
     await collect(adapter.run(createInput(), { executeTool: vi.fn() }));
