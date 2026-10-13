@@ -58,6 +58,18 @@ export function assertEndpointHostMatches(
   return check;
 }
 
+/** AppKit's workspace client exposes the typed Lakebase Postgres client. */
+function hasPostgresClient(client: Client): client is Client & {
+  postgres: {
+    getEndpoint(
+      req: { name: string },
+      options: { signal: AbortSignal },
+    ): Promise<unknown>;
+  };
+} {
+  return "postgres" in client;
+}
+
 async function compareHosts(
   client: NonNullable<HostCheckConfig["workspaceClient"]>,
   endpoint: string,
@@ -75,9 +87,14 @@ async function compareHosts(
     );
   try {
     const path = `/api/2.0/postgres/${endpoint}`;
-    const lookup =
-      "request" in client
-        ? // AppKit's modular client: throws ApiError (with statusCode) on non-2xx.
+    const lookup = hasPostgresClient(client)
+      ? // AppKit's workspace client: the typed Lakebase Postgres client.
+        client.postgres.getEndpoint(
+          { name: endpoint },
+          { signal: controller.signal },
+        )
+      : "request" in client
+        ? // A raw request-capable client: throws ApiError (with statusCode) on non-2xx.
           // `signal` isn't in lakebase's public request type but AppKit honors it.
           client
             .request({
@@ -111,8 +128,9 @@ async function compareHosts(
     if (
       typeof error === "object" &&
       error !== null &&
-      "statusCode" in error &&
-      error.statusCode === 404
+      // The typed client's sdk-core ApiError reports `httpStatusCode`.
+      (("statusCode" in error && error.statusCode === 404) ||
+        ("httpStatusCode" in error && error.httpStatusCode === 404))
     ) {
       logger.warn(
         "LAKEBASE_ENDPOINT %s was not found. Check the project, branch, and endpoint names; `databricks postgres list-endpoints projects/{project}/branches/{branch}` lists them with their hosts.",
