@@ -34,8 +34,8 @@ jobs:
       pull-requests: write
       id-token: write # setup-jfrog-npm exchanges an OIDC token for registry auth
     runs-on:
-      group: databricks-protected-runner-group
-      labels: linux-ubuntu-latest
+      group: databricks-ghec-untrusted-runner-group
+      labels: linux-ubuntu-latest-untrusted-2core-8gb
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup JFrog npm

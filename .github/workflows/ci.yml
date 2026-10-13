@@ -16,8 +16,8 @@ permissions:
 jobs:
   detect-changes:
     runs-on:
-      group: databricks-protected-runner-group
-      labels: linux-ubuntu-latest
+      group: databricks-ghec-untrusted-runner-group
+      labels: linux-ubuntu-latest-untrusted-2core-8gb
 
     name: Detect Changes
     outputs:
@@ -38,8 +38,8 @@ jobs:
   lint_and_typecheck:
     name: Lint & Type Check
     runs-on:
-      group: databricks-protected-runner-group
-      labels: linux-ubuntu-latest
+      group: databricks-ghec-untrusted-runner-group
+      labels: linux-ubuntu-latest-untrusted-2core-8gb
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -116,8 +116,8 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.appkit == 'true'
     runs-on:
-      group: databricks-protected-runner-group
-      labels: linux-ubuntu-latest
+      group: databricks-ghec-untrusted-runner-group
+      labels: linux-ubuntu-latest-untrusted-2core-8gb
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -138,8 +138,8 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.appkit == 'true'
     runs-on:
-      group: databricks-protected-runner-group
-      labels: linux-ubuntu-latest
+      group: databricks-ghec-untrusted-runner-group
+      labels: linux-ubuntu-latest-untrusted-2core-8gb
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -172,8 +172,8 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.appkit == 'true'
     runs-on:
-      group: databricks-protected-runner-group
-      labels: linux-ubuntu-latest
+      group: databricks-ghec-untrusted-runner-group
+      labels: linux-ubuntu-latest-untrusted-2core-8gb
     permissions:
       contents: read
       id-token: write
@@ -197,8 +197,8 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.appkit == 'true'
     runs-on:
-      group: databricks-protected-runner-group
-      labels: linux-ubuntu-latest
+      group: databricks-ghec-untrusted-runner-group
+      labels: linux-ubuntu-latest-untrusted-2core-8gb
     permissions:
       contents: read
       id-token: write
@@ -222,8 +222,8 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.appkit == 'true'
     runs-on:
-      group: databricks-protected-runner-group
-      labels: linux-ubuntu-latest
+      group: databricks-ghec-untrusted-runner-group
+      labels: linux-ubuntu-latest-untrusted-2core-8gb
     # Job-level permissions REPLACE (not merge with) the top-level set, so all
     # three must be listed: pull-requests: write for the sticky comment step,
     # and id-token: write which setup-jfrog-npm needs for its OIDC token.
@@ -367,8 +367,8 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.docs == 'true'
     runs-on:
-      group: databricks-protected-runner-group
-      labels: linux-ubuntu-latest
+      group: databricks-ghec-untrusted-runner-group
+      labels: linux-ubuntu-latest-untrusted-2core-8gb
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -412,3 +412,6 @@ jobs:
     with:
       appkit-remote: ${{ github.event.pull_request.head.repo.clone_url || format('https://github.com/{0}.git', github.repository) }}
       appkit-ref: ${{ github.head_ref || github.ref_name }}
+      # PR refs can't match the public-repos allow-list (main only).
+      runner-group: databricks-ghec-untrusted-runner-group
+      runner-label: linux-ubuntu-latest-untrusted-2core-8gb
