@@ -95,6 +95,8 @@ describe("OmnigentPlugin routes", () => {
       ["DELETE", "/sessions/:id"],
       ["POST", "/sessions/:id/messages"],
       ["POST", "/sessions/:id/interrupt"],
+      ["PUT", "/sessions/:id/mode"],
+      ["POST", "/sessions/:id/elicitations/:eid"],
       ["GET", "/sessions/:id/stream"],
     ]) {
       expect(getHandler(m, path), `${m} ${path}`).toBeTypeOf("function");
@@ -171,7 +173,18 @@ describe("OmnigentPlugin routes", () => {
       status: 202,
       body: { queued: true },
     });
-    const { getHandler } = plugin({ instructions: "Help with orders." });
+    routes["GET /api/2.0/omnigent/v1/sessions/s9/policies"] = () => ({
+      body: { data: [] },
+    });
+    const policies: unknown[] = [];
+    routes["POST /api/2.0/omnigent/v1/sessions/s9/policies"] = (init) => {
+      policies.push(JSON.parse(String(init.body)));
+      return { body: {} };
+    };
+    const { getHandler } = plugin({
+      instructions: "Help with orders.",
+      tools: [{ type: "sql" }],
+    });
     const res = await call(getHandler("POST", "/sessions"), {
       obo: user,
       body: { harness: "claude-sdk", message: "How many orders?" },
@@ -181,7 +194,14 @@ describe("OmnigentPlugin routes", () => {
       session_id: "s9",
       harness: "claude-sdk",
       model: "system.ai.claude-sonnet-5",
+      mode: "ask",
     });
+    // ask mode: Databricks SQL's execute_sql pauses for approval
+    expect(policies.map((p) => (p as { name: string }).name)).toEqual([
+      "appkit-mode-ask",
+      "appkit-mode-os",
+    ]);
+    expect(JSON.stringify(policies[0])).toContain("execute_sql");
     expect(metadata).toMatchObject({
       host_type: "managed",
       labels: { app: "orders-app" },
@@ -211,6 +231,35 @@ describe("OmnigentPlugin routes", () => {
       body: { harness: "claude-sdk", model: "system.ai.gpt-5-5" },
     });
     expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  test("resolves an approval only with accept, decline or cancel", async () => {
+    routes["GET /api/2.0/omnigent/v1/sessions/s1"] = () => ({
+      body: { id: "s1", labels: { app: "orders-app" } },
+    });
+    routes["POST /api/2.0/omnigent/v1/sessions/s1/elicitations/e1/resolve"] =
+      () => ({
+        body: { ok: true },
+      });
+    const { getHandler } = plugin();
+    const handler = getHandler("POST", "/sessions/:id/elicitations/:eid");
+    let res = await call(handler, {
+      obo: user,
+      params: { id: "s1", eid: "e1" },
+      body: { action: "approve" },
+    });
+    expect(res.status).toHaveBeenCalledWith(400);
+    res = await call(handler, {
+      obo: user,
+      params: { id: "s1", eid: "e1" },
+      body: { action: "accept" },
+    });
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(calls.at(-1)).toMatchObject({
+      method: "POST",
+      url: "/api/2.0/omnigent/v1/sessions/s1/elicitations/e1/resolve",
+      body: { action: "accept" },
+    });
   });
 
   test("status reports when Sandbox hosts are not enabled", async () => {
