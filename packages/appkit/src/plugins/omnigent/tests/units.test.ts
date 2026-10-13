@@ -4,6 +4,8 @@ import { describe, expect, test } from "vitest";
 
 import { buildBundle } from "../bundle";
 import { offerHarnesses } from "../harnesses";
+import { modeFromPolicies, modePolicies } from "../policies";
+import { toolServer, writeToolNames } from "../tools";
 
 function untar(buf: Buffer): Record<string, string> {
   const out: Record<string, string> = {};
@@ -106,5 +108,122 @@ describe("offerHarnesses", () => {
       models: catalog,
     });
     expect(offers.map((o) => o.id)).toEqual(["pi", "claude-sdk"]);
+  });
+});
+
+describe("tool sources", () => {
+  const host = "https://ws.example.com";
+
+  test("each source becomes a stdio proxy to its managed MCP URL", () => {
+    const urls = [
+      { type: "sql" },
+      { type: "genie", spaceId: "01f0abcdef12345678" },
+      { type: "functions", catalog: "main", schema: "tools" },
+      {
+        type: "functions",
+        catalog: "main",
+        schema: "tools",
+        function: "price",
+      },
+      { type: "ai-search", catalog: "main", schema: "docs", index: "faq" },
+      { type: "service", service: "system.ai.web_search" },
+    ].map((s) => {
+      const spec = toolServer(s as never, host);
+      expect(spec).toMatchObject({ transport: "stdio", command: "python3" });
+      expect(spec.args[0]).toBe("-c");
+      expect(spec.args[1]).toContain("databricks.sdk.core");
+      return [spec.name, spec.args[2]];
+    });
+    expect(urls).toEqual([
+      ["sql", `${host}/api/2.0/mcp/sql`],
+      ["genie_12345678", `${host}/api/2.0/mcp/genie/01f0abcdef12345678`],
+      ["functions_tools", `${host}/api/2.0/mcp/functions/main/tools`],
+      [
+        "functions_tools_price",
+        `${host}/api/2.0/mcp/functions/main/tools/price`,
+      ],
+      ["search_faq", `${host}/api/2.0/mcp/ai-search/main/docs/faq`],
+      [
+        "system_ai_web_search",
+        `${host}/ai-gateway/mcp-services/system.ai.web_search`,
+      ],
+    ]);
+  });
+
+  test("names can be set and are made MCP-safe", () => {
+    expect(toolServer({ type: "sql", name: "Orders DB" }, host).name).toBe(
+      "orders_db",
+    );
+  });
+
+  test("Databricks SQL's execute_sql is a write by default; apps add their own", () => {
+    expect(writeToolNames([{ type: "sql" }], ["send_message"])).toEqual([
+      "execute_sql",
+      "send_message",
+    ]);
+    expect(writeToolNames([{ type: "genie", spaceId: "x" }])).toEqual([]);
+  });
+
+  test("the bundle carries one tools/mcp file per server", () => {
+    const files = untar(
+      gunzipSync(
+        buildBundle({
+          name: "orders-app",
+          harness: "pi",
+          model: "system.ai.gpt-5-5",
+          instructions: "",
+          mcpServers: [toolServer({ type: "sql" }, host)],
+        }),
+      ),
+    );
+    expect(JSON.parse(files["tools/mcp/sql.yaml"])).toMatchObject({
+      name: "sql",
+      transport: "stdio",
+      command: "python3",
+    });
+    expect(() =>
+      buildBundle({
+        name: "a",
+        harness: "pi",
+        model: "m",
+        instructions: "",
+        mcpServers: [
+          toolServer({ type: "sql" }, host),
+          toolServer({ type: "sql" }, host),
+        ],
+      }),
+    ).toThrow(/Duplicate MCP server name/);
+  });
+});
+
+describe("policies", () => {
+  test("ask gates write tools and OS tools", () => {
+    const p = modePolicies("ask", ["execute_sql"]);
+    expect(p.map((x) => x.name)).toEqual(["appkit-mode-ask", "appkit-mode-os"]);
+    expect(String(p[0].factory_params?.expression)).toContain(
+      'endsWith("execute_sql")',
+    );
+    expect(String(p[0].factory_params?.expression)).toContain('"ASK"');
+  });
+
+  test("read denies writes; auto has no policies", () => {
+    expect(
+      String(modePolicies("read", ["w"])[0].factory_params?.expression),
+    ).toContain('"DENY"');
+    expect(modePolicies("auto", ["w"])).toEqual([]);
+  });
+
+  test("no write tools means the gate allows everything", () => {
+    expect(modePolicies("ask", [])[0].factory_params?.expression).toBe(
+      '{"result": "ALLOW"}',
+    );
+  });
+
+  test("mode round-trips through policy names", () => {
+    for (const m of ["ask", "read", "auto"] as const) {
+      expect(modeFromPolicies(modePolicies(m, ["w"]).map((p) => p.name))).toBe(
+        m,
+      );
+    }
   });
 });

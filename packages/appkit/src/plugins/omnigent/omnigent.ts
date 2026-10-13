@@ -16,6 +16,14 @@ import {
   type HarnessOffer,
 } from "./harnesses";
 import manifest from "./manifest.json";
+import {
+  MODE_POLICY_PREFIX,
+  modeFromPolicies,
+  modePolicies,
+  OMNIGENT_MODES,
+  type OmnigentMode,
+} from "./policies";
+import { toolServer, writeToolNames } from "./tools";
 import type {
   CreateSessionRequest,
   IOmnigentConfig,
@@ -25,6 +33,7 @@ import type {
 const logger = createLogger("omnigent");
 
 const MODELS_TTL_MS = 5 * 60_000;
+const ELICITATION_ACTIONS = new Set(["accept", "decline", "cancel"]);
 
 /**
  * Omnigent sessions for the app's users, on the workspace's managed
@@ -136,6 +145,7 @@ export class OmnigentPlugin extends Plugin {
   }
 
   private bundle(
+    host: string,
     email: string | undefined,
     harness: string,
     model: string,
@@ -146,7 +156,43 @@ export class OmnigentPlugin extends Plugin {
       harness,
       model,
       instructions: this.instructions(email),
+      mcpServers: (this.config.tools ?? []).map((t) => toolServer(t, host)),
     });
+  }
+
+  private async setMode(
+    token: string,
+    sid: string,
+    mode: OmnigentMode,
+  ): Promise<void> {
+    const have = (await (
+      await this.omnigent.request(token, "GET", `/v1/sessions/${sid}/policies`)
+    ).json()) as { data?: Array<{ id: string; name?: string }> };
+    for (const p of have.data ?? []) {
+      if (String(p.name ?? "").startsWith(MODE_POLICY_PREFIX)) {
+        await this.omnigent.request(
+          token,
+          "DELETE",
+          `/v1/sessions/${sid}/policies/${p.id}`,
+        );
+      }
+    }
+    const writes = writeToolNames(
+      this.config.tools ?? [],
+      this.config.writeTools,
+    );
+    for (const p of modePolicies(mode, writes)) {
+      const r = await this.omnigent.request(
+        token,
+        "POST",
+        `/v1/sessions/${sid}/policies`,
+        { json: p },
+      );
+      if (!r.ok)
+        throw new Error(
+          `Could not set ${mode} mode: ${r.status} ${await r.text()}`,
+        );
+    }
   }
 
   /** The session, or a 404 unless it belongs to this app (Omnigent already scopes it to the user). */
@@ -266,6 +312,8 @@ export class OmnigentPlugin extends Plugin {
         const harnesses = await this.offers(token);
         res.json({
           harnesses,
+          modes: OMNIGENT_MODES,
+          defaultMode: this.config.defaultMode ?? "ask",
           defaultHarness:
             harnesses.find((h) => h.id === this.config.defaultHarness)?.id ??
             harnesses[0]?.id,
@@ -320,6 +368,12 @@ export class OmnigentPlugin extends Plugin {
           });
           return;
         }
+        const mode = body.mode ?? this.config.defaultMode ?? "ask";
+        if (!OMNIGENT_MODES.includes(mode)) {
+          res.status(400).json({ error: `Unknown mode: ${mode}` });
+          return;
+        }
+        const host = await this.workspaceHost();
         const form = new FormData();
         form.set(
           "metadata",
@@ -337,7 +391,12 @@ export class OmnigentPlugin extends Plugin {
           new Blob(
             [
               new Uint8Array(
-                this.bundle(req.header("x-forwarded-email"), harness.id, model),
+                this.bundle(
+                  host,
+                  req.header("x-forwarded-email"),
+                  harness.id,
+                  model,
+                ),
               ),
             ],
             { type: "application/gzip" },
@@ -358,6 +417,7 @@ export class OmnigentPlugin extends Plugin {
         const { session_id: sid } = (await created.json()) as {
           session_id: string;
         };
+        await this.setMode(token, sid, mode);
         if (body.message) {
           const sent = await this.omnigent.request(
             token,
@@ -370,7 +430,9 @@ export class OmnigentPlugin extends Plugin {
             return;
           }
         }
-        res.status(201).json({ session_id: sid, harness: harness.id, model });
+        res
+          .status(201)
+          .json({ session_id: sid, harness: harness.id, model, mode });
       }),
     });
 
@@ -380,7 +442,18 @@ export class OmnigentPlugin extends Plugin {
       path: "/sessions/:id",
       handler: this.handler(async (req, res, token) => {
         const snap = await this.owned(token, req.params.id, res, true);
-        if (snap) res.json(snap);
+        if (!snap) return;
+        const pol = (await (
+          await this.omnigent.request(
+            token,
+            "GET",
+            `/v1/sessions/${encodeURIComponent(req.params.id)}/policies`,
+          )
+        ).json()) as { data?: Array<{ name?: string }> };
+        res.json({
+          ...snap,
+          mode: modeFromPolicies((pol.data ?? []).map((p) => String(p.name))),
+        });
       }),
     });
 
@@ -437,6 +510,47 @@ export class OmnigentPlugin extends Plugin {
             "POST",
             `/v1/sessions/${encodeURIComponent(req.params.id)}/events`,
             { json: { type: "interrupt", data: {} } },
+          ),
+        );
+      }),
+    });
+
+    this.route(router, {
+      name: "setMode",
+      method: "put",
+      path: "/sessions/:id/mode",
+      handler: this.handler(async (req, res, token) => {
+        const mode = (req.body as { mode?: OmnigentMode })?.mode;
+        if (!mode || !OMNIGENT_MODES.includes(mode)) {
+          res.status(400).json({ error: "mode must be auto, ask or read" });
+          return;
+        }
+        if (!(await this.owned(token, req.params.id, res))) return;
+        await this.setMode(token, encodeURIComponent(req.params.id), mode);
+        res.json({ mode });
+      }),
+    });
+
+    this.route(router, {
+      name: "resolveElicitation",
+      method: "post",
+      path: "/sessions/:id/elicitations/:eid",
+      handler: this.handler(async (req, res, token) => {
+        const action = (req.body as { action?: string })?.action ?? "";
+        if (!ELICITATION_ACTIONS.has(action)) {
+          res
+            .status(400)
+            .json({ error: "action must be accept, decline or cancel" });
+          return;
+        }
+        if (!(await this.owned(token, req.params.id, res))) return;
+        await OmnigentPlugin.relay(
+          res,
+          await this.omnigent.request(
+            token,
+            "POST",
+            `/v1/sessions/${encodeURIComponent(req.params.id)}/elicitations/${encodeURIComponent(req.params.eid)}/resolve`,
+            { json: { action } },
           ),
         );
       }),

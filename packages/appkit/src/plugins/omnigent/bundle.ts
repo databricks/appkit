@@ -1,17 +1,29 @@
 import { gzipSync } from "node:zlib";
 
+/** A stdio MCP server the session's host starts. */
+export interface McpServerSpec {
+  name: string;
+  description?: string;
+  transport: "stdio";
+  command: string;
+  args: string[];
+  /** Seconds. */
+  timeout?: number;
+}
+
 interface BundleSpec {
   name: string;
   description?: string;
   harness: string;
   model: string;
   instructions: string;
+  mcpServers?: McpServerSpec[];
 }
 
 /**
- * An Omnigent agent bundle: `config.yaml` (the agent spec) and `AGENTS.md`
- * (the instructions), as a tar.gz. The YAML is written as JSON, which is
- * valid YAML.
+ * An Omnigent agent bundle: `config.yaml` (the agent spec), `AGENTS.md` (the
+ * instructions) and one `tools/mcp/<name>.yaml` per MCP server, as a tar.gz.
+ * The YAML files are written as JSON, which is valid YAML.
  */
 export function buildBundle(spec: BundleSpec): Buffer {
   const config = {
@@ -29,6 +41,26 @@ export function buildBundle(spec: BundleSpec): Buffer {
     "config.yaml": `${JSON.stringify(config, null, 2)}\n`,
     "AGENTS.md": spec.instructions,
   };
+  for (const s of spec.mcpServers ?? []) {
+    if (!/^[a-z0-9][a-z0-9_-]*$/i.test(s.name)) {
+      throw new Error(`Invalid MCP server name: ${s.name}`);
+    }
+    if (files[`tools/mcp/${s.name}.yaml`]) {
+      throw new Error(`Duplicate MCP server name: ${s.name}`);
+    }
+    files[`tools/mcp/${s.name}.yaml`] = `${JSON.stringify(
+      {
+        name: s.name,
+        description: s.description ?? s.name,
+        transport: s.transport,
+        command: s.command,
+        args: s.args,
+        timeout: s.timeout ?? 300,
+      },
+      null,
+      2,
+    )}\n`;
+  }
   return gzipSync(tar(files));
 }
 

@@ -25,6 +25,25 @@
           "type": "string",
           "description": "System instructions for every session"
         },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "Databricks-managed MCP servers sessions can call, as the user"
+        },
+        "writeTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Further tool names that change data"
+        },
+        "defaultMode": {
+          "type": "string",
+          "enum": ["auto", "ask", "read"],
+          "default": "ask"
+        },
         "harnesses": {
           "type": "array",
           "items": {
