@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { withEnv } from "../../../testing";
 import { useTestCache } from "../../../testing/test-cache";
+import { createWorkspaceClient } from "../../../workspace-client";
 
 vi.mock("../../../context", () => ({
   getWorkspaceClient: vi.fn(() => mockWorkspaceClient),
@@ -118,18 +119,38 @@ const validVsResponse = {
   debug_info: { response_time: 35 },
 };
 
-// Records each raw `WorkspaceRequest`; resolves to the JSON body the facade's
-// `request()` would return as a `Response`.
+// Queries run through a REAL modular VectorSearchClient over a stubbed `fetch`,
+// so the patched marshal/unmarshal (debug_level/debug_info, bigint rows) is
+// exercised. `mockRequest` records each wire request and resolves to the JSON
+// body to respond with.
 const mockRequest = vi.fn().mockResolvedValue(validVsResponse);
+vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+  const body = await mockRequest({
+    method: init.method,
+    path: new URL(url).pathname,
+    body: init.body,
+    signal: init.signal,
+  });
+  // Raw text so tests can send ints beyond 2^53 that JSON.stringify can't.
+  return new Response(typeof body === "string" ? body : JSON.stringify(body));
+});
 const mockGetVectorIndex = vi.fn();
 const mockGetTable = vi.fn();
+const realVectorSearch = createWorkspaceClient({
+  host: "https://test.cloud.databricks.com",
+  token: "test-token",
+}).vectorSearch;
 const mockWorkspaceClient = {
-  request: async (req: unknown) => Response.json(await mockRequest(req)),
-  vectorSearch: { getVectorIndex: mockGetVectorIndex },
+  vectorSearch: {
+    queryVectorIndex: realVectorSearch.queryVectorIndex.bind(realVectorSearch),
+    queryVectorIndexNextPage:
+      realVectorSearch.queryVectorIndexNextPage.bind(realVectorSearch),
+    getVectorIndex: mockGetVectorIndex,
+  },
   tables: { getTable: mockGetTable },
 };
 
-/** JSON body of the n-th raw request sent through `request()`. */
+/** JSON body of the n-th wire request. */
 const bodyOf = (n = 0) => JSON.parse(mockRequest.mock.calls[n][0].body);
 
 import { AiSearchPlugin } from "../ai-search";
@@ -344,6 +365,25 @@ describe("AiSearchPlugin", () => {
       expect(result.results[1].score).toBe(0.87);
       expect(result.totalCount).toBe(2);
       expect(result.queryTimeMs).toBe(35);
+    });
+
+    it("coerces int64 row values the SDK parses as bigint to number", async () => {
+      // The SDK parses with json-bigint, so ints past 2^53 arrive as bigint;
+      // the patched schema accepts them and the connector coerces, keeping the
+      // result JSON-serializable (legacy JSON.parse precision).
+      mockRequest.mockResolvedValueOnce(
+        `{"manifest":{"column_count":2,"columns":[{"name":"id"},{"name":"score"}]},` +
+          `"result":{"row_count":1,"data_array":[[9007199254740993,0.5]]}}`,
+      );
+      const plugin = new AiSearchPlugin({
+        indexes: { big: { indexName: "cat.sch.big", columns: ["id"] } },
+      });
+      await plugin.setup();
+
+      const result = await plugin.query("big", { queryText: "q" });
+
+      expect(result.results[0].data.id).toBe(9007199254740992);
+      expect(() => JSON.stringify(result)).not.toThrow();
     });
 
     it("types result.data via the generic parameter", async () => {
@@ -1107,7 +1147,12 @@ describe("AiSearchPlugin", () => {
             signal: expect.any(AbortSignal),
           }),
         );
-        expect(bodyOf()).toEqual({ endpoint_name: "ep", page_token: "t" });
+        // The SDK also sends `name` in the body; the path carries it either way.
+        expect(bodyOf()).toEqual({
+          name: "cat.sch.paged",
+          endpoint_name: "ep",
+          page_token: "t",
+        });
         expect(res.json).toHaveBeenCalled();
       });
     });

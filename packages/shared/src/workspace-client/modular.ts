@@ -17,6 +17,12 @@
  * undocumented Reyden `attachment` response field, which the SDK's generated
  * unmarshal transform would otherwise strip.
  *
+ * NOTE: vectorSearch relies on a pinned pnpm patch
+ * (`patches/@databricks__sdk-vectorsearch@0.51.0.patch`): it adds the
+ * undocumented query `debug_level` request / `debug_info` response fields (the
+ * source of ai-search `queryTimeMs`), and lets row values be `bigint`, since the
+ * SDK parses with json-bigint and the unpatched schema rejects ints over 2^53.
+ *
  * NOTE: genie relies on a pinned pnpm patch
  * (`patches/@databricks__sdk-genie@0.54.0.patch`): the generated model types the
  * query result's `data_array` as protobuf `ListValue[]` (`{ values: [...] }`), but
@@ -594,9 +600,8 @@ export function buildFilesClient(opts: WorkspaceClientOptions): FilesClient {
 }
 
 /**
- * Build a modular Vector Search client from wrapper options. Only index metadata
- * (`getVectorIndex`) goes typed: the query endpoints use the raw `request()`
- * seam because the generated model drops `debug_level` / `debug_info`.
+ * Build a modular Vector Search client from wrapper options. Query calls rely
+ * on the sdk-vectorsearch pnpm patch (`debugLevel` / `debugInfo`, `bigint` rows).
  */
 export function buildVectorSearchClient(
   opts: WorkspaceClientOptions,
@@ -677,3 +682,7 @@ export type {
   EndpointState,
   GetWarehouseResponse,
 } from "@databricks/sdk-warehouses/v1";
+export type {
+  QueryVectorIndexRequest,
+  QueryVectorIndexResponse,
+} from "@databricks/sdk-vectorsearch/v1";

@@ -6,7 +6,11 @@ import {
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
-import type { WorkspaceClient } from "../../workspace-client";
+import type {
+  QueryVectorIndexRequest,
+  QueryVectorIndexResponse,
+  WorkspaceClient,
+} from "../../workspace-client";
 import type {
   AiSearchConnectorConfig,
   VsIndexInfo,
@@ -18,25 +22,29 @@ import type {
 const logger = createLogger("connectors:ai-search");
 
 /**
- * POST through the raw `request()` seam, not the typed `VectorSearchClient`:
- * its generated model has no `debug_level` (request) or `debug_info` (response),
- * so unmarshal would strip the timings the plugin reports, and its reranker
- * shape differs. Raw JSON keeps the exact wire shape `VsRawResponse` describes.
+ * Map the typed (camelCase) response back to the snake_case wire shape the
+ * plugin reads. `debugInfo` relies on the sdk-vectorsearch pnpm patch. Rows
+ * may hold `bigint` (the SDK parses with json-bigint); coerce to `number` so
+ * results stay JSON-serializable, matching legacy `JSON.parse` precision.
  */
-async function postJson<T>(
-  workspaceClient: WorkspaceClient,
-  path: string,
-  body: unknown,
-  signal?: AbortSignal,
-): Promise<T> {
-  const res = await workspaceClient.request({
-    method: "POST",
-    path,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal,
-  });
-  return (await res.json()) as T;
+function toRawResponse(res: QueryVectorIndexResponse): VsRawResponse {
+  return {
+    manifest: {
+      column_count: res.manifest?.columnCount ?? 0,
+      columns: (res.manifest?.columns ?? []).map((c) => ({
+        name: c.name ?? "",
+        type: c.typeText,
+      })),
+    },
+    result: {
+      row_count: res.result?.rowCount ?? 0,
+      data_array: (res.result?.dataArray ?? []).map((row) =>
+        row.map((v) => (typeof v === "bigint" ? Number(v) : v)),
+      ),
+    },
+    next_page_token: res.nextPageToken,
+    debug_info: res.debugInfo as VsRawResponse["debug_info"],
+  };
 }
 
 export class AiSearchConnector {
@@ -58,25 +66,25 @@ export class AiSearchConnector {
       throw new Error("Query cancelled before execution");
     }
 
-    const body: Record<string, unknown> = {
+    const hasFilters = !!(
+      params.filters && Object.keys(params.filters).length > 0
+    );
+    const req: QueryVectorIndexRequest = {
+      name: params.indexName,
       columns: params.columns,
-      num_results: params.numResults,
-      query_type: params.queryType.toUpperCase(),
-      debug_level: 1,
-    };
-
-    if (params.queryText) body.query_text = params.queryText;
-    if (params.queryVector) body.query_vector = params.queryVector;
-    if (params.filters && Object.keys(params.filters).length > 0) {
+      numResults: params.numResults,
+      queryType: params.queryType.toUpperCase(),
+      // Makes the response carry `debug_info` timings (queryTimeMs).
+      debugLevel: 1,
+      queryText: params.queryText || undefined,
+      queryVector: params.queryVector,
       // VS silently ignores an object under `filters`; it wants a JSON string.
-      body.filters_json = JSON.stringify(params.filters);
-    }
-    if (params.reranker) {
-      body.reranker = {
+      filtersJson: hasFilters ? JSON.stringify(params.filters) : undefined,
+      reranker: params.reranker && {
         model: "databricks_reranker",
-        parameters: { columns_to_rerank: params.reranker.columnsToRerank },
-      };
-    }
+        parameters: { columnsToRerank: params.reranker.columnsToRerank },
+      },
+    };
 
     logger.debug(
       "Querying VS index %s (type=%s, num_results=%d)",
@@ -94,20 +102,17 @@ export class AiSearchConnector {
           "vs.index_name": params.indexName,
           "vs.query_type": params.queryType,
           "vs.num_results": params.numResults,
-          "vs.has_filters": !!(
-            params.filters && Object.keys(params.filters).length > 0
-          ),
+          "vs.has_filters": hasFilters,
           "vs.has_reranker": !!params.reranker,
         },
       },
       async (span: Span) => {
         const startTime = Date.now();
         try {
-          const response = await postJson<VsRawResponse>(
-            workspaceClient,
-            `/api/2.0/vector-search/indexes/${params.indexName}/query`,
-            body,
-            signal,
+          const response = toRawResponse(
+            await workspaceClient.vectorSearch.queryVectorIndex(req, {
+              signal,
+            }),
           );
 
           const duration = Date.now() - startTime;
@@ -168,14 +173,15 @@ export class AiSearchConnector {
       },
       async (span: Span) => {
         try {
-          const response = await postJson<VsRawResponse>(
-            workspaceClient,
-            `/api/2.0/vector-search/indexes/${params.indexName}/query-next-page`,
-            {
-              endpoint_name: params.endpointName,
-              page_token: params.pageToken,
-            },
-            signal,
+          const response = toRawResponse(
+            await workspaceClient.vectorSearch.queryVectorIndexNextPage(
+              {
+                name: params.indexName,
+                endpointName: params.endpointName,
+                pageToken: params.pageToken,
+              },
+              { signal },
+            ),
           );
 
           span.setAttribute("vs.result_count", response.result.row_count);

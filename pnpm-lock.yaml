@@ -14,6 +14,7 @@ overrides:
 patchedDependencies:
   '@databricks/sdk-genie@0.54.0': 664f3e13b155eb1b5499486a4f6fc1ab9a6a502e2c6b200d06749bd25dd9ae54
   '@databricks/sdk-statementexecution@0.52.0': 9377a46b883b548d47116662bf73b159a4da51ec28b9ff1896a7e4a7841c240c
+  '@databricks/sdk-vectorsearch@0.51.0': b3d79eea4bba92065adc591ee8e6f1d72c0acdac6c00e0cb522074a5fb14ba8e
 
 importers:
 
@@ -312,7 +313,7 @@ importers:
         version: 0.52.0
       '@databricks/sdk-vectorsearch':
         specifier: 0.51.0
-        version: 0.51.0
+        version: 0.51.0(patch_hash=b3d79eea4bba92065adc591ee8e6f1d72c0acdac6c00e0cb522074a5fb14ba8e)
       '@databricks/sdk-warehouses':
         specifier: 0.53.0
         version: 0.53.0
@@ -660,7 +661,7 @@ importers:
         version: 0.52.0
       '@databricks/sdk-vectorsearch':
         specifier: 0.51.0
-        version: 0.51.0
+        version: 0.51.0(patch_hash=b3d79eea4bba92065adc591ee8e6f1d72c0acdac6c00e0cb522074a5fb14ba8e)
       '@databricks/sdk-warehouses':
         specifier: 0.53.0
         version: 0.53.0
@@ -14436,7 +14437,7 @@ snapshots:
       json-bigint: 1.0.0
       zod: 4.3.6
 
-  '@databricks/sdk-vectorsearch@0.51.0':
+  '@databricks/sdk-vectorsearch@0.51.0(patch_hash=b3d79eea4bba92065adc591ee8e6f1d72c0acdac6c00e0cb522074a5fb14ba8e)':
     dependencies:
       '@databricks/sdk-auth': 0.51.0
       '@databricks/sdk-core': 0.51.0
