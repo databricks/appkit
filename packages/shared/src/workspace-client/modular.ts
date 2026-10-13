@@ -56,6 +56,7 @@ import type { FilesClient } from "@databricks/sdk-files/v2";
 import type { GenieClient } from "@databricks/sdk-genie/v1";
 import type { JobsClient } from "@databricks/sdk-jobs/v2";
 import type { ClientOptions } from "@databricks/sdk-options/client";
+import type { PostgresClient } from "@databricks/sdk-postgres/v1";
 import { ScimClient } from "@databricks/sdk-scim/v1";
 import { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
 import type { TablesClient } from "@databricks/sdk-uc-tables/v1";
@@ -623,6 +624,20 @@ export function buildTablesClient(opts: WorkspaceClientOptions): TablesClient {
   );
 }
 
+/**
+ * Build a modular Lakebase Postgres (autoscaling: projects, branches,
+ * endpoints) client from wrapper options. Distinct from the provisioned
+ * `/api/2.0/database` instance API.
+ */
+export function buildPostgresClient(
+  opts: WorkspaceClientOptions,
+): PostgresClient {
+  return lazyClient(
+    () => import("@databricks/sdk-postgres/v1").then((m) => m.PostgresClient),
+    mapToClientOptions(opts),
+  );
+}
+
 // ── Client type re-exports (for the facade accessor types) ───────────────
 export type { FilesClient } from "@databricks/sdk-files/v2";
 export type {
@@ -631,6 +646,7 @@ export type {
 } from "@databricks/sdk-files/v2";
 export type { GenieClient } from "@databricks/sdk-genie/v1";
 export type { JobsClient } from "@databricks/sdk-jobs/v2";
+export type { PostgresClient } from "@databricks/sdk-postgres/v1";
 export type { ScimClient } from "@databricks/sdk-scim/v1";
 export type { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
 export type { TablesClient } from "@databricks/sdk-uc-tables/v1";
