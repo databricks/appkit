@@ -1,7 +1,7 @@
 # Function: appKitTypesPlugin()
 
 ```ts
-function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin$1;
+function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin;
 ```
 
 Vite plugin to generate types for AppKit queries.
@@ -15,6 +15,6 @@ Calls generateFromEntryPoint under the hood.
 
 ## Returns
 
-`Plugin$1`
+`Plugin`
 
 Vite plugin to generate types for AppKit queries.

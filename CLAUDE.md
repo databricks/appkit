@@ -311,7 +311,7 @@ Databricks Services (SQL Warehouse, APIs)
 
 ### Frontend: Vite (rolldown-vite fork)
 
-The frontend uses `rolldown-vite@7.1.14`, a performance-optimized Vite fork.
+The frontend uses `rolldown-vite@7.3.1`, a performance-optimized Vite fork.
 
 **Key plugins:**
 - `@vitejs/plugin-react` - React Fast Refresh
