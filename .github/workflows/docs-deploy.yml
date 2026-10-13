@@ -6,6 +6,10 @@ on:
       - main
     paths:
       - 'docs/**'
+      # The docs build compiles appkit-ui and shared sources and generates the API reference from packages/appkit
+      - 'packages/appkit/**'
+      - 'packages/appkit-ui/**'
+      - 'packages/shared/**'
 
 permissions:
   contents: read
