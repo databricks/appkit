@@ -60,6 +60,7 @@
   },
   "devDependencies": {
     "@arethetypeswrong/core": "0.18.4",
+    "@ast-grep/napi": "0.37.0",
     "@commitlint/cli": "19.8.1",
     "@commitlint/config-conventional": "19.8.1",
     "@cyclonedx/cdxgen": "12.1.2",

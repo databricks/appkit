@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 
+import { assertPackageImportsResolve } from "./validate-package-imports";
+
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const { values } = parseArgs({
   options: {
@@ -139,6 +141,8 @@ if (fs.existsSync(sharedPostinstall)) {
   fs.mkdirSync("tmp/scripts", { recursive: true });
   fs.copyFileSync(sharedPostinstall, "tmp/scripts/postinstall.js");
 }
+
+assertPackageImportsResolve("tmp/dist/cli");
 
 // Copy documentation from docs/build into tmp/docs/
 const docsBuildPath = path.join(__dirname, "../docs/build");
