@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   spinnerPrintDetail: vi.fn(),
   loadCache: vi.fn(() => ({ version: "2", queries: {} })),
   saveCache: vi.fn(),
+  // Captures the options typegen builds its client with (call-site auth test).
+  createWorkspaceClient: vi.fn(),
 }));
 
 vi.mock("node:fs/promises", () => ({
@@ -28,10 +30,13 @@ vi.mock("../../workspace-client", async (importOriginal) => {
     await importOriginal<typeof import("../../workspace-client")>();
   return {
     ...actual,
-    createWorkspaceClient: () => ({
-      statementExecution: { executeStatement: mocks.executeStatement },
-      warehouses: { get: mocks.getWarehouse, start: mocks.startWarehouse },
-    }),
+    createWorkspaceClient: (...args: unknown[]) => {
+      mocks.createWorkspaceClient(...args);
+      return {
+        statementExecution: { executeStatement: mocks.executeStatement },
+        warehouses: { get: mocks.getWarehouse, start: mocks.startWarehouse },
+      };
+    },
   };
 });
 
@@ -123,6 +128,25 @@ describe("generateQueriesFromDescribe", () => {
     // Re-establish the RUNNING default so a per-test preflight override (e.g.
     // mockReturnValue/mockImplementation) never leaks into the next test.
     mocks.getWarehouse.mockReturnValue({ state: "RUNNING" });
+    vi.unstubAllEnvs();
+  });
+
+  test("DESCRIBE client uses APPKIT_DEV_HOST / APPKIT_DEV_TOKEN when set", async () => {
+    vi.stubEnv("APPKIT_DEV_PROFILE", "");
+    vi.stubEnv("APPKIT_DEV_HOST", "http://127.0.0.1:8004");
+    vi.stubEnv("APPKIT_DEV_TOKEN", "dev-token");
+    mocks.readdir.mockResolvedValue(["users.sql"]);
+    mocks.readFile.mockResolvedValue("SELECT 1 AS id");
+    mocks.executeStatement.mockResolvedValue(
+      succeededResult([["id", "INT", null]]),
+    );
+
+    await describeQueries("/queries", "wh-1");
+
+    expect(mocks.createWorkspaceClient).toHaveBeenCalledWith({
+      host: "http://127.0.0.1:8004",
+      token: "dev-token",
+    });
   });
 
   test("success path — returns query schema", async () => {
