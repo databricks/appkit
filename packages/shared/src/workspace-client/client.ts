@@ -85,7 +85,6 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
   }
 
   // Migrated to the modular SDK — built lazily, independent of the legacy client.
-  // Migrated to the modular SDK — built lazily, independent of the legacy client.
   get vectorSearch(): VectorSearchClient {
     if (!this.#vectorSearch) {
       this.#vectorSearch = buildVectorSearchClient(this.#opts);
