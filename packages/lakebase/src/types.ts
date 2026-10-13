@@ -224,6 +224,31 @@ export interface LakebaseWorkspaceRequest {
  */
 export interface RequestCapableWorkspaceClient {
   request(req: LakebaseWorkspaceRequest): Promise<Response>;
+  /** Typed Lakebase Postgres client; used instead of raw requests when present. */
+  postgres?: LakebasePostgresClient;
+}
+
+/**
+ * The subset of the modular `@databricks/sdk-postgres` `PostgresClient` lakebase
+ * uses (the AppKit workspace client's `postgres`). Its model is camelCase.
+ */
+export interface LakebasePostgresClient {
+  generateDatabaseCredential(
+    req: {
+      endpoint?: string;
+      claims?: {
+        permissionSet?: string;
+        resources?: {
+          resourceName?: { $case: "tableName"; tableName: string };
+        }[];
+      }[];
+    },
+    options?: { signal?: AbortSignal },
+  ): Promise<{ token?: string; expireTime?: { toString(): string } }>;
+  getEndpoint(
+    req: { name: string },
+    options?: { signal?: AbortSignal },
+  ): Promise<unknown>;
 }
 
 /** The subset of the legacy `@databricks/sdk-experimental` `WorkspaceClient` lakebase uses. */

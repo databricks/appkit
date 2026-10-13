@@ -170,6 +170,94 @@ describe("Lakebase Authentication", () => {
       expect(mockApiClient.request).not.toHaveBeenCalled();
     });
 
+    it("uses the typed postgres client when present, mapping to camelCase", async () => {
+      const request = vi.fn();
+      const generate = vi.fn(async () => ({
+        token: "typed-token",
+        // Stand-in for Temporal.Instant: only toString() is relied on.
+        expireTime: { toString: () => "2026-02-06T18:00:00Z" },
+      }));
+      const client = {
+        request,
+        postgres: {
+          generateDatabaseCredential: generate,
+          getEndpoint: vi.fn(),
+        },
+      };
+
+      const result = await generateDatabaseCredential(client, {
+        endpoint: "projects/p/branches/main/endpoints/primary",
+        claims: [
+          {
+            permission_set: RequestedClaimsPermissionSet.READ_ONLY,
+            resources: [{ table_name: "catalog.schema.users" }],
+          },
+        ],
+      });
+
+      expect(result).toEqual({
+        token: "typed-token",
+        expire_time: "2026-02-06T18:00:00Z",
+      });
+      expect(generate).toHaveBeenCalledWith({
+        endpoint: "projects/p/branches/main/endpoints/primary",
+        claims: [
+          {
+            permissionSet: "READ_ONLY",
+            resources: [
+              {
+                resourceName: {
+                  $case: "tableName",
+                  tableName: "catalog.schema.users",
+                },
+              },
+            ],
+          },
+        ],
+      });
+      expect(request).not.toHaveBeenCalled();
+    });
+
+    it("rejects a typed response missing expireTime", async () => {
+      const client = {
+        request: vi.fn(),
+        postgres: {
+          generateDatabaseCredential: vi.fn(async () => ({ token: "t" })),
+          getEndpoint: vi.fn(),
+        },
+      };
+      await expect(
+        generateDatabaseCredential(client, { endpoint: "e" }),
+      ).rejects.toThrow();
+    });
+
+    it("falls back to raw request() for unspecified_resource_name claims", async () => {
+      // The typed model only has tableName, so these would be silently dropped.
+      const request = vi.fn(async () => Response.json(credential));
+      const generate = vi.fn();
+      const claims = [
+        { resources: [{ unspecified_resource_name: "some-resource" }] },
+      ];
+
+      await generateDatabaseCredential(
+        {
+          request,
+          postgres: {
+            generateDatabaseCredential: generate,
+            getEndpoint: vi.fn(),
+          },
+        },
+        { endpoint: "e", claims },
+      );
+
+      expect(generate).not.toHaveBeenCalled();
+      expect(request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: JSON.stringify({ endpoint: "e", claims }),
+        }),
+      );
+    });
+
     it("rejects a malformed credential response", async () => {
       const request = vi.fn(async () => Response.json({ token: "t" }));
       await expect(

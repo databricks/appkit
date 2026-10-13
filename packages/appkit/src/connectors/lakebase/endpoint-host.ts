@@ -58,18 +58,6 @@ export function assertEndpointHostMatches(
   return check;
 }
 
-/** AppKit's workspace client exposes the typed Lakebase Postgres client. */
-function hasPostgresClient(client: Client): client is Client & {
-  postgres: {
-    getEndpoint(
-      req: { name: string },
-      options: { signal: AbortSignal },
-    ): Promise<unknown>;
-  };
-} {
-  return "postgres" in client;
-}
-
 async function compareHosts(
   client: NonNullable<HostCheckConfig["workspaceClient"]>,
   endpoint: string,
@@ -86,33 +74,24 @@ async function compareHosts(
       reason,
     );
   try {
-    const path = `/api/2.0/postgres/${endpoint}`;
-    const lookup = hasPostgresClient(client)
-      ? // AppKit's workspace client: the typed Lakebase Postgres client.
-        client.postgres.getEndpoint(
-          { name: endpoint },
-          { signal: controller.signal },
-        )
-      : "request" in client
-        ? // A raw request-capable client: throws ApiError (with statusCode) on non-2xx.
-          // `signal` isn't in lakebase's public request type but AppKit honors it.
-          client
-            .request({
-              method: "GET",
-              path,
-              headers: { Accept: "application/json" },
-              signal: controller.signal,
-            } as Parameters<typeof client.request>[0])
-            .then((res) => res.json())
-        : client.apiClient.request(
-            {
-              path,
-              method: "GET",
-              headers: new Headers({ Accept: "application/json" }),
-              raw: false,
-            },
-            contextFromAbortSignal(controller.signal),
-          );
+    const lookup =
+      "postgres" in client && client.postgres
+        ? // AppKit's workspace client: the typed Lakebase Postgres client.
+          client.postgres.getEndpoint(
+            { name: endpoint },
+            { signal: controller.signal },
+          )
+        : "apiClient" in client
+          ? client.apiClient.request(
+              {
+                path: `/api/2.0/postgres/${endpoint}`,
+                method: "GET",
+                headers: new Headers({ Accept: "application/json" }),
+                raw: false,
+              },
+              contextFromAbortSignal(controller.signal),
+            )
+          : Promise.resolve(undefined);
     const response = await Promise.race([
       lookup,
       new Promise<undefined>((resolve) => {

@@ -53,6 +53,34 @@ export async function generateDatabaseCredential(
 ): Promise<DatabaseCredential> {
   const apiPath = "/api/2.0/postgres/credentials";
 
+  if (
+    isRequestCapable(workspaceClient) &&
+    workspaceClient.postgres &&
+    !hasUnspecifiedResource(request)
+  ) {
+    const credential =
+      await workspaceClient.postgres.generateDatabaseCredential({
+        endpoint: request.endpoint,
+        claims: request.claims?.map((claim) => ({
+          permissionSet: claim.permission_set,
+          resources: claim.resources?.map((resource) => ({
+            resourceName:
+              resource.table_name === undefined
+                ? undefined
+                : {
+                    $case: "tableName" as const,
+                    tableName: resource.table_name,
+                  },
+          })),
+        })),
+      });
+    return validateCredentialResponse({
+      token: credential.token,
+      // Temporal.Instant -> ISO-8601, the shape the raw API returns.
+      expire_time: credential.expireTime?.toString(),
+    });
+  }
+
   if (isRequestCapable(workspaceClient)) {
     const response = await workspaceClient.request({
       method: "POST",
@@ -78,6 +106,22 @@ export async function generateDatabaseCredential(
   });
 
   return validateCredentialResponse(response);
+}
+
+/**
+ * The typed model has no `unspecified_resource_name` (only `tableName`), so those
+ * claims go through the raw request to avoid silently dropping them.
+ */
+function hasUnspecifiedResource(
+  request: GenerateDatabaseCredentialRequest,
+): boolean {
+  return (
+    request.claims?.some((claim) =>
+      claim.resources?.some(
+        (resource) => resource.unspecified_resource_name !== undefined,
+      ),
+    ) ?? false
+  );
 }
 
 /** Validate the API response has the expected shape */

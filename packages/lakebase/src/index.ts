@@ -12,6 +12,7 @@ export type {
   LakebaseWorkspaceRequest,
   LegacyWorkspaceClientLike,
   LakebasePoolConfig,
+  LakebasePostgresClient,
   Logger,
   LoggerConfig,
   RequestedClaims,
