@@ -12,7 +12,13 @@ import {
   serving,
   WRITE_ACTIONS,
 } from "@databricks/appkit";
-import { agents, aiSearch, database, runAgent } from "@databricks/appkit/beta";
+import {
+  agents,
+  aiSearch,
+  database,
+  omnigent,
+  runAgent,
+} from "@databricks/appkit/beta";
 
 import redactor from "./agents/redactor/agent";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
@@ -178,6 +184,17 @@ createApp({
       // are dispatchers or ephemeral and don't make sense as the landing agent).
       defaultAgent: "helper",
     }),
+    // Needs the workspace's managed Omnigent (Omnigent and Sandbox previews);
+    // opt in with OMNIGENT_ENABLED=1.
+    ...(process.env.OMNIGENT_ENABLED
+      ? [
+          omnigent({
+            instructions:
+              "You are a helpful data assistant inside the AppKit dev playground.",
+            tools: [{ type: "sql" }],
+          }),
+        ]
+      : []),
     aiSearch({
       indexes: {
         demo: {
