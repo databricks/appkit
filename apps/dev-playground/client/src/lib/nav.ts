@@ -18,6 +18,7 @@ import {
   SigmaIcon,
   Wand2Icon,
   ZapIcon,
+  TerminalIcon,
 } from "lucide-react";
 
 /**
@@ -122,6 +123,13 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         description:
           "Chat agent over Databricks Model Serving with tools auto-discovered from AppKit plugins.",
         icon: BotIcon,
+      },
+      {
+        to: "/omnigent",
+        label: "Omnigent",
+        description:
+          "Claude Agent SDK, Pi and OpenAI Agents SDK sessions on Databricks Sandboxes, run as you.",
+        icon: TerminalIcon,
       },
       {
         to: "/genie",
