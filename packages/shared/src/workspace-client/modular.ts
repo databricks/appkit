@@ -8,12 +8,15 @@
  *
  * Migrated services are built here as per-service clients; the facade delegates
  * their accessors to these instead of the legacy monolithic client. Currently
- * `warehouses`, `statementExecution`, `currentUser` (SCIM), `genie`, `jobs`, `vectorSearch`
- * and `tables` (UC) are migrated, plus the auth + raw-request seam ({@link buildWorkspaceAuth});
- * every other service still routes through `legacy.ts`.
+ * `warehouses`, `statementExecution`, `currentUser` (SCIM), `genie`, `jobs`,
+ * `files`, `vectorSearch`, `tables`, `modelServing`, `volumes`, `functions`,
+ * `connections`, `database`, `postgres`, `experiments` and `apps` are
+ * migrated, plus the auth + raw-request seam ({@link buildWorkspaceAuth}).
+ * Only `servingEndpoints`, `config` and `apiClient` still route through
+ * `legacy.ts`.
  *
  * NOTE: statementExecution relies on a pinned pnpm patch
- * (`patches/@databricks__sdk-statementexecution@0.46.0.patch`) that restores the
+ * (`patches/@databricks__sdk-statementexecution@0.52.0.patch`) that restores the
  * undocumented Reyden `attachment` response field, which the SDK's generated
  * unmarshal transform would otherwise strip.
  *

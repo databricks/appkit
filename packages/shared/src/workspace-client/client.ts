@@ -2,10 +2,11 @@
  * `AppKitWorkspaceClient` — the facade implementation. Construct via
  * `createWorkspaceClient(...)`; this class is internal.
  *
- * Every service accessor delegates to a single lazily-constructed legacy SDK
- * client. This is the seam: to migrate a service to the modular SDK, replace
- * its getter here with a modular client instance (and update its connector +
- * the accessor type in `types.ts`). No other AppKit module touches the SDK.
+ * Migrated service accessors build their modular client lazily (see
+ * `modular.ts`); the rest (`servingEndpoints`, `config`, `apiClient`) delegate
+ * to a single lazily-constructed legacy SDK client. To migrate one, replace its
+ * getter here with a modular client instance (and update its connector + the
+ * accessor type in `types.ts`). No other AppKit module touches the SDK.
  */
 import {
   buildLegacyWorkspaceClient,
