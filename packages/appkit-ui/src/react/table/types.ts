@@ -10,7 +10,11 @@ export interface TableWrapperProps<TRaw = any, TProcessed = any> {
   queryKey: string;
   /** The parameters to pass to the query */
   parameters: Record<string, any>;
-  /** Optional function to transform raw data before creating table */
+  /**
+   * Optional function to transform raw data before creating table.
+   * A new function reference re-runs it and resets the table to the first page,
+   * so define it outside the component or wrap it in `useCallback`.
+   */
   transformer?: (data: TRaw[]) => TProcessed[];
   /** Render function that receives the TanStack Table instance */
   children: (data: Table<TProcessed>) => React.ReactNode;
@@ -38,7 +42,11 @@ export interface DataTableProps {
   filterColumn?: string;
   /** Optional placeholder for the filter input */
   filterPlaceholder?: string;
-  /** Optional function to transform data before creating table */
+  /**
+   * Optional function to transform data before creating table.
+   * A new function reference re-runs it and resets the table to the first page,
+   * so define it outside the component or wrap it in `useCallback`.
+   */
   transform?: (data: any[]) => any[];
   /** Optional labels for the DataTable component */
   labels?: DataTableLabels;
