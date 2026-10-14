@@ -32,7 +32,7 @@ export interface WorkspaceRequestClientLike {
   request(req: {
     method: string;
     path: string;
-    headers?: Record<string, string>;
+    headers?: Headers;
     body?: string;
     signal?: AbortSignal;
   }): Promise<Response>;
