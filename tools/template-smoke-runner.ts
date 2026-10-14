@@ -17,26 +17,26 @@ import { parse } from "yaml";
 
 export type PackageManager = "npm" | "pnpm";
 
+/** Go template expression `databricks apps init` renders to the selected package manager. */
+export const PACKAGE_MANAGER_PLACEHOLDER = "{{or .packageManager `pnpm`}}";
+
 /** Test fixture shaping; end-user package-manager selection belongs to the CLI. */
 export function selectSmokePackageManager(
   appDir: string,
   pm: PackageManager,
 ): void {
-  if (pm === "pnpm") {
-    rmSync(join(appDir, "package-lock.json"), { force: true });
-    return;
-  }
-  for (const file of ["pnpm-lock.yaml", "pnpm-workspace.yaml", ".npmrc"]) {
-    rmSync(join(appDir, file), { force: true });
-  }
   const packagePath = join(appDir, "package.json");
   const pkg = JSON.parse(readFileSync(packagePath, "utf-8"));
-  pkg.packageManager = `npm@${execFileSync("npm", ["--version"], { encoding: "utf-8" }).trim()}`;
   for (const [name, script] of Object.entries<string>(pkg.scripts)) {
-    pkg.scripts[name] = script
-      .split(" && ")
-      .map((command) => command.replace(/^pnpm run /, "npm run "))
-      .join(" && ");
+    pkg.scripts[name] = script.replaceAll(PACKAGE_MANAGER_PLACEHOLDER, pm);
+  }
+  if (pm === "pnpm") {
+    rmSync(join(appDir, "package-lock.json"), { force: true });
+  } else {
+    for (const file of ["pnpm-lock.yaml", "pnpm-workspace.yaml", ".npmrc"]) {
+      rmSync(join(appDir, file), { force: true });
+    }
+    pkg.packageManager = `npm@${execFileSync("npm", ["--version"], { encoding: "utf-8" }).trim()}`;
   }
   writeFileSync(packagePath, `${JSON.stringify(pkg, null, 2)}\n`);
 }
