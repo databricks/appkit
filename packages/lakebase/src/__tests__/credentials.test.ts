@@ -148,14 +148,18 @@ describe("Lakebase Authentication", () => {
       expect(request).toHaveBeenCalledWith({
         method: "POST",
         path: "/api/2.0/postgres/credentials",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
+        headers: expect.any(Headers),
         body: JSON.stringify({
           endpoint: "projects/p/branches/main/endpoints/primary",
           claims,
         }),
+      });
+      const [[sent]] = request.mock.calls as unknown as [
+        [{ headers: Headers }],
+      ];
+      expect(Object.fromEntries(sent.headers)).toEqual({
+        accept: "application/json",
+        "content-type": "application/json",
       });
     });
 

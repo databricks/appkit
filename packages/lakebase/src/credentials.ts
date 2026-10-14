@@ -85,10 +85,10 @@ export async function generateDatabaseCredential(
     const response = await workspaceClient.request({
       method: "POST",
       path: apiPath,
-      headers: {
+      headers: new Headers({
         Accept: "application/json",
         "Content-Type": "application/json",
-      },
+      }),
       body: JSON.stringify(request),
     });
     return validateCredentialResponse(await response.json());

@@ -214,7 +214,7 @@ export interface LakebaseWorkspaceRequest {
   method: string;
   /** Path on the workspace host, e.g. `/api/2.0/postgres/credentials`. */
   path: string;
-  headers?: Record<string, string>;
+  headers?: Headers;
   body?: string;
 }
 

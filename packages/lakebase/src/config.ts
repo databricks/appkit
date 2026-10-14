@@ -245,7 +245,7 @@ export async function getUsernameWithApiLookup(
     const response = await workspaceClient.request({
       method: "GET",
       path: "/api/2.0/preview/scim/v2/Me",
-      headers: { Accept: "application/json" },
+      headers: new Headers({ Accept: "application/json" }),
     });
     const me = (await response.json()) as { userName?: string };
     return me.userName ?? undefined;
