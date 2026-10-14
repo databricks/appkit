@@ -53,7 +53,7 @@ export async function fetchOpenApiSchema(
     const response = await client.request({
       method: "GET",
       path: `/api/2.0/serving-endpoints/${endpointName}/openapi`,
-      headers: { Accept: "text/plain" },
+      headers: new Headers({ Accept: "text/plain" }),
     });
 
     if (!response.body) {

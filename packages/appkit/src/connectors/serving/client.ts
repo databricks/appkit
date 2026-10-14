@@ -77,10 +77,10 @@ export async function invoke(
   const response = await client.request({
     method: "POST",
     path: `/serving-endpoints/${endpointName}/invocations`,
-    headers: {
+    headers: new Headers({
       Accept: "application/json",
       "Content-Type": "application/json",
-    },
+    }),
     body: JSON.stringify(cleanBody),
   });
 
@@ -129,10 +129,10 @@ export async function streamPath(
     const response = await client.request({
       method: "POST",
       path,
-      headers: {
+      headers: new Headers({
         "Content-Type": "application/json",
         Accept: "text/event-stream",
-      },
+      }),
       body: JSON.stringify(body),
       signal,
     });

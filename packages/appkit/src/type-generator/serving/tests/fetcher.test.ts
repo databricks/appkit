@@ -144,7 +144,10 @@ describe("fetchOpenApiSchema", () => {
     expect(client.request).toHaveBeenCalledWith({
       method: "GET",
       path: "/api/2.0/serving-endpoints/my-endpoint/openapi",
-      headers: { Accept: "text/plain" },
+      headers: expect.any(Headers),
     });
+    expect(Object.fromEntries(client.request.mock.calls[0][0].headers)).toEqual(
+      { accept: "text/plain" },
+    );
   });
 });

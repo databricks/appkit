@@ -44,14 +44,17 @@ describe("Serving Connector", () => {
       expect(client.request).toHaveBeenCalledWith({
         method: "POST",
         path: "/serving-endpoints/my-endpoint/invocations",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
+        headers: expect.any(Headers),
         body: JSON.stringify({
           messages: [{ role: "user", content: "Hi" }],
           temperature: 0.7,
         }),
+      });
+      expect(
+        Object.fromEntries(client.request.mock.calls[0][0].headers),
+      ).toEqual({
+        accept: "application/json",
+        "content-type": "application/json",
       });
       expect(result).toEqual(mockResponse);
     });
@@ -157,12 +160,15 @@ describe("Serving Connector", () => {
       expect(client.request).toHaveBeenCalledWith({
         method: "POST",
         path: "/serving-endpoints/my%20endpoint/invocations",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "text/event-stream",
-        },
+        headers: expect.any(Headers),
         body: JSON.stringify({ messages: [], stream: true }),
         signal: controller.signal,
+      });
+      expect(
+        Object.fromEntries(client.request.mock.calls[0][0].headers),
+      ).toEqual({
+        "content-type": "application/json",
+        accept: "text/event-stream",
       });
       expect(client.apiClient.request).not.toHaveBeenCalled();
     });
