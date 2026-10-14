@@ -8,6 +8,25 @@ import { contextFromAbortSignal } from "../context";
 
 const logger = createLogger("connectors:serving");
 
+// TODO: move model invocation onto a modular SDK client once one can do it.
+// Every call here goes through the raw `client.request(...)` seam because no
+// `@databricks/sdk-*` package covers it without breaking AppKit users:
+//
+// - `invoke`: `@databricks/sdk-modelservingquery` has `query`, but its
+//   generated unmarshal strips unknown request/response fields (model-specific
+//   JSON), `ChatMessage` is only `{ role, content }` (no tool calls), `created`
+//   is a `bigint`, and `served-model-name` becomes `servedModelName`.
+//   Needs: a pass-through `query` (raw JSON body in and out).
+// - `stream` / `streamPath`: no SDK package streams invocations.
+//   Needs: `queryStream(name, body, { signal }) -> ReadableStream<Uint8Array>`.
+// - `streamAiGateway` and the supervisor adapter's `/ai-gateway/mlflow/v1/responses`:
+//   `@databricks/sdk-aigateway` is management-only (MCP/model/provider services).
+//   Needs: a data-plane AI Gateway client for chat completions + responses,
+//   with streaming.
+//
+// When those land, also drop the legacy `apiClient.request` fallback in
+// `streamPath`, which only exists for caller-supplied legacy SDK clients.
+
 /**
  * Structural shape of a Databricks SDK client we need for the low-level
  * request call. Lets `streamPath` be reused by adapters that don't want a
