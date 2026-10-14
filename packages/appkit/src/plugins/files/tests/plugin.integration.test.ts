@@ -26,7 +26,7 @@ const { mockFilesApi, mockSdkClient } = vi.hoisted(() => {
   const mockFilesApi = {
     listDirectoryContentsIter: vi.fn(),
     downloadFile: vi.fn(),
-    upload: vi.fn(),
+    uploadFile: vi.fn(),
     createDirectory: vi.fn(),
     deleteFile: vi.fn(),
   };
@@ -104,7 +104,7 @@ describe("Files Plugin Integration", () => {
     mockFilesApi.listDirectoryContentsIter.mockReset();
     mockFilesApi.downloadFile.mockReset();
     mockSdkClient.request.mockReset().mockResolvedValue(new Response(null));
-    mockFilesApi.upload.mockReset();
+    mockFilesApi.uploadFile.mockReset();
     mockFilesApi.createDirectory.mockReset();
     mockFilesApi.deleteFile.mockReset();
   });

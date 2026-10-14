@@ -342,57 +342,39 @@ export class FilesConnector {
     client: WorkspaceClient,
     filePath: string,
     contents: ReadableStream | Buffer | string,
-    options?: { overwrite?: boolean },
+    options?: { overwrite?: boolean; signal?: AbortSignal },
   ): Promise<void> {
     const resolvedPath = this.resolvePath(filePath);
 
     return this.traced("upload", { "files.path": resolvedPath }, async () => {
-      const body = contents;
-      const overwrite = options?.overwrite ?? true;
-
-      // Workaround: The SDK's files.upload() has two bugs:
-      // 1. It ignores the `contents` field (sets body to undefined)
-      // 2. apiClient.request() checks `instanceof` against its own ReadableStream
-      //    subclass, so standard ReadableStream instances get JSON.stringified to "{}"
-      // Bypass both by calling the REST API directly with SDK-provided auth.
-      const hostValue = client.config.host;
-      if (!hostValue) {
-        throw new Error(
-          "Databricks host is not configured. Set DATABRICKS_HOST or configure client.config.host.",
+      // `uploadFile` takes only a ReadableStream body.
+      const body =
+        contents instanceof ReadableStream
+          ? contents
+          : new Blob([contents]).stream();
+      try {
+        await client.files.uploadFile(
+          {
+            filePath: resolvedPath,
+            contents: body,
+            overwrite: options?.overwrite ?? true,
+          },
+          { signal: options?.signal },
         );
-      }
-      const host = hostValue.startsWith("http")
-        ? hostValue
-        : `https://${hostValue}`;
-      const url = new URL(`/api/2.0/fs/files${resolvedPath}`, host);
-      url.searchParams.set("overwrite", String(overwrite));
-
-      const headers = new Headers({
-        "Content-Type": "application/octet-stream",
-        "User-Agent": client.apiClient.userAgent(),
-      });
-      const fetchOptions: RequestInit = { method: "PUT", headers, body };
-
-      if (body instanceof ReadableStream) {
-        fetchOptions.duplex = "half";
-      } else if (body instanceof Buffer) {
-        headers.set("Content-Length", String(body.length));
-      } else if (typeof body === "string") {
-        headers.set("Content-Length", String(Buffer.byteLength(body)));
-      }
-
-      await client.config.authenticate(headers);
-
-      const res = await fetch(url.toString(), fetchOptions);
-
-      if (!res.ok) {
-        const text = await res.text();
-        logger.error(`Upload failed (${res.status}): ${text}`);
-        const safeMessage = text.length > 200 ? `${text.slice(0, 200)}…` : text;
+      } catch (e) {
+        const wrapped = toWrapperApiError(e);
+        if (!(wrapped instanceof ApiError)) throw e;
+        logger.error(
+          `Upload failed (${wrapped.statusCode}): ${wrapped.message}`,
+        );
+        const safeMessage =
+          wrapped.message.length > 200
+            ? `${wrapped.message.slice(0, 200)}…`
+            : wrapped.message;
         throw new ApiError(
           `Upload failed: ${safeMessage}`,
           "UPLOAD_FAILED",
-          res.status,
+          wrapped.statusCode,
           undefined,
           [],
         );

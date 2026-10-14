@@ -26,7 +26,7 @@ describe("FilesPlugin upload", () => {
       responses: {
         "files.listDirectoryContentsIter": undefined,
         "files.downloadFile": undefined,
-        "files.upload": undefined,
+        "files.uploadFile": undefined,
         "files.createDirectory": undefined,
         "files.deleteFile": undefined,
       },

@@ -30,7 +30,7 @@ describe("FilesPlugin path validation", () => {
       responses: {
         "files.listDirectoryContentsIter": undefined,
         "files.downloadFile": undefined,
-        "files.upload": undefined,
+        "files.uploadFile": undefined,
         "files.createDirectory": undefined,
         "files.deleteFile": undefined,
       },
@@ -46,7 +46,7 @@ describe("FilesPlugin path validation", () => {
   // returns 400 — the status assertion alone wouldn't catch that.
   function expectNoSdkCall() {
     expect(getMock(client, "files.downloadFile")).not.toHaveBeenCalled();
-    expect(getMock(client, "files.upload")).not.toHaveBeenCalled();
+    expect(getMock(client, "files.uploadFile")).not.toHaveBeenCalled();
     expect(getMock(client, "files.deleteFile")).not.toHaveBeenCalled();
     expect(getMock(client, "files.createDirectory")).not.toHaveBeenCalled();
     expect(getMock(client, "request")).not.toHaveBeenCalled();

@@ -7,30 +7,22 @@ import { ApiError } from "../../../workspace-client";
 import { FilesConnector } from "../client";
 import { headResponse, streamFromChunks, streamFromString } from "./utils";
 
-const { mockFilesApi, mockConfig, mockClient } = vi.hoisted(() => {
+const { mockFilesApi, mockRequest, mockClient } = vi.hoisted(() => {
   const mockFilesApi = {
     listDirectoryContentsIter: vi.fn(),
     downloadFile: vi.fn(),
-    upload: vi.fn(),
+    uploadFile: vi.fn(),
     createDirectory: vi.fn(),
     deleteFile: vi.fn(),
   };
 
-  const mockConfig = {
-    host: "https://test.databricks.com",
-    authenticate: vi.fn(),
-  };
-
-  const mockApiClient = {
-    userAgent: vi.fn(() => "@databricks/appkit/9.9.9"),
-  };
+  const mockRequest = vi.fn();
   const mockClient = {
     files: mockFilesApi,
-    config: mockConfig,
-    apiClient: mockApiClient,
+    request: mockRequest,
   } as unknown as WorkspaceClient;
 
-  return { mockFilesApi, mockConfig, mockClient };
+  return { mockFilesApi, mockRequest, mockClient };
 });
 
 vi.mock("../../../workspace-client", async (importOriginal) => {
@@ -529,68 +521,54 @@ describe("FilesConnector", () => {
 
   describe("upload()", () => {
     let connector: FilesConnector;
-    let fetchSpy: ReturnType<typeof vi.fn>;
 
     beforeEach(() => {
       vi.clearAllMocks();
       connector = new FilesConnector({
         defaultVolume: "/Volumes/catalog/schema/vol",
       });
-      mockConfig.authenticate.mockResolvedValue(undefined);
-      fetchSpy = vi.fn().mockResolvedValue({ ok: true });
-      vi.stubGlobal("fetch", fetchSpy);
+      mockFilesApi.uploadFile.mockResolvedValue({});
     });
 
-    afterEach(() => {
-      vi.unstubAllGlobals();
-    });
+    async function sentBody(): Promise<string> {
+      const { contents } = mockFilesApi.uploadFile.mock.calls[0][0];
+      return new Response(contents).text();
+    }
 
-    test("handles string input", async () => {
+    test("wraps string input in a stream", async () => {
       await connector.upload(mockClient, "file.txt", "hello world");
 
-      expect(fetchSpy).toHaveBeenCalledWith(
-        expect.stringContaining(
-          "/api/2.0/fs/files/Volumes/catalog/schema/vol/file.txt",
-        ),
+      expect(mockFilesApi.uploadFile).toHaveBeenCalledWith(
         expect.objectContaining({
-          method: "PUT",
-          body: "hello world",
+          filePath: "/Volumes/catalog/schema/vol/file.txt",
+          contents: expect.any(ReadableStream),
         }),
+        { signal: undefined },
       );
+      expect(await sentBody()).toBe("hello world");
     });
 
-    test("handles Buffer input", async () => {
-      const buf = Buffer.from("buffer data");
-      await connector.upload(mockClient, "file.bin", buf);
-
-      expect(fetchSpy).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          method: "PUT",
-          body: buf,
-        }),
+    test("wraps Buffer input in a stream", async () => {
+      await connector.upload(
+        mockClient,
+        "file.bin",
+        Buffer.from("buffer data"),
       );
+
+      expect(await sentBody()).toBe("buffer data");
     });
 
-    test("handles ReadableStream input (streams directly)", async () => {
+    test("passes a ReadableStream through unchanged", async () => {
       const stream = streamFromString("stream data");
       await connector.upload(mockClient, "file.txt", stream);
 
-      expect(fetchSpy).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          method: "PUT",
-          body: expect.any(ReadableStream),
-          duplex: "half",
-        }),
-      );
+      expect(mockFilesApi.uploadFile.mock.calls[0][0].contents).toBe(stream);
     });
 
     test("defaults overwrite to true", async () => {
       await connector.upload(mockClient, "file.txt", "data");
 
-      const url = fetchSpy.mock.calls[0][0] as string;
-      expect(url).toContain("overwrite=true");
+      expect(mockFilesApi.uploadFile.mock.calls[0][0].overwrite).toBe(true);
     });
 
     test("sets overwrite=false when specified", async () => {
@@ -598,57 +576,50 @@ describe("FilesConnector", () => {
         overwrite: false,
       });
 
-      const url = fetchSpy.mock.calls[0][0] as string;
-      expect(url).toContain("overwrite=false");
+      expect(mockFilesApi.uploadFile.mock.calls[0][0].overwrite).toBe(false);
     });
 
-    test("calls config.authenticate on the headers", async () => {
-      await connector.upload(mockClient, "file.txt", "data");
+    test("forwards the abort signal", async () => {
+      const signal = new AbortController().signal;
+      await connector.upload(mockClient, "file.txt", "data", { signal });
 
-      expect(mockConfig.authenticate).toHaveBeenCalledWith(expect.any(Headers));
+      expect(mockFilesApi.uploadFile.mock.calls[0][1]).toEqual({ signal });
     });
 
-    test("stamps the AppKit User-Agent from the SDK apiClient", async () => {
-      await connector.upload(mockClient, "file.txt", "data");
+    test("re-wraps a modular SDK error as UPLOAD_FAILED with its status", async () => {
+      mockFilesApi.uploadFile.mockRejectedValue(
+        Object.assign(new Error("x".repeat(300)), {
+          httpStatusCode: 403,
+          code: "PERMISSION_DENIED",
+        }),
+      );
 
-      const init = fetchSpy.mock.calls[0][1] as RequestInit;
-      const headers = init.headers as Headers;
-      expect(headers.get("User-Agent")).toBe("@databricks/appkit/9.9.9");
-    });
-
-    test("builds URL from client.config.host", async () => {
-      await connector.upload(mockClient, "file.txt", "data");
-
-      const url = fetchSpy.mock.calls[0][0] as string;
-      expect(url).toMatch(
-        /^https:\/\/test\.databricks\.com\/api\/2\.0\/fs\/files/,
+      const error = await connector
+        .upload(mockClient, "file.txt", "data")
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(ApiError);
+      expect((error as ApiError).errorCode).toBe("UPLOAD_FAILED");
+      expect((error as ApiError).statusCode).toBe(403);
+      expect((error as ApiError).message).toBe(
+        `Upload failed: ${"x".repeat(200)}…`,
       );
     });
 
-    test("throws ApiError on non-ok response", async () => {
-      fetchSpy.mockResolvedValue({
-        ok: false,
-        status: 403,
-        text: () => Promise.resolve("Forbidden"),
-      });
+    test("rethrows non-API errors unchanged", async () => {
+      const boom = new Error("network down");
+      mockFilesApi.uploadFile.mockRejectedValue(boom);
 
       await expect(
         connector.upload(mockClient, "file.txt", "data"),
-      ).rejects.toThrow("Upload failed: Forbidden");
-
-      try {
-        await connector.upload(mockClient, "file.txt", "data");
-      } catch (error) {
-        expect(error).toBeInstanceOf(ApiError);
-        expect((error as any).statusCode).toBe(403);
-      }
+      ).rejects.toBe(boom);
     });
 
     test("resolves absolute paths directly", async () => {
       await connector.upload(mockClient, "/Volumes/other/vol/file.txt", "data");
 
-      const url = fetchSpy.mock.calls[0][0] as string;
-      expect(url).toContain("/api/2.0/fs/files/Volumes/other/vol/file.txt");
+      expect(mockFilesApi.uploadFile.mock.calls[0][0].filePath).toBe(
+        "/Volumes/other/vol/file.txt",
+      );
     });
   });
 
