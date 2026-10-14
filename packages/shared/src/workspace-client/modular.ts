@@ -191,6 +191,10 @@ export function buildStatementExecutionClient(
   return new StatementExecutionClient(mapToClientOptions(opts));
 }
 
+// The modular SDK's error class, for tests that must throw what typed calls
+// really throw (status in `httpStatusCode`, not the wrapper's `statusCode`).
+export { ApiError as ModularApiError } from "@databricks/sdk-core/apierror";
+
 // ── Client type re-exports (for the facade accessor types) ───────────────
 export type { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
 export type { WarehousesClient } from "@databricks/sdk-warehouses/v1";

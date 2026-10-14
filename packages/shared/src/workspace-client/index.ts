@@ -5,6 +5,7 @@
  * behind a stable facade.
  */
 export { ApiError } from "./errors";
+export { ModularApiError } from "./modular";
 export { createWorkspaceClient } from "./factory";
 export type {
   CancellationToken,
