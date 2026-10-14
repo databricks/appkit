@@ -58,6 +58,37 @@ function normalizeHost(host: string | undefined): string | undefined {
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
 
+// Same margin as the legacy SDK: refresh 40s early, since Azure Databricks
+// rejects tokens that expire in 30s or less.
+const TOKEN_REFRESH_MARGIN_MS = 40_000;
+
+/**
+ * Cache a token until shortly before it expires. The modular `newM2mCredentials`
+ * caches only the token endpoint and mints a fresh OAuth token on EVERY request;
+ * the legacy SDK reused it until expiry. Concurrent callers share one in-flight
+ * fetch. Like the legacy SDK, a token without an expiry is reused indefinitely.
+ */
+function withTokenCache(credentials: TokenCredentials): TokenCredentials {
+  let current: Token | undefined;
+  let inflight: Promise<Token> | undefined;
+  const isFresh = (t: Token) =>
+    t.expiry === undefined ||
+    t.expiry.getTime() - TOKEN_REFRESH_MARGIN_MS > Date.now();
+  return newTokenCredentials(
+    credentials.name(),
+    tokenProviderFn(async () => {
+      if (current && isFresh(current)) return current;
+      inflight ??= credentials
+        .token()
+        .then((t) => (current = t))
+        .finally(() => {
+          inflight = undefined;
+        });
+      return inflight;
+    }),
+  );
+}
+
 /**
  * The SDK default chain (profile / `~/.databrickscfg`), with the token cache the
  * chain lacks: its CLI strategy shells out to `databricks auth token` and its
@@ -329,44 +360,13 @@ async function sendWithRetry(
   }
 }
 
-// Same margin as the legacy SDK: refresh 40s early, since Azure Databricks
-// rejects tokens that expire in 30s or less.
-const TOKEN_REFRESH_MARGIN_MS = 40_000;
-
-/**
- * Cache a token until shortly before it expires. The modular `newM2mCredentials`
- * caches only the token endpoint and mints a fresh OAuth token on EVERY request;
- * the legacy SDK reused it until expiry. Concurrent callers share one in-flight
- * fetch. Like the legacy SDK, a token without an expiry is reused indefinitely.
- */
-function withTokenCache(credentials: TokenCredentials): TokenCredentials {
-  let current: Token | undefined;
-  let inflight: Promise<Token> | undefined;
-  const isFresh = (t: Token) =>
-    t.expiry === undefined ||
-    t.expiry.getTime() - TOKEN_REFRESH_MARGIN_MS > Date.now();
-  return newTokenCredentials(
-    credentials.name(),
-    tokenProviderFn(async () => {
-      if (current && isFresh(current)) return current;
-      inflight ??= credentials
-        .token()
-        .then((t) => (current = t))
-        .finally(() => {
-          inflight = undefined;
-        });
-      return inflight;
-    }),
-  );
-}
-
 /** A raw REST call against the workspace host. */
 export interface WorkspaceRequest {
   method: string;
   /** Path on the workspace host, e.g. `/api/2.0/preview/scim/v2/Me`. */
   path: string;
   query?: Record<string, string>;
-  headers?: Record<string, string>;
+  headers?: Headers;
   body?: HttpRequest["body"];
   signal?: AbortSignal;
 }

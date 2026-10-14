@@ -63,8 +63,8 @@ describe("TelemetryReporter", () => {
       path: "/telemetry-ext",
       method: "POST",
       query: { o: "1234567890" },
-      headers: { "Content-Type": "application/json" },
     });
+    expect(reqArg.headers.get("Content-Type")).toBe("application/json");
     expect(lastProtoLog(opts.__spy).entry.appkit_log).toMatchObject({
       event_name: "APP_STARTUP",
       app_id: "app-uuid-1",

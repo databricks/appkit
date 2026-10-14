@@ -65,14 +65,16 @@ export interface WorkspaceClient extends WorkspaceAuth {
   /**
    * Legacy SDK `Config`. Prefer `getHost()` / `authenticate(headers)` (modular,
    * inherited from `WorkspaceAuth`); kept for structural `WorkspaceClientLike`
-   * callers (supervisor adapter) until they migrate.
+   * callers (supervisor adapter) and the files upload (moves to the modular
+   * `files.uploadFile` with the files migration) until they migrate.
    */
   readonly config: LegacyWorkspaceClient["config"];
 
   /**
    * Legacy low-level HTTP transport. Prefer `request(...)` (modular, inherited
    * from `WorkspaceAuth`); still used by serving SSE streaming, vector search,
-   * and the agents adapters, which take a structural `apiClient` shape.
+   * the files upload User-Agent, and the agents adapters, which take a
+   * structural `apiClient` shape.
    */
   readonly apiClient: LegacyWorkspaceClient["apiClient"];
 

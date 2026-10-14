@@ -178,7 +178,7 @@ export class TelemetryReporter {
       path: "/telemetry-ext",
       method: "POST",
       query: { o: workspaceId },
-      headers: { "Content-Type": "application/json" },
+      headers: new Headers({ "Content-Type": "application/json" }),
       body: JSON.stringify(buildAppkitPayload(logs)),
     });
     await response.body?.cancel();

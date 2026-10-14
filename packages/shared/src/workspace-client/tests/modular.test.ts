@@ -455,7 +455,7 @@ describe("buildWorkspaceAuth (auth + raw-request seam)", () => {
       method: "GET",
       path: "/api/2.0/sql/warehouses",
       query: { skip_cannot_use: "true" },
-      headers: { "X-Extra": "1" },
+      headers: new Headers({ "X-Extra": "1" }),
     });
     expect(await res.json()).toEqual({ warehouses: [] });
     expect(sent[0].url).toBe(
