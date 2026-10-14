@@ -71,8 +71,7 @@ describe("Serving Connector", () => {
       expect(queryArg.temperature).toBe(0.7);
     });
 
-    // The legacy SDK's query() copied only its known request fields.
-    test("sends only the fields the legacy query sent", async () => {
+    test("passes through fields the legacy query dropped", async () => {
       const client = createMockClient();
       client.request.mockResolvedValue(jsonResponse({}));
 
@@ -82,7 +81,11 @@ describe("Serving Connector", () => {
         top_p: 0.9,
       });
 
-      expect(sentBody(client)).toEqual({ messages: [], max_tokens: 5 });
+      expect(sentBody(client)).toEqual({
+        messages: [],
+        max_tokens: 5,
+        top_p: 0.9,
+      });
     });
 
     // Responses are model-specific: nothing may be stripped.

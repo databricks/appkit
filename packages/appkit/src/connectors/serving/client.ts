@@ -25,26 +25,6 @@ export interface ApiClientLike {
   request?(req: WorkspaceRequest): Promise<Response>;
 }
 
-// The legacy SDK's `servingEndpoints.query` copied only these fields into the
-// request body and dropped the rest; kept so invocations send the same payload.
-const QUERY_FIELDS = [
-  "client_request_id",
-  "dataframe_records",
-  "dataframe_split",
-  "extra_params",
-  "input",
-  "inputs",
-  "instances",
-  "max_tokens",
-  "messages",
-  "n",
-  "prompt",
-  "stop",
-  "stream",
-  "temperature",
-  "usage_context",
-];
-
 /**
  * Transport shim shared by the agent adapters: given a request body, returns
  * the raw SSE byte stream from a serving / AI-gateway endpoint. Injected at
@@ -75,11 +55,6 @@ export async function invoke(
 
   logger.debug("Invoking endpoint %s", endpointName);
 
-  const payload: Record<string, unknown> = {};
-  for (const key of QUERY_FIELDS) {
-    if (Object.hasOwn(cleanBody, key)) payload[key] = cleanBody[key];
-  }
-
   const response = await client.request({
     method: "POST",
     path: `/serving-endpoints/${endpointName}/invocations`,
@@ -87,7 +62,7 @@ export async function invoke(
       Accept: "application/json",
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(cleanBody),
   });
 
   const text = await response.text();
