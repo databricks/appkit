@@ -4,4 +4,9 @@
  * plugin never imports it.
  */
 export { createDbContext, type DbContext } from "./context";
+export {
+  type IntrospectOptions,
+  type IntrospectReport,
+  runIntrospect,
+} from "./introspect";
 export { type MigrateOptions, type MigrateReport, runMigrate } from "./migrate";

@@ -36,4 +36,30 @@ declare module "@databricks/appkit/database-tooling" {
     ctx: DbContext,
     options: { interactive: boolean },
   ): Promise<MigrateReport>;
+
+  export interface Skip {
+    readonly table: string;
+    readonly column?: string;
+    readonly reason: string;
+  }
+
+  export interface IntrospectReport {
+    readonly branch: string;
+    readonly schemaName: string;
+    readonly tables: readonly string[];
+    readonly schemaFile: string;
+    readonly backupFile: string | null;
+    readonly skipped: readonly Skip[];
+    readonly warnings: readonly string[];
+    readonly approximated: readonly string[];
+    readonly migration: GeneratedMigration | null;
+    readonly recordedApplied: boolean;
+    readonly notRecorded?: string;
+    readonly typesFile: string;
+  }
+
+  export function runIntrospect(
+    ctx: DbContext,
+    options: { interactive: boolean; schemaName?: string },
+  ): Promise<IntrospectReport>;
 }

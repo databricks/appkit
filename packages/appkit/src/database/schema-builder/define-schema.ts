@@ -344,7 +344,7 @@ export function assertFinalizedSchema(value: unknown): asserts value is Schema {
  * the deployed app's service principal can create and own a schema of its
  * own, but has no CREATE on `public`.
  */
-const DEFAULT_SCHEMA_NAME = "app";
+export const DEFAULT_SCHEMA_NAME = "app";
 
 /**
  * Compile one declared schema. The returned type keeps the table names the
