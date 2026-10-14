@@ -1,5 +1,9 @@
 import type { BasePluginConfig, IAppRequest } from "shared";
 
+import type {
+  FilesDirectoryEntry as WorkspaceFilesDirectoryEntry,
+  FilesDownloadResponse as WorkspaceFilesDownloadResponse,
+} from "../../workspace-client";
 import type { FilePolicy } from "./policy";
 
 /**
@@ -158,7 +162,24 @@ export interface IFilesConfig extends BasePluginConfig {
   auth?: "service-principal" | "on-behalf-of-user";
 }
 
-/** A single entry returned when listing a directory (Files API wire shape). */
+/**
+ * A single directory entry in the modular SDK shape (camelCase). `list()` and
+ * the `/list` route still return the legacy {@link DirectoryEntry}; they move to
+ * this type in a future release.
+ */
+export type FilesDirectoryEntry = WorkspaceFilesDirectoryEntry;
+
+/**
+ * Download response in the modular SDK shape (`contentLength` is a `bigint`).
+ * `download()` still returns the legacy {@link DownloadResponse}; it moves to this
+ * type in a future release.
+ */
+export type FilesDownloadResponse = WorkspaceFilesDownloadResponse;
+
+/**
+ * A single entry returned when listing a directory (Files API wire shape).
+ * @deprecated Legacy snake_case shape; use {@link FilesDirectoryEntry}.
+ */
 export interface DirectoryEntry {
   /** The length of the file in bytes. Omitted for directories. */
   file_size?: number;
@@ -172,7 +193,10 @@ export interface DirectoryEntry {
   path?: string;
 }
 
-/** Response object for file downloads containing a readable stream. */
+/**
+ * Response object for file downloads containing a readable stream.
+ * @deprecated Legacy header-keyed shape; use {@link FilesDownloadResponse}.
+ */
 export interface DownloadResponse {
   "content-length"?: number;
   "content-type"?: string;

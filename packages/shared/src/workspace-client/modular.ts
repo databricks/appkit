@@ -569,6 +569,10 @@ export function buildFilesClient(opts: WorkspaceClientOptions): FilesClient {
 
 // ── Client type re-exports (for the facade accessor types) ───────────────
 export type { FilesClient } from "@databricks/sdk-files/v2";
+export type {
+  DirectoryEntry as FilesDirectoryEntry,
+  DownloadFileResponse as FilesDownloadResponse,
+} from "@databricks/sdk-files/v2";
 export type { GenieClient } from "@databricks/sdk-genie/v1";
 export type { JobsClient } from "@databricks/sdk-jobs/v2";
 export type { ScimClient } from "@databricks/sdk-scim/v1";

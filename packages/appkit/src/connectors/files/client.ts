@@ -233,6 +233,9 @@ export class FilesConnector {
     }
 
     return this.traced("list", { "files.path": resolvedPath }, async () => {
+      // TODO: return the SDK's camelCase entries as-is once appkit-ui's file
+      // browser and the template's FilesPage read camelCase. Changing the
+      // `/list` JSON is breaking for app code reading `is_directory` etc.
       const entries: DirectoryEntry[] = [];
       for await (const entry of client.files.listDirectoryContentsIter({
         directoryPath: resolvedPath,
@@ -315,6 +318,8 @@ export class FilesConnector {
     return this.traced("metadata", { "files.path": resolvedPath }, async () => {
       // The modular `getFileMetadata` parses the empty HEAD body and drops the
       // response headers that carry the metadata, so read them off a raw HEAD.
+      // TODO: switch to `client.files.getFileMetadata` once sdk-files builds the
+      // response from the HEAD headers (as `downloadFile` already does).
       const res = await client.request({
         method: "HEAD",
         path: `/api/2.0/fs/files${resolvedPath}`,
