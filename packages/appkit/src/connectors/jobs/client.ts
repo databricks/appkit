@@ -24,8 +24,10 @@ import type {
   JobBaseRun,
   JobDetails,
   JobRun,
+  JobRunNowResponse,
   JobRunOutput,
   JobsConnectorConfig,
+  JobSubmitRunResponse,
   Numeric,
 } from "./types";
 
@@ -80,7 +82,7 @@ export class JobsConnector {
     workspaceClient: WorkspaceClient,
     request: SubmitRunRequest,
     signal?: AbortSignal,
-  ): Promise<{ runId: number }> {
+  ): Promise<JobSubmitRunResponse> {
     return this._callApi("submit", async () => {
       const waiter = await workspaceClient.jobs.submitRun(request, { signal });
       return { runId: Number(waiter.runId) };
@@ -91,7 +93,7 @@ export class JobsConnector {
     workspaceClient: WorkspaceClient,
     request: RunNowRequest,
     signal?: AbortSignal,
-  ): Promise<{ runId: number }> {
+  ): Promise<JobRunNowResponse> {
     return this._callApi("runNow", async () => {
       const waiter = await workspaceClient.jobs.runNow(request, { signal });
       return { runId: Number(waiter.runId) };

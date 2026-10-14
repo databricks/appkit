@@ -12,6 +12,7 @@ import {
   type JobBaseRun,
   type JobDetails,
   type JobRun,
+  type JobRunNowResponse,
   type JobRunOutput,
   JobsConnector,
 } from "../../connectors/jobs";
@@ -287,7 +288,7 @@ class JobsPlugin extends Plugin {
     return {
       runNow: async (
         params?: Record<string, unknown>,
-      ): Promise<ExecutionResult<{ runId: number }>> => {
+      ): Promise<ExecutionResult<JobRunNowResponse>> => {
         const sdkFields = self._validateAndMap(jobKey, params);
 
         const result = await self.execute(

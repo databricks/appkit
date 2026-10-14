@@ -5,6 +5,7 @@ import type {
   JobBaseRun,
   JobDetails,
   JobRun,
+  JobRunNowResponse,
   JobRunOutput,
 } from "../../connectors/jobs";
 import type { ExecutionResult } from "../../plugin";
@@ -40,7 +41,7 @@ export interface JobAPI {
   /** Trigger the configured job with validated params. Returns the run response. */
   runNow(
     params?: Record<string, unknown>,
-  ): Promise<ExecutionResult<{ runId: number }>>;
+  ): Promise<ExecutionResult<JobRunNowResponse>>;
   /** Trigger and poll until completion, yielding status updates. */
   runAndWait(
     params?: Record<string, unknown>,

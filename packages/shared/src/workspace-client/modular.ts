@@ -595,7 +595,9 @@ export type {
   GetRunResponse,
   ListRunsRequest,
   RunNowRequest,
+  RunNowResponse,
   SubmitRunRequest,
+  SubmitRunResponse,
 } from "@databricks/sdk-jobs/v2";
 export type {
   EndpointHealth,

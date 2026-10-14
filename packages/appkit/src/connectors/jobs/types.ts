@@ -5,6 +5,8 @@ import type {
   GetJobResponse,
   GetRunOutputResponse,
   GetRunResponse,
+  RunNowResponse,
+  SubmitRunResponse,
 } from "../../workspace-client";
 
 export interface JobsConnectorConfig {
@@ -27,3 +29,5 @@ export type JobRun = Numeric<GetRunResponse>;
 export type JobBaseRun = Numeric<BaseRun>;
 export type JobRunOutput = Numeric<GetRunOutputResponse>;
 export type JobDetails = Numeric<GetJobResponse>;
+export type JobRunNowResponse = Numeric<RunNowResponse>;
+export type JobSubmitRunResponse = Numeric<SubmitRunResponse>;
