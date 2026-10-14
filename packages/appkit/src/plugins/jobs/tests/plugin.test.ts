@@ -281,7 +281,7 @@ describe("JobsPlugin", () => {
       const handle = exported("etl");
 
       await handle.runNow({
-        notebook_params: { key: "value" },
+        notebookParams: { key: "value" },
       });
 
       expect(jobsApi.runNow).toHaveBeenCalledWith(
@@ -478,9 +478,7 @@ describe("JobsPlugin", () => {
       const handle = plugin.exports()("etl");
 
       const gen = handle.runAndWait();
-      await expect(gen.next()).rejects.toThrow(
-        "runNow did not return a run_id",
-      );
+      await expect(gen.next()).rejects.toThrow("runNow did not return a runId");
     });
   });
 
@@ -588,7 +586,7 @@ describe("JobsPlugin", () => {
       const result = await handle.runNow();
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.data.run_id).toBe(42);
+        expect(result.data.runId).toBe(42);
       }
     });
   });
@@ -652,7 +650,7 @@ describe("JobsPlugin", () => {
 
       const result = await handle.getRun(42);
       expect(result.ok).toBe(true);
-      if (result.ok) expect(result.data.run_id).toBe(42);
+      if (result.ok) expect(result.data.runId).toBe(42);
     });
 
     test("connector forwards the abort signal as CallOptions", async () => {
@@ -664,7 +662,7 @@ describe("JobsPlugin", () => {
       const controller = new AbortController();
       await connector.getJob(
         mockClient as never,
-        { job_id: 123 },
+        { jobId: 123n },
         controller.signal,
       );
 
@@ -837,27 +835,27 @@ describe("defaults", () => {
 describe("mapParams", () => {
   test("notebook maps to notebook_params with string coercion", () => {
     const result = mapParams("notebook", { key: "value", num: 42 });
-    expect(result).toEqual({ notebook_params: { key: "value", num: "42" } });
+    expect(result).toEqual({ notebookParams: { key: "value", num: "42" } });
   });
 
   test("python_wheel maps to python_named_params", () => {
     const result = mapParams("python_wheel", { arg1: "a", arg2: "b" });
-    expect(result).toEqual({ python_named_params: { arg1: "a", arg2: "b" } });
+    expect(result).toEqual({ pythonNamedParams: { arg1: "a", arg2: "b" } });
   });
 
   test("python_script maps to python_params array", () => {
     const result = mapParams("python_script", { args: ["a", "b", "c"] });
-    expect(result).toEqual({ python_params: ["a", "b", "c"] });
+    expect(result).toEqual({ pythonParams: ["a", "b", "c"] });
   });
 
   test("spark_jar maps to jar_params array", () => {
     const result = mapParams("spark_jar", { args: ["x", "y"] });
-    expect(result).toEqual({ jar_params: ["x", "y"] });
+    expect(result).toEqual({ jarParams: ["x", "y"] });
   });
 
   test("sql maps to sql_params Record<string, string>", () => {
     const result = mapParams("sql", { p1: "v1", p2: 42 });
-    expect(result).toEqual({ sql_params: { p1: "v1", p2: "42" } });
+    expect(result).toEqual({ sqlParams: { p1: "v1", p2: "42" } });
   });
 
   test("dbt with empty params returns empty object", () => {
@@ -878,7 +876,7 @@ describe("mapParams", () => {
       nil: "null",
     });
     expect(result).toEqual({
-      notebook_params: { bool: "true", num: "123", nil: "null" },
+      notebookParams: { bool: "true", num: "123", nil: "null" },
     });
   });
 });
@@ -1197,11 +1195,11 @@ describe("injectRoutes", () => {
 
       await handler(mockReq, mockRes);
 
-      // The modular SDK's camelCase/bigint models go out in the legacy wire shape.
+      // bigint int64s go out as JSON numbers.
       expect(mockRes.json).toHaveBeenCalledWith({
         runs: [
-          { run_id: 1, state: { life_cycle_state: "TERMINATED" } },
-          { run_id: 2, state: { life_cycle_state: "RUNNING" } },
+          { runId: 1, state: { lifeCycleState: "TERMINATED" } },
+          { runId: 2, state: { lifeCycleState: "RUNNING" } },
         ],
       });
     });
@@ -1279,9 +1277,9 @@ describe("injectRoutes", () => {
       await handler(mockReq, mockRes);
 
       expect(mockRes.json).toHaveBeenCalledWith({
-        run_id: 42,
-        job_id: 123,
-        state: { life_cycle_state: "TERMINATED" },
+        runId: 42,
+        jobId: 123,
+        state: { lifeCycleState: "TERMINATED" },
       });
     });
 
@@ -1352,7 +1350,7 @@ describe("injectRoutes", () => {
       expect(mockRes.status).toHaveBeenCalledWith(404);
       // Response body must not leak the run object from the other job.
       expect(mockRes.json).not.toHaveBeenCalledWith(
-        expect.objectContaining({ job_id: 456 }),
+        expect.objectContaining({ jobId: 456 }),
       );
     });
   });
@@ -1397,7 +1395,7 @@ describe("injectRoutes", () => {
 
       expect(mockRes.json).toHaveBeenCalledWith({
         status: "TERMINATED",
-        run: { run_id: 42, state: { life_cycle_state: "TERMINATED" } },
+        run: { runId: 42, state: { lifeCycleState: "TERMINATED" } },
       });
     });
 

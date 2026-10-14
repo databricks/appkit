@@ -1,2 +1,8 @@
 export { JobsConnector } from "./client";
-export type { JobsConnectorConfig } from "./types";
+export type {
+  JobBaseRun,
+  JobDetails,
+  JobRun,
+  JobRunOutput,
+  JobsConnectorConfig,
+} from "./types";

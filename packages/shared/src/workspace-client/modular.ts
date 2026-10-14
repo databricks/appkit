@@ -585,8 +585,14 @@ export type {
   GenieMessage,
 } from "@databricks/sdk-genie/v1";
 export type {
+  BaseRun,
+  CancelRunRequest,
   GetJobRequest,
+  GetJobResponse,
+  GetRunOutputRequest,
+  GetRunOutputResponse,
   GetRunRequest,
+  GetRunResponse,
   ListRunsRequest,
   RunNowRequest,
   SubmitRunRequest,

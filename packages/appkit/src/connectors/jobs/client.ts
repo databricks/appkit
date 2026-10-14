@@ -9,93 +9,40 @@ import {
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
+import { isPlainObject } from "../../utils/is-plain-object";
 import type {
+  CancelRunRequest,
   GetJobRequest,
+  GetRunOutputRequest,
   GetRunRequest,
-  jobs,
   ListRunsRequest,
   RunNowRequest,
   SubmitRunRequest,
   WorkspaceClient,
 } from "../../workspace-client";
-import type { JobsConnectorConfig } from "./types";
+import type {
+  JobBaseRun,
+  JobDetails,
+  JobRun,
+  JobRunOutput,
+  JobsConnectorConfig,
+  Numeric,
+} from "./types";
 
 const logger = createLogger("connectors:jobs");
 
 /**
- * `Record<string, string>` fields of the Jobs model. Their keys are user data
- * (notebook params, tags, Spark conf), so they are copied verbatim instead of
- * re-cased.
+ * The modular SDK types int64s as `bigint`, which `JSON.stringify` rejects, and
+ * every jobs response ends up in HTTP JSON, SSE or the cache. `Number()` loses
+ * precision past 2^53, as the legacy SDK's plain `JSON.parse` did.
  */
-const MAP_FIELDS = new Set([
-  "artifactsHeaders",
-  "baseParameters",
-  "customTags",
-  "filters",
-  "jobParameters",
-  "namedParameters",
-  "notebookBaseParameters",
-  "notebookParams",
-  "parameters",
-  "pipelineTaskParameters",
-  "pythonNamedParams",
-  "sparkConf",
-  "sparkEnvVars",
-  "sqlParams",
-  "tags",
-  "variables",
-  "violations",
-]);
-
-/** The one model field whose camelCase name doesn't round-trip to its wire key. */
-const WIRE_KEY_OVERRIDES: Record<string, string> = {
-  pipelineTaskParameters: "parameters",
-};
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-/**
- * Modular model → the legacy wire shape the plugin's public API (HTTP JSON, SSE,
- * cache) has always exposed: snake_case keys and `number` int64s. `bigint` would
- * make `JSON.stringify` throw. `Number()` loses precision past 2^53, exactly as
- * the legacy SDK's plain `JSON.parse` did.
- */
-function toWire(value: unknown, verbatimKeys = false): unknown {
-  if (typeof value === "bigint") return Number(value);
-  if (Array.isArray(value)) return value.map((v) => toWire(v));
-  if (!isPlainObject(value)) return value;
+function toNumbers<T>(value: T): Numeric<T> {
+  if (typeof value === "bigint") return Number(value) as Numeric<T>;
+  if (Array.isArray(value)) return value.map(toNumbers) as Numeric<T>;
+  if (!isPlainObject(value)) return value as Numeric<T>;
   return Object.fromEntries(
-    Object.entries(value).map(([key, v]) =>
-      verbatimKeys
-        ? [key, v]
-        : [
-            WIRE_KEY_OVERRIDES[key] ??
-              key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`),
-            toWire(v, MAP_FIELDS.has(key)),
-          ],
-    ),
-  );
-}
-
-/**
- * Legacy snake_case request → modular camelCase request. int64 fields (`job_id`,
- * `run_id`) still need an explicit `BigInt()` at the call site: the SDK's
- * marshal schemas reject a `number` there.
- */
-function fromWire(value: unknown, verbatimKeys = false): unknown {
-  if (Array.isArray(value)) return value.map((v) => fromWire(v));
-  if (!isPlainObject(value)) return value;
-  return Object.fromEntries(
-    Object.entries(value).map(([key, v]) => {
-      if (verbatimKeys) return [key, v];
-      const camel = key.replace(/_([a-z0-9])/g, (_, c: string) =>
-        c.toUpperCase(),
-      );
-      return [camel, fromWire(v, MAP_FIELDS.has(camel))];
-    }),
-  );
+    Object.entries(value).map(([k, v]) => [k, toNumbers(v)]),
+  ) as Numeric<T>;
 }
 
 export class JobsConnector {
@@ -131,100 +78,69 @@ export class JobsConnector {
 
   async submitRun(
     workspaceClient: WorkspaceClient,
-    request: jobs.SubmitRun,
+    request: SubmitRunRequest,
     signal?: AbortSignal,
-  ): Promise<jobs.SubmitRunResponse> {
+  ): Promise<{ runId: number }> {
     return this._callApi("submit", async () => {
-      const waiter = await workspaceClient.jobs.submitRun(
-        fromWire(request) as SubmitRunRequest,
-        { signal },
-      );
-      return { run_id: Number(waiter.runId) };
+      const waiter = await workspaceClient.jobs.submitRun(request, { signal });
+      return { runId: Number(waiter.runId) };
     });
   }
 
   async runNow(
     workspaceClient: WorkspaceClient,
-    request: jobs.RunNow,
+    request: RunNowRequest,
     signal?: AbortSignal,
-  ): Promise<jobs.RunNowResponse> {
+  ): Promise<{ runId: number }> {
     return this._callApi("runNow", async () => {
-      const waiter = await workspaceClient.jobs.runNow(
-        {
-          ...(fromWire(request) as RunNowRequest),
-          jobId: BigInt(request.job_id),
-        },
-        { signal },
-      );
-      // The waiter only exposes runId; the API documents number_in_job as
-      // "set to the same value as run_id".
-      const runId = Number(waiter.runId);
-      return { run_id: runId, number_in_job: runId };
+      const waiter = await workspaceClient.jobs.runNow(request, { signal });
+      return { runId: Number(waiter.runId) };
     });
   }
 
   async getRun(
     workspaceClient: WorkspaceClient,
-    request: jobs.GetRunRequest,
+    request: GetRunRequest,
     signal?: AbortSignal,
-  ): Promise<jobs.Run> {
-    return this._callApi("getRun", async () => {
-      const run = await workspaceClient.jobs.getRun(
-        {
-          ...(fromWire(request) as GetRunRequest),
-          runId: BigInt(request.run_id),
-        },
-        { signal },
-      );
-      return toWire(run) as jobs.Run;
-    });
+  ): Promise<JobRun> {
+    return this._callApi("getRun", async () =>
+      toNumbers(await workspaceClient.jobs.getRun(request, { signal })),
+    );
   }
 
   async getRunOutput(
     workspaceClient: WorkspaceClient,
-    request: jobs.GetRunOutputRequest,
+    request: GetRunOutputRequest,
     signal?: AbortSignal,
-  ): Promise<jobs.RunOutput> {
-    return this._callApi("getRunOutput", async () => {
-      const output = await workspaceClient.jobs.getRunOutput(
-        { runId: BigInt(request.run_id) },
-        { signal },
-      );
-      return toWire(output) as jobs.RunOutput;
-    });
+  ): Promise<JobRunOutput> {
+    return this._callApi("getRunOutput", async () =>
+      toNumbers(await workspaceClient.jobs.getRunOutput(request, { signal })),
+    );
   }
 
   async cancelRun(
     workspaceClient: WorkspaceClient,
-    request: jobs.CancelRun,
+    request: CancelRunRequest,
     signal?: AbortSignal,
   ): Promise<void> {
     await this._callApi("cancelRun", async () => {
-      await workspaceClient.jobs.cancelRun(
-        { runId: BigInt(request.run_id) },
-        { signal },
-      );
+      await workspaceClient.jobs.cancelRun(request, { signal });
     });
   }
 
   async listRuns(
     workspaceClient: WorkspaceClient,
-    request: jobs.ListRunsRequest,
+    request: ListRunsRequest,
     signal?: AbortSignal,
-  ): Promise<jobs.BaseRun[]> {
+  ): Promise<JobBaseRun[]> {
     return this._callApi("listRuns", async () => {
-      const runs: jobs.BaseRun[] = [];
+      const runs: JobBaseRun[] = [];
       const limit = Math.max(1, Math.min(request.limit ?? 100, 100));
       for await (const run of workspaceClient.jobs.listRunsIter(
-        {
-          ...(fromWire(request) as ListRunsRequest),
-          jobId:
-            request.job_id === undefined ? undefined : BigInt(request.job_id),
-          limit,
-        },
+        { ...request, limit },
         { signal },
       )) {
-        runs.push(toWire(run) as jobs.BaseRun);
+        runs.push(toNumbers(run));
         if (runs.length >= limit) break;
       }
       return runs;
@@ -233,19 +149,12 @@ export class JobsConnector {
 
   async getJob(
     workspaceClient: WorkspaceClient,
-    request: jobs.GetJobRequest,
+    request: GetJobRequest,
     signal?: AbortSignal,
-  ): Promise<jobs.Job> {
-    return this._callApi("getJob", async () => {
-      const job = await workspaceClient.jobs.getJob(
-        {
-          ...(fromWire(request) as GetJobRequest),
-          jobId: BigInt(request.job_id),
-        },
-        { signal },
-      );
-      return toWire(job) as jobs.Job;
-    });
+  ): Promise<JobDetails> {
+    return this._callApi("getJob", async () =>
+      toNumbers(await workspaceClient.jobs.getJob(request, { signal })),
+    );
   }
 
   private async _callApi<T>(

@@ -8,7 +8,7 @@
  * service means changing its accessor's type here, its getter in `client.ts`,
  * and the connector that consumes it.
  *
- * Type-namespace re-exports (`files`, `jobs`, `serving`, `sql`) point at
+ * Type-namespace re-exports (`files`, `serving`, `sql`) point at
  * `@databricks/sdk-experimental` so existing AppKit call-site shapes stay
  * stable. They move to the modular `@databricks/sdk-<service>` model exports
  * as each service migrates.
@@ -31,10 +31,7 @@ import type {
 // as `sql.EndpointInfo[]`. It is not on the modular `listWarehouses` because
 // that request has no `skip_cannot_use` filter, so it could pick a warehouse
 // the caller can't use. Statement + warehouse service types come from `./modular`.
-// `jobs` stays as the wire-shape (snake_case, `number` IDs) type of the jobs
-// plugin's public API; appkit's jobs connector translates the modular client's
-// camelCase/`bigint` models back to it.
-export type { files, jobs, serving, sql } from "@databricks/sdk-experimental";
+export type { files, serving, sql } from "@databricks/sdk-experimental";
 // Modular SDK client + model types (warehouses, statementExecution, genie, jobs).
 export type * from "./modular";
 

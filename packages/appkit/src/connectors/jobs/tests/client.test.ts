@@ -2,59 +2,38 @@ import { describe, expect, test, vi } from "vitest";
 
 import { JobsConnector } from "../client";
 
-// The modular Jobs SDK returns camelCase models with `bigint` int64s, which
-// `JSON.stringify` rejects. The connector must hand the plugin the legacy wire
-// shape (snake_case, `number`) its public HTTP/SSE/cache surface has always had.
-describe("JobsConnector wire-shape translation", () => {
-  test("getRun returns a JSON-serializable snake_case run with numeric IDs", async () => {
+// The modular Jobs SDK types int64s as `bigint`, which `JSON.stringify` rejects.
+// Every connector response ends up in HTTP JSON, SSE or the cache.
+describe("JobsConnector", () => {
+  test("getRun returns a JSON-serializable run with numeric int64s", async () => {
     const getRun = vi.fn().mockResolvedValue({
       runId: 9007199254740991n,
       jobId: 123n,
       startTime: 1700000000000n,
       state: { lifeCycleState: "TERMINATED" },
-      overridingParameters: { notebookParams: { myParam: "x" } },
-      tasks: [
-        {
-          taskKey: "t1",
-          pipelineTask: { pipelineTaskParameters: { fullRefresh: "true" } },
-        },
-      ],
+      tasks: [{ taskKey: "t1", attemptNumber: 0n }],
     });
     const client = { jobs: { getRun } } as never;
 
-    const run = await new JobsConnector({}).getRun(client, { run_id: 42 });
+    const run = await new JobsConnector({}).getRun(client, { runId: 42n });
 
     expect(getRun).toHaveBeenCalledWith({ runId: 42n }, { signal: undefined });
     expect(JSON.parse(JSON.stringify(run))).toEqual({
-      run_id: 9007199254740991,
-      job_id: 123,
-      start_time: 1700000000000,
-      state: { life_cycle_state: "TERMINATED" },
-      // Map keys are user data: copied verbatim, not re-cased.
-      overriding_parameters: { notebook_params: { myParam: "x" } },
-      tasks: [
-        {
-          task_key: "t1",
-          pipeline_task: { parameters: { fullRefresh: "true" } },
-        },
-      ],
+      runId: 9007199254740991,
+      jobId: 123,
+      startTime: 1700000000000,
+      state: { lifeCycleState: "TERMINATED" },
+      tasks: [{ taskKey: "t1", attemptNumber: 0 }],
     });
   });
 
-  test("runNow camelCases the request without touching param keys", async () => {
+  test("runNow returns the waiter's runId as a number", async () => {
     const runNow = vi.fn().mockResolvedValue({ runId: 7n });
     const client = { jobs: { runNow } } as never;
 
-    const result = await new JobsConnector({}).runNow(client, {
-      job_id: 123,
-      notebook_params: { my_param: "v" },
-    });
+    const result = await new JobsConnector({}).runNow(client, { jobId: 123n });
 
-    expect(runNow).toHaveBeenCalledWith(
-      { jobId: 123n, notebookParams: { my_param: "v" } },
-      { signal: undefined },
-    );
-    expect(result).toEqual({ run_id: 7, number_in_job: 7 });
+    expect(result).toEqual({ runId: 7 });
   });
 
   test("surfaces the modular ApiError's httpStatusCode as statusCode", async () => {
@@ -68,7 +47,7 @@ describe("JobsConnector wire-shape translation", () => {
     const client = { jobs: { getRun } } as never;
 
     await expect(
-      new JobsConnector({}).getRun(client, { run_id: 1 }),
+      new JobsConnector({}).getRun(client, { runId: 1n }),
     ).rejects.toMatchObject({ statusCode: 404, message: "not found" });
   });
 });
