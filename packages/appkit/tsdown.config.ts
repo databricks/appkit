@@ -14,6 +14,7 @@ export default defineConfig([
       "src/testing/index.ts",
       "src/tsdown/index.ts",
       "src/type-generator/index.ts",
+      "src/database/tooling/index.ts",
     ],
     outDir: "dist",
     hash: false,

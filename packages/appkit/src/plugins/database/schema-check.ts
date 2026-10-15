@@ -76,7 +76,7 @@ export async function assertSchemaMatchesDatabase(
   }
   if (problems.length > 0) {
     throw databaseSetupFailed(
-      `the declared schema does not match the database: ${problems.join("; ")}. Create them, or commit migrations under config/database/migrations so the deployed app applies them on start.`,
+      `the declared schema does not match the database: ${problems.join("; ")}. Run \`npx appkit db migrate\` locally, or commit migrations under config/database/migrations so the deployed app applies them on start.`,
     );
   }
 }

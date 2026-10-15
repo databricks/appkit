@@ -8,9 +8,15 @@ import { assertFinalizedSchema } from "../../database/schema-builder/define-sche
 /** Same application-relative convention used by appkit generate-types. */
 const DEFAULT_SCHEMA_FILE = "config/database/schema.ts";
 
+interface LoadSchemaOptions {
+  /** Report why the module failed to import. Only for local CLI runs: see the catch below. */
+  readonly showImportError?: boolean;
+}
+
 /** Load application-owned declarations during setup, never during registration. */
 export async function loadDefaultDatabaseSchema(
   root = process.cwd(),
+  options: LoadSchemaOptions = {},
 ): Promise<Schema> {
   const file = path.resolve(root, DEFAULT_SCHEMA_FILE);
   const label = JSON.stringify(file);
@@ -34,8 +40,14 @@ export async function loadDefaultDatabaseSchema(
     module = await createJiti(import.meta.url, { moduleCache: false }).import(
       file,
     );
-  } catch {
+  } catch (error) {
     // Import errors can contain credentials, row values, or application internals.
+    // A CLI run shows them to the developer who wrote the file; the runtime never does.
+    if (options.showImportError) {
+      throw new Error(`Could not load ${DEFAULT_SCHEMA_FILE}.`, {
+        cause: error,
+      });
+    }
     throw databaseSetupFailed(
       `Could not load the default schema at ${label}. Check the module and its imports, or pass database({ schema }).`,
     );
