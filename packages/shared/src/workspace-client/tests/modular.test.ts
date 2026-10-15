@@ -3,13 +3,21 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 // The wrapper's own tests are the one place allowed to mock the SDK directly.
 // Capture the `ClientOptions` the modular `WarehousesClient` constructor receives
 // so we can assert how wrapper options map onto the modular SDK's config.
-const { ctorOpts, patTokens, m2mOpts, m2mMint } = vi.hoisted(() => ({
-  ctorOpts: [] as Array<Record<string, unknown>>,
-  patTokens: [] as string[],
-  m2mOpts: [] as Array<Record<string, unknown>>,
-  // Each M2M `token()` call mints a new token, like the real (uncached) SDK.
-  m2mMint: { count: 0, ttlMs: 60 * 60 * 1000 },
-}));
+const { ctorOpts, patTokens, m2mOpts, m2mMint, u2mMint, profileState } =
+  vi.hoisted(() => ({
+    ctorOpts: [] as Array<Record<string, unknown>>,
+    patTokens: [] as string[],
+    m2mOpts: [] as Array<Record<string, unknown>>,
+    // Each M2M `token()` call mints a new token, like the real (uncached) SDK.
+    m2mMint: { count: 0, ttlMs: 60 * 60 * 1000 },
+    // Each CLI `token()` call is a `databricks auth token` subprocess.
+    u2mMint: { count: 0 },
+    // What the mocked `~/.databrickscfg` profile resolution returns.
+    profileState: {
+      profile: {} as Record<string, unknown>,
+      resolveCalls: [] as unknown[],
+    },
+  }));
 
 vi.mock("@databricks/sdk-warehouses/v1", () => ({
   WarehousesClient: vi.fn().mockImplementation((opts) => {
@@ -34,6 +42,20 @@ vi.mock("@databricks/sdk-auth/credentials", () => ({
         expiry: new Date(Date.now() + m2mMint.ttlMs),
       }),
     };
+  }),
+  newU2mCredentials: vi.fn(() => ({
+    name: () => "databricks-cli",
+    token: async () => ({
+      value: `cli-token-${++u2mMint.count}`,
+      expiry: new Date(Date.now() + 60 * 60 * 1000),
+    }),
+  })),
+  defaultCredentials: vi.fn(() => ({ kind: "sdk-default" })),
+}));
+vi.mock("@databricks/sdk-core/profiles", () => ({
+  resolve: vi.fn(async (opts: unknown) => {
+    profileState.resolveCalls.push(opts);
+    return profileState.profile;
   }),
 }));
 // The default transport: its `send` echoes the final request headers so tests
@@ -89,6 +111,9 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     m2mOpts.length = 0;
     m2mMint.count = 0;
     m2mMint.ttlMs = 60 * 60 * 1000;
+    u2mMint.count = 0;
+    profileState.profile = {};
+    profileState.resolveCalls.length = 0;
     for (const key of AUTH_ENV) {
       originalEnv[key] = process.env[key];
       delete process.env[key];
@@ -139,10 +164,12 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     expect(patTokens).toEqual([]);
   });
 
-  test("no host, no token, no profile, no env → empty options (SDK default chain)", () => {
+  test("no host, no token, no profile, no env → cached SDK default chain", () => {
     buildWarehousesClient({});
     expect(ctorOpts[0].host).toBeUndefined();
-    expect(ctorOpts[0].credentials).toBeUndefined();
+    expect((ctorOpts[0].credentials as { name(): string }).name()).toBe(
+      "default",
+    );
     expect(ctorOpts[0].profileOptions).toBeUndefined();
   });
 
@@ -225,7 +252,88 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
     buildWarehousesClient({});
     expect(m2mOpts).toEqual([]);
-    expect(ctorOpts[0].credentials).toBeUndefined();
+    expect((ctorOpts[0].credentials as { name(): string }).name()).toBe(
+      "default",
+    );
+  });
+
+  describe("default chain (profile / ~/.databrickscfg) token cache", () => {
+    const bearerOf = (creds: unknown) => async () =>
+      (
+        await (
+          creds as {
+            authHeaders(): Promise<Array<{ key: string; value: string }>>;
+          }
+        ).authHeaders()
+      ).find((h) => h.key === "Authorization")?.value;
+
+    test("CLI profile: 5 calls → one `databricks auth token`, profile resolved once", async () => {
+      profileState.profile = { name: "dev", host: "https://ws" };
+      buildWarehousesClient({ profile: "dev" });
+      const bearer = bearerOf(ctorOpts[0].credentials);
+      for (let i = 0; i < 5; i++) {
+        expect(await bearer()).toBe("Bearer cli-token-1");
+      }
+      expect(u2mMint.count).toBe(1);
+      expect(profileState.resolveCalls).toEqual([{ profile: "dev" }]);
+    });
+
+    test("M2M profile: 5 calls → one OAuth token", async () => {
+      profileState.profile = {
+        name: "ci",
+        host: "ws.cloud.databricks.com/",
+        clientId: "id",
+        clientSecret: { value: "secret" },
+      };
+      buildWarehousesClient({ profile: "ci" });
+      const bearer = bearerOf(ctorOpts[0].credentials);
+      for (let i = 0; i < 5; i++) {
+        expect(await bearer()).toBe("Bearer m2m-token-1");
+      }
+      expect(m2mMint.count).toBe(1);
+      expect(m2mOpts).toEqual([
+        // Scheme-normalized, trailing slash dropped, like env M2M.
+        {
+          host: "https://ws.cloud.databricks.com",
+          clientId: "id",
+          clientSecret: "secret",
+        },
+      ]);
+    });
+
+    test("PAT profile: uses the profile token", async () => {
+      profileState.profile = {
+        name: "p",
+        host: "https://ws",
+        token: { value: "profile-pat" },
+      };
+      buildWarehousesClient({});
+      await (ctorOpts[0].credentials as { authHeaders(): Promise<unknown> })
+        .authHeaders()
+        .catch(() => undefined);
+      expect(patTokens).toEqual(["profile-pat"]);
+      expect(u2mMint.count).toBe(0);
+    });
+
+    test("authType / groupId profiles keep the SDK's own selection", async () => {
+      const { defaultCredentials } =
+        await import("@databricks/sdk-auth/credentials");
+      profileState.profile = {
+        name: "g",
+        host: "https://ws",
+        clientId: "id",
+        clientSecret: { value: "s" },
+        groupId: "grp",
+      };
+      buildWarehousesClient({ profile: "g" });
+      await (ctorOpts[0].credentials as { authHeaders(): Promise<unknown> })
+        .authHeaders()
+        .catch(() => undefined);
+      expect(defaultCredentials).toHaveBeenCalledWith({
+        profile: profileState.profile,
+      });
+      expect(m2mOpts).toEqual([]);
+    });
   });
 
   test("User-Agent: prepends the exact @databricks/appkit product segment (dashboards match on it)", async () => {

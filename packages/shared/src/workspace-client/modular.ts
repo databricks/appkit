@@ -17,16 +17,20 @@
  * unmarshal transform would otherwise strip.
  */
 import {
+  type Credentials,
   newTokenCredentials,
   type Token,
   type TokenCredentials,
   tokenProviderFn,
 } from "@databricks/sdk-auth";
 import {
+  defaultCredentials,
   newM2mCredentials,
   newPatCredentials,
+  newU2mCredentials,
 } from "@databricks/sdk-auth/credentials";
 import { type HttpClient, newFetchHttpClient } from "@databricks/sdk-core/http";
+import { type ProfileOptions, resolve } from "@databricks/sdk-core/profiles";
 import type { ClientOptions } from "@databricks/sdk-options/client";
 import { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
 import { WarehousesClient } from "@databricks/sdk-warehouses/v1";
@@ -77,6 +81,65 @@ function withTokenCache(credentials: TokenCredentials): TokenCredentials {
 }
 
 /**
+ * The SDK default chain (profile / `~/.databrickscfg`), with the token cache the
+ * chain lacks: its CLI strategy shells out to `databricks auth token` and its
+ * M2M strategy mints a new OAuth token on EVERY request. `DefaultCredentials`
+ * hides the token behind `authHeaders()`, so mirror its strategy order (PAT →
+ * M2M → CLI) to get a cacheable `TokenCredentials`. Profiles pinning an
+ * `authType` or a `groupId` keep the SDK's own (uncached) selection logic.
+ * TODO: drop once sdk-auth caches tokens in its M2M and CLI credentials.
+ */
+function cachedDefaultCredentials(
+  profileOptions?: ProfileOptions,
+): Credentials {
+  const select = async (): Promise<Credentials> => {
+    const profile = await resolve(profileOptions);
+    // Same as env M2M: OAuth discovery needs a scheme, which a profile may omit.
+    const host = normalizeHost(profile.host)?.replace(/\/+$/, "");
+    const { name, token, clientId, clientSecret } = profile;
+    if (host && !profile.authType && !profile.groupId) {
+      if (token) return newPatCredentials(token.value);
+      if (clientId && clientSecret) {
+        return withTokenCache(
+          newM2mCredentials({
+            host,
+            clientId,
+            clientSecret: clientSecret.value,
+            ...(profile.accountId !== undefined && {
+              accountId: profile.accountId,
+            }),
+          }),
+        );
+      }
+      if (name) {
+        return withTokenCache(
+          newU2mCredentials({
+            profile: name,
+            ...(profile.databricksCliPath !== undefined && {
+              cliPath: profile.databricksCliPath,
+            }),
+          }),
+        );
+      }
+    }
+    return defaultCredentials({
+      profile: { ...profile, ...(host && { host }) },
+    });
+  };
+  let selected: Promise<Credentials> | undefined;
+  return {
+    name: () => "default",
+    async authHeaders() {
+      selected ??= select().catch((e) => {
+        selected = undefined;
+        throw e;
+      });
+      return (await selected).authHeaders();
+    },
+  };
+}
+
+/**
  * Map wrapper options onto the modular SDK's `ClientOptions`, reproducing the
  * legacy SDK's auth resolution: explicit token → PAT (the OBO path); profile →
  * profile file; otherwise the service principal from the environment. It carries
@@ -102,6 +165,9 @@ function mapToClientOptions(opts: WorkspaceClientOptions): ClientOptions {
     clientOptions.credentials = newPatCredentials(opts.token);
   } else if (opts.profile) {
     clientOptions.profileOptions = { profile: opts.profile };
+    clientOptions.credentials = cachedDefaultCredentials({
+      profile: opts.profile,
+    });
   } else {
     // No token, no profile: authenticate as the service principal from the
     // environment. The SDK's own default chain DOES read the DATABRICKS_* env
@@ -123,9 +189,10 @@ function mapToClientOptions(opts: WorkspaceClientOptions): ClientOptions {
       );
     } else if (envToken) {
       clientOptions.credentials = newPatCredentials(envToken);
+    } else {
+      // Local dev: the profile-based default chain, with token caching.
+      clientOptions.credentials = cachedDefaultCredentials();
     }
-    // Otherwise leave credentials unset and let the SDK walk its profile-based
-    // default chain (local dev with `~/.databrickscfg`).
   }
   const httpClient = buildHttpClient(opts);
   if (httpClient) {
