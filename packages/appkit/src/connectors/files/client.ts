@@ -320,9 +320,15 @@ export class FilesConnector {
       // response headers that carry the metadata, so read them off a raw HEAD.
       // TODO: switch to `client.files.getFileMetadata` once sdk-files builds the
       // response from the HEAD headers (as `downloadFile` already does).
+      // Encode each segment so `#`, `?` and `%` in a name aren't parsed as URL
+      // syntax by the raw seam (the typed SDK calls do the same).
+      const encodedPath = resolvedPath
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/");
       const res = await client.request({
         method: "HEAD",
-        path: `/api/2.0/fs/files${resolvedPath}`,
+        path: `/api/2.0/fs/files${encodedPath}`,
       });
       const contentLength = res.headers.get("content-length");
       return {

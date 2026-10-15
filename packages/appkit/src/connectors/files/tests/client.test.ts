@@ -421,6 +421,25 @@ describe("FilesConnector", () => {
         "Network failure",
       );
     });
+
+    test("does not resolve a different file for a name containing '#'", async () => {
+      // Mirror the raw seam's `new URL(path, host)`: only `.../report` exists.
+      mockRequest.mockImplementation(async ({ path }: { path: string }) => {
+        const { pathname } = new URL(path, "https://host");
+        if (
+          pathname === "/api/2.0/fs/files/Volumes/catalog/schema/vol/report"
+        ) {
+          return headResponse({ "content-length": 1 });
+        }
+        throw createApiError({
+          message: "Not found",
+          errorCode: "NOT_FOUND",
+          statusCode: 404,
+        });
+      });
+
+      expect(await connector.exists(mockClient, "report#1.csv")).toBe(false);
+    });
   });
 
   describe("metadata()", () => {
@@ -493,6 +512,22 @@ describe("FilesConnector", () => {
       expect(mockRequest).toHaveBeenCalledWith({
         method: "HEAD",
         path: "/api/2.0/fs/files/Volumes/catalog/schema/vol/notes.txt",
+      });
+    });
+
+    test.each([
+      ["report#1.csv", "report%231.csv"],
+      ["report?final.csv", "report%3Ffinal.csv"],
+      ["100%25.csv", "100%2525.csv"],
+      ["Invoice #123.pdf", "Invoice%20%23123.pdf"],
+    ])("encodes path segments: %s", async (name, encoded) => {
+      mockRequest.mockResolvedValue(headResponse({ "content-length": 1 }));
+
+      await connector.metadata(mockClient, name);
+
+      expect(mockRequest).toHaveBeenCalledWith({
+        method: "HEAD",
+        path: `/api/2.0/fs/files/Volumes/catalog/schema/vol/${encoded}`,
       });
     });
 
