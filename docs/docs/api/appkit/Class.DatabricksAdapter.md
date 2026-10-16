@@ -100,7 +100,7 @@ Chat Completions endpoint (`/ai-gateway/mlflow/v1/chat/completions`).
 Unlike [fromModelServing](#frommodelserving), the target model is named in the request
 body (`model`, e.g. `"system.ai.claude-opus-5-5"`) rather than in the URL:
 the gateway is a single fixed path that routes by the body's `model`. Auth
-and transport reuse the SDK's `apiClient.request`, same as the serving
+and transport reuse the workspace client's `request()`, same as the serving
 path, so no bespoke `fetch()` + token handling. The request/response wire
 format and tool-calling loop are identical to the serving path.
 
@@ -188,7 +188,7 @@ static fromServingEndpoint(options: ServingEndpointOptions): Promise<DatabricksA
 Creates a DatabricksAdapter for a Databricks Model Serving endpoint.
 
 Routes through the shared `connectors/serving/stream` helper, which
-delegates to the SDK's `apiClient.request({ raw: true })`. That gives the
+delegates to the workspace client's raw `request()`. That gives the
 adapter centralised URL encoding + authentication with the rest of the
 serving surface — no bespoke `fetch()` + `authenticate()` plumbing.
 

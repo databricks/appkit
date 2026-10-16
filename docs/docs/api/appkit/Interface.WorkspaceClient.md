@@ -4,36 +4,29 @@ AppKit's workspace client facade. Mirrors the multi-client shape of the
 modular Databricks SDK: each service is its own accessor, so services can be
 migrated one at a time behind this stable interface.
 
-Accessors are legacy-typed for now (delegated to the underlying legacy SDK
-client); see the module docblock.
-
 ## Extends
 
 - `WorkspaceAuth`
 
 ## Properties
 
-### apiClient
+### apps
 
 ```ts
-readonly apiClient: ApiClient;
+readonly apps: AppsClient;
 ```
 
-Legacy low-level HTTP transport. Prefer `request(...)` (modular, inherited
-from `WorkspaceAuth`); still used by serving SSE streaming, vector search,
-and the agents adapters, which take a structural `apiClient` shape.
+Databricks Apps (modular SDK).
 
 ***
 
-### config
+### connections
 
 ```ts
-readonly config: Config;
+readonly connections: ConnectionsClient;
 ```
 
-Legacy SDK `Config`. Prefer `getHost()` / `authenticate(headers)` (modular,
-inherited from `WorkspaceAuth`); kept for structural `WorkspaceClientLike`
-callers (supervisor adapter) until they migrate.
+Unity Catalog Connections (modular SDK).
 
 ***
 
@@ -47,13 +40,43 @@ Current user (modular SDK SCIM client; `me({})` returns the caller).
 
 ***
 
+### database
+
+```ts
+readonly database: DatabaseClient;
+```
+
+Lakebase provisioned database instances + credentials (modular SDK).
+
+***
+
+### experiments
+
+```ts
+readonly experiments: ExperimentsClient;
+```
+
+MLflow Experiments (modular SDK).
+
+***
+
 ### files
 
 ```ts
-readonly files: FilesService;
+readonly files: FilesClient;
 ```
 
-UC Volumes / Files API.
+UC Volumes / Files API (modular SDK).
+
+***
+
+### functions
+
+```ts
+readonly functions: FunctionsClient;
+```
+
+Unity Catalog Functions (modular SDK).
 
 ***
 
@@ -70,20 +93,30 @@ Genie (modular SDK).
 ### jobs
 
 ```ts
-readonly jobs: JobsService;
+readonly jobs: JobsClient;
 ```
 
-Jobs.
+Jobs (modular SDK, Jobs API 2.2).
 
 ***
 
-### servingEndpoints
+### modelServing
 
 ```ts
-readonly servingEndpoints: ServingEndpointsService;
+readonly modelServing: ModelServingClient;
 ```
 
-Serving Endpoints.
+Serving endpoints (modular SDK).
+
+***
+
+### postgres
+
+```ts
+readonly postgres: PostgresClient;
+```
+
+Lakebase Postgres: autoscaling projects, branches, endpoints (modular SDK).
 
 ***
 
@@ -94,6 +127,36 @@ readonly statementExecution: StatementExecutionClient;
 ```
 
 Statement Execution (modular SDK).
+
+***
+
+### tables
+
+```ts
+readonly tables: TablesClient;
+```
+
+Unity Catalog Tables (modular SDK).
+
+***
+
+### vectorSearch
+
+```ts
+readonly vectorSearch: VectorSearchClient;
+```
+
+Vector Search (modular SDK; index metadata only, queries use `request()`).
+
+***
+
+### volumes
+
+```ts
+readonly volumes: VolumesClient;
+```
+
+Unity Catalog Volumes (modular SDK).
 
 ***
 
@@ -161,7 +224,7 @@ request(req: WorkspaceRequest): Promise<Response>;
 
 Send a request through the modular transport (AppKit User-Agent + auth).
 Returns the raw `Response` (body unread, so it can stream); throws
-ApiError on a non-2xx status.
+[ApiError](Class.ApiError.md) on a non-2xx status.
 
 #### Parameters
 
@@ -178,19 +241,3 @@ ApiError on a non-2xx status.
 ```ts
 WorkspaceAuth.request
 ```
-
-***
-
-### toLegacyWorkspaceClient()
-
-```ts
-toLegacyWorkspaceClient(): WorkspaceClient;
-```
-
-Returns the underlying legacy `@databricks/sdk-experimental`
-`WorkspaceClient`, for handoff to code still typed against the old SDK
-(`@databricks/lakebase`). Transitional.
-
-#### Returns
-
-`WorkspaceClient`

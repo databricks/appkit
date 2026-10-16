@@ -14,6 +14,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 
 | Class | Description |
 | ------ | ------ |
+| [ApiError](Class.ApiError.md) | - |
 | [AppKitError](Class.AppKitError.md) | Base error class for all AppKit errors. Provides a consistent structure for error handling across the framework. |
 | [AppKitMcpClient](Class.AppKitMcpClient.md) | Lightweight MCP client for Databricks-hosted MCP servers. |
 | [AuthenticationError](Class.AuthenticationError.md) | Error thrown when authentication fails. Use for missing tokens, invalid credentials, or authorization failures. |
@@ -57,8 +58,10 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [DatabaseValidationIssue](Interface.DatabaseValidationIssue.md) | One rejected field; `path` names public columns, never their values. |
 | [DatabricksAuth](Interface.DatabricksAuth.md) | Resolved Databricks host + bearer token for the eval runner's REST calls. |
 | [DatasetRow](Interface.DatasetRow.md) | One row of a managed evaluation dataset. `inputs` are the kwargs passed to the agent for the turn; `expectations` (when present) is the row's ground truth / guidelines. Mirrors the `{inputs, expectations}` shape of `mlflow.genai` datasets and of the Unity Catalog table backing a managed eval dataset. |
+| [~~DirectoryEntry~~](Interface.DirectoryEntry.md) | A single entry returned when listing a directory (Files API wire shape). |
 | [DiscoveredEval](Interface.DiscoveredEval.md) | An eval file found under `server/agents/<agent>/evals/`. |
 | [DiscoveredEvalConfig](Interface.DiscoveredEvalConfig.md) | A per-agent `evals.config.ts` found under `server/agents/<agent>/evals/`. |
+| [~~DownloadResponse~~](Interface.DownloadResponse.md) | Response object for file downloads containing a readable stream. |
 | [DriveResult](Interface.DriveResult.md) | What a driver returns for a single `t.send`. |
 | [EndpointConfig](Interface.EndpointConfig.md) | - |
 | [EntityMutationHooks](Interface.EntityMutationHooks.md) | Mutation lifecycle for one entity. A before hook may return a replacement payload, which is revalidated against the trusted schema before it is persisted. Every hook, the mutation, and any write a hook issues through `ctx.app.database` share one transaction, so a rejection anywhere rolls all of them back. Throw `DatabaseValidationError` to answer a generated route with `422`; any other failure stays an opaque server error. |
@@ -131,8 +134,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [ToolProvider](Interface.ToolProvider.md) | - |
 | [ValidationResult](Interface.ValidationResult.md) | Result of validating all registered resources against the environment. |
 | [WorkspaceClient](Interface.WorkspaceClient.md) | AppKit's workspace client facade. Mirrors the multi-client shape of the modular Databricks SDK: each service is its own accessor, so services can be migrated one at a time behind this stable interface. |
-| [WorkspaceClientLike](Interface.WorkspaceClientLike.md) | Structural shape of a Databricks SDK client used by [fromSupervisorApi](Function.fromSupervisorApi.md). Only what we need: `apiClient.request` for streaming and `config.ensureResolved` to materialise the host/credentials. |
-| [WorkspaceClientOptions](Interface.WorkspaceClientOptions.md) | Options used to construct the wrapper. Mirrors the subset of the old SDK's `Config` + `ClientOptions` that AppKit relies on today; we deliberately do NOT re-expose every old-SDK config knob. |
+| [WorkspaceClientOptions](Interface.WorkspaceClientOptions.md) | - |
 
 ## Type Aliases
 
@@ -157,6 +159,8 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [ExecutionResult](TypeAlias.ExecutionResult.md) | Discriminated union for plugin execution results. |
 | [FileAction](TypeAlias.FileAction.md) | Every action the files plugin can perform. |
 | [FilePolicy](TypeAlias.FilePolicy.md) | A policy function that decides whether `user` may perform `action` on `resource`. Return `true` to allow, `false` to deny. |
+| [FilesDirectoryEntry](TypeAlias.FilesDirectoryEntry.md) | A single directory entry in the modular SDK shape (camelCase). `list()` and the `/list` route still return the legacy [DirectoryEntry](Interface.DirectoryEntry.md); they move to this type in a future release. |
+| [FilesDownloadResponse](TypeAlias.FilesDownloadResponse.md) | Download response in the modular SDK shape (`contentLength` is a `bigint`). `download()` still returns the legacy [DownloadResponse](Interface.DownloadResponse.md); it moves to this type in a future release. |
 | [HostedTool](TypeAlias.HostedTool.md) | - |
 | [IAppRouter](TypeAlias.IAppRouter.md) | Express router type for plugin route registration |
 | [IDatabaseConfig](TypeAlias.IDatabaseConfig.md) | Configuration for one schema-bound DatabasePlugin instance. |
@@ -178,6 +182,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [TransactionClient](TypeAlias.TransactionClient.md) | Entity and SQL capabilities bound to one transaction. |
 | [~~UserContext~~](TypeAlias.UserContext.md) | - |
 | [UserScopedApp](TypeAlias.UserScopedApp.md) | - |
+| [WorkspaceClientLike](TypeAlias.WorkspaceClientLike.md) | Structural shape of a Databricks SDK client used by [fromSupervisorApi](Function.fromSupervisorApi.md). Only what we need: `request` for streaming. A legacy SDK client (`apiClient.request` + `config.ensureResolved`) is still accepted (deprecated). |
 
 ## Variables
 
