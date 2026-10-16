@@ -1,47 +1,24 @@
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
-import { ApiClient, Config } from "@databricks/sdk-experimental";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { getUsernameWithApiLookup } from "../config";
 import { generateDatabaseCredential } from "../credentials";
 import {
   type DatabaseCredential,
+  type LegacyWorkspaceClientLike,
   RequestedClaimsPermissionSet,
 } from "../types";
 
-// Mock the @databricks/sdk-experimental module
-vi.mock("@databricks/sdk-experimental", () => {
-  const mockRequest = vi.fn();
-
-  return {
-    Config: vi.fn(),
-    ApiClient: vi.fn().mockImplementation(() => ({
-      request: mockRequest,
-    })),
-  };
-});
-
 describe("Lakebase Authentication", () => {
-  let mockWorkspaceClient: WorkspaceClient;
-  let mockApiClient: ApiClient;
+  let mockWorkspaceClient: LegacyWorkspaceClientLike;
+  let mockApiClient: LegacyWorkspaceClientLike["apiClient"];
 
   beforeEach(() => {
     vi.clearAllMocks();
-
-    // Get the mocked ApiClient constructor
-    const ApiClientConstructor = ApiClient as unknown as ReturnType<
-      typeof vi.fn
-    >;
-    mockApiClient = new ApiClientConstructor(
-      new Config({ host: "https://test.databricks.com" }),
-    );
-
-    // Setup mock workspace client with apiClient
+    mockApiClient = { request: vi.fn() };
     mockWorkspaceClient = {
-      config: {
-        host: "https://test.databricks.com",
-      },
+      currentUser: { me: vi.fn() },
       apiClient: mockApiClient,
-    } as WorkspaceClient;
+    };
   });
 
   describe("generateDatabaseCredential", () => {
@@ -145,44 +122,179 @@ describe("Lakebase Authentication", () => {
         }),
       ).rejects.toThrow("API request failed");
     });
+  });
 
-    it("should use correct workspace host for API calls", async () => {
-      const customHost = "https://custom-workspace.databricks.com";
+  describe("request-capable (AppKit modular) client", () => {
+    const credential: DatabaseCredential = {
+      token: "modular-token",
+      expire_time: "2026-02-06T18:00:00Z",
+    };
 
-      // Create a new mock API client for the custom workspace
-      const ApiClientConstructor = ApiClient as unknown as ReturnType<
-        typeof vi.fn
-      >;
-      const customApiClient = new ApiClientConstructor(
-        new Config({ host: customHost }),
+    it("posts the snake_case request body through request()", async () => {
+      const request = vi.fn(async () => Response.json(credential));
+      const claims = [
+        {
+          permission_set: RequestedClaimsPermissionSet.READ_ONLY,
+          resources: [{ table_name: "catalog.schema.users" }],
+        },
+      ];
+
+      const result = await generateDatabaseCredential(
+        { request },
+        { endpoint: "projects/p/branches/main/endpoints/primary", claims },
       );
 
-      const customWorkspaceClient = {
-        config: { host: customHost },
-        apiClient: customApiClient,
-      } as WorkspaceClient;
+      expect(result).toEqual(credential);
+      expect(request).toHaveBeenCalledWith({
+        method: "POST",
+        path: "/api/2.0/postgres/credentials",
+        headers: expect.any(Headers),
+        body: JSON.stringify({
+          endpoint: "projects/p/branches/main/endpoints/primary",
+          claims,
+        }),
+      });
+      const [[sent]] = request.mock.calls as unknown as [
+        [{ headers: Headers }],
+      ];
+      expect(Object.fromEntries(sent.headers)).toEqual({
+        accept: "application/json",
+        "content-type": "application/json",
+      });
+    });
 
-      const mockCredential: DatabaseCredential = {
-        token: "mock-token",
-        expire_time: "2026-02-06T18:00:00Z",
+    it("prefers request() over a legacy apiClient on the same object", async () => {
+      // The AppKit facade exposes both; the modular path must win.
+      const request = vi.fn(async () => Response.json(credential));
+      const client = { ...mockWorkspaceClient, request };
+
+      await generateDatabaseCredential(client, { endpoint: "e" });
+
+      expect(request).toHaveBeenCalledOnce();
+      expect(mockApiClient.request).not.toHaveBeenCalled();
+    });
+
+    it("uses the typed postgres client when present, mapping to camelCase", async () => {
+      const request = vi.fn();
+      const generate = vi.fn(async () => ({
+        token: "typed-token",
+        // Stand-in for Temporal.Instant: only toString() is relied on.
+        expireTime: { toString: () => "2026-02-06T18:00:00Z" },
+      }));
+      const client = {
+        request,
+        postgres: {
+          generateDatabaseCredential: generate,
+          getEndpoint: vi.fn(),
+        },
       };
 
-      vi.mocked(customApiClient.request).mockResolvedValue(mockCredential);
-
-      await generateDatabaseCredential(customWorkspaceClient, {
-        endpoint: "projects/test/branches/main/endpoints/primary",
+      const result = await generateDatabaseCredential(client, {
+        endpoint: "projects/p/branches/main/endpoints/primary",
+        claims: [
+          {
+            permission_set: RequestedClaimsPermissionSet.READ_ONLY,
+            resources: [{ table_name: "catalog.schema.users" }],
+          },
+        ],
       });
 
-      // Verify the request was made with the correct workspace client
-      expect(customApiClient.request).toHaveBeenCalledWith({
-        path: "/api/2.0/postgres/credentials",
-        method: "POST",
-        headers: expect.any(Headers),
-        raw: false,
-        payload: {
-          endpoint: "projects/test/branches/main/endpoints/primary",
+      expect(result).toEqual({
+        token: "typed-token",
+        expire_time: "2026-02-06T18:00:00Z",
+      });
+      expect(generate).toHaveBeenCalledWith({
+        endpoint: "projects/p/branches/main/endpoints/primary",
+        claims: [
+          {
+            permissionSet: "READ_ONLY",
+            resources: [
+              {
+                resourceName: {
+                  $case: "tableName",
+                  tableName: "catalog.schema.users",
+                },
+              },
+            ],
+          },
+        ],
+      });
+      expect(request).not.toHaveBeenCalled();
+    });
+
+    it("rejects a typed response missing expireTime", async () => {
+      const client = {
+        request: vi.fn(),
+        postgres: {
+          generateDatabaseCredential: vi.fn(async () => ({ token: "t" })),
+          getEndpoint: vi.fn(),
         },
-      });
+      };
+      await expect(
+        generateDatabaseCredential(client, { endpoint: "e" }),
+      ).rejects.toThrow();
+    });
+
+    it("falls back to raw request() for unspecified_resource_name claims", async () => {
+      // The typed model only has tableName, so these would be silently dropped.
+      const request = vi.fn(async () => Response.json(credential));
+      const generate = vi.fn();
+      const claims = [
+        { resources: [{ unspecified_resource_name: "some-resource" }] },
+      ];
+
+      await generateDatabaseCredential(
+        {
+          request,
+          postgres: {
+            generateDatabaseCredential: generate,
+            getEndpoint: vi.fn(),
+          },
+        },
+        { endpoint: "e", claims },
+      );
+
+      expect(generate).not.toHaveBeenCalled();
+      expect(request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: JSON.stringify({ endpoint: "e", claims }),
+        }),
+      );
+    });
+
+    it("rejects a malformed credential response", async () => {
+      const request = vi.fn(async () => Response.json({ token: "t" }));
+      await expect(
+        generateDatabaseCredential({ request }, { endpoint: "e" }),
+      ).rejects.toThrow();
+    });
+
+    it("resolves the username via the SCIM Me endpoint", async () => {
+      const prev = {
+        PGUSER: process.env.PGUSER,
+        DATABRICKS_CLIENT_ID: process.env.DATABRICKS_CLIENT_ID,
+      };
+      delete process.env.PGUSER;
+      delete process.env.DATABRICKS_CLIENT_ID;
+      try {
+        const request = vi.fn(async () =>
+          Response.json({ userName: "someone@example.com" }),
+        );
+        await expect(
+          getUsernameWithApiLookup({ workspaceClient: { request } }),
+        ).resolves.toBe("someone@example.com");
+        expect(request).toHaveBeenCalledWith(
+          expect.objectContaining({
+            method: "GET",
+            path: "/api/2.0/preview/scim/v2/Me",
+          }),
+        );
+      } finally {
+        Object.assign(process.env, prev);
+        for (const [k, v] of Object.entries(prev)) {
+          if (v === undefined) delete process.env[k];
+        }
+      }
     });
   });
 });
