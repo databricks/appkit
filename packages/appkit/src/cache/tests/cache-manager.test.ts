@@ -55,9 +55,7 @@ vi.mock("../../workspace-client", async (importOriginal) => {
     await importOriginal<typeof import("../../workspace-client")>();
   return {
     ...actual,
-    createWorkspaceClient: vi.fn().mockImplementation(() => ({
-      toLegacyWorkspaceClient: () => ({}),
-    })),
+    createWorkspaceClient: vi.fn().mockImplementation(() => ({})),
   };
 });
 
