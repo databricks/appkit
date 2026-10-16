@@ -9,18 +9,17 @@ interface CatalogColumn {
 }
 
 /**
- * Confirm every declared table and column exists before routes are published.
- * Even after a deployed app applies its migrations, drift would surface on each
- * request as an undefined-table or undefined-column failure, so check up front.
+ * Every declared table or column the database lacks, and every declared table
+ * that is a view or another non-table relation, as human-readable problems.
  * pg_catalog is read rather than information_schema, which hides objects the
  * role cannot access and would report a privilege gap as a missing column.
  */
-export async function assertSchemaMatchesDatabase(
-  dataPath: DataPath,
+export async function findSchemaProblems(
+  dataPath: Pick<DataPath, "raw">,
   schema: Schema,
-): Promise<void> {
+): Promise<string[]> {
   const tables = Object.values(schema.$tables);
-  if (tables.length === 0) return;
+  if (tables.length === 0) return [];
   const schemaName = schema.$schemaName;
   const tableNames = tables.map((table) => table.$name);
   // Include non-tables so setup can report their kind instead of claiming they are absent.
@@ -74,6 +73,19 @@ export async function assertSchemaMatchesDatabase(
       );
     }
   }
+  return problems;
+}
+
+/**
+ * Confirm every declared table and column exists before routes are published.
+ * Even after a deployed app applies its migrations, drift would surface on each
+ * request as an undefined-table or undefined-column failure, so check up front.
+ */
+export async function assertSchemaMatchesDatabase(
+  dataPath: DataPath,
+  schema: Schema,
+): Promise<void> {
+  const problems = await findSchemaProblems(dataPath, schema);
   if (problems.length > 0) {
     throw databaseSetupFailed(
       `the declared schema does not match the database: ${problems.join("; ")}. Run \`npx appkit db migrate\` locally, or commit migrations under config/database/migrations so the deployed app applies them on start.`,

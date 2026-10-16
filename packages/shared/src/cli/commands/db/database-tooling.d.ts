@@ -104,4 +104,28 @@ declare module "@databricks/appkit/database-tooling" {
   export function runClean(ctx: DbContext): Promise<{ branch: string; schemaName: string }>;
 
   export function runSeed(ctx: DbContext): Promise<{ branch: string; file: string }>;
+
+  export type VerifyReport =
+    | {
+        readonly kind: "local";
+        readonly branch: string;
+        readonly schemaProblems: readonly string[];
+        readonly pendingMigrations: readonly string[];
+        readonly strandedMigrations: readonly {
+          readonly tag: string;
+          readonly reason: "out of order" | "edited";
+        }[];
+        readonly ok: boolean;
+      }
+    | {
+        readonly kind: "deploy";
+        readonly branch: string;
+        readonly app: string | null;
+        readonly problems: readonly string[];
+        readonly ok: boolean;
+      };
+  export function runVerify(
+    ctx: DbContext,
+    options?: { prod?: boolean },
+  ): Promise<VerifyReport>;
 }

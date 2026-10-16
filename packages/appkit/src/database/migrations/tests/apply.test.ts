@@ -12,6 +12,7 @@ import {
   MigrationBaselineMismatchError,
   migrationLockKey,
   pendingMigrationTags,
+  strandedMigrations,
 } from "../apply";
 import { type Journal, MigrationFilesError } from "../paths";
 
@@ -89,6 +90,8 @@ afterEach(() => {
 interface FakeState {
   journalTableExists: boolean;
   lastCreatedAt: number | null;
+  /** Rows of `select hash, created_at` from the journal table. */
+  journalRows?: Array<{ hash: string; created_at: string }>;
   failOn?: RegExp;
   /** SQLSTATE of the failOn error; defaults to 42P07 (duplicate_table). */
   failCode?: string;
@@ -147,6 +150,9 @@ class RecordingClient {
     }
     if (text.startsWith("select max(created_at)")) {
       return { rows: [{ last: this.state.lastCreatedAt }] };
+    }
+    if (text.startsWith("select hash, created_at from")) {
+      return { rows: this.state.journalRows ?? [] };
     }
     if (text.includes("order by created_at desc limit 1")) {
       return {
@@ -883,6 +889,91 @@ describe("pendingMigrationTags", () => {
       pendingMigrationTags(client as never, options(folder)),
     ).resolves.toEqual([]);
     expect(client.statements).toEqual([]);
+  });
+});
+
+describe("strandedMigrations", () => {
+  const options = (migrationsFolder: string) => ({
+    migrationsFolder,
+    schemaName: "app",
+  });
+  /** A journal row as the migrator writes it for that file. */
+  const row = (folder: string, tag: string, when: number) => ({
+    hash: createHash("sha256")
+      .update(fs.readFileSync(path.join(folder, `${tag}.sql`), "utf-8"))
+      .digest("hex"),
+    created_at: String(when),
+  });
+  const threeMigrations = () =>
+    migrations([
+      { tag: "0000_migration", when: 1000, sql: ["select 0;"] },
+      { tag: "0001_parallel", when: 1500, sql: ["select 1;"] },
+      { tag: "0002_migration", when: 2000, sql: ["select 2;"] },
+    ]);
+
+  test("none when every entry up to the last recorded one is recorded unchanged", async () => {
+    const folder = threeMigrations();
+    const { client } = fakePool({
+      journalTableExists: true,
+      lastCreatedAt: 1500,
+      journalRows: [
+        row(folder, "0000_migration", 1000),
+        row(folder, "0001_parallel", 1500),
+      ],
+    });
+
+    await expect(
+      strandedMigrations(client as never, options(folder)),
+    ).resolves.toEqual([]);
+  });
+
+  test("an entry older than the last recorded one but never recorded is out of order", async () => {
+    const folder = threeMigrations();
+    const { client } = fakePool({
+      journalTableExists: true,
+      lastCreatedAt: 2000,
+      journalRows: [
+        row(folder, "0000_migration", 1000),
+        row(folder, "0002_migration", 2000),
+      ],
+    });
+
+    await expect(
+      strandedMigrations(client as never, options(folder)),
+    ).resolves.toEqual([{ tag: "0001_parallel", reason: "out of order" }]);
+  });
+
+  test("a recorded entry whose file changed since is edited", async () => {
+    const folder = threeMigrations();
+    const rows = [
+      row(folder, "0000_migration", 1000),
+      row(folder, "0001_parallel", 1500),
+    ];
+    fs.appendFileSync(path.join(folder, "0000_migration.sql"), "select 9;");
+    const { client } = fakePool({
+      journalTableExists: true,
+      lastCreatedAt: 1500,
+      journalRows: rows,
+    });
+
+    await expect(
+      strandedMigrations(client as never, options(folder)),
+    ).resolves.toEqual([{ tag: "0000_migration", reason: "edited" }]);
+  });
+
+  test("with nothing recorded nothing is stranded, and the rows are not read", async () => {
+    const folder = threeMigrations();
+    const { client } = fakePool({
+      journalTableExists: false,
+      lastCreatedAt: null,
+    });
+
+    await expect(
+      strandedMigrations(client as never, options(folder)),
+    ).resolves.toEqual([]);
+    expect(
+      client.statements.some((s) => s.startsWith("select hash, created_at")),
+    ).toBe(false);
   });
 });
 

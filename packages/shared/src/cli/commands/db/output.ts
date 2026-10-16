@@ -4,6 +4,7 @@ import process from "node:process";
 import type {
   IntrospectReport,
   MigrateReport,
+  VerifyReport,
 } from "@databricks/appkit/database-tooling";
 import pc from "picocolors";
 
@@ -73,6 +74,67 @@ export function printMigrateReport(report: MigrateReport): void {
   }
 
   ok(`Generated ${relative(report.typesFile)}`);
+}
+
+type LocalVerifyReport = Extract<VerifyReport, { kind: "local" }>;
+type DeployVerifyReport = Extract<VerifyReport, { kind: "deploy" }>;
+
+const STRANDED: Record<"out of order" | "edited", string> = {
+  "out of order":
+    "it is older than a migration the branch already ran (merged out of order); the deployed app skips it too once it ran a newer one",
+  edited:
+    "it changed after the branch ran it; restore it from version control and put the change in a new migration",
+};
+
+/** The one next step for a failed local verify, most fundamental gap first. */
+function localVerifyHint(report: LocalVerifyReport): string {
+  if (report.strandedMigrations.length > 0) {
+    return "`appkit db clean` and then `appkit db migrate` rebuild the branch from the migrations, in order.";
+  }
+  // Pending migrations explain the gap; without them, schema.ts changed or the branch was edited.
+  return report.pendingMigrations.length > 0
+    ? "Run `appkit db migrate` to apply the pending migrations."
+    : "If you changed schema.ts, run `appkit db migrate`; if the branch was changed by hand, `appkit db clean` and then `appkit db migrate` rebuild it from the migrations.";
+}
+
+function printLocalVerifyReport(report: LocalVerifyReport): void {
+  const branch = shortName(report.branch);
+  if (report.ok) {
+    ok(
+      `${branch} matches config/database/schema.ts and has every committed migration`,
+    );
+    return;
+  }
+  for (const problem of report.schemaProblems) warn(`Schema: ${problem}`);
+  if (report.pendingMigrations.length > 0) {
+    warn(`Pending migrations: ${report.pendingMigrations.join(", ")}`);
+  }
+  for (const { tag, reason } of report.strandedMigrations) {
+    warn(`Never runs: ${tag}: ${STRANDED[reason]}`);
+  }
+  console.error(
+    `${pc.red("✖")} ${branch} does not match config/database/schema.ts and the committed migrations. ${localVerifyHint(report)}`,
+  );
+}
+
+function printDeployVerifyReport(report: DeployVerifyReport): void {
+  const branch = `${shortName(report.branch)} (deploy branch)`;
+  const app = report.app ? `app ${report.app}` : "The deployed app";
+  if (report.ok) {
+    ok(
+      `${app} is running on ${branch}: on start it applied its migrations and checked its schema`,
+    );
+    return;
+  }
+  for (const problem of report.problems) warn(problem);
+  console.error(
+    `${pc.red("✖")} ${app} cannot use ${branch} yet. Fix the above, then run \`appkit db verify --prod\` again.`,
+  );
+}
+
+export function printVerifyReport(report: VerifyReport): void {
+  if (report.kind === "local") printLocalVerifyReport(report);
+  else printDeployVerifyReport(report);
 }
 
 export function printIntrospectReport(report: IntrospectReport): void {

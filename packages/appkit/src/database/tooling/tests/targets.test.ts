@@ -140,7 +140,7 @@ targets:
 });
 
 describe("readDeployTarget", () => {
-  test("reads the default target's postgres variables", () => {
+  test("reads the default target's postgres variables and the app name", () => {
     const root = tempApp({
       "databricks.yml": databricksYml(
         "projects/p/branches/production",
@@ -150,6 +150,7 @@ describe("readDeployTarget", () => {
     expect(readDeployTarget(root)).toEqual({
       branch: "projects/p/branches/production",
       database: "projects/p/branches/production/databases/databricks-postgres",
+      appName: "my-app",
     });
   });
 
@@ -166,7 +167,19 @@ targets:
     expect(readDeployTarget(root)).toEqual({
       branch: "projects/p/branches/main",
       database: null,
+      appName: null,
     });
+  });
+
+  test("the default target's app name overrides the top-level one", () => {
+    const root = tempApp({
+      // Appended under targets.default.
+      "databricks.yml": `${databricksYml(
+        "projects/p/branches/production",
+        "projects/p/branches/production/databases/databricks-postgres",
+      )}    resources:\n      apps:\n        app:\n          name: my-app-prod\n`,
+    });
+    expect(readDeployTarget(root)?.appName).toBe("my-app-prod");
   });
 
   test("null without databricks.yml or without a postgres binding", () => {
