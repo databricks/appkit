@@ -85,8 +85,9 @@ function withTokenCache(credentials: TokenCredentials): TokenCredentials {
  * chain lacks: its CLI strategy shells out to `databricks auth token` and its
  * M2M strategy mints a new OAuth token on EVERY request. `DefaultCredentials`
  * hides the token behind `authHeaders()`, so mirror its strategy order (PAT →
- * M2M → CLI) to get a cacheable `TokenCredentials`. Profiles pinning an
- * `authType` or a `groupId` keep the SDK's own (uncached) selection logic.
+ * M2M → CLI) to get a cacheable `TokenCredentials`. A profile `authType` naming
+ * one of these (`databricks auth login` writes `databricks-cli`) pins that
+ * strategy; other auth types and `groupId` keep the SDK's own (uncached) logic.
  * TODO: drop once sdk-auth caches tokens in its M2M and CLI credentials.
  */
 function cachedDefaultCredentials(
@@ -96,10 +97,11 @@ function cachedDefaultCredentials(
     const profile = await resolve(profileOptions);
     // Same as env M2M: OAuth discovery needs a scheme, which a profile may omit.
     const host = normalizeHost(profile.host)?.replace(/\/+$/, "");
-    const { name, token, clientId, clientSecret } = profile;
-    if (host && !profile.authType && !profile.groupId) {
-      if (token) return newPatCredentials(token.value);
-      if (clientId && clientSecret) {
+    const { name, token, clientId, clientSecret, authType } = profile;
+    const allows = (strategy: string) => !authType || authType === strategy;
+    if (host && !profile.groupId) {
+      if (token && allows("pat")) return newPatCredentials(token.value);
+      if (clientId && clientSecret && allows("oauth-m2m")) {
         return withTokenCache(
           newM2mCredentials({
             host,
@@ -111,7 +113,7 @@ function cachedDefaultCredentials(
           }),
         );
       }
-      if (name) {
+      if (name && allows("databricks-cli")) {
         return withTokenCache(
           newU2mCredentials({
             profile: name,

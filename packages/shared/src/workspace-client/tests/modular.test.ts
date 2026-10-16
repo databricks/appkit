@@ -315,23 +315,58 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
       expect(u2mMint.count).toBe(0);
     });
 
-    test("authType / groupId profiles keep the SDK's own selection", async () => {
+    test("auth_type = databricks-cli (what `databricks auth login` writes) is cached", async () => {
+      // A PAT in the same profile must not win over the pinned CLI strategy.
+      profileState.profile = {
+        name: "dev",
+        host: "https://ws",
+        authType: "databricks-cli",
+        token: { value: "stale-pat" },
+      };
+      buildWarehousesClient({ profile: "dev" });
+      const bearer = bearerOf(ctorOpts[0].credentials);
+      for (let i = 0; i < 5; i++) {
+        expect(await bearer()).toBe("Bearer cli-token-1");
+      }
+      expect(u2mMint.count).toBe(1);
+      expect(patTokens).toEqual([]);
+    });
+
+    test("auth_type = oauth-m2m is cached", async () => {
+      profileState.profile = {
+        name: "ci",
+        host: "https://ws",
+        authType: "oauth-m2m",
+        clientId: "id",
+        clientSecret: { value: "secret" },
+      };
+      buildWarehousesClient({ profile: "ci" });
+      const bearer = bearerOf(ctorOpts[0].credentials);
+      expect(await bearer()).toBe("Bearer m2m-token-1");
+      expect(await bearer()).toBe("Bearer m2m-token-1");
+      expect(m2mMint.count).toBe(1);
+    });
+
+    test("other auth types and groupId profiles keep the SDK's own selection", async () => {
       const { defaultCredentials } =
         await import("@databricks/sdk-auth/credentials");
-      profileState.profile = {
-        name: "g",
-        host: "https://ws",
-        clientId: "id",
-        clientSecret: { value: "s" },
-        groupId: "grp",
-      };
-      buildWarehousesClient({ profile: "g" });
-      await (ctorOpts[0].credentials as { authHeaders(): Promise<unknown> })
-        .authHeaders()
-        .catch(() => undefined);
-      expect(defaultCredentials).toHaveBeenCalledWith({
-        profile: profileState.profile,
-      });
+      for (const extra of [{ authType: "azure-cli" }, { groupId: "grp" }]) {
+        profileState.profile = {
+          name: "g",
+          host: "https://ws",
+          clientId: "id",
+          clientSecret: { value: "s" },
+          ...extra,
+        };
+        ctorOpts.length = 0;
+        buildWarehousesClient({ profile: "g" });
+        await (ctorOpts[0].credentials as { authHeaders(): Promise<unknown> })
+          .authHeaders()
+          .catch(() => undefined);
+        expect(defaultCredentials).toHaveBeenLastCalledWith({
+          profile: profileState.profile,
+        });
+      }
       expect(m2mOpts).toEqual([]);
     });
   });
