@@ -1,3 +1,9 @@
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { SpanKind } from "@opentelemetry/api";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -57,14 +63,14 @@ function stubSdk(
       return Promise.resolve();
     }
   }
-  vi.doMock("@mlflow/core/dist/exporters/mlflow", () => ({
+  vi.doMock("@mlflow/core/dist/exporters/mlflow.js", () => ({
     MlflowSpanExporter: class {},
     MlflowSpanProcessor: StubProcessor,
   }));
   // Distinct from the classic stub so a test can tell which processor was built
   // and assert the resolved UC location actually reaches its constructor.
   const uc: { built: boolean; location?: unknown } = { built: false };
-  vi.doMock("@mlflow/core/dist/exporters/uc_table", () => ({
+  vi.doMock("@mlflow/core/dist/exporters/uc_table.js", () => ({
     DatabricksUCTableSpanExporter: class {},
     DatabricksUCTableSpanProcessor: class {
       constructor(_exporter: unknown, location: unknown) {
@@ -83,7 +89,7 @@ function stubSdk(
   }));
   // mlflow's experiment-tag → UC-location parser (deep import), used by the
   // numeric-id auto-detect path. Default: not a UC experiment (null → classic).
-  vi.doMock("@mlflow/core/dist/core/destination", () => ({
+  vi.doMock("@mlflow/core/dist/core/destination.js", () => ({
     ucLocationFromExperimentTags: vi.fn(() => ucFromTags),
   }));
   return { sdk, span, setInputs, setOutputs, uc };
@@ -100,9 +106,9 @@ describe("agent tracing (mlflow)", () => {
 
   afterEach(() => {
     vi.doUnmock("@mlflow/core");
-    vi.doUnmock("@mlflow/core/dist/exporters/mlflow");
-    vi.doUnmock("@mlflow/core/dist/exporters/uc_table");
-    vi.doUnmock("@mlflow/core/dist/core/destination");
+    vi.doUnmock("@mlflow/core/dist/exporters/mlflow.js");
+    vi.doUnmock("@mlflow/core/dist/exporters/uc_table.js");
+    vi.doUnmock("@mlflow/core/dist/core/destination.js");
     vi.doUnmock("../../../telemetry");
     vi.restoreAllMocks();
     delete process.env.MLFLOW_EXPERIMENT_ID;
@@ -367,6 +373,47 @@ describe("agent tracing (mlflow)", () => {
     });
   });
 
+  // vitest resolves extensionless specifiers, real Node ESM does not (no
+  // `exports` map in @mlflow/core), so resolve mlflow.ts's deep imports in a
+  // child `node` process. Regression: extensionless paths broke tracing in prod.
+  const appkitRoot = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "../../../..",
+  );
+  const mlflowInstalled = (() => {
+    try {
+      createRequire(join(appkitRoot, "package.json")).resolve("@mlflow/core");
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  test.skipIf(!mlflowInstalled)(
+    "@mlflow/core deep imports resolve under real Node ESM",
+    () => {
+      const source = readFileSync(
+        join(appkitRoot, "src/plugins/agents/mlflow.ts"),
+        "utf8",
+      );
+      const specifiers = [
+        ...source.matchAll(/import\("(@mlflow\/core\/[^"]+)"\)/g),
+      ].map((m) => m[1]);
+      expect(specifiers).toHaveLength(3);
+      for (const spec of specifiers) {
+        const url = execFileSync(
+          process.execPath,
+          [
+            "--input-type=module",
+            "-e",
+            `process.stdout.write(import.meta.resolve(${JSON.stringify(spec)}))`,
+          ],
+          { cwd: appkitRoot, encoding: "utf8" },
+        );
+        expect(existsSync(fileURLToPath(url))).toBe(true);
+      }
+    },
+  );
+
   // Tripwire: fails loudly if a @mlflow/core version bump moves or renames the
   // deep-imported exporter/processor classes buildMlflowSpanProcessor relies on,
   // or moves the public symbols we now import from the entrypoint. Runs against
@@ -381,11 +428,11 @@ describe("agent tracing (mlflow)", () => {
       SpanType,
     } = mlflow;
     const { MlflowSpanExporter, MlflowSpanProcessor } =
-      await import("@mlflow/core/dist/exporters/mlflow");
+      await import("@mlflow/core/dist/exporters/mlflow.js");
     const { DatabricksUCTableSpanExporter, DatabricksUCTableSpanProcessor } =
-      await import("@mlflow/core/dist/exporters/uc_table");
+      await import("@mlflow/core/dist/exporters/uc_table.js");
     const { ucLocationFromExperimentTags } =
-      await import("@mlflow/core/dist/core/destination");
+      await import("@mlflow/core/dist/core/destination.js");
 
     // Public entrypoint symbols (deep imports under mlflow-tracing 0.1.3).
     expect(typeof createAuthProvider).toBe("function");

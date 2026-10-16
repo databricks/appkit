@@ -42,6 +42,12 @@ vi.mock("@databricks/sdk-warehouses/v1", () => ({
 vi.mock("@databricks/sdk-statementexecution/v1", () => ({
   StatementExecutionClient: vi.fn().mockImplementation((opts) => ({ opts })),
 }));
+vi.mock("@databricks/sdk-experiments/v1", () => ({
+  ExperimentsClient: vi.fn().mockImplementation((opts) => {
+    ctorOpts.push(opts);
+    return { opts, getExperiment: async () => ({}) };
+  }),
+}));
 vi.mock("@databricks/sdk-genie/v1", () => ({
   GenieClient: vi.fn().mockImplementation((opts) => {
     ctorOpts.push(opts);
@@ -157,6 +163,7 @@ import {
   buildFunctionsClient,
   buildConnectionsClient,
   buildDatabaseClient,
+  buildExperimentsClient,
   buildGenieClient,
   buildModelServingClient,
   buildVolumesClient,
@@ -524,6 +531,36 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
       token: "user-token",
       host: "https://x",
     }).getConnection({} as never);
+    expect(ctorOpts[0].credentials).toMatchObject({
+      kind: "pat",
+      token: "user-token",
+    });
+    expect(m2mOpts).toEqual([]);
+  });
+
+  test("experiments normalizes the env host and resolves the SP via M2M", async () => {
+    process.env.DATABRICKS_HOST = "x.cloud.databricks.com";
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    await buildExperimentsClient({}).getExperiment({} as never);
+    expect(ctorOpts[0].host).toBe("https://x.cloud.databricks.com");
+    expect(m2mOpts).toEqual([
+      {
+        host: "https://x.cloud.databricks.com",
+        clientId: "sp-client-id",
+        clientSecret: "sp-secret",
+      },
+    ]);
+    expect(ctorOpts[0].credentials).toBeDefined();
+  });
+
+  test("experiments (asUser) uses the OBO token as PAT", async () => {
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    await buildExperimentsClient({
+      token: "user-token",
+      host: "https://x",
+    }).getExperiment({} as never);
     expect(ctorOpts[0].credentials).toMatchObject({
       kind: "pat",
       token: "user-token",
