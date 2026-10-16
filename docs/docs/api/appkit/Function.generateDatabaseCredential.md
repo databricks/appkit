@@ -1,7 +1,7 @@
 # Function: generateDatabaseCredential()
 
 ```ts
-function generateDatabaseCredential(workspaceClient: WorkspaceClient, request: GenerateDatabaseCredentialRequest): Promise<DatabaseCredential>;
+function generateDatabaseCredential(workspaceClient: LakebaseWorkspaceClient, request: GenerateDatabaseCredentialRequest): Promise<DatabaseCredential>;
 ```
 
 Generate OAuth credentials for Postgres database connection using the proper Postgres API.
@@ -13,7 +13,7 @@ as a password when connecting to Lakebase Postgres databases.
 
 | Parameter | Type | Description |
 | ------ | ------ | ------ |
-| `workspaceClient` | `WorkspaceClient` | Databricks workspace client for authentication |
+| `workspaceClient` | `LakebaseWorkspaceClient` | Databricks workspace client for authentication |
 | `request` | [`GenerateDatabaseCredentialRequest`](Interface.GenerateDatabaseCredentialRequest.md) | Request parameters including endpoint path and optional UC claims |
 
 ## Returns

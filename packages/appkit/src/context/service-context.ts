@@ -8,8 +8,8 @@ import {
 import { WarehouseResource } from "../resources/warehouse";
 import {
   type ClientOptions,
-  ConfigError,
   createWorkspaceClient,
+  isAuthConfigError,
   type WorkspaceClient,
 } from "../workspace-client";
 import { type CallerContext, snapshotCallerContext } from "./caller-context";
@@ -125,13 +125,11 @@ export class ServiceContext {
 
     const serviceCtx = ServiceContext.get();
 
-    // Create user client with the OAuth token from Databricks Apps
-    // Note: We use authType: "pat" because the token is passed as a Bearer token
-    // just like a PAT, even though it's technically an OAuth token
+    // Create user client with the OAuth token from Databricks Apps. An explicit
+    // token is sent as a Bearer token, like a PAT, though it's an OAuth token.
     const userClient = createWorkspaceClient({
       token,
       host,
-      authType: "pat",
       clientOptions: getClientOptions(),
     });
 
@@ -213,9 +211,9 @@ export class ServiceContext {
         workspaceId: Promise.resolve(resolvedWorkspaceId),
       });
     } catch (e) {
-      if (e instanceof ConfigError) {
+      if (isAuthConfigError(e)) {
         throw ConfigurationError.databricksAuthenticationSetupFailed(
-          e.baseMessage,
+          e.message,
           { cause: e },
         );
       }

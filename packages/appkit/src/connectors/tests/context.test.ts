@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { Context } from "../../workspace-client";
 import { contextFromAbortSignal } from "../context";
 
 describe("contextFromAbortSignal", () => {
@@ -8,9 +7,8 @@ describe("contextFromAbortSignal", () => {
     expect(contextFromAbortSignal()).toBeUndefined();
   });
 
-  it("wraps a signal in an SDK Context", () => {
+  it("wraps a signal in a context carrying a cancellation token", () => {
     const ctx = contextFromAbortSignal(new AbortController().signal);
-    expect(ctx).toBeInstanceOf(Context);
     expect(ctx?.cancellationToken).toBeDefined();
   });
 

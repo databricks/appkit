@@ -21,7 +21,7 @@ Callable to select a job by key.
 
 ```ts
 // Trigger a configured job
-const { run_id } = await appkit.jobs("etl").runNow();
+const { runId } = await appkit.jobs("etl").runNow();
 
 // Trigger and poll until completion
 for await (const status of appkit.jobs("etl").runAndWait()) {

@@ -107,7 +107,7 @@ Telemetry configuration
 ### workspaceClient?
 
 ```ts
-optional workspaceClient: WorkspaceClient;
+optional workspaceClient: LakebaseWorkspaceClient;
 ```
 
 Databricks workspace client for OAuth authentication

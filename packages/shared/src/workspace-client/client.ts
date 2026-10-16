@@ -2,17 +2,10 @@
  * `AppKitWorkspaceClient` — the facade implementation. Construct via
  * `createWorkspaceClient(...)`; this class is internal.
  *
- * Migrated service accessors build their modular client lazily (see
- * `modular.ts`); the rest (`servingEndpoints`, `config`, `apiClient`) delegate
- * to a single lazily-constructed legacy SDK client. To migrate one, replace its
- * getter here with a modular client instance (and update its connector + the
- * accessor type in `types.ts`). No other AppKit module touches the SDK.
+ * Every service accessor builds its modular `@databricks/sdk-*` client lazily
+ * (see `modular.ts`); raw REST calls go through the auth + request seam. No
+ * other AppKit module touches the SDK.
  */
-import {
-  buildLegacyWorkspaceClient,
-  type LegacyWorkspaceClient,
-  type WorkspaceClientOptions,
-} from "./legacy";
 import {
   buildScimClient,
   buildStatementExecutionClient,
@@ -50,11 +43,11 @@ import {
   type WorkspaceAuth,
   type WorkspaceRequest,
 } from "./modular";
+import type { WorkspaceClientOptions } from "./options";
 import type { WorkspaceClient } from "./types";
 
 export class AppKitWorkspaceClient implements WorkspaceClient {
   readonly #opts: WorkspaceClientOptions;
-  #legacy?: LegacyWorkspaceClient;
   #warehouses?: WarehousesClient;
   #statementExecution?: StatementExecutionClient;
   #auth?: WorkspaceAuth;
@@ -77,7 +70,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     this.#opts = opts;
   }
 
-  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  // Migrated to the modular SDK — built lazily.
   get files(): FilesClient {
     if (!this.#files) {
       this.#files = buildFilesClient(this.#opts);
@@ -85,7 +78,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#files;
   }
 
-  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  // Migrated to the modular SDK — built lazily.
   get warehouses(): WarehousesClient {
     if (!this.#warehouses) {
       this.#warehouses = buildWarehousesClient(this.#opts);
@@ -93,7 +86,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#warehouses;
   }
 
-  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  // Migrated to the modular SDK — built lazily.
   get genie(): GenieClient {
     if (!this.#genie) {
       this.#genie = buildGenieClient(this.#opts);
@@ -101,7 +94,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#genie;
   }
 
-  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  // Migrated to the modular SDK — built lazily.
   get apps(): AppsClient {
     if (!this.#apps) {
       this.#apps = buildAppsClient(this.#opts);
@@ -109,7 +102,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#apps;
   }
 
-  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  // Migrated to the modular SDK — built lazily.
   get database(): DatabaseClient {
     if (!this.#database) {
       this.#database = buildDatabaseClient(this.#opts);
@@ -117,7 +110,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#database;
   }
 
-  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  // Migrated to the modular SDK — built lazily.
   get jobs(): JobsClient {
     if (!this.#jobs) {
       this.#jobs = buildJobsClient(this.#opts);
@@ -125,7 +118,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#jobs;
   }
 
-  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  // Migrated to the modular SDK — built lazily.
   get experiments(): ExperimentsClient {
     if (!this.#experiments) {
       this.#experiments = buildExperimentsClient(this.#opts);
@@ -133,7 +126,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#experiments;
   }
 
-  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  // Migrated to the modular SDK — built lazily.
   get vectorSearch(): VectorSearchClient {
     if (!this.#vectorSearch) {
       this.#vectorSearch = buildVectorSearchClient(this.#opts);
@@ -141,7 +134,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#vectorSearch;
   }
 
-  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  // Migrated to the modular SDK — built lazily.
   get tables(): TablesClient {
     if (!this.#tables) {
       this.#tables = buildTablesClient(this.#opts);
@@ -149,7 +142,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#tables;
   }
 
-  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  // Migrated to the modular SDK — built lazily.
   get postgres(): PostgresClient {
     if (!this.#postgres) {
       this.#postgres = buildPostgresClient(this.#opts);
@@ -157,7 +150,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#postgres;
   }
 
-  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  // Migrated to the modular SDK — built lazily.
   get connections(): ConnectionsClient {
     if (!this.#connections) {
       this.#connections = buildConnectionsClient(this.#opts);
@@ -165,7 +158,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#connections;
   }
 
-  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  // Migrated to the modular SDK — built lazily.
   get functions(): FunctionsClient {
     if (!this.#functions) {
       this.#functions = buildFunctionsClient(this.#opts);
@@ -173,7 +166,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#functions;
   }
 
-  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  // Migrated to the modular SDK — built lazily.
   get volumes(): VolumesClient {
     if (!this.#volumes) {
       this.#volumes = buildVolumesClient(this.#opts);
@@ -181,7 +174,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#volumes;
   }
 
-  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  // Migrated to the modular SDK — built lazily.
   get statementExecution(): StatementExecutionClient {
     if (!this.#statementExecution) {
       this.#statementExecution = buildStatementExecutionClient(this.#opts);
@@ -189,8 +182,6 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#statementExecution;
   }
 
-  // Modular serving endpoints client. A new accessor because `servingEndpoints`
-  // is the legacy client's public type and can't change.
   get modelServing(): ModelServingClient {
     if (!this.#modelServing) {
       this.#modelServing = buildModelServingClient(this.#opts);
@@ -198,11 +189,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#modelServing;
   }
 
-  get servingEndpoints() {
-    return this.#getLegacy().servingEndpoints;
-  }
-
-  // Migrated to the modular SDK (SCIM) — built lazily, independent of the legacy client.
+  // Migrated to the modular SDK (SCIM) — built lazily.
   get currentUser(): ScimClient {
     if (!this.#currentUser) {
       this.#currentUser = buildScimClient(this.#opts);
@@ -210,7 +197,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#currentUser;
   }
 
-  // Modular auth + raw-request seam — built lazily, independent of the legacy client.
+  // Modular auth + raw-request seam — built lazily.
   getHost(): Promise<string> {
     return this.#getAuth().getHost();
   }
@@ -223,29 +210,10 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#getAuth().request(req);
   }
 
-  get config() {
-    return this.#getLegacy().config;
-  }
-
-  get apiClient() {
-    return this.#getLegacy().apiClient;
-  }
-
-  toLegacyWorkspaceClient(): LegacyWorkspaceClient {
-    return this.#getLegacy();
-  }
-
   #getAuth(): WorkspaceAuth {
     if (!this.#auth) {
       this.#auth = buildWorkspaceAuth(this.#opts);
     }
     return this.#auth;
-  }
-
-  #getLegacy(): LegacyWorkspaceClient {
-    if (!this.#legacy) {
-      this.#legacy = buildLegacyWorkspaceClient(this.#opts);
-    }
-    return this.#legacy;
   }
 }

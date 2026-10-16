@@ -1,5 +1,5 @@
 import { createLogger } from "../../logging/logger";
-import type { serving, WorkspaceClient } from "../../workspace-client";
+import type { WorkspaceClient } from "../../workspace-client";
 import { contextFromAbortSignal } from "../context";
 
 const logger = createLogger("connectors:serving");
@@ -20,8 +20,8 @@ const logger = createLogger("connectors:serving");
 //   Needs: a data-plane AI Gateway client for chat completions + responses,
 //   with streaming.
 //
-// When those land, also drop the legacy `apiClient.request` fallback in
-// `streamPath`, which only exists for caller-supplied legacy SDK clients.
+// The `apiClient.request` fallback in `streamPath` is structural: it only
+// serves callers that pass their own legacy-style client.
 
 /**
  * Structural shape of the AppKit workspace client's raw-request seam
@@ -81,7 +81,7 @@ export async function invoke(
   client: WorkspaceClient,
   endpointName: string,
   body: Record<string, unknown>,
-): Promise<serving.QueryEndpointResponse> {
+): Promise<Record<string, unknown>> {
   // Strip `stream` from the body — the connector controls this
   const { stream: _stream, ...cleanBody } = body;
 
@@ -98,7 +98,7 @@ export async function invoke(
   });
 
   const text = await response.text();
-  let json: serving.QueryEndpointResponse;
+  let json: Record<string, unknown>;
   try {
     json = text.length === 0 ? {} : JSON.parse(text);
   } catch {

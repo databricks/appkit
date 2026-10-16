@@ -1,17 +1,14 @@
 /**
  * API error type surfaced by the AppKit workspace client.
  *
- * Migrated services throw the modular `@databricks/sdk-core` `ApiError`, a
- * different class from the legacy `@databricks/sdk-experimental` one, with the
- * status in `httpStatusCode` and the code in `code`. To keep `instanceof
- * ApiError`, `.statusCode` and `.errorCode` working for AppKit and its
- * consumers, the exported `ApiError` matches both classes, and modular errors
- * also expose the legacy field names.
+ * AppKit's own error class, with the field names AppKit and its consumers read
+ * (`statusCode`, `errorCode`). The modular `@databricks/sdk-core` `ApiError`
+ * keeps its status in `httpStatusCode` and its code in `code`, so it also
+ * exposes the AppKit names, and `instanceof ApiError` matches it too.
  */
 import { ApiError as ModularApiError } from "@databricks/sdk-core/apierror";
-import { ApiError as LegacyApiError } from "@databricks/sdk-experimental";
 
-// Legacy-name aliases on modular errors. Setters store an own value, so call
+// AppKit-name aliases on modular errors. Setters store an own value, so call
 // sites that assign `statusCode` (e.g. via Object.assign) keep working.
 for (const [name, source] of [
   ["statusCode", "httpStatusCode"],
@@ -35,8 +32,27 @@ for (const [name, source] of [
   }
 }
 
-export class ApiError extends LegacyApiError {
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly errorCode: string,
+    readonly statusCode: number,
+    readonly response?: unknown,
+    readonly details: unknown[] = [],
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+
+  /** Like the legacy SDK: only 429 is retryable by status alone. */
+  isRetryable(): boolean {
+    return this.statusCode === 429;
+  }
+
   static [Symbol.hasInstance](value: unknown): boolean {
-    return value instanceof LegacyApiError || value instanceof ModularApiError;
+    return (
+      Function.prototype[Symbol.hasInstance].call(ApiError, value) ||
+      value instanceof ModularApiError
+    );
   }
 }

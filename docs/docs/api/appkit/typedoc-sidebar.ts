@@ -23,6 +23,11 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
+          id: "api/appkit/Class.ApiError",
+          label: "ApiError"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Class.AppKitError",
           label: "AppKitError"
         },
@@ -219,6 +224,12 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.DirectoryEntry",
+          label: "DirectoryEntry",
+          className: "typedoc-sidebar-item-deprecated"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.DiscoveredEval",
           label: "DiscoveredEval"
         },
@@ -226,6 +237,12 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.DiscoveredEvalConfig",
           label: "DiscoveredEvalConfig"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.DownloadResponse",
+          label: "DownloadResponse",
+          className: "typedoc-sidebar-item-deprecated"
         },
         {
           type: "doc",
@@ -589,11 +606,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Interface.WorkspaceClientLike",
-          label: "WorkspaceClientLike"
-        },
-        {
-          type: "doc",
           id: "api/appkit/Interface.WorkspaceClientOptions",
           label: "WorkspaceClientOptions"
         }
@@ -700,6 +712,16 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.FilesDirectoryEntry",
+          label: "FilesDirectoryEntry"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.FilesDownloadResponse",
+          label: "FilesDownloadResponse"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.HostedTool",
           label: "HostedTool"
         },
@@ -803,6 +825,11 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.UserScopedApp",
           label: "UserScopedApp"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.WorkspaceClientLike",
+          label: "WorkspaceClientLike"
         }
       ]
     },
