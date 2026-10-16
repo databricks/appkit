@@ -5,33 +5,24 @@ import { createApiError } from "../../../testing";
 import type { WorkspaceClient } from "../../../workspace-client";
 import { ApiError } from "../../../workspace-client";
 import { FilesConnector } from "../client";
-import { streamFromChunks, streamFromString } from "./utils";
+import { headResponse, streamFromChunks, streamFromString } from "./utils";
 
-const { mockFilesApi, mockConfig, mockClient } = vi.hoisted(() => {
+const { mockFilesApi, mockRequest, mockClient } = vi.hoisted(() => {
   const mockFilesApi = {
-    listDirectoryContents: vi.fn(),
-    download: vi.fn(),
-    getMetadata: vi.fn(),
-    upload: vi.fn(),
+    listDirectoryContentsIter: vi.fn(),
+    downloadFile: vi.fn(),
+    uploadFile: vi.fn(),
     createDirectory: vi.fn(),
-    delete: vi.fn(),
+    deleteFile: vi.fn(),
   };
 
-  const mockConfig = {
-    host: "https://test.databricks.com",
-    authenticate: vi.fn(),
-  };
-
-  const mockApiClient = {
-    userAgent: vi.fn(() => "@databricks/appkit/9.9.9"),
-  };
+  const mockRequest = vi.fn();
   const mockClient = {
     files: mockFilesApi,
-    config: mockConfig,
-    apiClient: mockApiClient,
+    request: mockRequest,
   } as unknown as WorkspaceClient;
 
-  return { mockFilesApi, mockConfig, mockClient };
+  return { mockFilesApi, mockRequest, mockClient };
 });
 
 vi.mock("../../../workspace-client", async (importOriginal) => {
@@ -64,11 +55,11 @@ describe("FilesConnector", () => {
         defaultVolume: "/Volumes/catalog/schema/vol",
       });
 
-      mockFilesApi.download.mockResolvedValue({ contents: null });
+      mockFilesApi.downloadFile.mockResolvedValue({ contents: null });
       connector.download(mockClient, "/Volumes/other/path/file.txt");
 
-      expect(mockFilesApi.download).toHaveBeenCalledWith({
-        file_path: "/Volumes/other/path/file.txt",
+      expect(mockFilesApi.downloadFile).toHaveBeenCalledWith({
+        filePath: "/Volumes/other/path/file.txt",
       });
     });
 
@@ -77,11 +68,11 @@ describe("FilesConnector", () => {
         defaultVolume: "/Volumes/catalog/schema/vol",
       });
 
-      mockFilesApi.download.mockResolvedValue({ contents: null });
+      mockFilesApi.downloadFile.mockResolvedValue({ contents: null });
       connector.download(mockClient, "subdir/file.txt");
 
-      expect(mockFilesApi.download).toHaveBeenCalledWith({
-        file_path: "/Volumes/catalog/schema/vol/subdir/file.txt",
+      expect(mockFilesApi.downloadFile).toHaveBeenCalledWith({
+        filePath: "/Volumes/catalog/schema/vol/subdir/file.txt",
       });
     });
 
@@ -163,45 +154,54 @@ describe("FilesConnector", () => {
       });
     });
 
-    test("collects async iterator entries", async () => {
-      const entries = [
+    test("collects async iterator entries, mapped to the snake_case wire shape", async () => {
+      mockFilesApi.listDirectoryContentsIter.mockReturnValue(
+        (async function* () {
+          yield {
+            name: "file1.txt",
+            path: "/Volumes/catalog/schema/vol/file1.txt",
+            isDirectory: false,
+            fileSize: 42,
+            lastModified: 1700000000000,
+          };
+          yield {
+            name: "subdir",
+            path: "/Volumes/catalog/schema/vol/subdir",
+            isDirectory: true,
+          };
+        })(),
+      );
+
+      const result = await connector.list(mockClient);
+
+      expect(result).toEqual([
         {
           name: "file1.txt",
           path: "/Volumes/catalog/schema/vol/file1.txt",
           is_directory: false,
+          file_size: 42,
+          last_modified: 1700000000000,
         },
         {
           name: "subdir",
           path: "/Volumes/catalog/schema/vol/subdir",
           is_directory: true,
         },
-      ];
-
-      mockFilesApi.listDirectoryContents.mockReturnValue(
-        (async function* () {
-          for (const entry of entries) {
-            yield entry;
-          }
-        })(),
-      );
-
-      const result = await connector.list(mockClient);
-
-      expect(result).toEqual(entries);
-      expect(mockFilesApi.listDirectoryContents).toHaveBeenCalledWith({
-        directory_path: "/Volumes/catalog/schema/vol",
+      ]);
+      expect(mockFilesApi.listDirectoryContentsIter).toHaveBeenCalledWith({
+        directoryPath: "/Volumes/catalog/schema/vol",
       });
     });
 
     test("uses defaultVolume when no path provided", async () => {
-      mockFilesApi.listDirectoryContents.mockReturnValue(
+      mockFilesApi.listDirectoryContentsIter.mockReturnValue(
         (async function* () {})(),
       );
 
       await connector.list(mockClient);
 
-      expect(mockFilesApi.listDirectoryContents).toHaveBeenCalledWith({
-        directory_path: "/Volumes/catalog/schema/vol",
+      expect(mockFilesApi.listDirectoryContentsIter).toHaveBeenCalledWith({
+        directoryPath: "/Volumes/catalog/schema/vol",
       });
     });
 
@@ -214,31 +214,31 @@ describe("FilesConnector", () => {
     });
 
     test("uses provided absolute path", async () => {
-      mockFilesApi.listDirectoryContents.mockReturnValue(
+      mockFilesApi.listDirectoryContentsIter.mockReturnValue(
         (async function* () {})(),
       );
 
       await connector.list(mockClient, "/Volumes/other/path");
 
-      expect(mockFilesApi.listDirectoryContents).toHaveBeenCalledWith({
-        directory_path: "/Volumes/other/path",
+      expect(mockFilesApi.listDirectoryContentsIter).toHaveBeenCalledWith({
+        directoryPath: "/Volumes/other/path",
       });
     });
 
     test("resolves relative path with defaultVolume", async () => {
-      mockFilesApi.listDirectoryContents.mockReturnValue(
+      mockFilesApi.listDirectoryContentsIter.mockReturnValue(
         (async function* () {})(),
       );
 
       await connector.list(mockClient, "subdir");
 
-      expect(mockFilesApi.listDirectoryContents).toHaveBeenCalledWith({
-        directory_path: "/Volumes/catalog/schema/vol/subdir",
+      expect(mockFilesApi.listDirectoryContentsIter).toHaveBeenCalledWith({
+        directoryPath: "/Volumes/catalog/schema/vol/subdir",
       });
     });
 
     test("returns empty array for empty directory", async () => {
-      mockFilesApi.listDirectoryContents.mockReturnValue(
+      mockFilesApi.listDirectoryContentsIter.mockReturnValue(
         (async function* () {})(),
       );
 
@@ -260,7 +260,7 @@ describe("FilesConnector", () => {
 
     test("decodes ReadableStream to UTF-8 string", async () => {
       const content = "Hello, world!";
-      mockFilesApi.download.mockResolvedValue({
+      mockFilesApi.downloadFile.mockResolvedValue({
         contents: streamFromString(content),
       });
 
@@ -270,7 +270,7 @@ describe("FilesConnector", () => {
     });
 
     test("returns empty string when contents is null", async () => {
-      mockFilesApi.download.mockResolvedValue({ contents: null });
+      mockFilesApi.downloadFile.mockResolvedValue({ contents: null });
 
       const result = await connector.read(mockClient, "empty.txt");
 
@@ -278,7 +278,7 @@ describe("FilesConnector", () => {
     });
 
     test("concatenates multiple chunks correctly", async () => {
-      mockFilesApi.download.mockResolvedValue({
+      mockFilesApi.downloadFile.mockResolvedValue({
         contents: streamFromChunks(["Hello, ", "world", "!"]),
       });
 
@@ -289,7 +289,7 @@ describe("FilesConnector", () => {
 
     test("handles multi-byte UTF-8 characters", async () => {
       const content = "Héllo wörld 🌍";
-      mockFilesApi.download.mockResolvedValue({
+      mockFilesApi.downloadFile.mockResolvedValue({
         contents: streamFromString(content),
       });
 
@@ -309,26 +309,55 @@ describe("FilesConnector", () => {
       });
     });
 
-    test("calls client.files.download with resolved path", async () => {
-      const response = { contents: streamFromString("data") };
-      mockFilesApi.download.mockResolvedValue(response);
+    test("calls client.files.downloadFile with resolved path", async () => {
+      const contents = streamFromString("data");
+      mockFilesApi.downloadFile.mockResolvedValue({
+        contentLength: 4n,
+        contentType: "text/plain",
+        lastModified: "Mon, 01 Jan 2025 00:00:00 GMT",
+        contents,
+      });
 
       const result = await connector.download(mockClient, "file.txt");
 
-      expect(mockFilesApi.download).toHaveBeenCalledWith({
-        file_path: "/Volumes/catalog/schema/vol/file.txt",
+      expect(mockFilesApi.downloadFile).toHaveBeenCalledWith({
+        filePath: "/Volumes/catalog/schema/vol/file.txt",
       });
-      expect(result).toBe(response);
+      expect(result).toEqual({
+        "content-length": 4,
+        "content-type": "text/plain",
+        "last-modified": "Mon, 01 Jan 2025 00:00:00 GMT",
+        contents,
+      });
+      expect(result.contents).toBe(contents);
+    });
+
+    test("converts a modular-SDK 404 error into the wrapper ApiError", async () => {
+      mockFilesApi.downloadFile.mockRejectedValue(
+        Object.assign(new Error("File not found"), {
+          httpStatusCode: 404,
+          code: "NOT_FOUND",
+        }),
+      );
+
+      const error = await connector
+        .download(mockClient, "missing.txt")
+        .catch((e) => e);
+
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error.statusCode).toBe(404);
+      expect(error.errorCode).toBe("NOT_FOUND");
+      expect(error.message).toBe("File not found");
     });
 
     test("passes absolute path directly", async () => {
       const response = { contents: null };
-      mockFilesApi.download.mockResolvedValue(response);
+      mockFilesApi.downloadFile.mockResolvedValue(response);
 
       await connector.download(mockClient, "/Volumes/other/file.txt");
 
-      expect(mockFilesApi.download).toHaveBeenCalledWith({
-        file_path: "/Volumes/other/file.txt",
+      expect(mockFilesApi.downloadFile).toHaveBeenCalledWith({
+        filePath: "/Volumes/other/file.txt",
       });
     });
   });
@@ -344,11 +373,13 @@ describe("FilesConnector", () => {
     });
 
     test("returns true when metadata succeeds", async () => {
-      mockFilesApi.getMetadata.mockResolvedValue({
-        "content-length": 100,
-        "content-type": "text/plain",
-        "last-modified": "2025-01-01",
-      });
+      mockRequest.mockResolvedValue(
+        headResponse({
+          "content-length": 100,
+          "content-type": "text/plain",
+          "last-modified": "2025-01-01",
+        }),
+      );
 
       const result = await connector.exists(mockClient, "file.txt");
 
@@ -356,7 +387,7 @@ describe("FilesConnector", () => {
     });
 
     test("returns false on 404 ApiError", async () => {
-      mockFilesApi.getMetadata.mockRejectedValue(
+      mockRequest.mockRejectedValue(
         createApiError({
           message: "Not found",
           errorCode: "NOT_FOUND",
@@ -370,7 +401,7 @@ describe("FilesConnector", () => {
     });
 
     test("rethrows non-404 ApiError", async () => {
-      mockFilesApi.getMetadata.mockRejectedValue(
+      mockRequest.mockRejectedValue(
         createApiError({
           message: "Server error",
           errorCode: "SERVER_ERROR",
@@ -384,11 +415,30 @@ describe("FilesConnector", () => {
     });
 
     test("rethrows generic errors", async () => {
-      mockFilesApi.getMetadata.mockRejectedValue(new Error("Network failure"));
+      mockRequest.mockRejectedValue(new Error("Network failure"));
 
       await expect(connector.exists(mockClient, "file.txt")).rejects.toThrow(
         "Network failure",
       );
+    });
+
+    test("does not resolve a different file for a name containing '#'", async () => {
+      // Mirror the raw seam's `new URL(path, host)`: only `.../report` exists.
+      mockRequest.mockImplementation(async ({ path }: { path: string }) => {
+        const { pathname } = new URL(path, "https://host");
+        if (
+          pathname === "/api/2.0/fs/files/Volumes/catalog/schema/vol/report"
+        ) {
+          return headResponse({ "content-length": 1 });
+        }
+        throw createApiError({
+          message: "Not found",
+          errorCode: "NOT_FOUND",
+          statusCode: 404,
+        });
+      });
+
+      expect(await connector.exists(mockClient, "report#1.csv")).toBe(false);
     });
   });
 
@@ -403,11 +453,13 @@ describe("FilesConnector", () => {
     });
 
     test("maps SDK response to FileMetadata", async () => {
-      mockFilesApi.getMetadata.mockResolvedValue({
-        "content-length": 1234,
-        "content-type": "application/json",
-        "last-modified": "2025-06-15T10:00:00Z",
-      });
+      mockRequest.mockResolvedValue(
+        headResponse({
+          "content-length": 1234,
+          "content-type": "application/json",
+          "last-modified": "2025-06-15T10:00:00Z",
+        }),
+      );
 
       const result = await connector.metadata(mockClient, "data.json");
 
@@ -419,11 +471,13 @@ describe("FilesConnector", () => {
     });
 
     test("uses contentTypeFromPath to resolve octet-stream", async () => {
-      mockFilesApi.getMetadata.mockResolvedValue({
-        "content-length": 500,
-        "content-type": "application/octet-stream",
-        "last-modified": "2025-01-01",
-      });
+      mockRequest.mockResolvedValue(
+        headResponse({
+          "content-length": 500,
+          "content-type": "application/octet-stream",
+          "last-modified": "2025-01-01",
+        }),
+      );
 
       const result = await connector.metadata(mockClient, "image.png");
 
@@ -431,11 +485,13 @@ describe("FilesConnector", () => {
     });
 
     test("handles undefined content-type from SDK", async () => {
-      mockFilesApi.getMetadata.mockResolvedValue({
-        "content-length": 100,
-        "content-type": undefined,
-        "last-modified": "2025-01-01",
-      });
+      mockRequest.mockResolvedValue(
+        headResponse({
+          "content-length": 100,
+          "content-type": undefined,
+          "last-modified": "2025-01-01",
+        }),
+      );
 
       const result = await connector.metadata(mockClient, "data.csv");
 
@@ -443,84 +499,130 @@ describe("FilesConnector", () => {
     });
 
     test("resolves relative path via defaultVolume", async () => {
-      mockFilesApi.getMetadata.mockResolvedValue({
-        "content-length": 0,
-        "content-type": "text/plain",
-        "last-modified": "2025-01-01",
-      });
+      mockRequest.mockResolvedValue(
+        headResponse({
+          "content-length": 0,
+          "content-type": "text/plain",
+          "last-modified": "2025-01-01",
+        }),
+      );
 
       await connector.metadata(mockClient, "notes.txt");
 
-      expect(mockFilesApi.getMetadata).toHaveBeenCalledWith({
-        file_path: "/Volumes/catalog/schema/vol/notes.txt",
+      expect(mockRequest).toHaveBeenCalledWith({
+        method: "HEAD",
+        path: "/api/2.0/fs/files/Volumes/catalog/schema/vol/notes.txt",
+      });
+    });
+
+    test.each([
+      ["report#1.csv", "report%231.csv"],
+      ["report?final.csv", "report%3Ffinal.csv"],
+      ["100%25.csv", "100%2525.csv"],
+      ["Invoice #123.pdf", "Invoice%20%23123.pdf"],
+    ])("encodes path segments: %s", async (name, encoded) => {
+      mockRequest.mockResolvedValue(headResponse({ "content-length": 1 }));
+
+      await connector.metadata(mockClient, name);
+
+      expect(mockRequest).toHaveBeenCalledWith({
+        method: "HEAD",
+        path: `/api/2.0/fs/files/Volumes/catalog/schema/vol/${encoded}`,
+      });
+    });
+
+    // Regression: the modular SDK's getFileMetadata drops HEAD response
+    // headers, so metadata must come from the raw HEAD response headers.
+    test("reads metadata from the HEAD response headers", async () => {
+      mockRequest.mockResolvedValue(
+        new Response(null, {
+          headers: {
+            "content-length": "2048",
+            "content-type": "text/plain",
+            "last-modified": "Sun, 15 Jun 2025 10:00:00 GMT",
+          },
+        }),
+      );
+
+      const result = await connector.metadata(mockClient, "notes.txt");
+
+      expect(result).toEqual({
+        contentLength: 2048,
+        contentType: "text/plain",
+        lastModified: "Sun, 15 Jun 2025 10:00:00 GMT",
       });
     });
   });
 
   describe("upload()", () => {
     let connector: FilesConnector;
-    let fetchSpy: ReturnType<typeof vi.fn>;
 
     beforeEach(() => {
       vi.clearAllMocks();
       connector = new FilesConnector({
         defaultVolume: "/Volumes/catalog/schema/vol",
       });
-      mockConfig.authenticate.mockResolvedValue(undefined);
-      fetchSpy = vi.fn().mockResolvedValue({ ok: true });
-      vi.stubGlobal("fetch", fetchSpy);
+      mockFilesApi.uploadFile.mockResolvedValue({});
+      mockRequest.mockResolvedValue(new Response(null, { status: 204 }));
     });
 
-    afterEach(() => {
-      vi.unstubAllGlobals();
-    });
+    /** The single PUT the in-memory path sent through the request seam. */
+    function sentPut() {
+      expect(mockRequest).toHaveBeenCalledTimes(1);
+      return mockRequest.mock.calls[0][0] as {
+        method: string;
+        path: string;
+        query: Record<string, string>;
+        body: Uint8Array;
+        signal?: AbortSignal;
+      };
+    }
 
-    test("handles string input", async () => {
+    test("sends string input as bytes (known length, retryable) via the request seam", async () => {
       await connector.upload(mockClient, "file.txt", "hello world");
 
-      expect(fetchSpy).toHaveBeenCalledWith(
-        expect.stringContaining(
-          "/api/2.0/fs/files/Volumes/catalog/schema/vol/file.txt",
-        ),
-        expect.objectContaining({
-          method: "PUT",
-          body: "hello world",
-        }),
+      const put = sentPut();
+      expect(put.method).toBe("PUT");
+      expect(put.path).toBe(
+        "/api/2.0/fs/files/Volumes/catalog/schema/vol/file.txt",
+      );
+      expect(put.body).toBeInstanceOf(Uint8Array);
+      expect(new TextDecoder().decode(put.body)).toBe("hello world");
+      expect(mockFilesApi.uploadFile).not.toHaveBeenCalled();
+    });
+
+    test("sends Buffer input as bytes", async () => {
+      await connector.upload(
+        mockClient,
+        "file.bin",
+        Buffer.from("buffer data"),
+      );
+
+      expect(new TextDecoder().decode(sentPut().body)).toBe("buffer data");
+    });
+
+    test("encodes path segments so # and ? stay in the file name", async () => {
+      await connector.upload(mockClient, "report#1?.csv", "data");
+
+      expect(sentPut().path).toBe(
+        "/api/2.0/fs/files/Volumes/catalog/schema/vol/report%231%3F.csv",
       );
     });
 
-    test("handles Buffer input", async () => {
-      const buf = Buffer.from("buffer data");
-      await connector.upload(mockClient, "file.bin", buf);
-
-      expect(fetchSpy).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          method: "PUT",
-          body: buf,
-        }),
-      );
-    });
-
-    test("handles ReadableStream input (streams directly)", async () => {
+    test("passes a ReadableStream through unchanged to uploadFile", async () => {
       const stream = streamFromString("stream data");
       await connector.upload(mockClient, "file.txt", stream);
 
-      expect(fetchSpy).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          method: "PUT",
-          body: expect.any(ReadableStream),
-          duplex: "half",
-        }),
-      );
+      expect(mockFilesApi.uploadFile.mock.calls[0][0].contents).toBe(stream);
+      expect(mockRequest).not.toHaveBeenCalled();
     });
 
     test("defaults overwrite to true", async () => {
       await connector.upload(mockClient, "file.txt", "data");
+      expect(sentPut().query).toEqual({ overwrite: "true" });
 
-      const url = fetchSpy.mock.calls[0][0] as string;
-      expect(url).toContain("overwrite=true");
+      await connector.upload(mockClient, "s.txt", streamFromString("s"));
+      expect(mockFilesApi.uploadFile.mock.calls[0][0].overwrite).toBe(true);
     });
 
     test("sets overwrite=false when specified", async () => {
@@ -528,57 +630,57 @@ describe("FilesConnector", () => {
         overwrite: false,
       });
 
-      const url = fetchSpy.mock.calls[0][0] as string;
-      expect(url).toContain("overwrite=false");
+      expect(sentPut().query).toEqual({ overwrite: "false" });
     });
 
-    test("calls config.authenticate on the headers", async () => {
-      await connector.upload(mockClient, "file.txt", "data");
+    test("forwards the abort signal", async () => {
+      const signal = new AbortController().signal;
+      await connector.upload(mockClient, "file.txt", "data", { signal });
+      expect(sentPut().signal).toBe(signal);
 
-      expect(mockConfig.authenticate).toHaveBeenCalledWith(expect.any(Headers));
-    });
-
-    test("stamps the AppKit User-Agent from the SDK apiClient", async () => {
-      await connector.upload(mockClient, "file.txt", "data");
-
-      const init = fetchSpy.mock.calls[0][1] as RequestInit;
-      const headers = init.headers as Headers;
-      expect(headers.get("User-Agent")).toBe("@databricks/appkit/9.9.9");
-    });
-
-    test("builds URL from client.config.host", async () => {
-      await connector.upload(mockClient, "file.txt", "data");
-
-      const url = fetchSpy.mock.calls[0][0] as string;
-      expect(url).toMatch(
-        /^https:\/\/test\.databricks\.com\/api\/2\.0\/fs\/files/,
-      );
-    });
-
-    test("throws ApiError on non-ok response", async () => {
-      fetchSpy.mockResolvedValue({
-        ok: false,
-        status: 403,
-        text: () => Promise.resolve("Forbidden"),
+      await connector.upload(mockClient, "s.txt", streamFromString("s"), {
+        signal,
       });
+      expect(mockFilesApi.uploadFile.mock.calls[0][1]).toEqual({ signal });
+    });
+
+    test("re-wraps a modular SDK error as UPLOAD_FAILED with its status", async () => {
+      const apiError = () =>
+        Object.assign(new Error("x".repeat(300)), {
+          httpStatusCode: 403,
+          code: "PERMISSION_DENIED",
+        });
+      mockRequest.mockRejectedValue(apiError());
+      mockFilesApi.uploadFile.mockRejectedValue(apiError());
+
+      for (const contents of ["data", streamFromString("s")]) {
+        const error = await connector
+          .upload(mockClient, "file.txt", contents)
+          .catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(ApiError);
+        expect((error as ApiError).errorCode).toBe("UPLOAD_FAILED");
+        expect((error as ApiError).statusCode).toBe(403);
+        expect((error as ApiError).message).toBe(
+          `Upload failed: ${"x".repeat(200)}…`,
+        );
+      }
+    });
+
+    test("rethrows non-API errors unchanged", async () => {
+      const boom = new Error("network down");
+      mockRequest.mockRejectedValue(boom);
 
       await expect(
         connector.upload(mockClient, "file.txt", "data"),
-      ).rejects.toThrow("Upload failed: Forbidden");
-
-      try {
-        await connector.upload(mockClient, "file.txt", "data");
-      } catch (error) {
-        expect(error).toBeInstanceOf(ApiError);
-        expect((error as any).statusCode).toBe(403);
-      }
+      ).rejects.toBe(boom);
     });
 
     test("resolves absolute paths directly", async () => {
       await connector.upload(mockClient, "/Volumes/other/vol/file.txt", "data");
 
-      const url = fetchSpy.mock.calls[0][0] as string;
-      expect(url).toContain("/api/2.0/fs/files/Volumes/other/vol/file.txt");
+      expect(sentPut().path).toBe(
+        "/api/2.0/fs/files/Volumes/other/vol/file.txt",
+      );
     });
   });
 
@@ -598,7 +700,7 @@ describe("FilesConnector", () => {
       await connector.createDirectory(mockClient, "new-dir");
 
       expect(mockFilesApi.createDirectory).toHaveBeenCalledWith({
-        directory_path: "/Volumes/catalog/schema/vol/new-dir",
+        directoryPath: "/Volumes/catalog/schema/vol/new-dir",
       });
     });
 
@@ -611,7 +713,7 @@ describe("FilesConnector", () => {
       );
 
       expect(mockFilesApi.createDirectory).toHaveBeenCalledWith({
-        directory_path: "/Volumes/other/path/new-dir",
+        directoryPath: "/Volumes/other/path/new-dir",
       });
     });
   });
@@ -626,23 +728,23 @@ describe("FilesConnector", () => {
       });
     });
 
-    test("calls client.files.delete with resolved path", async () => {
-      mockFilesApi.delete.mockResolvedValue(undefined);
+    test("calls client.files.deleteFile with resolved path", async () => {
+      mockFilesApi.deleteFile.mockResolvedValue(undefined);
 
       await connector.delete(mockClient, "file.txt");
 
-      expect(mockFilesApi.delete).toHaveBeenCalledWith({
-        file_path: "/Volumes/catalog/schema/vol/file.txt",
+      expect(mockFilesApi.deleteFile).toHaveBeenCalledWith({
+        filePath: "/Volumes/catalog/schema/vol/file.txt",
       });
     });
 
     test("uses absolute path when provided", async () => {
-      mockFilesApi.delete.mockResolvedValue(undefined);
+      mockFilesApi.deleteFile.mockResolvedValue(undefined);
 
       await connector.delete(mockClient, "/Volumes/other/file.txt");
 
-      expect(mockFilesApi.delete).toHaveBeenCalledWith({
-        file_path: "/Volumes/other/file.txt",
+      expect(mockFilesApi.deleteFile).toHaveBeenCalledWith({
+        filePath: "/Volumes/other/file.txt",
       });
     });
   });
@@ -660,12 +762,14 @@ describe("FilesConnector", () => {
     test("text files return truncated preview (max 1024 chars)", async () => {
       const longText = "A".repeat(2000);
 
-      mockFilesApi.getMetadata.mockResolvedValue({
-        "content-length": 2000,
-        "content-type": "text/plain",
-        "last-modified": "2025-01-01",
-      });
-      mockFilesApi.download.mockResolvedValue({
+      mockRequest.mockResolvedValue(
+        headResponse({
+          "content-length": 2000,
+          "content-type": "text/plain",
+          "last-modified": "2025-01-01",
+        }),
+      );
+      mockFilesApi.downloadFile.mockResolvedValue({
         contents: streamFromString(longText),
       });
 
@@ -678,12 +782,14 @@ describe("FilesConnector", () => {
     });
 
     test("text/html files are treated as text", async () => {
-      mockFilesApi.getMetadata.mockResolvedValue({
-        "content-length": 30,
-        "content-type": "text/html",
-        "last-modified": "2025-01-01",
-      });
-      mockFilesApi.download.mockResolvedValue({
+      mockRequest.mockResolvedValue(
+        headResponse({
+          "content-length": 30,
+          "content-type": "text/html",
+          "last-modified": "2025-01-01",
+        }),
+      );
+      mockFilesApi.downloadFile.mockResolvedValue({
         contents: streamFromString("<h1>Hello</h1>"),
       });
 
@@ -694,12 +800,14 @@ describe("FilesConnector", () => {
     });
 
     test("application/json files are treated as text", async () => {
-      mockFilesApi.getMetadata.mockResolvedValue({
-        "content-length": 20,
-        "content-type": "application/json",
-        "last-modified": "2025-01-01",
-      });
-      mockFilesApi.download.mockResolvedValue({
+      mockRequest.mockResolvedValue(
+        headResponse({
+          "content-length": 20,
+          "content-type": "application/json",
+          "last-modified": "2025-01-01",
+        }),
+      );
+      mockFilesApi.downloadFile.mockResolvedValue({
         contents: streamFromString('{"key":"value"}'),
       });
 
@@ -710,12 +818,14 @@ describe("FilesConnector", () => {
     });
 
     test("application/xml files are treated as text", async () => {
-      mockFilesApi.getMetadata.mockResolvedValue({
-        "content-length": 30,
-        "content-type": "application/xml",
-        "last-modified": "2025-01-01",
-      });
-      mockFilesApi.download.mockResolvedValue({
+      mockRequest.mockResolvedValue(
+        headResponse({
+          "content-length": 30,
+          "content-type": "application/xml",
+          "last-modified": "2025-01-01",
+        }),
+      );
+      mockFilesApi.downloadFile.mockResolvedValue({
         contents: streamFromString("<root/>"),
       });
 
@@ -726,11 +836,13 @@ describe("FilesConnector", () => {
     });
 
     test("image files return isImage: true, textPreview: null", async () => {
-      mockFilesApi.getMetadata.mockResolvedValue({
-        "content-length": 5000,
-        "content-type": "image/png",
-        "last-modified": "2025-01-01",
-      });
+      mockRequest.mockResolvedValue(
+        headResponse({
+          "content-length": 5000,
+          "content-type": "image/png",
+          "last-modified": "2025-01-01",
+        }),
+      );
 
       const result = await connector.preview(mockClient, "image.png");
 
@@ -740,11 +852,13 @@ describe("FilesConnector", () => {
     });
 
     test("other files return isText: false, isImage: false, textPreview: null", async () => {
-      mockFilesApi.getMetadata.mockResolvedValue({
-        "content-length": 1000,
-        "content-type": "application/pdf",
-        "last-modified": "2025-01-01",
-      });
+      mockRequest.mockResolvedValue(
+        headResponse({
+          "content-length": 1000,
+          "content-type": "application/pdf",
+          "last-modified": "2025-01-01",
+        }),
+      );
 
       const result = await connector.preview(mockClient, "doc.pdf");
 
@@ -754,12 +868,14 @@ describe("FilesConnector", () => {
     });
 
     test("empty file contents return empty string preview", async () => {
-      mockFilesApi.getMetadata.mockResolvedValue({
-        "content-length": 0,
-        "content-type": "text/plain",
-        "last-modified": "2025-01-01",
-      });
-      mockFilesApi.download.mockResolvedValue({
+      mockRequest.mockResolvedValue(
+        headResponse({
+          "content-length": 0,
+          "content-type": "text/plain",
+          "last-modified": "2025-01-01",
+        }),
+      );
+      mockFilesApi.downloadFile.mockResolvedValue({
         contents: null,
       });
 
@@ -771,12 +887,14 @@ describe("FilesConnector", () => {
     });
 
     test("preview spreads metadata into result", async () => {
-      mockFilesApi.getMetadata.mockResolvedValue({
-        "content-length": 42,
-        "content-type": "text/plain",
-        "last-modified": "2025-06-15T10:00:00Z",
-      });
-      mockFilesApi.download.mockResolvedValue({
+      mockRequest.mockResolvedValue(
+        headResponse({
+          "content-length": 42,
+          "content-type": "text/plain",
+          "last-modified": "2025-06-15T10:00:00Z",
+        }),
+      );
+      mockFilesApi.downloadFile.mockResolvedValue({
         contents: streamFromString("hello"),
       });
 
@@ -790,12 +908,14 @@ describe("FilesConnector", () => {
 
     test("short text file returns full content", async () => {
       const content = "Short file.";
-      mockFilesApi.getMetadata.mockResolvedValue({
-        "content-length": content.length,
-        "content-type": "text/plain",
-        "last-modified": "2025-01-01",
-      });
-      mockFilesApi.download.mockResolvedValue({
+      mockRequest.mockResolvedValue(
+        headResponse({
+          "content-length": content.length,
+          "content-type": "text/plain",
+          "last-modified": "2025-01-01",
+        }),
+      );
+      mockFilesApi.downloadFile.mockResolvedValue({
         contents: streamFromString(content),
       });
 

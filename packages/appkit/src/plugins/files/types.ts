@@ -1,6 +1,9 @@
 import type { BasePluginConfig, IAppRequest } from "shared";
 
-import type { files } from "../../workspace-client";
+import type {
+  FilesDirectoryEntry as WorkspaceFilesDirectoryEntry,
+  FilesDownloadResponse as WorkspaceFilesDownloadResponse,
+} from "../../workspace-client";
 import type { FilePolicy } from "./policy";
 
 /**
@@ -159,11 +162,48 @@ export interface IFilesConfig extends BasePluginConfig {
   auth?: "service-principal" | "on-behalf-of-user";
 }
 
-/** A single entry returned when listing a directory. Re-exported from `@databricks/sdk-experimental`. */
-export type DirectoryEntry = files.DirectoryEntry;
+/**
+ * A single directory entry in the modular SDK shape (camelCase). `list()` and
+ * the `/list` route still return the legacy {@link DirectoryEntry}; they move to
+ * this type in a future release.
+ */
+export type FilesDirectoryEntry = WorkspaceFilesDirectoryEntry;
 
-/** Response object for file downloads containing a readable stream. Re-exported from `@databricks/sdk-experimental`. */
-export type DownloadResponse = files.DownloadResponse;
+/**
+ * Download response in the modular SDK shape (`contentLength` is a `bigint`).
+ * `download()` still returns the legacy {@link DownloadResponse}; it moves to this
+ * type in a future release.
+ */
+export type FilesDownloadResponse = WorkspaceFilesDownloadResponse;
+
+/**
+ * A single entry returned when listing a directory (Files API wire shape).
+ * @deprecated Legacy snake_case shape; use {@link FilesDirectoryEntry}.
+ */
+export interface DirectoryEntry {
+  /** The length of the file in bytes. Omitted for directories. */
+  file_size?: number;
+  /** True if the path is a directory. */
+  is_directory?: boolean;
+  /** Last modification time in milliseconds since unix epoch. */
+  last_modified?: number;
+  /** The name of the file or directory (last path component). */
+  name?: string;
+  /** The absolute path of the file or directory. */
+  path?: string;
+}
+
+/**
+ * Response object for file downloads containing a readable stream.
+ * @deprecated Legacy header-keyed shape; use {@link FilesDownloadResponse}.
+ */
+export interface DownloadResponse {
+  "content-length"?: number;
+  "content-type"?: string;
+  contents?: ReadableStream;
+  /** Last modified time in HTTP-date (RFC 7231) format. */
+  "last-modified"?: string;
+}
 
 /**
  * Metadata for a file stored in a Unity Catalog volume.
