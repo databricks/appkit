@@ -2,11 +2,11 @@
  * The wrapper facade type and the SDK type-namespace re-exports used across
  * AppKit.
  *
- * Every service accessor is currently typed against the legacy SDK and
- * delegated through `toLegacyWorkspaceClient()` — this PR introduces the seam
- * only, it does not migrate any service to the modular SDK. Migrating a service
- * later means changing that accessor's type here + its getter in `client.ts`
- * and updating the one connector that consumes it.
+ * Accessors for migrated services are typed against their modular
+ * `@databricks/sdk-*` clients (built in `modular.ts`); the rest are still the
+ * legacy SDK's, delegated through `toLegacyWorkspaceClient()`. Migrating a
+ * service means changing its accessor's type here, its getter in `client.ts`,
+ * and the connector that consumes it.
  *
  * Type-namespace re-exports (`files`, `jobs`, `serving`, `sql`) point at
  * `@databricks/sdk-experimental` so existing AppKit call-site shapes stay
