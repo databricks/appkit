@@ -14,6 +14,7 @@
         "@databricks/sdk-core",
         "@databricks/sdk-experimental",
         "@databricks/sdk-options",
+        "@databricks/sdk-scim",
         "@databricks/sdk-statementexecution",
         "@databricks/sdk-warehouses",
         "@mlflow/core",
