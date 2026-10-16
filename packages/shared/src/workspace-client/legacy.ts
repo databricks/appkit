@@ -77,7 +77,7 @@ export type {
 //
 // AppKit modules import these from the wrapper instead of the SDK so the
 // boundary rule holds. `Context` bridges AbortSignal → CancellationToken
-// (serving/jobs/sql-warehouse); `Time`/`TimeUnits` drive genie polling;
+// (serving/jobs/sql-warehouse); `Time`/`TimeUnits` are re-exported by `shared`'s index;
 // `ConfigError` is matched in service-context's auth-failure handling.
 //
 // These are sourced off the namespace import rather than `export { ... } from`
@@ -90,9 +90,3 @@ export type {
 export const { ConfigError, Context, TimeUnits, loadConfigFile } = SDK;
 export const Time =
   SDK.Time ?? (SDK as unknown as { default: typeof SDK }).default.Time;
-
-// Deep-import types used by the genie connector's waiter idiom. Not exposed
-// on the SDK's top-level index, so re-exported here to keep the genie
-// connector off a direct `@databricks/sdk-experimental/dist/**` import.
-export type { GenieMessage } from "@databricks/sdk-experimental/dist/apis/dashboards";
-export type { Waiter } from "@databricks/sdk-experimental/dist/wait";

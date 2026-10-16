@@ -42,6 +42,19 @@ vi.mock("@databricks/sdk-warehouses/v1", () => ({
 vi.mock("@databricks/sdk-statementexecution/v1", () => ({
   StatementExecutionClient: vi.fn().mockImplementation((opts) => ({ opts })),
 }));
+vi.mock("@databricks/sdk-genie/v1", () => ({
+  GenieClient: vi.fn().mockImplementation((opts) => {
+    ctorOpts.push(opts);
+    return {
+      opts,
+      genieGetConversationMessage: async () => ({ id: "m" }),
+      async *listItemsIter() {
+        yield 1;
+        yield 2;
+      },
+    };
+  }),
+}));
 vi.mock("@databricks/sdk-auth/credentials", () => ({
   newPatCredentials: vi.fn((token: string) => {
     patTokens.push(token);
@@ -104,7 +117,11 @@ vi.mock("node:child_process", () => ({
 }));
 
 import { ApiError } from "../errors";
-import { buildWarehousesClient, buildWorkspaceAuth } from "../modular";
+import {
+  buildGenieClient,
+  buildWarehousesClient,
+  buildWorkspaceAuth,
+} from "../modular";
 
 /** Drive the wrapped httpClient with one request and return the UA it set. */
 async function sentUserAgent(
@@ -288,6 +305,44 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     } as never);
     const ua = await sentUserAgent(ctorOpts[0].httpClient);
     expect(ua).toBe("@databricks/appkit/0.64.0");
+  });
+
+  test("genie (asUser) uses the OBO token as PAT and keeps the AppKit User-Agent", async () => {
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    await buildGenieClient({
+      token: "user-token",
+      host: "https://x",
+      clientOptions: {
+        product: "@databricks/appkit",
+        productVersion: "0.64.0",
+      },
+    } as never).genieGetConversationMessage({} as never);
+    expect(ctorOpts[0].credentials).toMatchObject({
+      kind: "pat",
+      token: "user-token",
+    });
+    expect(m2mOpts).toEqual([]);
+    expect(await sentUserAgent(ctorOpts[0].httpClient)).toBe(
+      "@databricks/appkit/0.64.0",
+    );
+  });
+
+  test("lazy clients load the SDK module on first call and build once", async () => {
+    const client = buildGenieClient({ host: "https://x" });
+    expect(ctorOpts).toEqual([]);
+    await expect(
+      client.genieGetConversationMessage({} as never),
+    ).resolves.toEqual({ id: "m" });
+    const items: unknown[] = [];
+    for await (const item of (
+      client as unknown as { listItemsIter(): AsyncIterable<unknown> }
+    ).listItemsIter()) {
+      items.push(item);
+    }
+    expect(items).toEqual([1, 2]);
+    expect(ctorOpts).toHaveLength(1);
+    expect(Reflect.get(client, "then")).toBeUndefined();
   });
 
   test("no product configured (build-time) → transport adds no AppKit User-Agent", async () => {

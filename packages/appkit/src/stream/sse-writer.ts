@@ -9,6 +9,15 @@ import {
 } from "./types";
 import { StreamValidator } from "./validator";
 
+/**
+ * `JSON.stringify` replacer for SSE events: the modular SDK returns int64 fields
+ * as `bigint`, which `JSON.stringify` throws on. Emit them as numbers, matching
+ * what the legacy SDK's raw JSON produced.
+ */
+export function sseJsonReplacer(_key: string, value: unknown): unknown {
+  return typeof value === "bigint" ? Number(value) : value;
+}
+
 export class SSEWriter {
   // setup SSE headers
   setupHeaders(res: IAppResponse): void {
@@ -29,7 +38,7 @@ export class SSEWriter {
     if (res.writableEnded) return;
 
     const eventType = StreamValidator.sanitizeEventType(event.type);
-    const eventData = JSON.stringify(event);
+    const eventData = JSON.stringify(event, sseJsonReplacer);
 
     res.write(`id: ${eventId}\n`);
     res.write(`event: ${eventType}\n`);

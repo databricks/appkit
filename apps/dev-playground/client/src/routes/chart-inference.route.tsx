@@ -12,12 +12,12 @@ export const Route = createFileRoute("/chart-inference")({
 });
 
 // ---------------------------------------------------------------------------
-// Helper to build a Genie-shaped statement_response from simple definitions
+// Helper to build a Genie-shaped statement response from simple definitions
 // ---------------------------------------------------------------------------
 
 interface SampleColumn {
   name: string;
-  type_name: string;
+  typeName: string;
 }
 
 function makeStatementResponse(
@@ -26,7 +26,7 @@ function makeStatementResponse(
 ) {
   return {
     manifest: { schema: { columns } },
-    result: { data_array: rows },
+    result: { dataArray: rows },
   };
 }
 
@@ -46,8 +46,8 @@ const SAMPLES: {
     expected: "line",
     data: makeStatementResponse(
       [
-        { name: "date", type_name: "DATE" },
-        { name: "revenue", type_name: "DECIMAL" },
+        { name: "date", typeName: "DATE" },
+        { name: "revenue", typeName: "DECIMAL" },
       ],
       [
         ["2024-01-01", "12000"],
@@ -71,8 +71,8 @@ const SAMPLES: {
     expected: "pie",
     data: makeStatementResponse(
       [
-        { name: "region", type_name: "STRING" },
-        { name: "sales", type_name: "DECIMAL" },
+        { name: "region", typeName: "STRING" },
+        { name: "sales", typeName: "DECIMAL" },
       ],
       [
         ["North America", "45000"],
@@ -87,8 +87,8 @@ const SAMPLES: {
     expected: "bar",
     data: makeStatementResponse(
       [
-        { name: "product", type_name: "STRING" },
-        { name: "revenue", type_name: "DECIMAL" },
+        { name: "product", typeName: "STRING" },
+        { name: "revenue", typeName: "DECIMAL" },
       ],
       Array.from({ length: 15 }, (_, i) => [
         `Product ${String.fromCharCode(65 + i)}`,
@@ -102,8 +102,8 @@ const SAMPLES: {
     expected: "line",
     data: makeStatementResponse(
       [
-        { name: "city", type_name: "STRING" },
-        { name: "population", type_name: "INT" },
+        { name: "city", typeName: "STRING" },
+        { name: "population", typeName: "INT" },
       ],
       Array.from({ length: 150 }, (_, i) => [
         `City ${i + 1}`,
@@ -117,9 +117,9 @@ const SAMPLES: {
     expected: "line",
     data: makeStatementResponse(
       [
-        { name: "month", type_name: "DATE" },
-        { name: "revenue", type_name: "DECIMAL" },
-        { name: "cost", type_name: "DECIMAL" },
+        { name: "month", typeName: "DATE" },
+        { name: "revenue", typeName: "DECIMAL" },
+        { name: "cost", typeName: "DECIMAL" },
       ],
       [
         ["2024-01-01", "12000", "8000"],
@@ -137,9 +137,9 @@ const SAMPLES: {
     expected: "bar",
     data: makeStatementResponse(
       [
-        { name: "department", type_name: "STRING" },
-        { name: "budget", type_name: "DECIMAL" },
-        { name: "actual", type_name: "DECIMAL" },
+        { name: "department", typeName: "STRING" },
+        { name: "budget", typeName: "DECIMAL" },
+        { name: "actual", typeName: "DECIMAL" },
       ],
       [
         ["Engineering", "500000", "480000"],
@@ -159,8 +159,8 @@ const SAMPLES: {
     expected: "scatter",
     data: makeStatementResponse(
       [
-        { name: "height_cm", type_name: "DOUBLE" },
-        { name: "weight_kg", type_name: "DOUBLE" },
+        { name: "height_cm", typeName: "DOUBLE" },
+        { name: "weight_kg", typeName: "DOUBLE" },
       ],
       Array.from({ length: 30 }, (_, i) => [
         String(150 + i * 1.2),
@@ -174,8 +174,8 @@ const SAMPLES: {
     expected: "none (table only)",
     data: makeStatementResponse(
       [
-        { name: "metric", type_name: "STRING" },
-        { name: "value", type_name: "DECIMAL" },
+        { name: "metric", typeName: "STRING" },
+        { name: "value", typeName: "DECIMAL" },
       ],
       [["Total Revenue", "125000"]],
     ),
@@ -186,9 +186,9 @@ const SAMPLES: {
     expected: "none (table only)",
     data: makeStatementResponse(
       [
-        { name: "first_name", type_name: "STRING" },
-        { name: "last_name", type_name: "STRING" },
-        { name: "city", type_name: "STRING" },
+        { name: "first_name", typeName: "STRING" },
+        { name: "last_name", typeName: "STRING" },
+        { name: "city", typeName: "STRING" },
       ],
       [
         ["Alice", "Smith", "New York"],
