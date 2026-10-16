@@ -15,10 +15,10 @@ function modularError(status: number) {
 }
 
 describe("modular SDK errors", () => {
-  test("carry the status in httpStatusCode only", () => {
+  test("carry the status in httpStatusCode, mirrored as the legacy statusCode", () => {
     const error = modularError(401);
     expect(error.httpStatusCode).toBe(401);
-    expect("statusCode" in error).toBe(false);
+    expect((error as unknown as { statusCode: number }).statusCode).toBe(401);
   });
 
   test("isUnauthorized recognizes a modular 401, directly and as a cause", () => {

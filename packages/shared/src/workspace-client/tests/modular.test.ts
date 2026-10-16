@@ -3,21 +3,33 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 // The wrapper's own tests are the one place allowed to mock the SDK directly.
 // Capture the `ClientOptions` the modular `WarehousesClient` constructor receives
 // so we can assert how wrapper options map onto the modular SDK's config.
-const { ctorOpts, patTokens, m2mOpts, m2mMint, u2mMint, profileState } =
-  vi.hoisted(() => ({
-    ctorOpts: [] as Array<Record<string, unknown>>,
-    patTokens: [] as string[],
-    m2mOpts: [] as Array<Record<string, unknown>>,
-    // Each M2M `token()` call mints a new token, like the real (uncached) SDK.
-    m2mMint: { count: 0, ttlMs: 60 * 60 * 1000 },
-    // Each CLI `token()` call is a `databricks auth token` subprocess.
-    u2mMint: { count: 0 },
-    // What the mocked `~/.databrickscfg` profile resolution returns.
-    profileState: {
-      profile: {} as Record<string, unknown>,
-      resolveCalls: [] as unknown[],
-    },
-  }));
+const {
+  ctorOpts,
+  patTokens,
+  m2mOpts,
+  m2mMint,
+  u2mMint,
+  profileState,
+  cliCalls,
+  responses,
+} = vi.hoisted(() => ({
+  ctorOpts: [] as Array<Record<string, unknown>>,
+  patTokens: [] as string[],
+  m2mOpts: [] as Array<Record<string, unknown>>,
+  // Each M2M `token()` call mints a new token, like the real (uncached) SDK.
+  m2mMint: { count: 0, ttlMs: 60 * 60 * 1000 },
+  // Each CLI `token()` call is a `databricks auth token` subprocess.
+  u2mMint: { count: 0 },
+  // What the mocked `~/.databrickscfg` profile resolution returns.
+  profileState: {
+    profile: {} as Record<string, unknown>,
+    resolveCalls: [] as unknown[],
+  },
+  // Each `databricks auth token --host` subprocess run by the host CLI path.
+  cliCalls: [] as string[][],
+  // Queued transport responses; when empty the transport answers 200.
+  responses: [] as Array<{ statusCode: number; body: string }>,
+}));
 
 vi.mock("@databricks/sdk-warehouses/v1", () => ({
   WarehousesClient: vi.fn().mockImplementation((opts) => {
@@ -62,14 +74,32 @@ vi.mock("@databricks/sdk-core/profiles", () => ({
 // can assert the User-Agent the wrapper set before delegating.
 vi.mock("@databricks/sdk-core/http", () => ({
   newFetchHttpClient: vi.fn(() => ({
-    send: vi.fn((request: { headers: Headers }) =>
-      Promise.resolve({
-        statusCode: 200,
+    send: vi.fn((request: { headers: Headers }) => {
+      const next = responses.shift();
+      return Promise.resolve({
+        statusCode: next?.statusCode ?? 200,
         headers: request.headers,
-        body: null,
-      }),
-    ),
+        body: next ? new Response(next.body).body : null,
+      });
+    }),
   })),
+}));
+vi.mock("node:child_process", () => ({
+  execFile: vi.fn(
+    (
+      _cmd: string,
+      args: string[],
+      cb: (err: null, out: { stdout: string }) => void,
+    ) => {
+      cliCalls.push(args);
+      cb(null, {
+        stdout: JSON.stringify({
+          access_token: `host-cli-token-${cliCalls.length}`,
+          expiry: new Date(Date.now() + 3_600_000).toISOString(),
+        }),
+      });
+    },
+  ),
 }));
 
 import { buildWarehousesClient } from "../modular";
@@ -102,6 +132,7 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     "DATABRICKS_CLIENT_ID",
     "DATABRICKS_CLIENT_SECRET",
     "DATABRICKS_TOKEN",
+    "DATABRICKS_AUTH_TYPE",
   ] as const;
   const originalEnv: Record<string, string | undefined> = {};
 
@@ -112,6 +143,8 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     m2mMint.count = 0;
     m2mMint.ttlMs = 60 * 60 * 1000;
     u2mMint.count = 0;
+    cliCalls.length = 0;
+    responses.length = 0;
     profileState.profile = {};
     profileState.resolveCalls.length = 0;
     for (const key of AUTH_ENV) {
@@ -398,8 +431,159 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     expect(ua).toBe("@databricks/appkit/0.64.0");
   });
 
-  test("no product configured (build-time) → no httpClient override (SDK default UA)", () => {
+  test("no product configured (build-time) → transport adds no AppKit User-Agent", async () => {
     buildWarehousesClient({ host: "https://x" });
-    expect(ctorOpts[0].httpClient).toBeUndefined();
+    expect(await sentUserAgent(ctorOpts[0].httpClient)).toBeNull();
+  });
+});
+
+describe("migration review fixes (host-only auth, DATABRICKS_AUTH_TYPE, retries, ApiError)", () => {
+  const ENV = [
+    "DATABRICKS_HOST",
+    "DATABRICKS_CLIENT_ID",
+    "DATABRICKS_CLIENT_SECRET",
+    "DATABRICKS_TOKEN",
+    "DATABRICKS_AUTH_TYPE",
+  ] as const;
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    ctorOpts.length = 0;
+    patTokens.length = 0;
+    m2mOpts.length = 0;
+    cliCalls.length = 0;
+    responses.length = 0;
+    profileState.profile = {
+      name: "DEFAULT",
+      host: "https://other-workspace",
+      token: { value: "default-profile-pat" },
+    };
+    profileState.resolveCalls.length = 0;
+    for (const k of ENV) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+    }
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    for (const k of ENV) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  });
+
+  const bearer = async (creds: unknown) =>
+    (
+      await (
+        creds as {
+          authHeaders(): Promise<Array<{ key: string; value: string }>>;
+        }
+      ).authHeaders()
+    ).find((h) => h.key === "Authorization")?.value;
+
+  test("host-only env never uses another host's [DEFAULT] profile; uses the CLI for that host, cached", async () => {
+    process.env.DATABRICKS_HOST = "envhost.cloud.databricks.com";
+    buildWarehousesClient({});
+    for (let i = 0; i < 3; i++) {
+      expect(await bearer(ctorOpts[0].credentials)).toBe(
+        "Bearer host-cli-token-1",
+      );
+    }
+    expect(cliCalls).toEqual([
+      ["auth", "token", "--host", "https://envhost.cloud.databricks.com"],
+    ]);
+    expect(profileState.resolveCalls).toEqual([]);
+    expect(patTokens).toEqual([]);
+  });
+
+  test("DATABRICKS_AUTH_TYPE=pat wins over SP client id/secret", async () => {
+    process.env.DATABRICKS_HOST = "envhost.cloud.databricks.com";
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    process.env.DATABRICKS_TOKEN = "user-pat";
+    process.env.DATABRICKS_AUTH_TYPE = "pat";
+    buildWarehousesClient({});
+    expect(patTokens).toEqual(["user-pat"]);
+    expect(m2mOpts).toEqual([]);
+  });
+
+  test("an unsupported DATABRICKS_AUTH_TYPE fails with an actionable message", async () => {
+    process.env.DATABRICKS_HOST = "envhost.cloud.databricks.com";
+    process.env.DATABRICKS_AUTH_TYPE = "azure-cli";
+    buildWarehousesClient({});
+    await expect(bearer(ctorOpts[0].credentials)).rejects.toThrow(
+      /DATABRICKS_AUTH_TYPE=azure-cli cannot be satisfied/,
+    );
+    expect(cliCalls).toEqual([]);
+  });
+
+  async function send(body?: unknown) {
+    buildWarehousesClient({ host: "https://x" });
+    const client = ctorOpts[0].httpClient as {
+      send(
+        r: unknown,
+      ): Promise<{ statusCode: number; body: ReadableStream | null }>;
+    };
+    return client.send({
+      url: "https://x/api",
+      method: "POST",
+      headers: new Headers(),
+      ...(body !== undefined && { body }),
+    });
+  }
+
+  test("transport retries a 429 (legacy behavior) and returns the eventual success", async () => {
+    vi.useFakeTimers();
+    responses.push({
+      statusCode: 429,
+      body: '{"error_code":"TOO_MANY_REQUESTS"}',
+    });
+    const pending = send("{}");
+    await vi.runAllTimersAsync();
+    const res = await pending;
+    expect(res.statusCode).toBe(200);
+    expect(responses).toEqual([]);
+  });
+
+  test("transport does not retry a plain 400 and keeps its body readable", async () => {
+    responses.push({
+      statusCode: 400,
+      body: '{"message":"Run 1 does not exist."}',
+    });
+    responses.push({ statusCode: 200, body: "{}" });
+    const res = await send("{}");
+    expect(res.statusCode).toBe(400);
+    expect(await new Response(res.body).text()).toContain(
+      "Run 1 does not exist",
+    );
+    expect(responses).toHaveLength(1);
+  });
+
+  test("transport never retries a streamed body (it can only be sent once)", async () => {
+    responses.push({ statusCode: 429, body: "{}" });
+    const res = await send(new Response("data").body);
+    expect(res.statusCode).toBe(429);
+  });
+
+  test("modular SDK errors are instanceof the exported ApiError and expose legacy fields", async () => {
+    const { ApiError, ModularApiError } = await import("../index");
+    const body = new TextEncoder().encode(
+      JSON.stringify({
+        error_code: "INVALID_PARAMETER_VALUE",
+        message: "nope",
+      }),
+    );
+    const err = ModularApiError.fromHttpError(400, undefined, body);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as unknown as { statusCode: number }).statusCode).toBe(400);
+    expect((err as unknown as { errorCode: string }).errorCode).toBe(
+      "INVALID_PARAMETER_VALUE",
+    );
+    // Assigning the legacy field (as some connectors do) must not throw.
+    Object.assign(err as object, { statusCode: 418 });
+    expect((err as unknown as { statusCode: number }).statusCode).toBe(418);
+    expect(new Error("x")).not.toBeInstanceOf(ApiError);
+    expect(new ApiError("m", "CODE", 404, undefined, [])).toBeInstanceOf(
+      ApiError,
+    );
   });
 });

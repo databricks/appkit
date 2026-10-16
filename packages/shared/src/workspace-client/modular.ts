@@ -16,6 +16,9 @@
  * undocumented Reyden `attachment` response field, which the SDK's generated
  * unmarshal transform would otherwise strip.
  */
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
 import {
   type Credentials,
   newTokenCredentials,
@@ -35,6 +38,7 @@ import type { ClientOptions } from "@databricks/sdk-options/client";
 import { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
 import { WarehousesClient } from "@databricks/sdk-warehouses/v1";
 
+import "./errors";
 import type { WorkspaceClientOptions } from "./legacy";
 
 /**
@@ -141,6 +145,55 @@ function cachedDefaultCredentials(
   };
 }
 
+const execFileAsync = promisify(execFile);
+
+/**
+ * Databricks CLI auth for a host, not a profile: what the legacy SDK used when
+ * only a host was configured. The modular CLI strategy needs a profile name.
+ */
+function cliHostCredentials(host: string): TokenCredentials {
+  return withTokenCache(
+    newTokenCredentials(
+      "databricks-cli",
+      tokenProviderFn(async () => {
+        let stdout: string;
+        try {
+          ({ stdout } = await execFileAsync("databricks", [
+            "auth",
+            "token",
+            "--host",
+            host,
+          ]));
+        } catch (e) {
+          const err = e as { stderr?: unknown; message?: string };
+          const detail = String(err.stderr ?? err.message ?? e).trim();
+          throw new Error(
+            `cannot get an access token for ${host} from the Databricks CLI: ${detail}`,
+          );
+        }
+        const parsed = JSON.parse(stdout) as {
+          access_token: string;
+          expiry?: string;
+        };
+        return {
+          value: parsed.access_token,
+          ...(parsed.expiry && { expiry: new Date(parsed.expiry) }),
+        };
+      }),
+    ),
+  );
+}
+
+/** Credentials that fail on use with `message`, so boot surfaces it clearly. */
+function unsupportedCredentials(message: string): Credentials {
+  return {
+    name: () => "unsupported",
+    authHeaders: async () => {
+      throw new Error(message);
+    },
+  };
+}
+
 /**
  * Map wrapper options onto the modular SDK's `ClientOptions`, reproducing the
  * legacy SDK's auth resolution: explicit token → PAT (the OBO path); profile →
@@ -182,24 +235,32 @@ function mapToClientOptions(opts: WorkspaceClientOptions): ClientOptions {
     // (what Apps injects), else PAT from `DATABRICKS_TOKEN`, else fall through to
     // the SDK default chain (local dev, where a `~/.databrickscfg` host already
     // carries a scheme).
+    // `DATABRICKS_AUTH_TYPE`, like in the legacy SDK, pins the strategy.
     const clientId = process.env.DATABRICKS_CLIENT_ID;
     const clientSecret = process.env.DATABRICKS_CLIENT_SECRET;
     const envToken = process.env.DATABRICKS_TOKEN;
-    if (host && clientId && clientSecret) {
+    const authType = process.env.DATABRICKS_AUTH_TYPE?.trim() || undefined;
+    const allows = (strategy: string) => !authType || authType === strategy;
+    if (host && clientId && clientSecret && allows("oauth-m2m")) {
       clientOptions.credentials = withTokenCache(
         newM2mCredentials({ host, clientId, clientSecret }),
       );
-    } else if (envToken) {
+    } else if (envToken && allows("pat")) {
       clientOptions.credentials = newPatCredentials(envToken);
-    } else {
-      // Local dev: the profile-based default chain, with token caching.
+    } else if (host && allows("databricks-cli")) {
+      // A configured host means ~/.databrickscfg is NOT consulted (legacy
+      // rule): a profile's credentials must never be sent to another host.
+      clientOptions.credentials = cliHostCredentials(host);
+    } else if (!host && !authType) {
+      // Local dev with no host anywhere: the profile-based default chain.
       clientOptions.credentials = cachedDefaultCredentials();
+    } else {
+      clientOptions.credentials = unsupportedCredentials(
+        `DATABRICKS_AUTH_TYPE=${authType ?? ""} cannot be satisfied: supported types are pat (DATABRICKS_TOKEN), oauth-m2m (DATABRICKS_CLIENT_ID/SECRET) and databricks-cli (\`databricks auth login\`).`,
+      );
     }
   }
-  const httpClient = buildHttpClient(opts);
-  if (httpClient) {
-    clientOptions.httpClient = httpClient;
-  }
+  clientOptions.httpClient = buildHttpClient(opts);
   return clientOptions;
 }
 
@@ -221,29 +282,77 @@ function mapToClientOptions(opts: WorkspaceClientOptions): ClientOptions {
  * the SDK's default User-Agent untouched — matching the legacy behavior where
  * build-time clients carried no AppKit UA.
  */
-function buildHttpClient(opts: WorkspaceClientOptions): HttpClient | undefined {
+function buildHttpClient(opts: WorkspaceClientOptions): HttpClient {
   const co = opts.clientOptions;
-  if (!co?.product || !co?.productVersion) {
-    return undefined;
-  }
-  const segments = [`${co.product}/${co.productVersion}`];
-  if (co.userAgentExtra) {
-    for (const [key, value] of Object.entries(co.userAgentExtra)) {
-      segments.push(`${key}/${String(value)}`);
+  let appkitUserAgent: string | undefined;
+  if (co?.product && co?.productVersion) {
+    const segments = [`${co.product}/${co.productVersion}`];
+    if (co.userAgentExtra) {
+      for (const [key, value] of Object.entries(co.userAgentExtra)) {
+        segments.push(`${key}/${String(value)}`);
+      }
     }
+    appkitUserAgent = segments.join(" ");
   }
-  const appkitUserAgent = segments.join(" ");
   const base = newFetchHttpClient();
   return {
     send(request) {
-      const existing = request.headers.get("User-Agent");
-      request.headers.set(
-        "User-Agent",
-        existing ? `${appkitUserAgent} ${existing}` : appkitUserAgent,
-      );
-      return base.send(request);
+      if (appkitUserAgent) {
+        const existing = request.headers.get("User-Agent");
+        request.headers.set(
+          "User-Agent",
+          existing ? `${appkitUserAgent} ${existing}` : appkitUserAgent,
+        );
+      }
+      return sendWithRetry(base, request);
     },
   };
+}
+
+// The legacy SDK's retry policy: 429, or an error body naming a transient
+// failure; backoff of `attempt` seconds plus jitter, capped at 10s, for up to
+// 300s in total. The modular SDK retries nothing outside long-running waits.
+const RETRY_TIMEOUT_MS = 300_000;
+const TRANSIENT_ERROR_MESSAGES = [
+  "com.databricks.backend.manager.util.UnknownWorkerEnvironmentException",
+  "does not have any associated worker environments",
+  "There is no worker environment with id",
+  "Unknown worker environment",
+  "ClusterNotReadyException",
+  "connection reset by peer",
+  "TLS handshake timeout",
+  "connection refused",
+  "Unexpected error",
+  "i/o timeout",
+];
+
+async function sendWithRetry(
+  base: HttpClient,
+  request: Parameters<HttpClient["send"]>[0],
+): ReturnType<HttpClient["send"]> {
+  // A streamed body (e.g. a file upload) can only be sent once.
+  if (request.body instanceof ReadableStream) return base.send(request);
+  const deadline = Date.now() + RETRY_TIMEOUT_MS;
+  for (let attempt = 1; ; attempt++) {
+    const response = await base.send(request);
+    if (response.statusCode < 400) return response;
+    const body = new Uint8Array(
+      await new Response(response.body).arrayBuffer(),
+    );
+    const text = new TextDecoder().decode(body);
+    const retryable =
+      response.statusCode === 429 ||
+      TRANSIENT_ERROR_MESSAGES.some((m) => text.includes(m));
+    const waitMs = Math.min(attempt * 1000 + 50 + Math.random() * 700, 10_000);
+    if (
+      !retryable ||
+      request.signal?.aborted ||
+      Date.now() + waitMs > deadline
+    ) {
+      return { ...response, body: new Response(body).body };
+    }
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
 }
 
 /** Build a modular Warehouses client from wrapper options. */
