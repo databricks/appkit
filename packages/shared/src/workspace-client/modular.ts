@@ -55,6 +55,7 @@ import { type ProfileOptions, resolve } from "@databricks/sdk-core/profiles";
 import type { FilesClient } from "@databricks/sdk-files/v2";
 import type { GenieClient } from "@databricks/sdk-genie/v1";
 import type { JobsClient } from "@databricks/sdk-jobs/v2";
+import type { ModelServingClient } from "@databricks/sdk-modelserving/v1";
 import type { ClientOptions } from "@databricks/sdk-options/client";
 import type { PostgresClient } from "@databricks/sdk-postgres/v1";
 import { ScimClient } from "@databricks/sdk-scim/v1";
@@ -616,6 +617,19 @@ export function buildVectorSearchClient(
   );
 }
 
+/** Build a modular Model Serving (serving endpoints) client from wrapper options. */
+export function buildModelServingClient(
+  opts: WorkspaceClientOptions,
+): ModelServingClient {
+  return lazyClient(
+    () =>
+      import("@databricks/sdk-modelserving/v1").then(
+        (m) => m.ModelServingClient,
+      ),
+    mapToClientOptions(opts),
+  );
+}
+
 /** Build a modular Unity Catalog Tables client from wrapper options. */
 export function buildTablesClient(opts: WorkspaceClientOptions): TablesClient {
   return lazyClient(
@@ -646,6 +660,7 @@ export type {
 } from "@databricks/sdk-files/v2";
 export type { GenieClient } from "@databricks/sdk-genie/v1";
 export type { JobsClient } from "@databricks/sdk-jobs/v2";
+export type { ModelServingClient } from "@databricks/sdk-modelserving/v1";
 export type { PostgresClient } from "@databricks/sdk-postgres/v1";
 export type { ScimClient } from "@databricks/sdk-scim/v1";
 export type { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
@@ -692,6 +707,13 @@ export type {
   SubmitRunRequest,
   SubmitRunResponse,
 } from "@databricks/sdk-jobs/v2";
+export type {
+  GetInferenceEndpointRequest,
+  InferenceEndpoint,
+  InferenceEndpointDetailed,
+  ListInferenceEndpointsRequest,
+  ListInferenceEndpointsResponse,
+} from "@databricks/sdk-modelserving/v1";
 export type {
   EndpointHealth,
   EndpointInfo,
