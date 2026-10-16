@@ -98,9 +98,11 @@ import { createApp } from "../appkit";
 const { MockWorkspaceClient } = vi.hoisted(() => {
   const MockWorkspaceClient = vi.fn().mockImplementation(() => ({
     currentUser: { me: vi.fn().mockResolvedValue({ id: "sp-user-123" }) },
-    apiClient: {
-      request: vi.fn().mockResolvedValue({ "x-databricks-org-id": "ws-456" }),
-    },
+    request: vi
+      .fn()
+      .mockResolvedValue(
+        new Response(null, { headers: { "x-databricks-org-id": "ws-456" } }),
+      ),
   }));
   return { MockWorkspaceClient };
 });
