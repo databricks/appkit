@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, test } from "vitest";
 
 import {
+  parseProject,
   parseResourceName,
   readDeployBranches,
+  readDeployTarget,
   readLocalTarget,
 } from "../targets";
 import { cleanupTempApps, databricksYml, tempApp } from "./fakes";
@@ -35,16 +37,35 @@ describe("parseResourceName", () => {
   });
 });
 
+describe("parseProject", () => {
+  test("accepts projects/<id> or a bare <id>, normalized to the resource name", () => {
+    expect(parseProject("projects/my-app")).toBe("projects/my-app");
+    expect(parseProject(" my-app ")).toBe("projects/my-app");
+  });
+
+  test("placeholders, branch paths and junk are null", () => {
+    expect(parseProject("your_postgres_project")).toBeNull();
+    expect(parseProject("projects/p/branches/b")).toBeNull();
+    expect(parseProject("")).toBeNull();
+    expect(parseProject(undefined)).toBeNull();
+  });
+});
+
 describe("readLocalTarget", () => {
-  test("reads the .env endpoint and this checkout's session", () => {
+  test("reads a real .env target", () => {
     expect(
       readLocalTarget({
+        LAKEBASE_PROJECT: "p",
         LAKEBASE_ENDPOINT: "projects/p/branches/b/endpoints/primary",
         PGHOST: "ep.example.com",
+        PGDATABASE: "databricks_postgres",
+        PGUSER: "alice@example.com",
         APPKIT_DB_SESSION: "k2x9q0ab",
       }),
     ).toEqual({
+      project: "projects/p",
       endpoint: "projects/p/branches/b/endpoints/primary",
+      database: "databricks_postgres",
       session: "k2x9q0ab",
     });
   });
@@ -52,10 +73,18 @@ describe("readLocalTarget", () => {
   test("placeholders from .env.example read as not configured", () => {
     expect(
       readLocalTarget({
+        LAKEBASE_PROJECT: "your_postgres_project",
         LAKEBASE_ENDPOINT: "your_postgres_endpointPath",
+        PGHOST: "your_postgres_host",
+        PGDATABASE: "your_postgres_databaseName",
         APPKIT_DB_SESSION: "NOT VALID",
       }),
-    ).toEqual({ endpoint: null, session: null });
+    ).toEqual({
+      project: null,
+      endpoint: null,
+      database: null,
+      session: null,
+    });
   });
 });
 
@@ -107,5 +136,43 @@ targets:
     expect(() => readDeployBranches(root)).toThrow(
       /^Cannot read databricks\.yml, so the branches it deploys to are unknown: .+\(\d+:\d+\)$/,
     );
+  });
+});
+
+describe("readDeployTarget", () => {
+  test("reads the default target's postgres variables", () => {
+    const root = tempApp({
+      "databricks.yml": databricksYml(
+        "projects/p/branches/production",
+        "projects/p/branches/production/databases/databricks-postgres",
+      ),
+    });
+    expect(readDeployTarget(root)).toEqual({
+      branch: "projects/p/branches/production",
+      database: "projects/p/branches/production/databases/databricks-postgres",
+    });
+  });
+
+  test("falls back to top-level variable defaults", () => {
+    const root = tempApp({
+      "databricks.yml": `variables:
+  postgres_branch:
+    default: projects/p/branches/main
+targets:
+  dev:
+    default: true
+`,
+    });
+    expect(readDeployTarget(root)).toEqual({
+      branch: "projects/p/branches/main",
+      database: null,
+    });
+  });
+
+  test("null without databricks.yml or without a postgres binding", () => {
+    expect(readDeployTarget(tempApp())).toBeNull();
+    expect(
+      readDeployTarget(tempApp({ "databricks.yml": "bundle:\n  name: x\n" })),
+    ).toBeNull();
   });
 });

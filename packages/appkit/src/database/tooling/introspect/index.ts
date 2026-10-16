@@ -164,7 +164,7 @@ export async function runIntrospect(
         .filter((skip) => !skip.column)
         .map((skip) => `${skip.table}: ${skip.reason}`);
       throw new IntrospectRefusedError(
-        `Schema "${schemaName}" on ${branchId} has no tables${tables.length > 0 ? ` introspect can write (${reasons.join("; ")})` : ""}, so introspect would ${hasHistory ? "write a migration that drops every table" : `replace ${SCHEMA_FILE} with an empty one`}. Pass --schema-name <name> to read another schema.`,
+        `Schema "${schemaName}" on ${branchId} has no tables${tables.length > 0 ? ` introspect can write (${reasons.join("; ")})` : ""}, so introspect would ${hasHistory ? "write a migration that drops every table" : `replace ${SCHEMA_FILE} with an empty one`}. Run \`appkit db introspect --schema-name <name>\` to read another schema.`,
       );
     }
 

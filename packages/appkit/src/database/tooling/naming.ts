@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomInt } from "node:crypto";
 
 // Branch names AppKit creates. Branch IDs: 1-63 chars, start with a
 // lowercase letter, lowercase letters, digits and hyphens only.
@@ -7,6 +7,9 @@ const MAX_BRANCH_ID = 63;
 const DEV_PREFIX = "dev-";
 const SESSION_PREFIX = "session-";
 const HASH_LENGTH = 6;
+
+/** Seven days: a session branch outlives a working week, then expires on its own. */
+export const SESSION_BRANCH_TTL = "604800s";
 
 const SESSION_ID = /^[a-z0-9]{1,55}$/;
 
@@ -45,4 +48,13 @@ export function sessionBranchId(sessionId: string): string {
     );
   }
   return `${SESSION_PREFIX}${sessionId}`;
+}
+
+const BASE36 = "0123456789abcdefghijklmnopqrstuvwxyz";
+
+/** 8 random base36 characters, generated once per checkout and kept in .env. */
+export function newSessionId(): string {
+  let id = "";
+  for (let i = 0; i < 8; i++) id += BASE36[randomInt(BASE36.length)];
+  return id;
 }

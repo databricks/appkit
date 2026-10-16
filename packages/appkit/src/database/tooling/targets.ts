@@ -5,6 +5,8 @@ import yaml from "js-yaml";
 
 import { isValidSessionId } from "./naming";
 
+export type BranchMode = "dev" | "session";
+
 /** Full resource names, e.g. branch = "projects/p/branches/b". */
 interface ResourceName {
   readonly project: string;
@@ -39,9 +41,26 @@ export function resourceId(name: string): string {
   return name.slice(name.lastIndexOf("/") + 1);
 }
 
+const PROJECT_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
+/**
+ * LAKEBASE_PROJECT as a project resource name: accepts "projects/<id>" or a bare
+ * "<id>"; null for anything else (e.g. the .env.example placeholder).
+ */
+export function parseProject(value: string | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  const id = trimmed.startsWith("projects/")
+    ? trimmed.slice("projects/".length)
+    : trimmed;
+  return PROJECT_ID.test(id) ? `projects/${id}` : null;
+}
+
 /** What `.env` says about the local branch. Unparseable values (template placeholders) read as null. */
-interface LocalTarget {
+export interface LocalTarget {
+  /** LAKEBASE_PROJECT, normalized to "projects/<id>". */
+  readonly project: string | null;
   readonly endpoint: string | null;
+  readonly database: string | null;
   readonly session: string | null;
 }
 
@@ -51,7 +70,19 @@ export function readLocalTarget(env: NodeJS.ProcessEnv): LocalTarget {
     env.APPKIT_DB_SESSION && isValidSessionId(env.APPKIT_DB_SESSION)
       ? env.APPKIT_DB_SESSION
       : null;
-  return { endpoint, session };
+  return {
+    project: parseProject(env.LAKEBASE_PROJECT),
+    endpoint,
+    // Without a real endpoint PGDATABASE is a template placeholder too.
+    database: endpoint ? env.PGDATABASE || null : null,
+    session,
+  };
+}
+
+/** The branch the bundle's default target deploys to. */
+export interface DeployTarget {
+  readonly branch: string;
+  readonly database: string | null;
 }
 
 type Yaml = Record<string, unknown> | undefined;
@@ -90,6 +121,28 @@ function variableOf(
     record(record(bundle.variables)?.[name])?.default ??
     null;
   return typeof value === "string" && value ? value : null;
+}
+
+/** Default target's postgres_branch / postgres_database variables; null without databricks.yml or binding. */
+export function readDeployTarget(root: string): DeployTarget | null {
+  const bundle = readBundle(root);
+  if (!bundle) return null;
+  const targets = record(bundle.targets) ?? {};
+  const target =
+    Object.values(targets)
+      .map(record)
+      .find((candidate) => candidate?.default === true) ??
+    record(targets.default);
+
+  const branch = parseResourceName(
+    variableOf(bundle, target, "postgres_branch") ?? undefined,
+  )?.branch;
+  if (!branch) return null;
+  const database =
+    parseResourceName(
+      variableOf(bundle, target, "postgres_database") ?? undefined,
+    )?.database ?? null;
+  return { branch, database };
 }
 
 /**

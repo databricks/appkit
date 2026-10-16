@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, test } from "vitest";
 
-import { checkAppkitBranch, classifyBranch } from "../guard";
+import {
+  assertAppkitBranch,
+  BranchGuardError,
+  checkAppkitBranch,
+  classifyBranch,
+} from "../guard";
 import { devBranchId } from "../naming";
 import {
   cleanupTempApps,
@@ -158,6 +163,78 @@ describe("checkAppkitBranch", () => {
     await expect(
       checkAppkitBranch(fakeContext({ root: tempApp(), api: lakebase.api() })),
     ).resolves.toBeNull();
+    await expect(
+      checkAppkitBranch(
+        fakeContext({ root: tempApp(), env: envFor(dev), api: lakebase.api() }),
+      ),
+    ).rejects.toThrow(/does not exist.*appkit db init/);
+  });
+});
+
+describe("assertAppkitBranch", () => {
+  const envFor = (branch: string) => ({
+    LAKEBASE_ENDPOINT: `${branch}/endpoints/primary`,
+  });
+
+  test("passes the .env branch when it is the developer's dev branch", async () => {
+    const lakebase = new FakeLakebase();
+    lakebase.addBranch(dev);
+    const ctx = fakeContext({
+      root: tempApp(),
+      env: envFor(dev),
+      api: lakebase.api(),
+    });
+
+    await expect(assertAppkitBranch(ctx, "clean")).resolves.toMatchObject({
+      name: dev,
+    });
+  });
+
+  test("refuses the default branch and the deploy branch, using only the API", async () => {
+    const lakebase = new FakeLakebase();
+    lakebase.addBranch(`${P}/branches/production`, { default: true });
+    lakebase.addBranch(dev);
+
+    const onDefault = fakeContext({
+      root: tempApp(),
+      env: envFor(`${P}/branches/production`),
+      api: lakebase.api(),
+    });
+    const error = await assertAppkitBranch(onDefault, "clean").catch(
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(BranchGuardError);
+    expect((error as Error).message).toBe(
+      "Refusing to clean production: it is the project's default branch. `appkit db clean` only writes to branches `appkit db init` created for you (dev-… or session-…).",
+    );
+
+    const deployRoot = tempApp({
+      "databricks.yml": databricksYml(
+        dev,
+        `${dev}/databases/databricks-postgres`,
+      ),
+    });
+    const onDeploy = fakeContext({
+      root: deployRoot,
+      env: envFor(dev),
+      api: lakebase.api(),
+    });
+    await expect(assertAppkitBranch(onDeploy, "seed")).rejects.toThrow(
+      /deploys to/,
+    );
+    expect(lakebase.calls.every((call) => call.startsWith("getBranch"))).toBe(
+      true,
+    );
+  });
+
+  test("without a configured branch it refuses, and a deleted branch points at init", async () => {
+    const lakebase = new FakeLakebase();
+    await expect(
+      assertAppkitBranch(
+        fakeContext({ root: tempApp(), api: lakebase.api() }),
+        "seed",
+      ),
+    ).rejects.toThrow(/no branch configured/);
     await expect(
       checkAppkitBranch(
         fakeContext({ root: tempApp(), env: envFor(dev), api: lakebase.api() }),

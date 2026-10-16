@@ -1,6 +1,12 @@
 import { describe, expect, test } from "vitest";
 
-import { devBranchId, isValidSessionId, sessionBranchId } from "../naming";
+import {
+  devBranchId,
+  isValidSessionId,
+  newSessionId,
+  SESSION_BRANCH_TTL,
+  sessionBranchId,
+} from "../naming";
 
 const BRANCH_ID = /^[a-z][a-z0-9-]{0,62}$/;
 
@@ -32,8 +38,11 @@ describe("branch naming", () => {
   });
 
   test("session branches are session-<id>; ids are lowercase base36", () => {
-    expect(sessionBranchId("k2x9q0ab")).toBe("session-k2x9q0ab");
+    const sessionId = newSessionId();
+    expect(sessionId).toMatch(/^[0-9a-z]{8}$/);
+    expect(sessionBranchId(sessionId)).toBe(`session-${sessionId}`);
     expect(isValidSessionId("Bad-Id")).toBe(false);
     expect(() => sessionBranchId("Bad-Id")).toThrow(/APPKIT_DB_SESSION/);
+    expect(SESSION_BRANCH_TTL).toBe("604800s");
   });
 });

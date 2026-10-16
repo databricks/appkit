@@ -17,15 +17,24 @@ import { resourceId } from "./targets";
 export const SCHEMA_FILE = "config/database/schema.ts";
 
 /** Whether the checkout has a config/database/schema.ts yet. */
-function hasSchemaFile(root: string): boolean {
+export function hasSchemaFile(root: string): boolean {
   return fs.existsSync(path.join(root, SCHEMA_FILE));
 }
 
-/** Without schema.ts, point to introspect instead of a load error. */
-function requireSchemaFile(root: string): void {
+const WITHOUT_SCHEMA = {
+  migrate: "there is nothing to migrate",
+  clean: "clean cannot tell which schema to drop",
+} as const;
+
+/** For a command that reads schema.ts: without one, point to introspect instead of a load error. */
+export function requireSchemaFile(
+  root: string,
+  command: keyof typeof WITHOUT_SCHEMA,
+): void {
   if (hasSchemaFile(root)) return;
+  const what = WITHOUT_SCHEMA[command];
   throw new Error(
-    `No ${SCHEMA_FILE} yet, so there is nothing to migrate. Run \`appkit db introspect\` to write it from the branch's tables, or create it.`,
+    `No ${SCHEMA_FILE} yet, so ${what}. Run \`appkit db introspect\` to write it from the branch's tables, or create it.`,
   );
 }
 export const DATABASE_TYPES_PATH = path.join(
@@ -48,6 +57,8 @@ export interface MigrateReport {
 export interface MigrateOptions {
   /** false: an ambiguous rename throws instead of prompting. */
   readonly interactive: boolean;
+  /** false: only apply committed migrations (init's `clean` start). Default true. */
+  readonly generate?: boolean;
 }
 
 type ApplyOutcome = Pick<MigrateReport, "applied" | "adopted" | "notApplied">;
@@ -95,16 +106,19 @@ export async function runMigrate(
   ctx: DbContext,
   options: MigrateOptions,
 ): Promise<MigrateReport> {
-  requireSchemaFile(ctx.root);
+  requireSchemaFile(ctx.root, "migrate");
   const schema = await loadDefaultDatabaseSchema(ctx.root, {
     showImportError: true,
   });
   const folder = migrationsFolder(ctx.root);
-  const generated = await generateMigrationFiles({
-    folder,
-    schema,
-    interactive: options.interactive,
-  });
+  const generated =
+    options.generate === false
+      ? null
+      : await generateMigrationFiles({
+          folder,
+          schema,
+          interactive: options.interactive,
+        });
 
   // The types follow schema.ts alone, so they are current even if applying fails.
   const typesFile = path.join(ctx.root, DATABASE_TYPES_PATH);
