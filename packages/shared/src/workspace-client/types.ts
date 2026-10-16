@@ -22,6 +22,8 @@ import type {
   GenieClient,
   JobsClient,
   FilesClient,
+  TablesClient,
+  VectorSearchClient,
 } from "./modular";
 
 // Legacy SDK type namespaces for un-migrated services, re-exported so AppKit
@@ -56,6 +58,12 @@ export interface WorkspaceClient extends WorkspaceAuth {
 
   /** Jobs (modular SDK, Jobs API 2.2). */
   readonly jobs: JobsClient;
+
+  /** Vector Search (modular SDK; index metadata only, queries use `request()`). */
+  readonly vectorSearch: VectorSearchClient;
+
+  /** Unity Catalog Tables (modular SDK). */
+  readonly tables: TablesClient;
 
   /** Statement Execution (modular SDK). */
   readonly statementExecution: StatementExecutionClient;
