@@ -72,6 +72,7 @@ const FACADE_SERVICES = [
   "vectorSearch",
   "tables",
   "postgres",
+  "volumes",
   "statementExecution",
   "modelServing",
   "servingEndpoints",

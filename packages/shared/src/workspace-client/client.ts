@@ -30,6 +30,8 @@ import {
   type TablesClient,
   buildPostgresClient,
   type PostgresClient,
+  buildVolumesClient,
+  type VolumesClient,
   buildVectorSearchClient,
   type VectorSearchClient,
   type StatementExecutionClient,
@@ -53,6 +55,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
   #vectorSearch?: VectorSearchClient;
   #tables?: TablesClient;
   #postgres?: PostgresClient;
+  #volumes?: VolumesClient;
 
   constructor(opts: WorkspaceClientOptions) {
     this.#opts = opts;
@@ -112,6 +115,14 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
       this.#postgres = buildPostgresClient(this.#opts);
     }
     return this.#postgres;
+  }
+
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  get volumes(): VolumesClient {
+    if (!this.#volumes) {
+      this.#volumes = buildVolumesClient(this.#opts);
+    }
+    return this.#volumes;
   }
 
   // Migrated to the modular SDK — built lazily, independent of the legacy client.
