@@ -73,6 +73,12 @@ vi.mock("@databricks/sdk-uc-functions/v1", () => ({
     return { opts, getFunction: async () => ({}) };
   }),
 }));
+vi.mock("@databricks/sdk-uc-connections/v1", () => ({
+  ConnectionsClient: vi.fn().mockImplementation((opts) => {
+    ctorOpts.push(opts);
+    return { opts, getConnection: async () => ({}) };
+  }),
+}));
 vi.mock("@databricks/sdk-postgres/v1", () => ({
   PostgresClient: vi.fn().mockImplementation((opts) => {
     ctorOpts.push(opts);
@@ -143,6 +149,7 @@ vi.mock("node:child_process", () => ({
 import { ApiError } from "../errors";
 import {
   buildFunctionsClient,
+  buildConnectionsClient,
   buildGenieClient,
   buildModelServingClient,
   buildVolumesClient,
@@ -450,6 +457,31 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
       token: "user-token",
       host: "https://x",
     } as never).getFunction({} as never);
+    expect(ctorOpts[0].credentials).toMatchObject({
+      kind: "pat",
+      token: "user-token",
+    });
+    expect(m2mOpts).toEqual([]);
+  });
+
+  test("connections normalizes a scheme-less host and uses SP M2M creds", async () => {
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    await buildConnectionsClient({
+      host: "my-ws.cloud.databricks.com",
+    }).getConnection({} as never);
+    expect(ctorOpts[0].host).toBe("https://my-ws.cloud.databricks.com");
+    expect(m2mOpts).toHaveLength(1);
+    expect(patTokens).toEqual([]);
+  });
+
+  test("connections (asUser) uses the OBO token as PAT", async () => {
+    process.env.DATABRICKS_CLIENT_ID = "sp-client-id";
+    process.env.DATABRICKS_CLIENT_SECRET = "sp-secret";
+    await buildConnectionsClient({
+      token: "user-token",
+      host: "https://x",
+    }).getConnection({} as never);
     expect(ctorOpts[0].credentials).toMatchObject({
       kind: "pat",
       token: "user-token",
