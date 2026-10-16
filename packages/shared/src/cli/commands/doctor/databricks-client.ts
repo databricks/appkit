@@ -111,15 +111,9 @@ export async function getLakebasePool(
   // that dumps the raw SDK ApiError (stack + full response blob) to stderr on a
   // failed token fetch. doctor classifies and prints that failure itself, so the
   // library's dump is just noise on top of our clean one-line report.
-  // `@databricks/lakebase` is still typed against the legacy client: it calls
-  // `apiClient.request` and an argument-less `currentUser.me()`, which the
-  // modular SCIM client rejects, so hand it that exact shape.
-  const ws = client as WorkspaceClient;
+  // Lakebase takes the facade as is: it uses `request` and the typed `postgres`.
   const pool = appkit.createLakebasePool({
-    workspaceClient: {
-      apiClient: ws.apiClient,
-      currentUser: { me: () => ws.currentUser.me({}) },
-    },
+    workspaceClient: client as WorkspaceClient,
     logger: { error: false },
   });
   return pool as unknown as LakebasePoolHandle;

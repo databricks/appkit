@@ -84,7 +84,6 @@ export function resolveWorkspaceClient(
       return createWorkspaceClient({
         host: options.host,
         token: options.token,
-        authType: "pat",
       });
     }
     return createWorkspaceClient(

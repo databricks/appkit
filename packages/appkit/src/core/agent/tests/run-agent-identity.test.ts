@@ -118,7 +118,7 @@ describe("standalone caller identity", () => {
     expect(seen).toEqual(["user:alice"]);
     expect(factory).toHaveBeenCalledOnce();
     expect(factory).toHaveBeenCalledWith(
-      expect.objectContaining({ token: "token-alice", authType: "pat" }),
+      expect.objectContaining({ token: "token-alice" }),
     );
     expect(JSON.stringify(result)).not.toContain("token-alice");
     expect(getCurrentPrincipalKey()).toBe("app");

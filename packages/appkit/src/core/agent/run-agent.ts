@@ -138,7 +138,6 @@ export async function runAgent(
       client: createWorkspaceClient({
         token,
         host,
-        authType: "pat",
         clientOptions: getClientOptions(),
       }),
       workspaceId: Promise.resolve(workspaceId),

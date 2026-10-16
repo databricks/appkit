@@ -1,7 +1,14 @@
-import { type CancellationToken, Context } from "../workspace-client";
+/**
+ * The cancellation shape a caller-supplied legacy-style client reads from the
+ * second argument of `apiClient.request` (duck-typed, so no SDK import).
+ */
+interface CancellationToken {
+  readonly isCancellationRequested: boolean;
+  onCancellationRequested(callback: (e?: unknown) => unknown): void;
+}
 
 /**
- * Bridges {@link AbortSignal} to the SDK's {@link CancellationToken} so
+ * Bridges {@link AbortSignal} to a {@link CancellationToken} so
  * `apiClient.request` can abort the outbound HTTP request (and stop pulling a
  * response body) when the caller aborts.
  */
@@ -37,16 +44,14 @@ function cancellationTokenFromAbortSignal(
 }
 
 /**
- * Wraps an optional {@link AbortSignal} in an SDK {@link Context} for the
- * second argument of `apiClient.request`. Returns `undefined` when no signal
- * is given, so callers can pass the result straight through.
+ * Wraps an optional {@link AbortSignal} as the request context a legacy-style
+ * `apiClient.request` reads (`context.cancellationToken`). Returns `undefined`
+ * when no signal is given, so callers can pass the result straight through.
  */
 export function contextFromAbortSignal(
   signal?: AbortSignal,
-): InstanceType<typeof Context> | undefined {
+): { cancellationToken: CancellationToken } | undefined {
   return signal
-    ? new Context({
-        cancellationToken: cancellationTokenFromAbortSignal(signal),
-      })
+    ? { cancellationToken: cancellationTokenFromAbortSignal(signal) }
     : undefined;
 }

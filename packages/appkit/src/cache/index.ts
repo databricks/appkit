@@ -181,7 +181,7 @@ export class CacheManager {
     try {
       const workspaceClient = createWorkspaceClient({
         clientOptions: getClientOptions(),
-      }).toLegacyWorkspaceClient();
+      });
       const pool = createLakebasePool({ workspaceClient });
       const persistentStorage = new PersistentStorage(config, pool);
 

@@ -288,7 +288,7 @@ describe("ServiceContext", () => {
       expect(userCtx.workspaceId).toBe(serviceCtx.workspaceId);
     });
 
-    test("should create user client with PAT authType", () => {
+    test("should create the user client from the user token (PAT)", () => {
       ServiceContext.createUserContext("user-token", "user-1");
 
       // The last call to MockWorkspaceClient should be for the user client
@@ -299,7 +299,6 @@ describe("ServiceContext", () => {
       expect(lastCall[0]).toMatchObject({
         token: "user-token",
         host: process.env.DATABRICKS_HOST,
-        authType: "pat",
       });
     });
 
@@ -358,7 +357,6 @@ describe("ServiceContext", () => {
         expect.objectContaining({
           host: "https://profile-host.example.com",
           token: "user-token",
-          authType: "pat",
         }),
       );
     });

@@ -51,7 +51,6 @@
     "@databricks/sdk-apps": "0.54.0",
     "@databricks/sdk-auth": "0.51.0",
     "@databricks/sdk-core": "0.51.0",
-    "@databricks/sdk-experimental": "0.17.0",
     "@databricks/sdk-database": "0.51.0",
     "@databricks/sdk-files": "0.52.0",
     "@databricks/sdk-experiments": "0.52.0",

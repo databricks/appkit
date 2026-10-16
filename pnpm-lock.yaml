@@ -293,9 +293,6 @@ importers:
       '@databricks/sdk-database':
         specifier: 0.51.0
         version: 0.51.0
-      '@databricks/sdk-experimental':
-        specifier: 0.17.0
-        version: 0.17.0
       '@databricks/sdk-experiments':
         specifier: 0.52.0
         version: 0.52.0
@@ -668,9 +665,6 @@ importers:
       '@databricks/sdk-database':
         specifier: 0.51.0
         version: 0.51.0
-      '@databricks/sdk-experimental':
-        specifier: 0.17.0
-        version: 0.17.0
       '@databricks/sdk-experiments':
         specifier: 0.52.0
         version: 0.52.0
@@ -2099,10 +2093,6 @@ packages:
 
   '@databricks/sdk-experimental@0.15.0':
     resolution: {integrity: sha512-HkoMiF7dNDt6WRW0xhi7oPlBJQfxJ9suJhEZRFt08VwLMaWcw2PiF8monfHlkD4lkufEYV6CTxi5njQkciqiHA==}
-    engines: {node: '>=22.0', npm: '>=10.0.0'}
-
-  '@databricks/sdk-experimental@0.17.0':
-    resolution: {integrity: sha512-dOJIt4F2nBk6HKObnv7Xbmy/qLYTy2835qhXSuW0Qw1QAXui9plmCet1KqG3yeQcMTyncWGbnhjGdQi8GEGQSA==}
     engines: {node: '>=22.0', npm: '>=10.0.0'}
 
   '@databricks/sdk-experiments@0.52.0':
@@ -14462,15 +14452,6 @@ snapshots:
       zod: 4.3.6
 
   '@databricks/sdk-experimental@0.15.0':
-    dependencies:
-      google-auth-library: 10.5.0
-      ini: 6.0.0
-      reflect-metadata: 0.2.2
-      semver: 7.7.3
-    transitivePeerDependencies:
-      - supports-color
-
-  '@databricks/sdk-experimental@0.17.0':
     dependencies:
       google-auth-library: 10.5.0
       ini: 6.0.0

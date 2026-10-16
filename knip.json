@@ -13,7 +13,6 @@
         "@databricks/sdk-apps",
         "@databricks/sdk-auth",
         "@databricks/sdk-core",
-        "@databricks/sdk-experimental",
         "@databricks/sdk-files",
         "@databricks/sdk-database",
         "@databricks/sdk-experiments",
