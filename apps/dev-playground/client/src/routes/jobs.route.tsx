@@ -9,10 +9,10 @@ export const Route = createFileRoute("/jobs")({
 const MAX_STREAM_LOG = 500;
 
 interface Run {
-  run_id: number;
-  state?: { life_cycle_state?: string; result_state?: string };
-  start_time?: number;
-  end_time?: number;
+  runId: number;
+  state?: { lifeCycleState?: string; resultState?: string };
+  startTime?: number;
+  endTime?: number;
 }
 
 function formatTime(ts?: number) {
@@ -211,8 +211,8 @@ function JobsRoute() {
               </p>
               {status.run && (
                 <p className="text-sm text-muted-foreground mt-1">
-                  Run #{status.run.run_id} &mdash; started{" "}
-                  {formatTime(status.run.start_time)}
+                  Run #{status.run.runId} &mdash; started{" "}
+                  {formatTime(status.run.startTime)}
                 </p>
               )}
             </Card>
@@ -235,27 +235,27 @@ function JobsRoute() {
                   </thead>
                   <tbody>
                     {runs.map((run) => (
-                      <tr key={run.run_id} className="border-b last:border-0">
-                        <td className="py-2 pr-4 font-mono">{run.run_id}</td>
+                      <tr key={run.runId} className="border-b last:border-0">
+                        <td className="py-2 pr-4 font-mono">{run.runId}</td>
                         <td
-                          className={`py-2 pr-4 ${stateColor(run.state?.life_cycle_state)}`}
+                          className={`py-2 pr-4 ${stateColor(run.state?.lifeCycleState)}`}
                         >
-                          {run.state?.life_cycle_state ?? "—"}
+                          {run.state?.lifeCycleState ?? "—"}
                         </td>
                         <td
-                          className={`py-2 pr-4 ${stateColor(run.state?.result_state)}`}
+                          className={`py-2 pr-4 ${stateColor(run.state?.resultState)}`}
                         >
-                          {run.state?.result_state ?? "—"}
+                          {run.state?.resultState ?? "—"}
                         </td>
                         <td className="py-2 pr-4 text-muted-foreground">
-                          {formatTime(run.start_time)}
+                          {formatTime(run.startTime)}
                         </td>
                         <td className="py-2">
-                          {run.state?.life_cycle_state === "RUNNING" && (
+                          {run.state?.lifeCycleState === "RUNNING" && (
                             <Button
                               variant="destructive"
                               size="sm"
-                              onClick={() => cancelRun(run.run_id)}
+                              onClick={() => cancelRun(run.runId)}
                             >
                               Cancel
                             </Button>

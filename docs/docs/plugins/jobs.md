@@ -97,11 +97,11 @@ When `taskType` is set, the plugin maps validated parameters to the correct SDK 
 
 | Task type | SDK field | Parameter shape |
 |-----------|-----------|-----------------|
-| `notebook` | `notebook_params` | `Record<string, string>` — values coerced to string |
-| `python_wheel` | `python_named_params` | `Record<string, string>` — values coerced to string |
-| `python_script` | `python_params` | `{ args: string[] }` — positional args |
-| `spark_jar` | `jar_params` | `{ args: string[] }` — positional args |
-| `sql` | `sql_params` | `Record<string, string>` — values coerced to string |
+| `notebook` | `notebookParams` | `Record<string, string>` — values coerced to string |
+| `python_wheel` | `pythonNamedParams` | `Record<string, string>` — values coerced to string |
+| `python_script` | `pythonParams` | `{ args: string[] }` — positional args |
+| `spark_jar` | `jarParams` | `{ args: string[] }` — positional args |
+| `sql` | `sqlParams` | `Record<string, string>` — values coerced to string |
 | `dbt` | — | No parameters accepted |
 
 ```ts
@@ -198,7 +198,7 @@ const etl = AppKit.jobs("etl");
 // Trigger a run
 const result = await etl.runNow({ startDate: "2025-01-01" });
 if (result.ok) {
-  console.log("Run ID:", result.data.run_id);
+  console.log("Run ID:", result.data.runId);
 }
 
 // Trigger and poll until completion
