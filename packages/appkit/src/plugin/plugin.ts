@@ -27,6 +27,7 @@ import {
 import { scopePlugin } from "../context/scoped-api";
 import type { PluginContext } from "../core/plugin-context";
 import { AppKitError, AuthenticationError } from "../errors";
+import { httpStatusOf } from "../errors/http-status";
 import { IdentityExpiredError } from "../errors/identity-expired";
 import { createLogger } from "../logging/logger";
 import { StreamManager } from "../stream";
@@ -52,20 +53,6 @@ const logger = createLogger("plugin");
 
 export { isPlainObject } from "../utils/is-plain-object";
 export { isDevOboFallback } from "../context/request-scope";
-
-/**
- * Narrow an unknown thrown value to an Error that carries a numeric
- * `statusCode` property (e.g. `ApiError` from `@databricks/sdk-experimental`).
- */
-function hasHttpStatusCode(
-  error: unknown,
-): error is Error & { statusCode: number } {
-  return (
-    error instanceof Error &&
-    "statusCode" in error &&
-    typeof (error as Record<string, unknown>).statusCode === "number"
-  );
-}
 
 /**
  * Base abstract class for creating AppKit plugins.
@@ -511,12 +498,13 @@ export abstract class Plugin<
         };
       }
 
-      if (hasHttpStatusCode(error)) {
+      const status = httpStatusOf(error);
+      if (status !== undefined && error instanceof Error) {
         const isDev = process.env.NODE_ENV !== "production";
-        const isClientError = error.statusCode >= 400 && error.statusCode < 500;
+        const isClientError = status >= 400 && status < 500;
         return {
           ok: false,
-          status: error.statusCode,
+          status,
           message: isDev || isClientError ? error.message : "Server error",
         };
       }

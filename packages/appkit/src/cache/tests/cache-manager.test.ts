@@ -997,6 +997,25 @@ describe("CacheManager", () => {
       );
     });
 
+    test("should re-throw a modular SDK ApiError without wrapping (keeps its status)", async () => {
+      const { ModularApiError } = await import("shared/workspace-client");
+      const cache = await CacheManager.getInstance({
+        storage: createMockStorage(),
+      });
+      const body = new TextEncoder().encode(
+        JSON.stringify({
+          error_code: "INVALID_PARAMETER_VALUE",
+          message: "Run 1 does not exist.",
+        }),
+      );
+      const apiError = ModularApiError.fromHttpError(400, undefined, body);
+      const fn = vi.fn().mockRejectedValue(apiError);
+
+      await expect(cache.getOrExecute(["key"], fn, "user1")).rejects.toBe(
+        apiError,
+      );
+    });
+
     test("should allow retry after error", async () => {
       const cache = await CacheManager.getInstance({
         storage: createMockStorage(),

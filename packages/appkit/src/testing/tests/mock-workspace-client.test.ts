@@ -24,8 +24,8 @@ describe("createMockWorkspaceClient", () => {
       ["genie", "getMessage", undefined],
       ["jobs", "getRun", undefined],
       ["servingEndpoints", "get", undefined],
-      ["warehouses", "get", { state: "RUNNING" }],
-      ["warehouses", "start", undefined],
+      ["warehouses", "getWarehouse", { state: "RUNNING" }],
+      ["warehouses", "startWarehouse", undefined],
       ["statementExecution", "executeStatement", SUCCEEDED],
       ["currentUser", "me", TEST_USER],
     ])("%s.%s resolves its default", async (service, method, expected) => {
@@ -248,11 +248,13 @@ describe("createMockWorkspaceClient", () => {
       await expect(
         client.statementExecution.executeStatement({} as never),
       ).resolves.toEqual(SUCCEEDED);
-      await expect(client.warehouses.get({} as never)).resolves.toEqual({
+      await expect(
+        client.warehouses.getWarehouse({} as never),
+      ).resolves.toEqual({
         state: "RUNNING",
       });
       await expect(
-        client.warehouses.start({} as never),
+        client.warehouses.startWarehouse({} as never),
       ).resolves.toBeUndefined();
     });
 

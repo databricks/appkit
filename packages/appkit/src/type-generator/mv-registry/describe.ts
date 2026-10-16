@@ -25,7 +25,7 @@ export function parseDescribeTableExtendedJson(
     throw new Error(`DESCRIBE TABLE EXTENDED failed: ${msg}`);
   }
 
-  const rows = response.result?.data_array ?? [];
+  const rows = response.result?.dataArray ?? [];
   if (rows.length === 0) {
     throw new Error(
       "DESCRIBE TABLE EXTENDED returned no rows. Verify the FQN points to a metric view.",

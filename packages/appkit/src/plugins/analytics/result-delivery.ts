@@ -4,7 +4,7 @@ import type { SQLTypeMarker } from "shared";
 import { ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import type { RefreshChunkLink } from "../../stream/arrow-stream-processor";
-import type { sql } from "../../workspace-client";
+import type { ExternalLink } from "../../workspace-client";
 
 /**
  * Centralized disposition/format fallback for analytics result delivery.
@@ -39,7 +39,7 @@ export interface QueryExecutor {
     | {
         attachment?: string;
         data?: Record<string, unknown>[];
-        external_links?: sql.ExternalLink[];
+        external_links?: ExternalLink[];
         columnNames?: string[];
         statement_id?: string;
         status?: unknown;
@@ -52,7 +52,7 @@ export interface QueryExecutor {
 /** Streams already-resolved EXTERNAL_LINKS chunks; the connector provides it. */
 export interface ArrowChunkStreamer {
   streamExternalLinks(
-    chunks: sql.ExternalLink[],
+    chunks: ExternalLink[],
     signal?: AbortSignal,
     refresh?: RefreshChunkLink,
   ): AsyncGenerator<Uint8Array, void, unknown>;

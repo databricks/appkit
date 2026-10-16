@@ -6,6 +6,7 @@ import { createLakebasePool } from "../connectors/lakebase";
 import { getClientOptions } from "../context/client-options";
 import { getCurrentPrincipalKey } from "../context/execution-context";
 import { AppKitError, ExecutionError, InitializationError } from "../errors";
+import { httpStatusOf } from "../errors/http-status";
 import { createLogger } from "../logging/logger";
 import type { Counter, TelemetryProvider } from "../telemetry";
 import { SpanStatusCode, TelemetryManager } from "../telemetry";
@@ -339,7 +340,13 @@ export class CacheManager {
               if (sharedController.signal.aborted) {
                 throw error;
               }
-              if (error instanceof AppKitError || error instanceof ApiError) {
+              // Keep any error that carries an HTTP status: the modular SDK's
+              // ApiError is a different class from the legacy one.
+              if (
+                error instanceof AppKitError ||
+                error instanceof ApiError ||
+                httpStatusOf(error) !== undefined
+              ) {
                 throw error;
               }
               throw ExecutionError.statementFailed(

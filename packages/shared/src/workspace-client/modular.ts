@@ -1,0 +1,405 @@
+/**
+ * The single module allowed to import the modular `@databricks/sdk-*` SDK
+ * directly — the new-SDK sibling of {@link ./legacy.ts}. Every other AppKit
+ * module reaches these clients through the {@link WorkspaceClient} facade and
+ * the type re-exports below, so the modular SDK stays isolated exactly like the
+ * legacy one (the oxlint `no-restricted-imports` boundary walls `@databricks/sdk-*`
+ * off everywhere outside `packages/shared/src/workspace-client/`).
+ *
+ * Migrated services are built here as per-service clients; the facade delegates
+ * their accessors to these instead of the legacy monolithic client. Currently
+ * `warehouses` and `statementExecution` are migrated; every other service still
+ * routes through `legacy.ts`.
+ *
+ * NOTE: statementExecution relies on a pinned pnpm patch
+ * (`patches/@databricks__sdk-statementexecution@0.46.0.patch`) that restores the
+ * undocumented Reyden `attachment` response field, which the SDK's generated
+ * unmarshal transform would otherwise strip.
+ */
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+import {
+  type Credentials,
+  newTokenCredentials,
+  type Token,
+  type TokenCredentials,
+  tokenProviderFn,
+} from "@databricks/sdk-auth";
+import {
+  defaultCredentials,
+  newM2mCredentials,
+  newPatCredentials,
+  newU2mCredentials,
+} from "@databricks/sdk-auth/credentials";
+import { type HttpClient, newFetchHttpClient } from "@databricks/sdk-core/http";
+import { type ProfileOptions, resolve } from "@databricks/sdk-core/profiles";
+import type { ClientOptions } from "@databricks/sdk-options/client";
+import { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
+import { WarehousesClient } from "@databricks/sdk-warehouses/v1";
+
+import "./errors";
+import type { WorkspaceClientOptions } from "./legacy";
+
+/**
+ * Prepend `https://` to a scheme-less host. The legacy SDK normalized the host
+ * this way; the modular SDK does NOT — it passes the host straight into `fetch`,
+ * so a bare `DATABRICKS_HOST=my-workspace.cloud.databricks.com` (the common form,
+ * and what the Databricks Apps runtime sets) yields `TypeError: Invalid URL`.
+ */
+function normalizeHost(host: string | undefined): string | undefined {
+  const trimmed = host?.trim();
+  if (!trimmed) return undefined;
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+// Same margin as the legacy SDK: refresh 40s early, since Azure Databricks
+// rejects tokens that expire in 30s or less.
+const TOKEN_REFRESH_MARGIN_MS = 40_000;
+
+/**
+ * Cache a token until shortly before it expires. The modular `newM2mCredentials`
+ * caches only the token endpoint and mints a fresh OAuth token on EVERY request;
+ * the legacy SDK reused it until expiry. Concurrent callers share one in-flight
+ * fetch. Like the legacy SDK, a token without an expiry is reused indefinitely.
+ */
+function withTokenCache(credentials: TokenCredentials): TokenCredentials {
+  let current: Token | undefined;
+  let inflight: Promise<Token> | undefined;
+  const isFresh = (t: Token) =>
+    t.expiry === undefined ||
+    t.expiry.getTime() - TOKEN_REFRESH_MARGIN_MS > Date.now();
+  return newTokenCredentials(
+    credentials.name(),
+    tokenProviderFn(async () => {
+      if (current && isFresh(current)) return current;
+      inflight ??= credentials
+        .token()
+        .then((t) => (current = t))
+        .finally(() => {
+          inflight = undefined;
+        });
+      return inflight;
+    }),
+  );
+}
+
+/**
+ * The SDK default chain (profile / `~/.databrickscfg`), with the token cache the
+ * chain lacks: its CLI strategy shells out to `databricks auth token` and its
+ * M2M strategy mints a new OAuth token on EVERY request. `DefaultCredentials`
+ * hides the token behind `authHeaders()`, so mirror its strategy order (PAT →
+ * M2M → CLI) to get a cacheable `TokenCredentials`. A profile `authType` naming
+ * one of these (`databricks auth login` writes `databricks-cli`) pins that
+ * strategy; other auth types and `groupId` keep the SDK's own (uncached) logic.
+ * TODO: drop once sdk-auth caches tokens in its M2M and CLI credentials.
+ */
+function cachedDefaultCredentials(
+  profileOptions?: ProfileOptions,
+): Credentials {
+  const select = async (): Promise<Credentials> => {
+    const profile = await resolve(profileOptions);
+    // Same as env M2M: OAuth discovery needs a scheme, which a profile may omit.
+    const host = normalizeHost(profile.host)?.replace(/\/+$/, "");
+    const { name, token, clientId, clientSecret, authType } = profile;
+    const allows = (strategy: string) => !authType || authType === strategy;
+    if (host && !profile.groupId) {
+      if (token && allows("pat")) return newPatCredentials(token.value);
+      if (clientId && clientSecret && allows("oauth-m2m")) {
+        return withTokenCache(
+          newM2mCredentials({
+            host,
+            clientId,
+            clientSecret: clientSecret.value,
+            ...(profile.accountId !== undefined && {
+              accountId: profile.accountId,
+            }),
+          }),
+        );
+      }
+      if (name && allows("databricks-cli")) {
+        return withTokenCache(
+          newU2mCredentials({
+            profile: name,
+            ...(profile.databricksCliPath !== undefined && {
+              cliPath: profile.databricksCliPath,
+            }),
+          }),
+        );
+      }
+    }
+    return defaultCredentials({
+      profile: { ...profile, ...(host && { host }) },
+    });
+  };
+  let selected: Promise<Credentials> | undefined;
+  return {
+    name: () => "default",
+    async authHeaders() {
+      selected ??= select().catch((e) => {
+        selected = undefined;
+        throw e;
+      });
+      return (await selected).authHeaders();
+    },
+  };
+}
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Databricks CLI auth for a host, not a profile: what the legacy SDK used when
+ * only a host was configured. The modular CLI strategy needs a profile name.
+ */
+function cliHostCredentials(host: string): TokenCredentials {
+  return withTokenCache(
+    newTokenCredentials(
+      "databricks-cli",
+      tokenProviderFn(async () => {
+        let stdout: string;
+        try {
+          ({ stdout } = await execFileAsync("databricks", [
+            "auth",
+            "token",
+            "--host",
+            host,
+          ]));
+        } catch (e) {
+          const err = e as { stderr?: unknown; message?: string };
+          const detail = String(err.stderr ?? err.message ?? e).trim();
+          throw new Error(
+            `cannot get an access token for ${host} from the Databricks CLI: ${detail}`,
+          );
+        }
+        const parsed = JSON.parse(stdout) as {
+          access_token: string;
+          expiry?: string;
+        };
+        return {
+          value: parsed.access_token,
+          ...(parsed.expiry && { expiry: new Date(parsed.expiry) }),
+        };
+      }),
+    ),
+  );
+}
+
+/** Credentials that fail on use with `message`, so boot surfaces it clearly. */
+function unsupportedCredentials(message: string): Credentials {
+  return {
+    name: () => "unsupported",
+    authHeaders: async () => {
+      throw new Error(message);
+    },
+  };
+}
+
+/**
+ * Map wrapper options onto the modular SDK's `ClientOptions`, reproducing the
+ * legacy SDK's auth resolution: explicit token → PAT (the OBO path); profile →
+ * profile file; otherwise the service principal from the environment. It carries
+ * the privilege-escalation guard — check `token !== undefined` (NOT truthiness)
+ * so an explicitly-passed token, even an empty string, pins the PAT path and
+ * fails loudly at request time rather than silently falling through to the
+ * service-principal env credentials (which would be an OBO privilege escalation).
+ */
+function mapToClientOptions(opts: WorkspaceClientOptions): ClientOptions {
+  const clientOptions: ClientOptions = {};
+  // Resolve + scheme-normalize the host the way the legacy SDK did. Explicit
+  // `opts.host` wins; otherwise fall back to `DATABRICKS_HOST` (env is where the
+  // Apps runtime and dev set it). When a profile is selected without an explicit
+  // host, defer to the SDK's profile-file resolution instead of the env.
+  const host = normalizeHost(
+    opts.host ?? (opts.profile ? undefined : process.env.DATABRICKS_HOST),
+  );
+  if (host) {
+    clientOptions.host = host;
+  }
+  if (opts.token !== undefined) {
+    // Explicit token (this is the OBO path: `asUser` passes the user's token).
+    clientOptions.credentials = newPatCredentials(opts.token);
+  } else if (opts.profile) {
+    clientOptions.profileOptions = { profile: opts.profile };
+    clientOptions.credentials = cachedDefaultCredentials({
+      profile: opts.profile,
+    });
+  } else {
+    // No token, no profile: authenticate as the service principal from the
+    // environment. The SDK's own default chain DOES read the DATABRICKS_* env
+    // vars (host, client id/secret, token) — but its M2M strategy feeds the RAW
+    // `DATABRICKS_HOST` straight into OAuth token-endpoint discovery, and the
+    // Databricks Apps runtime sets that host scheme-less (e.g.
+    // `x.cloud.databricks.com`), so discovery fails with `Invalid URL` and every
+    // request dies as "Warehouse readiness check failed". Resolve the SP here
+    // with the scheme-normalized `host` instead: M2M from client id + secret
+    // (what Apps injects), else PAT from `DATABRICKS_TOKEN`, else fall through to
+    // the SDK default chain (local dev, where a `~/.databrickscfg` host already
+    // carries a scheme).
+    // `DATABRICKS_AUTH_TYPE`, like in the legacy SDK, pins the strategy.
+    const clientId = process.env.DATABRICKS_CLIENT_ID;
+    const clientSecret = process.env.DATABRICKS_CLIENT_SECRET;
+    const envToken = process.env.DATABRICKS_TOKEN;
+    const authType = process.env.DATABRICKS_AUTH_TYPE?.trim() || undefined;
+    const allows = (strategy: string) => !authType || authType === strategy;
+    if (host && clientId && clientSecret && allows("oauth-m2m")) {
+      clientOptions.credentials = withTokenCache(
+        newM2mCredentials({ host, clientId, clientSecret }),
+      );
+    } else if (envToken && allows("pat")) {
+      clientOptions.credentials = newPatCredentials(envToken);
+    } else if (host && allows("databricks-cli")) {
+      // A configured host means ~/.databrickscfg is NOT consulted (legacy
+      // rule): a profile's credentials must never be sent to another host.
+      clientOptions.credentials = cliHostCredentials(host);
+    } else if (!host && !authType) {
+      // Local dev with no host anywhere: the profile-based default chain.
+      clientOptions.credentials = cachedDefaultCredentials();
+    } else {
+      clientOptions.credentials = unsupportedCredentials(
+        `DATABRICKS_AUTH_TYPE=${authType ?? ""} cannot be satisfied: supported types are pat (DATABRICKS_TOKEN), oauth-m2m (DATABRICKS_CLIENT_ID/SECRET) and databricks-cli (\`databricks auth login\`).`,
+      );
+    }
+  }
+  clientOptions.httpClient = buildHttpClient(opts);
+  return clientOptions;
+}
+
+/**
+ * Wrap the SDK's default fetch transport to prepend AppKit's product segment to
+ * the outgoing `User-Agent`, preserving the exact legacy string (e.g.
+ * `@databricks/appkit/0.75.1`) that Databricks-side dashboards match on.
+ *
+ * Why the transport and not `setProduct`: the modular SDK's client-info API
+ * validates the product as a simple token and rejects `@databricks/appkit` (the
+ * `@`/`/`), and it is process-global. Setting the header on the `httpClient`
+ * instead keeps the literal product name, is per-client, and — unlike a pnpm
+ * patch — ships inside appkit's bundled `dist`, so it also reaches deployed apps
+ * (npm-installed from the tarball, where pnpm patches do not apply). The SDK's
+ * own client-info (`sdk-js-core/…`, runtime) is already on `request.headers`, so
+ * prepending keeps it intact after AppKit's segment.
+ *
+ * Returns `undefined` when no product is configured (build-time callers), leaving
+ * the SDK's default User-Agent untouched — matching the legacy behavior where
+ * build-time clients carried no AppKit UA.
+ */
+function buildHttpClient(opts: WorkspaceClientOptions): HttpClient {
+  const co = opts.clientOptions;
+  let appkitUserAgent: string | undefined;
+  if (co?.product && co?.productVersion) {
+    const segments = [`${co.product}/${co.productVersion}`];
+    if (co.userAgentExtra) {
+      for (const [key, value] of Object.entries(co.userAgentExtra)) {
+        segments.push(`${key}/${String(value)}`);
+      }
+    }
+    appkitUserAgent = segments.join(" ");
+  }
+  const base = newFetchHttpClient();
+  return {
+    send(request) {
+      if (appkitUserAgent) {
+        const existing = request.headers.get("User-Agent");
+        request.headers.set(
+          "User-Agent",
+          existing ? `${appkitUserAgent} ${existing}` : appkitUserAgent,
+        );
+      }
+      return sendWithRetry(base, request);
+    },
+  };
+}
+
+// The legacy SDK's retry policy: 429, or an error body naming a transient
+// failure; backoff of `attempt` seconds plus jitter, capped at 10s, for up to
+// 300s in total. The modular SDK retries nothing outside long-running waits.
+const RETRY_TIMEOUT_MS = 300_000;
+const TRANSIENT_ERROR_MESSAGES = [
+  "com.databricks.backend.manager.util.UnknownWorkerEnvironmentException",
+  "does not have any associated worker environments",
+  "There is no worker environment with id",
+  "Unknown worker environment",
+  "ClusterNotReadyException",
+  "connection reset by peer",
+  "TLS handshake timeout",
+  "connection refused",
+  "Unexpected error",
+  "i/o timeout",
+];
+
+async function sendWithRetry(
+  base: HttpClient,
+  request: Parameters<HttpClient["send"]>[0],
+): ReturnType<HttpClient["send"]> {
+  // A streamed body (e.g. a file upload) can only be sent once.
+  if (request.body instanceof ReadableStream) return base.send(request);
+  const deadline = Date.now() + RETRY_TIMEOUT_MS;
+  for (let attempt = 1; ; attempt++) {
+    const response = await base.send(request);
+    if (response.statusCode < 400) return response;
+    const body = new Uint8Array(
+      await new Response(response.body).arrayBuffer(),
+    );
+    const text = new TextDecoder().decode(body);
+    const retryable =
+      response.statusCode === 429 ||
+      TRANSIENT_ERROR_MESSAGES.some((m) => text.includes(m));
+    const waitMs = Math.min(attempt * 1000 + 50 + Math.random() * 700, 10_000);
+    if (
+      !retryable ||
+      request.signal?.aborted ||
+      Date.now() + waitMs > deadline
+    ) {
+      return { ...response, body: new Response(body).body };
+    }
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+}
+
+/** Build a modular Warehouses client from wrapper options. */
+export function buildWarehousesClient(
+  opts: WorkspaceClientOptions,
+): WarehousesClient {
+  return new WarehousesClient(mapToClientOptions(opts));
+}
+
+/** Build a modular Statement Execution client from wrapper options. */
+export function buildStatementExecutionClient(
+  opts: WorkspaceClientOptions,
+): StatementExecutionClient {
+  return new StatementExecutionClient(mapToClientOptions(opts));
+}
+
+// The modular SDK's error class, for tests that must throw what typed calls
+// really throw (status in `httpStatusCode`, not the wrapper's `statusCode`).
+export { ApiError as ModularApiError } from "@databricks/sdk-core/apierror";
+
+// ── Client type re-exports (for the facade accessor types) ───────────────
+export type { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
+export type { WarehousesClient } from "@databricks/sdk-warehouses/v1";
+
+// ── Model type re-exports ────────────────────────────────────────────────
+// AppKit modules import request/response/enum types from the wrapper rather
+// than the SDK, so the import boundary holds. Type-only: the connector compares
+// state against string literals, which satisfy the SDK's `Enum | (string & {})`
+// field unions — no runtime enum values needed.
+export type {
+  ColumnInfo,
+  Disposition,
+  ExecuteStatementRequest,
+  ExternalLink,
+  Format,
+  ResultData,
+  ResultManifest,
+  Schema,
+  ServiceError,
+  StatementParameter,
+  StatementResponse,
+  StatementStatus,
+  StatementStatus_State,
+} from "@databricks/sdk-statementexecution/v1";
+export type {
+  EndpointHealth,
+  EndpointInfo,
+  EndpointState,
+  GetWarehouseResponse,
+} from "@databricks/sdk-warehouses/v1";
