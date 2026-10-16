@@ -563,46 +563,65 @@ describe("FilesConnector", () => {
         defaultVolume: "/Volumes/catalog/schema/vol",
       });
       mockFilesApi.uploadFile.mockResolvedValue({});
+      mockRequest.mockResolvedValue(new Response(null, { status: 204 }));
     });
 
-    async function sentBody(): Promise<string> {
-      const { contents } = mockFilesApi.uploadFile.mock.calls[0][0];
-      return new Response(contents).text();
+    /** The single PUT the in-memory path sent through the request seam. */
+    function sentPut() {
+      expect(mockRequest).toHaveBeenCalledTimes(1);
+      return mockRequest.mock.calls[0][0] as {
+        method: string;
+        path: string;
+        query: Record<string, string>;
+        body: Uint8Array;
+        signal?: AbortSignal;
+      };
     }
 
-    test("wraps string input in a stream", async () => {
+    test("sends string input as bytes (known length, retryable) via the request seam", async () => {
       await connector.upload(mockClient, "file.txt", "hello world");
 
-      expect(mockFilesApi.uploadFile).toHaveBeenCalledWith(
-        expect.objectContaining({
-          filePath: "/Volumes/catalog/schema/vol/file.txt",
-          contents: expect.any(ReadableStream),
-        }),
-        { signal: undefined },
+      const put = sentPut();
+      expect(put.method).toBe("PUT");
+      expect(put.path).toBe(
+        "/api/2.0/fs/files/Volumes/catalog/schema/vol/file.txt",
       );
-      expect(await sentBody()).toBe("hello world");
+      expect(put.body).toBeInstanceOf(Uint8Array);
+      expect(new TextDecoder().decode(put.body)).toBe("hello world");
+      expect(mockFilesApi.uploadFile).not.toHaveBeenCalled();
     });
 
-    test("wraps Buffer input in a stream", async () => {
+    test("sends Buffer input as bytes", async () => {
       await connector.upload(
         mockClient,
         "file.bin",
         Buffer.from("buffer data"),
       );
 
-      expect(await sentBody()).toBe("buffer data");
+      expect(new TextDecoder().decode(sentPut().body)).toBe("buffer data");
     });
 
-    test("passes a ReadableStream through unchanged", async () => {
+    test("encodes path segments so # and ? stay in the file name", async () => {
+      await connector.upload(mockClient, "report#1?.csv", "data");
+
+      expect(sentPut().path).toBe(
+        "/api/2.0/fs/files/Volumes/catalog/schema/vol/report%231%3F.csv",
+      );
+    });
+
+    test("passes a ReadableStream through unchanged to uploadFile", async () => {
       const stream = streamFromString("stream data");
       await connector.upload(mockClient, "file.txt", stream);
 
       expect(mockFilesApi.uploadFile.mock.calls[0][0].contents).toBe(stream);
+      expect(mockRequest).not.toHaveBeenCalled();
     });
 
     test("defaults overwrite to true", async () => {
       await connector.upload(mockClient, "file.txt", "data");
+      expect(sentPut().query).toEqual({ overwrite: "true" });
 
+      await connector.upload(mockClient, "s.txt", streamFromString("s"));
       expect(mockFilesApi.uploadFile.mock.calls[0][0].overwrite).toBe(true);
     });
 
@@ -611,38 +630,45 @@ describe("FilesConnector", () => {
         overwrite: false,
       });
 
-      expect(mockFilesApi.uploadFile.mock.calls[0][0].overwrite).toBe(false);
+      expect(sentPut().query).toEqual({ overwrite: "false" });
     });
 
     test("forwards the abort signal", async () => {
       const signal = new AbortController().signal;
       await connector.upload(mockClient, "file.txt", "data", { signal });
+      expect(sentPut().signal).toBe(signal);
 
+      await connector.upload(mockClient, "s.txt", streamFromString("s"), {
+        signal,
+      });
       expect(mockFilesApi.uploadFile.mock.calls[0][1]).toEqual({ signal });
     });
 
     test("re-wraps a modular SDK error as UPLOAD_FAILED with its status", async () => {
-      mockFilesApi.uploadFile.mockRejectedValue(
+      const apiError = () =>
         Object.assign(new Error("x".repeat(300)), {
           httpStatusCode: 403,
           code: "PERMISSION_DENIED",
-        }),
-      );
+        });
+      mockRequest.mockRejectedValue(apiError());
+      mockFilesApi.uploadFile.mockRejectedValue(apiError());
 
-      const error = await connector
-        .upload(mockClient, "file.txt", "data")
-        .catch((e: unknown) => e);
-      expect(error).toBeInstanceOf(ApiError);
-      expect((error as ApiError).errorCode).toBe("UPLOAD_FAILED");
-      expect((error as ApiError).statusCode).toBe(403);
-      expect((error as ApiError).message).toBe(
-        `Upload failed: ${"x".repeat(200)}…`,
-      );
+      for (const contents of ["data", streamFromString("s")]) {
+        const error = await connector
+          .upload(mockClient, "file.txt", contents)
+          .catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(ApiError);
+        expect((error as ApiError).errorCode).toBe("UPLOAD_FAILED");
+        expect((error as ApiError).statusCode).toBe(403);
+        expect((error as ApiError).message).toBe(
+          `Upload failed: ${"x".repeat(200)}…`,
+        );
+      }
     });
 
     test("rethrows non-API errors unchanged", async () => {
       const boom = new Error("network down");
-      mockFilesApi.uploadFile.mockRejectedValue(boom);
+      mockRequest.mockRejectedValue(boom);
 
       await expect(
         connector.upload(mockClient, "file.txt", "data"),
@@ -652,8 +678,8 @@ describe("FilesConnector", () => {
     test("resolves absolute paths directly", async () => {
       await connector.upload(mockClient, "/Volumes/other/vol/file.txt", "data");
 
-      expect(mockFilesApi.uploadFile.mock.calls[0][0].filePath).toBe(
-        "/Volumes/other/vol/file.txt",
+      expect(sentPut().path).toBe(
+        "/api/2.0/fs/files/Volumes/other/vol/file.txt",
       );
     });
   });

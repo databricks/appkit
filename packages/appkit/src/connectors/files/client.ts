@@ -353,20 +353,36 @@ export class FilesConnector {
     const resolvedPath = this.resolvePath(filePath);
 
     return this.traced("upload", { "files.path": resolvedPath }, async () => {
-      // `uploadFile` takes only a ReadableStream body.
-      const body =
-        contents instanceof ReadableStream
-          ? contents
-          : new Blob([contents]).stream();
+      const overwrite = options?.overwrite ?? true;
       try {
-        await client.files.uploadFile(
-          {
-            filePath: resolvedPath,
-            contents: body,
-            overwrite: options?.overwrite ?? true,
-          },
-          { signal: options?.signal },
-        );
+        if (contents instanceof ReadableStream) {
+          await client.files.uploadFile(
+            { filePath: resolvedPath, contents, overwrite },
+            { signal: options?.signal },
+          );
+        } else {
+          // `uploadFile` takes only a ReadableStream, which goes out chunked
+          // and can't be retried. Send in-memory contents as bytes instead, so
+          // the request carries Content-Length and the transport can retry it.
+          const encodedPath = resolvedPath
+            .split("/")
+            .map(encodeURIComponent)
+            .join("/");
+          const res = await client.request({
+            method: "PUT",
+            path: `/api/2.0/fs/files${encodedPath}`,
+            query: { overwrite: String(overwrite) },
+            headers: new Headers({
+              "Content-Type": "application/octet-stream",
+            }),
+            body:
+              typeof contents === "string"
+                ? new TextEncoder().encode(contents)
+                : new Uint8Array(contents),
+            signal: options?.signal,
+          });
+          await res.body?.cancel();
+        }
       } catch (e) {
         const wrapped = toWrapperApiError(e);
         if (!(wrapped instanceof ApiError)) throw e;
