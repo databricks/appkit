@@ -89,6 +89,29 @@ Tables live in the Postgres schema `app` unless the second argument of
 default is not `public` because the deployed app's service principal creates and
 owns `app`, but has no `CREATE` privilege on `public`.
 
+Give each app its own schema. Two apps on one database and one schema share the
+migration history, and the second app's service principal cannot change the
+tables the first one owns.
+
+### Apps with tables in `public`
+
+Earlier releases put tables in `public` by default. An app that created its
+tables there fails setup after the upgrade, and the error says the tables are in
+`public`. Keep them there with:
+
+```ts
+export const schema = defineSchema(
+  ({ table }) => ({
+    notes: table("notes", { id: id(), body: text().notNull() }),
+  }),
+  { schemaName: "public" },
+);
+```
+
+Migrations applied on start into `public` also need
+`GRANT CREATE ON SCHEMA public` to the app's service principal, because it does
+not own `public`.
+
 ## Schema discovery and overrides
 
 `database()` and `database({})` use the same defaults. During setup, the plugin
