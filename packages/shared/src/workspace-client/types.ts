@@ -24,6 +24,7 @@ import type {
   ModelServingClient,
   FilesClient,
   TablesClient,
+  VolumesClient,
   VectorSearchClient,
   PostgresClient,
 } from "./modular";
@@ -68,6 +69,9 @@ export interface WorkspaceClient extends WorkspaceAuth {
   readonly tables: TablesClient;
   /** Lakebase Postgres: autoscaling projects, branches, endpoints (modular SDK). */
   readonly postgres: PostgresClient;
+
+  /** Unity Catalog Volumes (modular SDK). */
+  readonly volumes: VolumesClient;
 
   /** Statement Execution (modular SDK). */
   readonly statementExecution: StatementExecutionClient;
