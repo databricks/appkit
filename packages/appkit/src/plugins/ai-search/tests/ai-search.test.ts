@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { withEnv } from "../../../testing";
 import { useTestCache } from "../../../testing/test-cache";
-import { Context } from "../../../workspace-client";
+import { createWorkspaceClient } from "../../../workspace-client";
 
 vi.mock("../../../context", () => ({
   getWorkspaceClient: vi.fn(() => mockWorkspaceClient),
@@ -119,10 +119,39 @@ const validVsResponse = {
   debug_info: { response_time: 35 },
 };
 
+// Queries run through a REAL modular VectorSearchClient over a stubbed `fetch`,
+// so the patched marshal/unmarshal (debug_level/debug_info, bigint rows) is
+// exercised. `mockRequest` records each wire request and resolves to the JSON
+// body to respond with.
 const mockRequest = vi.fn().mockResolvedValue(validVsResponse);
+vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+  const body = await mockRequest({
+    method: init.method,
+    path: new URL(url).pathname,
+    body: init.body,
+    signal: init.signal,
+  });
+  // Raw text so tests can send ints beyond 2^53 that JSON.stringify can't.
+  return new Response(typeof body === "string" ? body : JSON.stringify(body));
+});
+const mockGetVectorIndex = vi.fn();
+const mockGetTable = vi.fn();
+const realVectorSearch = createWorkspaceClient({
+  host: "https://test.cloud.databricks.com",
+  token: "test-token",
+}).vectorSearch;
 const mockWorkspaceClient = {
-  apiClient: { request: mockRequest },
+  vectorSearch: {
+    queryVectorIndex: realVectorSearch.queryVectorIndex.bind(realVectorSearch),
+    queryVectorIndexNextPage:
+      realVectorSearch.queryVectorIndexNextPage.bind(realVectorSearch),
+    getVectorIndex: mockGetVectorIndex,
+  },
+  tables: { getTable: mockGetTable },
 };
+
+/** JSON body of the n-th wire request. */
+const bodyOf = (n = 0) => JSON.parse(mockRequest.mock.calls[n][0].body);
 
 import { AiSearchPlugin } from "../ai-search";
 
@@ -130,6 +159,8 @@ describe("AiSearchPlugin", () => {
   beforeEach(() => {
     mockRequest.mockClear();
     mockRequest.mockResolvedValue(validVsResponse);
+    mockGetVectorIndex.mockReset();
+    mockGetTable.mockReset();
   });
 
   describe("setup()", () => {
@@ -218,25 +249,22 @@ describe("AiSearchPlugin", () => {
 
   describe("setup() column auto-discovery", () => {
     const originalNodeEnv = process.env.NODE_ENV;
-    // Route GET metadata calls to discovery fixtures; POST queries stay on the
-    // default validVsResponse.
-    const routeByPath = (opts: { method: string; path: string }) => {
-      if (opts.path.endsWith("/query")) return Promise.resolve(validVsResponse);
-      if (opts.path.startsWith("/api/2.0/vector-search/indexes/")) {
-        return Promise.resolve({
-          index_type: "DELTA_SYNC",
-          delta_sync_index_spec: {
-            source_table: "cat.sch.src",
-            embedding_vector_columns: [{ name: "__vec" }],
+    // Discovery goes through the typed modular clients (camelCase models);
+    // queries stay on the raw `request()` mock and its default validVsResponse.
+    const mockDiscovery = () => {
+      mockGetVectorIndex.mockResolvedValue({
+        indexType: "DELTA_SYNC",
+        indexSpec: {
+          $case: "deltaSyncIndexSpec",
+          deltaSyncIndexSpec: {
+            sourceTable: "cat.sch.src",
+            embeddingVectorColumns: [{ name: "__vec" }],
           },
-        });
-      }
-      if (opts.path.startsWith("/api/2.1/unity-catalog/tables/")) {
-        return Promise.resolve({
-          columns: [{ name: "id" }, { name: "body" }, { name: "__vec" }],
-        });
-      }
-      return Promise.resolve(validVsResponse);
+        },
+      });
+      mockGetTable.mockResolvedValue({
+        columns: [{ name: "id" }, { name: "body" }, { name: "__vec" }],
+      });
     };
 
     afterEach(() => {
@@ -245,7 +273,7 @@ describe("AiSearchPlugin", () => {
 
     it("fills columns from the source table in development and warns", async () => {
       process.env.NODE_ENV = "development";
-      mockRequest.mockImplementation(routeByPath);
+      mockDiscovery();
       const plugin = new AiSearchPlugin({
         indexes: { docs: { indexName: "cat.sch.idx" } },
       });
@@ -254,15 +282,20 @@ describe("AiSearchPlugin", () => {
 
       // Discovered columns, minus the embedding vector column.
       await plugin.query("docs", { queryText: "q" });
-      const queryCall = mockRequest.mock.calls.find((c) =>
-        c[0].path.endsWith("/query"),
+      expect(mockGetVectorIndex).toHaveBeenCalledWith(
+        { name: "cat.sch.idx" },
+        expect.anything(),
       );
-      expect(queryCall?.[0].payload.columns).toEqual(["id", "body"]);
+      expect(mockGetTable).toHaveBeenCalledWith(
+        { fullNameArg: "cat.sch.src" },
+        expect.anything(),
+      );
+      expect(bodyOf().columns).toEqual(["id", "body"]);
     });
 
     it("does not discover columns outside development", async () => {
       process.env.NODE_ENV = "production";
-      mockRequest.mockImplementation(routeByPath);
+      mockDiscovery();
       // Columns set so the prod no-columns guard doesn't fire; this test only
       // asserts discovery doesn't run outside development.
       const plugin = new AiSearchPlugin({
@@ -272,25 +305,21 @@ describe("AiSearchPlugin", () => {
       await plugin.setup();
 
       // No get-index / get-table calls were made.
-      const metadataCalls = mockRequest.mock.calls.filter(
-        (c) => !c[0].path.endsWith("/query"),
-      );
-      expect(metadataCalls).toHaveLength(0);
+      expect(mockGetVectorIndex).not.toHaveBeenCalled();
+      expect(mockGetTable).not.toHaveBeenCalled();
     });
 
     it("skips (does not throw) when an index already has columns", async () => {
       process.env.NODE_ENV = "development";
-      mockRequest.mockImplementation(routeByPath);
+      mockDiscovery();
       const plugin = new AiSearchPlugin({
         indexes: { docs: { indexName: "cat.sch.idx", columns: ["id"] } },
       });
 
       await plugin.setup();
 
-      const metadataCalls = mockRequest.mock.calls.filter(
-        (c) => !c[0].path.endsWith("/query"),
-      );
-      expect(metadataCalls).toHaveLength(0);
+      expect(mockGetVectorIndex).not.toHaveBeenCalled();
+      expect(mockGetTable).not.toHaveBeenCalled();
     });
   });
 
@@ -338,6 +367,25 @@ describe("AiSearchPlugin", () => {
       expect(result.queryTimeMs).toBe(35);
     });
 
+    it("coerces int64 row values the SDK parses as bigint to number", async () => {
+      // The SDK parses with json-bigint, so ints past 2^53 arrive as bigint;
+      // the patched schema accepts them and the connector coerces, keeping the
+      // result JSON-serializable (legacy JSON.parse precision).
+      mockRequest.mockResolvedValueOnce(
+        `{"manifest":{"column_count":2,"columns":[{"name":"id"},{"name":"score"}]},` +
+          `"result":{"row_count":1,"data_array":[[9007199254740993,0.5]]}}`,
+      );
+      const plugin = new AiSearchPlugin({
+        indexes: { big: { indexName: "cat.sch.big", columns: ["id"] } },
+      });
+      await plugin.setup();
+
+      const result = await plugin.query("big", { queryText: "q" });
+
+      expect(result.results[0].data.id).toBe(9007199254740992);
+      expect(() => JSON.stringify(result)).not.toThrow();
+    });
+
     it("types result.data via the generic parameter", async () => {
       interface Doc extends Record<string, unknown> {
         id: number;
@@ -378,16 +426,18 @@ describe("AiSearchPlugin", () => {
         expect.objectContaining({
           method: "POST",
           path: "/api/2.0/vector-search/indexes/cat.sch.idx/query",
+          signal: expect.any(AbortSignal),
         }),
-        // 2nd arg is the SDK Context bridging the execution's abort signal.
-        expect.any(Context),
       );
 
-      const callBody = mockRequest.mock.calls[0][0].payload;
+      const callBody = bodyOf();
       expect(callBody.query_text).toBe("test query");
       expect(callBody.query_type).toBe("HYBRID");
       expect(callBody.num_results).toBe(10);
       expect(callBody.columns).toEqual(["id", "title"]);
+      // Not in the modular request model; the raw `request()` path must keep it
+      // so the response carries `debug_info` (queryTimeMs).
+      expect(callBody.debug_level).toBe(1);
     });
 
     it("throws Error for unknown alias", async () => {
@@ -418,7 +468,7 @@ describe("AiSearchPlugin", () => {
         filters: { category: ["books"] },
       });
 
-      const callBody = mockRequest.mock.calls[0][0].payload;
+      const callBody = bodyOf();
       // VS expects a JSON-encoded string under `filters_json`; a raw object
       // under `filters` is silently ignored by the API.
       expect(callBody.filters).toBeUndefined();
@@ -440,7 +490,7 @@ describe("AiSearchPlugin", () => {
       await plugin.setup();
       await plugin.query("test", { queryText: "test" });
 
-      const callBody = mockRequest.mock.calls[0][0].payload;
+      const callBody = bodyOf();
       expect(callBody.reranker.model).toBe("databricks_reranker");
       expect(callBody.reranker.parameters.columns_to_rerank).toEqual([
         "title",
@@ -464,7 +514,7 @@ describe("AiSearchPlugin", () => {
       await plugin.query("test", { queryText: "test" });
 
       expect(mockEmbeddingFn).toHaveBeenCalledWith("test");
-      const callBody = mockRequest.mock.calls[0][0].payload;
+      const callBody = bodyOf();
       expect(callBody.query_vector).toEqual([0.1, 0.2, 0.3]);
       expect(callBody.query_text).toBeUndefined();
     });
@@ -485,7 +535,7 @@ describe("AiSearchPlugin", () => {
       await plugin.query("test", { queryText: "test" });
 
       expect(mockEmbeddingFn).toHaveBeenCalledWith("test");
-      const callBody = mockRequest.mock.calls[0][0].payload;
+      const callBody = bodyOf();
       expect(callBody.query_vector).toEqual([0.1, 0.2, 0.3]);
       expect(callBody.query_text).toBe("test");
     });
@@ -506,7 +556,7 @@ describe("AiSearchPlugin", () => {
       await plugin.query("test", { queryText: "test" });
 
       expect(mockEmbeddingFn).not.toHaveBeenCalled();
-      const callBody = mockRequest.mock.calls[0][0].payload;
+      const callBody = bodyOf();
       expect(callBody.query_text).toBe("test");
       expect(callBody.query_vector).toBeUndefined();
     });
@@ -613,7 +663,7 @@ describe("AiSearchPlugin", () => {
         columns: ["id"],
       });
 
-      const callBody = mockRequest.mock.calls[0][0].payload;
+      const callBody = bodyOf();
       expect(callBody.query_type).toBe("ANN");
       expect(callBody.num_results).toBe(5);
       expect(callBody.columns).toEqual(["id"]);
@@ -632,7 +682,7 @@ describe("AiSearchPlugin", () => {
       await plugin.setup();
       await plugin.query("test", { queryText: "q" });
 
-      const callBody = mockRequest.mock.calls[0][0].payload;
+      const callBody = bodyOf();
       expect(callBody.reranker.parameters.columns_to_rerank).toEqual(["title"]);
     });
 
@@ -649,7 +699,7 @@ describe("AiSearchPlugin", () => {
       await plugin.setup();
       await plugin.query("test", { queryText: "q", reranker: false });
 
-      const callBody = mockRequest.mock.calls[0][0].payload;
+      const callBody = bodyOf();
       expect(callBody.reranker).toBeUndefined();
     });
 
@@ -661,7 +711,7 @@ describe("AiSearchPlugin", () => {
       });
       await plugin.query("test", { queryText: "q" });
 
-      const callBody = mockRequest.mock.calls[0][0].payload;
+      const callBody = bodyOf();
       expect(callBody.reranker).toBeUndefined();
       expect(callBody.columns).toEqual([]);
     });
@@ -1012,7 +1062,7 @@ describe("AiSearchPlugin", () => {
 
         // demo is configured with columns ["id", "title"]; the request's
         // columns must not widen the projection.
-        const callBody = mockRequest.mock.calls[0][0].payload;
+        const callBody = bodyOf();
         expect(callBody.columns).toEqual(["id", "title"]);
       });
 
@@ -1094,10 +1144,15 @@ describe("AiSearchPlugin", () => {
         expect(mockRequest).toHaveBeenCalledWith(
           expect.objectContaining({
             path: "/api/2.0/vector-search/indexes/cat.sch.paged/query-next-page",
-            payload: { endpoint_name: "ep", page_token: "t" },
+            signal: expect.any(AbortSignal),
           }),
-          expect.any(Context),
         );
+        // The SDK also sends `name` in the body; the path carries it either way.
+        expect(bodyOf()).toEqual({
+          name: "cat.sch.paged",
+          endpoint_name: "ep",
+          page_token: "t",
+        });
         expect(res.json).toHaveBeenCalled();
       });
     });
