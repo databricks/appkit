@@ -1,4 +1,4 @@
-import type { DbContext } from "./context";
+import { type DbContext, hasEnvBranch } from "./context";
 import { currentIdentity } from "./identity";
 import type { LakebaseBranch } from "./lakebase-api";
 import { devBranchId, sessionBranchId } from "./naming";
@@ -9,12 +9,18 @@ import {
   resourceId,
 } from "./targets";
 
-// Commands that write to a branch run only on branches `appkit db init`
-// created for this developer (dev-…) or this checkout (session-…).
+/** What a branch is to this developer, checked in this order. */
+type BranchKind =
+  | "default"
+  | "protected"
+  | "deploy-target"
+  | "dev"
+  | "session"
+  | "other";
 
-interface BranchVerdict {
-  readonly appkitOwned: boolean;
-  /** Why the branch is not AppKit-owned. */
+interface Classification {
+  readonly kind: BranchKind;
+  /** Why the branch takes no writes; undefined for dev and session branches. */
   readonly reason?: string;
 }
 
@@ -24,27 +30,27 @@ export function classifyBranch(input: {
   sessionId: string | null;
   /** Every branch databricks.yml deploys to; the deployed app migrates those itself. */
   deployBranches: readonly string[];
-}): BranchVerdict {
+}): Classification {
   const { branch, userName, sessionId, deployBranches } = input;
   if (branch.status?.default) {
-    return { appkitOwned: false, reason: "it is the project's default branch" };
+    return { kind: "default", reason: "it is the project's default branch" };
   }
   if (branch.status?.is_protected) {
-    return { appkitOwned: false, reason: "it is a protected branch" };
+    return { kind: "protected", reason: "it is a protected branch" };
   }
   if (deployBranches.includes(branch.name)) {
     return {
-      appkitOwned: false,
+      kind: "deploy-target",
       reason: "it is a branch databricks.yml deploys to",
     };
   }
   const id = resourceId(branch.name);
-  if (id === devBranchId(userName)) return { appkitOwned: true };
+  if (id === devBranchId(userName)) return { kind: "dev" };
   if (sessionId && id === sessionBranchId(sessionId)) {
-    return { appkitOwned: true };
+    return { kind: "session" };
   }
   return {
-    appkitOwned: false,
+    kind: "other",
     reason: `it is not your dev branch (${devBranchId(userName)})${
       sessionId
         ? ` or this checkout's session branch (${sessionBranchId(sessionId)})`
@@ -53,18 +59,34 @@ export function classifyBranch(input: {
   };
 }
 
-interface BranchCheck {
-  readonly branch: LakebaseBranch;
-  readonly verdict: BranchVerdict;
+/**
+ * Commands write only to branches `appkit db init` created for this developer
+ * (dev-…) or this checkout (session-…).
+ */
+export function takesWrites(kind: BranchKind): boolean {
+  return kind === "dev" || kind === "session";
 }
 
-/** Classify the `.env` branch through the API (no database connection); null when none is configured. */
-export async function checkAppkitBranch(
+/** The .env branch and what it is to this developer. */
+interface EnvBranch extends Classification {
+  readonly branch: LakebaseBranch;
+}
+
+/** Why a command does not write to the branch. */
+export function notYourBranch(env: EnvBranch): string {
+  return `${resourceId(env.branch.name)} is not your dev or session branch (${env.reason})`;
+}
+
+/**
+ * Classify the .env branch through the API, without connecting. null when .env
+ * does not name a branch to connect to (see NO_ENV_BRANCH).
+ */
+export async function resolveEnvBranch(
   ctx: DbContext,
-): Promise<BranchCheck | null> {
+): Promise<EnvBranch | null> {
   const local = readLocalTarget(ctx.env);
   const name = parseResourceName(local.endpoint ?? undefined)?.branch;
-  if (!name) return null;
+  if (!name || !hasEnvBranch(ctx.env)) return null;
   const [branch, { userName }] = await Promise.all([
     ctx.api().getBranch(name),
     currentIdentity(ctx),
@@ -76,7 +98,7 @@ export async function checkAppkitBranch(
   }
   return {
     branch,
-    verdict: classifyBranch({
+    ...classifyBranch({
       branch,
       userName,
       sessionId: local.session,

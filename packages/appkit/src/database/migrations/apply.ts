@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
-import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { readMigrationFiles } from "drizzle-orm/migrator";
@@ -22,8 +21,10 @@ import {
   type Journal,
   MIGRATIONS_TABLE,
   MigrationFilesError,
+  migrationFile,
   readJournal,
   readJsonFile,
+  snapshotFile,
 } from "./paths";
 
 const logger = createLogger("database");
@@ -228,7 +229,7 @@ type QueryClient = Pick<PoolClient, "query">;
 /** Every committed migration, in journal order. Fails on a missing file before connecting. */
 function readMigrations(folder: string, journal: Journal): MigrationFile[] {
   for (const entry of journal.entries) {
-    const file = path.join(folder, `${entry.tag}.sql`);
+    const file = migrationFile(folder, entry.tag);
     if (!fs.existsSync(file)) {
       throw new MigrationFilesError(
         `Missing ${file}, listed in meta/_journal.json. Restore it from version control.`,
@@ -454,11 +455,7 @@ function snapshotTables(
   idx: number,
   schemaName: string,
 ): Map<string, string[]> {
-  const file = path.join(
-    folder,
-    "meta",
-    `${String(idx).padStart(4, "0")}_snapshot.json`,
-  );
+  const file = snapshotFile(folder, idx);
   if (!fs.existsSync(file)) {
     throw new MigrationFilesError(
       `Missing ${file} for ${BASELINE_TAG}. Restore it from version control; it lists the tables the baseline adopts.`,

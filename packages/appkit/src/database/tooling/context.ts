@@ -98,14 +98,23 @@ async function assertHostServesEndpoint(
   }
 }
 
+export const NO_ENV_BRANCH =
+  "no branch is configured in .env (PGHOST, PGDATABASE and LAKEBASE_ENDPOINT); run `appkit db init`";
+
+/** Whether .env names a branch to connect to. */
+export function hasEnvBranch(env: NodeJS.ProcessEnv): boolean {
+  return Boolean(env.PGHOST && env.PGDATABASE && env.LAKEBASE_ENDPOINT);
+}
+
 /**
- * null when PGHOST / PGDATABASE / LAKEBASE_ENDPOINT are not configured. The
- * pool is created directly: initializeLakebasePool would look the endpoint and
- * the user up a second time.
+ * The pool is created directly: initializeLakebasePool would look the endpoint
+ * and the user up a second time.
  */
-export async function openBranchPool(ctx: DbContext): Promise<Pool | null> {
+async function openBranchPool(ctx: DbContext): Promise<Pool> {
   const { PGHOST, PGDATABASE, LAKEBASE_ENDPOINT } = ctx.env;
-  if (!PGHOST || !PGDATABASE || !LAKEBASE_ENDPOINT) return null;
+  if (!PGHOST || !PGDATABASE || !LAKEBASE_ENDPOINT) {
+    throw new Error(`Did not connect: ${NO_ENV_BRANCH}.`);
+  }
   const [user] = await Promise.all([
     ctx.env.PGUSER || currentIdentity(ctx).then(({ userName }) => userName),
     assertHostServesEndpoint(ctx, LAKEBASE_ENDPOINT, PGHOST),
@@ -127,4 +136,17 @@ export async function openBranchPool(ctx: DbContext): Promise<Pool | null> {
     max: 2,
     idleTimeoutMillis: 1_000,
   });
+}
+
+/** Run fn with a pool on the .env branch, and close the pool after. */
+export async function withBranchPool<T>(
+  ctx: DbContext,
+  fn: (pool: Pool) => Promise<T>,
+): Promise<T> {
+  const pool = await openBranchPool(ctx);
+  try {
+    return await fn(pool);
+  } finally {
+    await pool.end().catch(() => undefined);
+  }
 }

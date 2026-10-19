@@ -18,14 +18,13 @@ import {
   migrationsFolder,
   readJournal,
 } from "../migrations/paths";
-import { type DbContext, openBranchPool } from "./context";
-import { checkAppkitBranch } from "./guard";
+import { type DbContext, NO_ENV_BRANCH, withBranchPool } from "./context";
+import { notYourBranch, resolveEnvBranch, takesWrites } from "./guard";
 import {
   discardMigrationFiles,
   type GeneratedMigration,
   generateMigrationFiles,
 } from "./migrations";
-import { resourceId } from "./targets";
 
 /** Whether the checkout has a config/database/schema.ts yet. */
 function hasSchemaFile(root: string): boolean {
@@ -69,15 +68,12 @@ export interface MigrateOptions {
 
 type ApplyOutcome = Pick<MigrateReport, "applied" | "adopted" | "notApplied">;
 
-const NO_BRANCH =
-  "no branch configured (PGHOST, PGDATABASE, LAKEBASE_ENDPOINT) — run appkit db init";
-
 /** Why migrations must not be applied to the `.env` branch; undefined when they may. */
 async function applyBlocker(ctx: DbContext): Promise<string | undefined> {
-  const check = await checkAppkitBranch(ctx);
-  if (!check) return NO_BRANCH;
-  if (check.verdict.appkitOwned) return undefined;
-  return `${resourceId(check.branch.name)} is not an AppKit dev or session branch (${check.verdict.reason}). Migrations are applied only to branches \`appkit db init\` created for you; the deployed app applies committed migrations to its own branch`;
+  const env = await resolveEnvBranch(ctx);
+  if (!env) return NO_ENV_BRANCH;
+  if (takesWrites(env.kind)) return undefined;
+  return `${notYourBranch(env)}. Migrations are applied only to branches \`appkit db init\` created for you; the deployed app applies committed migrations to its own branch`;
 }
 
 /** Apply pending migrations to the `.env` branch, or say why they were not. */
@@ -90,17 +86,13 @@ async function applyToEnvBranch(
     ? await applyBlocker(ctx)
     : "no migrations to apply — schema.ts declares no tables yet";
   if (blocker) return { applied: [], notApplied: blocker };
-  const pool = await openBranchPool(ctx);
-  if (!pool) return { applied: [], notApplied: NO_BRANCH };
-  try {
+  return withBranchPool(ctx, async (pool) => {
     const { applied, adopted } = await applyPendingMigrations(pool, {
       migrationsFolder: folder,
       schemaName,
     });
     return { applied, ...(adopted.length > 0 ? { adopted } : {}) };
-  } finally {
-    await pool.end().catch(() => undefined);
-  }
+  });
 }
 
 /**

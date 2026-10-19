@@ -4,21 +4,25 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-const { applyPendingMigrations, checkAppkitBranch, openBranchPool } =
-  vi.hoisted(() => ({
+const { applyPendingMigrations, resolveEnvBranch, withBranchPool } = vi.hoisted(
+  () => ({
     applyPendingMigrations: vi.fn(),
-    checkAppkitBranch: vi.fn(),
-    openBranchPool: vi.fn(),
-  }));
+    resolveEnvBranch: vi.fn(),
+    withBranchPool: vi.fn(),
+  }),
+);
 
 vi.mock("../../migrations/apply", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../migrations/apply")>()),
   applyPendingMigrations,
 }));
-vi.mock("../guard", () => ({ checkAppkitBranch }));
+vi.mock("../guard", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../guard")>()),
+  resolveEnvBranch,
+}));
 vi.mock("../context", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../context")>()),
-  openBranchPool,
+  withBranchPool,
 }));
 
 import { MigrationApplyError } from "../../migrations/apply";
@@ -59,17 +63,18 @@ function app(tables: string): DbContext {
 
 const devBranch = {
   branch: { name: "projects/p/branches/dev-alice-3f9a2c" },
-  verdict: { appkitOwned: true },
+  kind: "dev",
 };
 
-const pool = { end: vi.fn(async () => undefined) };
+const pool = {};
 
 beforeEach(() => {
   applyPendingMigrations.mockReset();
-  openBranchPool.mockReset();
-  checkAppkitBranch.mockReset();
-  checkAppkitBranch.mockResolvedValue(devBranch);
-  pool.end.mockClear();
+  withBranchPool
+    .mockReset()
+    .mockImplementation((_ctx, fn: (p: unknown) => unknown) => fn(pool));
+  resolveEnvBranch.mockReset();
+  resolveEnvBranch.mockResolvedValue(devBranch);
 });
 
 afterEach(() => {
@@ -86,7 +91,7 @@ describe("runMigrate", () => {
     await expect(runMigrate(ctx, { interactive: false })).rejects.toThrow(
       "No config/database/schema.ts yet, so there is nothing to migrate. Run `appkit db introspect` to write it from the branch's tables, or create it.",
     );
-    expect(checkAppkitBranch).not.toHaveBeenCalled();
+    expect(resolveEnvBranch).not.toHaveBeenCalled();
     expect(
       fs.existsSync(path.join(ctx.root, "config/database/migrations")),
     ).toBe(false);
@@ -99,17 +104,16 @@ describe("runMigrate", () => {
     expect(report.generated).toBeNull();
     expect(report.applied).toEqual([]);
     expect(report.notApplied).toMatch(/no migrations/);
-    expect(openBranchPool).not.toHaveBeenCalled();
-    expect(checkAppkitBranch).not.toHaveBeenCalled();
+    expect(withBranchPool).not.toHaveBeenCalled();
+    expect(resolveEnvBranch).not.toHaveBeenCalled();
     expect(report.typesFile).toBe(
       path.join(ctx.root, "shared/appkit-types/database.d.ts"),
     );
     expect(fs.existsSync(report.typesFile)).toBe(true);
   });
 
-  test("generates, regenerates types, applies to the .env branch with the app schema, and ends the pool", async () => {
+  test("generates, regenerates types, and applies to the .env branch with the app schema", async () => {
     const ctx = app(`notes: table("notes", { id: id(), body: text() })`);
-    openBranchPool.mockResolvedValue(pool);
     applyPendingMigrations.mockResolvedValue({
       applied: ["0000_migration"],
       adopted: [],
@@ -118,23 +122,22 @@ describe("runMigrate", () => {
     const report = await runMigrate(ctx, { interactive: false });
 
     expect(report.generated?.tag).toBe("0000_migration");
-    expect(openBranchPool).toHaveBeenCalledWith(ctx);
+    expect(withBranchPool).toHaveBeenCalledWith(ctx, expect.any(Function));
     expect(applyPendingMigrations).toHaveBeenCalledWith(pool, {
       migrationsFolder: path.join(ctx.root, "config/database/migrations"),
       schemaName: "app",
     });
     expect(report.applied).toEqual(["0000_migration"]);
     expect(report.notApplied).toBeUndefined();
-    expect(pool.end).toHaveBeenCalledOnce();
     expect(fs.readFileSync(report.typesFile, "utf-8")).toContain("notes");
   });
 
   test("applies committed migrations even when schema.ts did not change", async () => {
     const ctx = app(`notes: table("notes", { id: id() })`);
-    openBranchPool.mockResolvedValue(null);
+    resolveEnvBranch.mockResolvedValue(null);
     await runMigrate(ctx, { interactive: false });
 
-    openBranchPool.mockResolvedValue(pool);
+    resolveEnvBranch.mockResolvedValue(devBranch);
     applyPendingMigrations.mockResolvedValue({
       applied: ["0000_migration"],
       adopted: [],
@@ -147,44 +150,43 @@ describe("runMigrate", () => {
 
   test("without a configured branch it still generates, and says why nothing was applied", async () => {
     const ctx = app(`notes: table("notes", { id: id() })`);
-    checkAppkitBranch.mockResolvedValue(null);
+    resolveEnvBranch.mockResolvedValue(null);
 
     const report = await runMigrate(ctx, { interactive: false });
 
     expect(report.generated?.tag).toBe("0000_migration");
     expect(applyPendingMigrations).not.toHaveBeenCalled();
-    expect(report.notApplied).toMatch(/appkit db init/);
+    expect(report.notApplied).toBe(
+      "no branch is configured in .env (PGHOST, PGDATABASE and LAKEBASE_ENDPOINT); run `appkit db init`",
+    );
     expect(fs.existsSync(report.typesFile)).toBe(true);
   });
 
   test("on a branch AppKit did not create for you it generates, never connects, and says why", async () => {
     const ctx = app(`notes: table("notes", { id: id() })`);
-    checkAppkitBranch.mockResolvedValue({
+    resolveEnvBranch.mockResolvedValue({
       branch: { name: "projects/p/branches/production" },
-      verdict: {
-        appkitOwned: false,
-        reason: "it is the project's default branch",
-      },
+      kind: "default",
+      reason: "it is the project's default branch",
     });
 
     const report = await runMigrate(ctx, { interactive: false });
 
     expect(report.generated?.tag).toBe("0000_migration");
-    expect(openBranchPool).not.toHaveBeenCalled();
+    expect(withBranchPool).not.toHaveBeenCalled();
     expect(applyPendingMigrations).not.toHaveBeenCalled();
     expect(report.notApplied).toBe(
-      "production is not an AppKit dev or session branch (it is the project's default branch). Migrations are applied only to branches `appkit db init` created for you; the deployed app applies committed migrations to its own branch",
+      "production is not your dev or session branch (it is the project's default branch). Migrations are applied only to branches `appkit db init` created for you; the deployed app applies committed migrations to its own branch",
     );
     expect(fs.existsSync(report.typesFile)).toBe(true);
   });
 
   test("reports a baseline adopted without running it", async () => {
     const ctx = app(`notes: table("notes", { id: id() })`);
-    checkAppkitBranch.mockResolvedValue(null);
+    resolveEnvBranch.mockResolvedValue(null);
     await runMigrate(ctx, { interactive: false });
 
-    checkAppkitBranch.mockResolvedValue(devBranch);
-    openBranchPool.mockResolvedValue(pool);
+    resolveEnvBranch.mockResolvedValue(devBranch);
     applyPendingMigrations.mockResolvedValue({
       applied: [],
       adopted: ["0000_baseline"],
@@ -194,9 +196,8 @@ describe("runMigrate", () => {
     expect(report).toMatchObject({ applied: [], adopted: ["0000_baseline"] });
   });
 
-  test("an apply failure ends the pool and says the generated migration was written but not applied", async () => {
+  test("an apply failure says the generated migration was written but not applied", async () => {
     const ctx = app(`notes: table("notes", { id: id() })`);
-    openBranchPool.mockResolvedValue(pool);
     const failure = new Error("apply failed");
     applyPendingMigrations.mockRejectedValue(failure);
 
@@ -208,7 +209,6 @@ describe("runMigrate", () => {
       `Wrote ${path.join("config/database/migrations", "0000_migration.sql")}, but did not apply it: apply failed`,
     );
     expect(error.cause).toBe(failure);
-    expect(pool.end).toHaveBeenCalledOnce();
     expect(
       fs.existsSync(
         path.join(ctx.root, "config/database/migrations/0000_migration.sql"),
@@ -224,7 +224,7 @@ describe("runMigrate", () => {
 
   test("when the migration this run wrote fails to apply, it is removed so a fix in schema.ts can replace it", async () => {
     const ctx = app(`notes: table("notes", { id: id() })`);
-    checkAppkitBranch.mockResolvedValue(null);
+    resolveEnvBranch.mockResolvedValue(null);
     await runMigrate(ctx, { interactive: false });
     const folder = path.join(ctx.root, "config/database/migrations");
     const journal = fs.readFileSync(
@@ -236,8 +236,7 @@ describe("runMigrate", () => {
       ctx.root,
       `notes: table("notes", { id: id(), title: text().notNull() })`,
     );
-    checkAppkitBranch.mockResolvedValue(devBranch);
-    openBranchPool.mockResolvedValue(pool);
+    resolveEnvBranch.mockResolvedValue(devBranch);
     const failure = new MigrationApplyError({
       step: "Applying migrations",
       failed: "0001_migration",
@@ -268,12 +267,11 @@ describe("runMigrate", () => {
 
   test("when an earlier migration fails, the one this run wrote stays for the next try", async () => {
     const ctx = app(`notes: table("notes", { id: id() })`);
-    checkAppkitBranch.mockResolvedValue(null);
+    resolveEnvBranch.mockResolvedValue(null);
     await runMigrate(ctx, { interactive: false });
 
     writeSchema(ctx.root, `notes: table("notes", { id: id(), body: text() })`);
-    checkAppkitBranch.mockResolvedValue(devBranch);
-    openBranchPool.mockResolvedValue(pool);
+    resolveEnvBranch.mockResolvedValue(devBranch);
     applyPendingMigrations.mockRejectedValue(
       new MigrationApplyError({
         step: "Applying migrations",
@@ -295,23 +293,22 @@ describe("runMigrate", () => {
 
   test("a guard failure after generating says so too, and never connects", async () => {
     const ctx = app(`notes: table("notes", { id: id() })`);
-    checkAppkitBranch.mockRejectedValue(
+    resolveEnvBranch.mockRejectedValue(
       new Error("The .env branch projects/p/branches/dev-a does not exist"),
     );
 
     await expect(runMigrate(ctx, { interactive: false })).rejects.toThrow(
       /^Wrote .*0000_migration\.sql, but did not apply it: The \.env branch .* does not exist$/,
     );
-    expect(openBranchPool).not.toHaveBeenCalled();
+    expect(withBranchPool).not.toHaveBeenCalled();
   });
 
   test("a failure with nothing generated propagates unchanged", async () => {
     const ctx = app(`notes: table("notes", { id: id() })`);
-    checkAppkitBranch.mockResolvedValue(null);
+    resolveEnvBranch.mockResolvedValue(null);
     await runMigrate(ctx, { interactive: false });
 
-    checkAppkitBranch.mockResolvedValue(devBranch);
-    openBranchPool.mockResolvedValue(pool);
+    resolveEnvBranch.mockResolvedValue(devBranch);
     const failure = new Error("apply failed");
     applyPendingMigrations.mockRejectedValue(failure);
 
@@ -327,6 +324,6 @@ describe("runMigrate", () => {
 
     expect(error.message).toBe("Could not load config/database/schema.ts.");
     expect((error.cause as Error).message).toMatch(/schema\.ts:\d+:\d+/);
-    expect(checkAppkitBranch).not.toHaveBeenCalled();
+    expect(resolveEnvBranch).not.toHaveBeenCalled();
   });
 });

@@ -6,15 +6,18 @@ import path from "node:path";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 
-const { checkAppkitBranch, openBranchPool } = vi.hoisted(() => ({
-  checkAppkitBranch: vi.fn(),
-  openBranchPool: vi.fn(),
+const { resolveEnvBranch, withBranchPool } = vi.hoisted(() => ({
+  resolveEnvBranch: vi.fn(),
+  withBranchPool: vi.fn(),
 }));
 
-vi.mock("../guard", () => ({ checkAppkitBranch }));
+vi.mock("../guard", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../guard")>()),
+  resolveEnvBranch,
+}));
 vi.mock("../context", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../context")>()),
-  openBranchPool,
+  withBranchPool,
 }));
 
 import type { DbContext } from "../context";
@@ -69,12 +72,19 @@ describe.skipIf(!url)("runMigrate against Postgres", () => {
         throw new Error("no Lakebase API calls expected");
       },
     };
-    checkAppkitBranch.mockResolvedValue({
+    resolveEnvBranch.mockResolvedValue({
       branch: { name: "projects/p/branches/dev-alice-3f9a2c" },
-      verdict: { appkitOwned: true },
+      kind: "dev",
     });
-    openBranchPool.mockImplementation(
-      async () => new Pool({ connectionString: url, max: 2 }),
+    withBranchPool.mockImplementation(
+      async (_ctx, fn: (pool: Pool) => Promise<unknown>) => {
+        const pool = new Pool({ connectionString: url, max: 2 });
+        try {
+          return await fn(pool);
+        } finally {
+          await pool.end();
+        }
+      },
     );
   });
 

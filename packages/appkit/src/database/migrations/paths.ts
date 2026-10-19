@@ -33,9 +33,32 @@ export function migrationsFolder(root: string): string {
   return path.resolve(root, MIGRATIONS_DIR);
 }
 
+// drizzle-kit 0.31's v7 folder layout. drizzle-kit v1 replaces it with one
+// folder per migration, so every path into the folder is built here.
+
+/** Folder of the journal and the snapshots. */
+export function metaFolder(folder: string): string {
+  return path.join(folder, "meta");
+}
+
 /** Path of the journal inside a migrations folder. */
 export function journalFile(folder: string): string {
-  return path.join(folder, "meta", "_journal.json");
+  return path.join(metaFolder(folder), "_journal.json");
+}
+
+/** The `NNNN` that starts the tag of the migration at journal index idx. */
+export function migrationPrefix(idx: number): string {
+  return String(idx).padStart(4, "0");
+}
+
+/** Path of a migration's SQL. */
+export function migrationFile(folder: string, tag: string): string {
+  return path.join(folder, `${tag}.sql`);
+}
+
+/** Path of the snapshot written with the migration at journal index idx. */
+export function snapshotFile(folder: string, idx: number): string {
+  return path.join(metaFolder(folder), `${migrationPrefix(idx)}_snapshot.json`);
 }
 
 /** A committed migration file is missing or unreadable; the message names the file. */

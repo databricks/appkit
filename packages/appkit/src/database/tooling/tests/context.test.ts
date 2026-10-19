@@ -9,17 +9,19 @@ vi.mock("../../../connectors/lakebase", () => ({ createLakebasePool }));
 vi.mock("../../../workspace-client", () => ({ createWorkspaceClient }));
 
 import { getClientOptions } from "../../../context/client-options";
-import { createDbContext, openBranchPool } from "../context";
+import { createDbContext, withBranchPool } from "../context";
 import type { LakebaseApi } from "../lakebase-api";
 import { cleanupTempApps, FakeLakebase, fakeContext, tempApp } from "./fakes";
 
 const BRANCH = "projects/p/branches/dev-alice-3f9a2c";
 const ENDPOINT = `${BRANCH}/endpoints/primary`;
 const HOST = "primary.dev-alice-3f9a2c.example.com";
-const pool = { end: vi.fn() };
+const pool = { end: vi.fn(async () => undefined) };
+const usePool = async (p: unknown) => p;
 
 beforeEach(() => {
   createLakebasePool.mockReset().mockReturnValue(pool);
+  pool.end.mockClear();
   createWorkspaceClient.mockReset();
 });
 afterEach(cleanupTempApps);
@@ -28,15 +30,18 @@ function contextFor(env: NodeJS.ProcessEnv, api: LakebaseApi) {
   return fakeContext({ root: tempApp(), env, api });
 }
 
-describe("openBranchPool", () => {
-  test("null without PGHOST, PGDATABASE and LAKEBASE_ENDPOINT, before any API call", async () => {
+describe("withBranchPool", () => {
+  test("refuses without PGHOST, PGDATABASE and LAKEBASE_ENDPOINT, before any API call", async () => {
     const lakebase = new FakeLakebase();
 
     await expect(
-      openBranchPool(
+      withBranchPool(
         contextFor({ PGHOST: HOST, PGDATABASE: "db" }, lakebase.api()),
+        usePool,
       ),
-    ).resolves.toBeNull();
+    ).rejects.toThrow(
+      "Did not connect: no branch is configured in .env (PGHOST, PGDATABASE and LAKEBASE_ENDPOINT); run `appkit db init`.",
+    );
     expect(lakebase.calls).toEqual([]);
     expect(createLakebasePool).not.toHaveBeenCalled();
   });
@@ -54,7 +59,8 @@ describe("openBranchPool", () => {
       lakebase.api(),
     );
 
-    await expect(openBranchPool(ctx)).resolves.toBe(pool);
+    await expect(withBranchPool(ctx, usePool)).resolves.toBe(pool);
+    expect(pool.end).toHaveBeenCalledOnce();
     expect(lakebase.calls).toEqual([`getEndpoint ${ENDPOINT}`]);
     expect(createLakebasePool).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -81,7 +87,7 @@ describe("openBranchPool", () => {
       api: lakebase.api(),
     });
 
-    await openBranchPool(ctx);
+    await withBranchPool(ctx, usePool);
 
     expect(lakebase.calls).toEqual([`getEndpoint ${ENDPOINT}`]);
     expect(createLakebasePool).toHaveBeenCalledWith(
@@ -98,17 +104,18 @@ describe("openBranchPool", () => {
     };
 
     await expect(
-      openBranchPool(
+      withBranchPool(
         contextFor(
           { ...env, PGHOST: "primary.production.example.com" },
           lakebase.api(),
         ),
+        usePool,
       ),
     ).rejects.toThrow(
       `PGHOST primary.production.example.com is not a host of LAKEBASE_ENDPOINT ${ENDPOINT} (expected ${HOST}), so it did not connect. Run \`appkit db init\` to rewrite .env.`,
     );
     await expect(
-      openBranchPool(
+      withBranchPool(
         contextFor(
           {
             ...env,
@@ -117,6 +124,7 @@ describe("openBranchPool", () => {
           },
           lakebase.api(),
         ),
+        usePool,
       ),
     ).rejects.toThrow(
       `LAKEBASE_ENDPOINT ${BRANCH}/endpoints/gone does not exist, so it did not connect.`,
@@ -128,8 +136,9 @@ describe("openBranchPool", () => {
         throw lookupFailure;
       },
     } as unknown as LakebaseApi;
-    const error = (await openBranchPool(
+    const error = (await withBranchPool(
       contextFor({ ...env, PGHOST: HOST }, failing),
+      usePool,
     ).catch((caught: unknown) => caught)) as Error;
     expect(error.message).toBe(
       `Could not verify that PGHOST ${HOST} serves LAKEBASE_ENDPOINT ${ENDPOINT}, so it did not connect.`,
@@ -137,6 +146,29 @@ describe("openBranchPool", () => {
     expect(error.cause).toBe(lookupFailure);
 
     expect(createLakebasePool).not.toHaveBeenCalled();
+  });
+
+  test("closes the pool when fn fails, and rethrows fn's error", async () => {
+    const lakebase = new FakeLakebase();
+    lakebase.addBranch(BRANCH);
+    const ctx = contextFor(
+      {
+        PGHOST: HOST,
+        PGDATABASE: "databricks_postgres",
+        LAKEBASE_ENDPOINT: ENDPOINT,
+        PGUSER: "alice@example.com",
+      },
+      lakebase.api(),
+    );
+    const failure = new Error("query failed");
+    pool.end.mockRejectedValueOnce(new Error("end failed"));
+
+    await expect(
+      withBranchPool(ctx, async () => {
+        throw failure;
+      }),
+    ).rejects.toBe(failure);
+    expect(pool.end).toHaveBeenCalledOnce();
   });
 });
 

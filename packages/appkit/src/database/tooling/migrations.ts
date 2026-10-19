@@ -7,8 +7,12 @@ import {
   type Journal,
   type JournalEntry,
   journalFile,
+  metaFolder,
+  migrationFile,
+  migrationPrefix,
   readJournal,
   readJsonFile,
+  snapshotFile,
 } from "../migrations/paths";
 import type { Schema } from "../schema-builder";
 import { drizzleKitImports } from "./drizzle-exports";
@@ -94,14 +98,6 @@ function originSnapshot(): Snapshot {
     views: {},
     _meta: { schemas: {}, tables: {}, columns: {} },
   };
-}
-
-function prefixOf(idx: number): string {
-  return String(idx).padStart(4, "0");
-}
-
-function snapshotFile(folder: string, idx: number): string {
-  return path.join(folder, "meta", `${prefixOf(idx)}_snapshot.json`);
 }
 
 function latestSnapshot(folder: string, journal: Journal | null): Snapshot {
@@ -306,7 +302,7 @@ export async function generateMigrationFiles(
   const entries = journal?.entries ?? [];
   const last = entries.at(-1);
   const idx = last ? last.idx + 1 : 0;
-  const tag = `${prefixOf(idx)}_migration`;
+  const tag = `${migrationPrefix(idx)}_migration`;
   const entry: JournalEntry = {
     idx,
     version: "7",
@@ -321,8 +317,8 @@ export async function generateMigrationFiles(
     entries: [...entries, entry],
   };
 
-  const file = path.join(options.folder, `${tag}.sql`);
-  fs.mkdirSync(path.join(options.folder, "meta"), { recursive: true });
+  const file = migrationFile(options.folder, tag);
+  fs.mkdirSync(metaFolder(options.folder), { recursive: true });
   fs.writeFileSync(
     snapshotFile(options.folder, idx),
     JSON.stringify(
@@ -355,7 +351,7 @@ export function discardMigrationFiles(
     return;
   }
   fs.rmSync(journalFile(folder), { force: true });
-  for (const dir of [path.join(folder, "meta"), folder]) {
+  for (const dir of [metaFolder(folder), folder]) {
     if (fs.existsSync(dir) && fs.readdirSync(dir).length === 0)
       fs.rmdirSync(dir);
   }
