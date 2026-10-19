@@ -26,12 +26,36 @@ const schema = defineSchema(
 );
 const roots: string[] = [];
 const pool = { connect: vi.fn() };
+const deployEnv = {
+  LAKEBASE_ENDPOINT: "projects/p/branches/production/endpoints/primary",
+  PGHOST: "ep-abc.database.cloud.databricks.com",
+};
 
 function appRoot(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "appkit-migrate-start-"));
   roots.push(root);
   return root;
 }
+
+/** An app root with a committed (empty) journal. */
+function appRootWithMigrations(): string {
+  const root = appRoot();
+  const meta = path.join(root, "config/database/migrations/meta");
+  fs.mkdirSync(meta, { recursive: true });
+  fs.writeFileSync(
+    path.join(meta, "_journal.json"),
+    JSON.stringify({ version: "7", dialect: "postgresql", entries: [] }),
+  );
+  return root;
+}
+
+const nothingDone = {
+  applied: [],
+  adopted: [],
+  edited: [],
+  unknown: 0,
+  lockWaitMs: 0,
+};
 
 beforeEach(async () => {
   const actual = await vi.importActual<
@@ -54,44 +78,31 @@ describe("shouldMigrateOnStart", () => {
     DATABRICKS_CLIENT_ID: "sp-client-id",
     DATABRICKS_CLIENT_SECRET: "secret",
   };
-  const app = { DATABRICKS_APP_NAME: "my-app", ...credentials };
+  const optIn = { APPKIT_DB_MIGRATE_ON_START: "true" };
 
   test.each([
-    ["a deployed app", { ...app, NODE_ENV: "production" }, true],
-    ["a deployed app without NODE_ENV", app, true],
+    ["a deployed app that opts in", { ...optIn, ...credentials }, true],
     [
-      "local development, even with app credentials",
-      { ...app, NODE_ENV: "development" },
+      "a deployed app without the flag",
+      { DATABRICKS_APP_NAME: "my-app", ...credentials },
       false,
     ],
     [
-      "`databricks apps run-local`: the app name without its credentials",
-      { DATABRICKS_APP_NAME: "my-app", NODE_ENV: "production" },
+      "a flag other than true",
+      { APPKIT_DB_MIGRATE_ON_START: "1", ...credentials },
       false,
     ],
     [
-      "a local production start with app credentials in .env but no app name",
-      { ...credentials, NODE_ENV: "production" },
+      "`databricks apps run-local`: the flag from app.yaml, no credentials",
+      { ...optIn, DATABRICKS_APP_NAME: "my-app" },
       false,
     ],
     [
       "no client secret (a developer's own credentials)",
-      {
-        DATABRICKS_APP_NAME: "my-app",
-        DATABRICKS_CLIENT_ID: "x",
-        NODE_ENV: "production",
-      },
+      { ...optIn, DATABRICKS_CLIENT_ID: "x" },
       false,
     ],
-    [
-      "no client id",
-      {
-        DATABRICKS_APP_NAME: "my-app",
-        DATABRICKS_CLIENT_SECRET: "x",
-        NODE_ENV: "production",
-      },
-      false,
-    ],
+    ["no client id", { ...optIn, DATABRICKS_CLIENT_SECRET: "x" }, false],
     ["nothing set", {}, false],
   ] as const)("%s → %s", (_label, env, expected) => {
     expect(shouldMigrateOnStart(env)).toBe(expected);
@@ -99,21 +110,29 @@ describe("shouldMigrateOnStart", () => {
 });
 
 describe("migrateOnStart", () => {
-  test("no committed journal: a no-op that never connects", async () => {
-    await migrateOnStart(pool, schema, appRoot());
+  test("no committed journal: says so and never connects", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const root = appRoot();
+
+    await migrateOnStart(pool, schema, root, deployEnv);
 
     expect(pool.connect).not.toHaveBeenCalled();
+    expect(log.mock.calls.flat().map(String).join(" ")).toContain(
+      `No committed migrations at ${path.join(root, "config/database/migrations")}`,
+    );
   });
 
-  test("applies from <root>/config/database/migrations into the schema's own journal, and logs what it did", async () => {
-    const root = appRoot();
+  test("applies from <root>/config/database/migrations into the schema's own journal, and logs one summary", async () => {
+    const root = appRootWithMigrations();
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     applyPendingMigrations.mockResolvedValueOnce({
+      ...nothingDone,
       applied: ["0001_migration"],
       adopted: ["0000_baseline"],
+      lockWaitMs: 12,
     });
 
-    await migrateOnStart(pool, schema, root);
+    await migrateOnStart(pool, schema, root, deployEnv);
 
     expect(applyPendingMigrations).toHaveBeenCalledWith(pool, {
       migrationsFolder: path.join(root, "config/database/migrations"),
@@ -121,29 +140,77 @@ describe("migrateOnStart", () => {
     });
     const logged = log.mock.calls.map((call) => call.map(String).join(" "));
     expect(logged).toEqual([
-      expect.stringContaining(
-        "Adopted 0000_baseline in schema app: its tables already existed",
-      ),
-      expect.stringContaining(
-        "Applied migrations 0001_migration to schema app",
+      expect.stringMatching(
+        /Migrations for schema app from .*: applied=1 adopted=1 edited=0 unknown=0 lock_wait_ms=12 duration_ms=\d+/,
       ),
     ]);
   });
 
-  test("nothing pending logs nothing", async () => {
-    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
-    applyPendingMigrations.mockResolvedValueOnce({ applied: [], adopted: [] });
+  test.each([
+    ["a developer branch", "dev-jane-a1b2c3"],
+    ["an agent session branch", "session-k3x9q2m7"],
+  ])(
+    "%s is never migrated on start, even with committed migrations",
+    async (_label, branch) => {
+      const warn = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => undefined);
 
-    await migrateOnStart(pool, schema, appRoot());
+      await migrateOnStart(pool, schema, appRootWithMigrations(), {
+        ...deployEnv,
+        LAKEBASE_ENDPOINT: `projects/p/branches/${branch}/endpoints/primary`,
+      });
 
-    expect(log).not.toHaveBeenCalled();
+      expect(applyPendingMigrations).not.toHaveBeenCalled();
+      expect(warn.mock.calls.flat().map(String).join(" ")).toContain(
+        `Not migrating branch ${branch} on start`,
+      );
+    },
+  );
+
+  test.each([
+    ["a branch that only starts with dev-", "dev-environment"],
+    ["the production branch", "production"],
+  ])("%s is migrated", async (_label, branch) => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    applyPendingMigrations.mockResolvedValueOnce(nothingDone);
+
+    await migrateOnStart(pool, schema, appRootWithMigrations(), {
+      ...deployEnv,
+      LAKEBASE_ENDPOINT: `projects/p/branches/${branch}/endpoints/primary`,
+    });
+
+    expect(applyPendingMigrations).toHaveBeenCalled();
+  });
+
+  test("a pooled endpoint is refused: the migration lock would not hold", async () => {
+    const error = await migrateOnStart(pool, schema, appRootWithMigrations(), {
+      ...deployEnv,
+      PGHOST: "ep-abc-pooler.database.cloud.databricks.com",
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(DatabasePluginError);
+    expect((error as Error).message).toContain(
+      "is a pooled endpoint, and migrations need a direct connection",
+    );
+    expect(applyPendingMigrations).not.toHaveBeenCalled();
   });
 
   test.each([
     [
       "a failed migration",
-      new apply.MigrationApplyError(["0001_migration"], "42501"),
-      "Applying migration 0001_migration failed (SQLSTATE 42501); none were applied.",
+      new apply.MigrationApplyError({
+        step: "Applying migrations",
+        failed: "0001_migration",
+        pending: ["0001_migration"],
+        cause: Object.assign(new Error("denied"), { code: "42501" }),
+      }),
+      "Migration 0001_migration failed (SQLSTATE 42501) and was rolled back.",
+    ],
+    [
+      "a stranded migration",
+      new apply.MigrationHistoryError("app", ["0001_parallel"], "0002_b"),
+      "Migration 0001_parallel is older than 0002_b",
     ],
     [
       "a baseline that only partly matches",
@@ -164,9 +231,12 @@ describe("migrateOnStart", () => {
     async (_label, failure, reason) => {
       applyPendingMigrations.mockRejectedValueOnce(failure);
 
-      const error = await migrateOnStart(pool, schema, appRoot()).catch(
-        (caught: unknown) => caught,
-      );
+      const error = await migrateOnStart(
+        pool,
+        schema,
+        appRootWithMigrations(),
+        deployEnv,
+      ).catch((caught: unknown) => caught);
 
       expect(error).toBeInstanceOf(DatabasePluginError);
       expect(error).toMatchObject({ category: "SETUP_FAILED", phase: "setup" });
@@ -182,6 +252,8 @@ describe("migrateOnStart", () => {
     const raw = new Error("connection reset");
     applyPendingMigrations.mockRejectedValueOnce(raw);
 
-    await expect(migrateOnStart(pool, schema, appRoot())).rejects.toBe(raw);
+    await expect(
+      migrateOnStart(pool, schema, appRootWithMigrations(), deployEnv),
+    ).rejects.toBe(raw);
   });
 });

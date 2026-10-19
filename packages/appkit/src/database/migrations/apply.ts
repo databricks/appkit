@@ -1,18 +1,25 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import { readMigrationFiles } from "drizzle-orm/migrator";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
 import type { Pool, PoolClient } from "pg";
 
 import { createLogger } from "../../logging/logger";
-import { ownershipHint } from "./ownership";
+import {
+  type MigrationFile,
+  type RecordedMigration,
+  reconcileMigrations,
+} from "./history";
+import {
+  INSUFFICIENT_PRIVILEGE,
+  ownershipHint,
+  schemaOwnership,
+} from "./ownership";
 import {
   BASELINE_TAG,
   type Journal,
-  type JournalEntry,
   MIGRATIONS_TABLE,
   MigrationFilesError,
   readJournal,
@@ -26,6 +33,10 @@ interface ApplyMigrationsOptions {
   readonly migrationsFolder: string;
   /** Journal schema = app schema. */
   readonly schemaName: string;
+  /** Longest wait for another session's migration lock, in milliseconds. */
+  readonly lockWaitMs?: number;
+  /** Longest wait for each table lock a migration takes, in milliseconds. */
+  readonly lockTimeoutMs?: number;
 }
 
 interface ApplyMigrationsResult {
@@ -33,59 +44,95 @@ interface ApplyMigrationsResult {
   readonly applied: readonly string[];
   /** Tags recorded without running, because the catalog already held them (the baseline). */
   readonly adopted: readonly string[];
+  /** Recorded migrations whose committed file changed since; the change never runs. */
+  readonly edited: readonly string[];
+  /** Recorded migrations that are not committed here. */
+  readonly unknown: number;
+  /** Time spent waiting for another session's migration lock. */
+  readonly lockWaitMs: number;
 }
 
-/** lock_not_available: a table lock was not granted within LOCK_TIMEOUT. */
-const LOCK_NOT_AVAILABLE = "55P03";
+/** A deploy waits this long for another instance to finish migrating, then fails. */
+const LOCK_WAIT_MS = 5 * 60_000;
 /**
- * Longest wait for a table lock while migrating. Past it the migration fails;
- * waiting longer would queue every other query on that table behind it.
+ * Longest wait for one table lock. Past it the migration rolls back and is
+ * retried: a longer wait would queue every other query on that table behind it.
  */
-const LOCK_TIMEOUT = "30s";
+const LOCK_TIMEOUT_MS = 5_000;
+/** Tries per migration when a table lock is not granted within the lock timeout. */
+const LOCK_ATTEMPTS = 3;
+const LOCK_POLL_MS = 1_000;
+const LOCK_REPORT_MS = 30_000;
+/** Shown in pg_stat_activity, so a waiting instance can name the lock holder. */
+const APPLICATION_NAME = "appkit-migrate";
+/** Lets the server cancel a migration whose instance died. Linux servers only. */
+const CONNECTION_CHECK_INTERVAL = "10s";
 
-function failureHint(code: string | undefined): string | undefined {
-  if (code === LOCK_NOT_AVAILABLE) {
-    return `Another session held a lock on a table this migration changes for over ${LOCK_TIMEOUT}; deploy again once it finishes.`;
-  }
-  return ownershipHint(code);
-}
+/** lock_not_available: a table lock was not granted within the lock timeout. */
+const LOCK_NOT_AVAILABLE = "55P03";
 
 /**
- * A statement failed while migrating. Pending migrations run in one drizzle-orm
- * migrator transaction, so none of them were applied; a baseline adopted just
- * before commits on its own and stays recorded.
+ * A step of applying migrations failed. Each migration commits in its own
+ * transaction: the failing one rolled back, the ones before it stay applied.
  */
 export class MigrationApplyError extends Error {
-  /** Tags that were being applied; empty when reading the recorded migrations failed. */
+  /** The migration that failed and rolled back; undefined when another step failed. */
+  readonly failed?: string;
+  /** Committed migrations still not applied, the failed one first. */
   readonly pending: readonly string[];
+  /** Tags this run applied before the failure. */
+  readonly applied: readonly string[];
+  /** Tags this run recorded as applied (adopted) before the failure. */
+  readonly adopted: readonly string[];
   /** SQLSTATE of the failing statement, when the driver reported one. */
   readonly code?: string;
-  /** Tags this run recorded as applied before the failure. */
-  readonly adopted: readonly string[];
 
-  constructor(
-    pending: readonly string[],
-    code: string | undefined,
-    options: { cause?: unknown; adopted?: readonly string[] } = {},
-  ) {
-    const adopted = options.adopted ?? [];
-    const sqlState = code ? ` (SQLSTATE ${code})` : "";
-    const failure =
-      pending.length > 0
-        ? `Applying migration${pending.length === 1 ? "" : "s"} ${pending.join(", ")} failed${sqlState}; none were applied.`
-        : `Reading the recorded migrations in ${MIGRATIONS_TABLE} failed${sqlState}; none were applied.`;
-    const kept =
-      adopted.length > 0
-        ? ` ${adopted.join(", ")} stays recorded as applied: its tables already existed.`
+  constructor(details: {
+    /** What failed when no migration did, e.g. "Connecting to the database". */
+    readonly step: string;
+    readonly failed?: string;
+    readonly pending?: readonly string[];
+    readonly applied?: readonly string[];
+    readonly adopted?: readonly string[];
+    readonly hint?: string;
+    readonly cause?: unknown;
+  }) {
+    const pending = details.pending ?? [];
+    const applied = details.applied ?? [];
+    const adopted = details.adopted ?? [];
+    const code = sqlStateOf(details.cause);
+    const systemCode = code ? undefined : systemCodeOf(details.cause);
+    const reason = code
+      ? ` (SQLSTATE ${code})`
+      : systemCode
+        ? ` (${systemCode})`
         : "";
-    const hint = failureHint(code);
-    super(`${failure}${kept}${hint ? ` ${hint}` : ""}`, {
-      cause: options.cause,
-    });
+    const parts = [
+      details.failed
+        ? `Migration ${details.failed} failed${reason} and was rolled back.`
+        : `${details.step} failed${reason}.`,
+    ];
+    if (adopted.length > 0) {
+      parts.push(
+        `${adopted.join(", ")} stays recorded as applied: its tables already existed.`,
+      );
+    }
+    if (applied.length > 0) {
+      parts.push(`Applied before the failure: ${applied.join(", ")}.`);
+    }
+    parts.push(
+      pending.length > 0
+        ? `Not applied: ${pending.join(", ")}.`
+        : "No migration was applied.",
+    );
+    if (details.hint) parts.push(details.hint);
+    super(parts.join(" "), { cause: details.cause });
     this.name = "MigrationApplyError";
+    this.failed = details.failed;
     this.pending = Object.freeze([...pending]);
-    this.code = code;
+    this.applied = Object.freeze([...applied]);
     this.adopted = Object.freeze([...adopted]);
+    this.code = code;
   }
 }
 
@@ -106,24 +153,65 @@ export class MigrationBaselineMismatchError extends Error {
   }
 }
 
-const SQLSTATE = /^[0-9A-Z]{5}$/;
+/**
+ * Committed migrations are older than the last one the database recorded and
+ * were never applied, so they would never run. Nothing was applied.
+ */
+export class MigrationHistoryError extends Error {
+  readonly stranded: readonly string[];
 
-/** drizzle wraps driver errors; the SQLSTATE lives somewhere on the cause chain. */
-function sqlStateOf(error: unknown): string | undefined {
+  constructor(schemaName: string, stranded: readonly string[], last: string) {
+    const many = stranded.length > 1;
+    super(
+      `Migration${many ? "s" : ""} ${stranded.join(", ")} ${many ? "are" : "is"} older than ${last}, which schema "${schemaName}" already recorded, ` +
+        `and ${many ? "were" : "was"} never applied, so ${many ? "they" : "it"} would never run. This happens when migrations from parallel branches merge. ` +
+        `Delete ${many ? "their" : "its"} .sql file, snapshot and journal entry, generate the migration again from schema.ts, and deploy again. ` +
+        "No migration was applied.",
+    );
+    this.name = "MigrationHistoryError";
+    this.stranded = Object.freeze([...stranded]);
+  }
+}
+
+/** The migration lock stayed taken past the wait limit. */
+class MigrationLockWaitError extends Error {
+  constructor(readonly holder: string | undefined) {
+    super("migration lock wait timed out");
+  }
+}
+
+const SQLSTATE = /^[0-9A-Z]{5}$/;
+const SYSTEM_CODE = /^E[A-Z0-9_]+$/;
+
+/** drizzle and the connector wrap driver errors; the code lives somewhere on the cause chain. */
+function findCode(
+  error: unknown,
+  matches: (code: string) => boolean,
+): string | undefined {
   let current = error;
   for (let depth = 0; depth < 5 && current; depth++) {
     const code = (current as { code?: unknown }).code;
-    // No SQLSTATE class starts with "E"; Node system errors (EPIPE, EPERM, …) all do.
-    if (typeof code === "string" && SQLSTATE.test(code) && code[0] !== "E") {
-      return code;
-    }
+    if (typeof code === "string" && matches(code)) return code;
     current = (current as { cause?: unknown }).cause;
   }
   return undefined;
 }
 
+// No SQLSTATE class starts with "E"; Node system errors (EPIPE, ECONNREFUSED, …) all do.
+function sqlStateOf(error: unknown): string | undefined {
+  return findCode(error, (code) => SQLSTATE.test(code) && code[0] !== "E");
+}
+
+function systemCodeOf(error: unknown): string | undefined {
+  return findCode(error, (code) => SYSTEM_CODE.test(code));
+}
+
 function quoteIdentifier(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
+}
+
+function journalTable(schemaName: string): string {
+  return `${quoteIdentifier(schemaName)}.${quoteIdentifier(MIGRATIONS_TABLE)}`;
 }
 
 /** One lock per app schema, so concurrent instances apply in turn. */
@@ -137,49 +225,8 @@ export function migrationLockKey(schemaName: string): string {
 
 type QueryClient = Pick<PoolClient, "query">;
 
-/**
- * `created_at` of the last migration the database recorded; null when none is.
- * An empty journal table counts as nothing recorded: drizzle-orm creates it
- * before its transaction, so a failed first deploy leaves one behind.
- */
-async function lastRecordedMigration(
-  client: QueryClient,
-  schemaName: string,
-): Promise<number | null> {
-  // pg_catalog needs no privileges, so a missing grant is not mistaken for a missing table.
-  const table = await client.query(
-    `select 1 from pg_catalog.pg_class c
-       join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-      where n.nspname = $1 and c.relname = $2`,
-    [schemaName, MIGRATIONS_TABLE],
-  );
-  if (table.rows.length === 0) return null;
-  const last = await client.query<{ last: string | number | null }>(
-    `select max(created_at) as last from ${quoteIdentifier(schemaName)}.${quoteIdentifier(MIGRATIONS_TABLE)}`,
-  );
-  const value = last.rows[0]?.last;
-  return value === null || value === undefined ? null : Number(value);
-}
-
-/**
- * Journal entries newer than the last recorded migration: drizzle-orm's own
- * rule, so this agrees with what its migrator runs.
- *
- * Known gap, shared with drizzle-orm: an entry older than the last recorded one
- * (e.g. merged from a parallel branch) is never applied, and an applied
- * migration edited later goes unnoticed. Comparing the recorded hashes with the
- * journal would catch both.
- */
-function pendingEntries(
-  journal: Journal,
-  lastRecorded: number | null,
-): JournalEntry[] {
-  if (lastRecorded === null) return journal.entries;
-  return journal.entries.filter((entry) => entry.when > lastRecorded);
-}
-
-/** Fail before connecting, naming the file, rather than inside drizzle-orm's migrator. */
-function assertMigrationFiles(folder: string, journal: Journal): void {
+/** Every committed migration, in journal order. Fails on a missing file before connecting. */
+function readMigrations(folder: string, journal: Journal): MigrationFile[] {
   for (const entry of journal.entries) {
     const file = path.join(folder, `${entry.tag}.sql`);
     if (!fs.existsSync(file)) {
@@ -188,64 +235,134 @@ function assertMigrationFiles(folder: string, journal: Journal): void {
       );
     }
   }
+  // drizzle-orm's reader, so `hash` matches what drizzle-kit records.
+  const files = readMigrationFiles({ migrationsFolder: folder });
+  return journal.entries.map((entry, index) => {
+    const file = files[index];
+    if (!file) {
+      throw new MigrationFilesError(
+        `Cannot read ${entry.tag}.sql in ${folder}. Restore it from version control.`,
+      );
+    }
+    return {
+      tag: entry.tag,
+      idx: entry.idx,
+      when: entry.when,
+      hash: file.hash,
+      statements: file.sql,
+    };
+  });
+}
+
+/** The journal table's rows; none when the table does not exist yet. */
+async function readRecordedMigrations(
+  client: QueryClient,
+  schemaName: string,
+): Promise<RecordedMigration[]> {
+  // pg_catalog needs no privileges, so a missing grant is not mistaken for a missing table.
+  const table = await client.query(
+    `select 1 from pg_catalog.pg_class c
+       join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = $1 and c.relname = $2`,
+    [schemaName, MIGRATIONS_TABLE],
+  );
+  if (table.rows.length === 0) return [];
+  const { rows } = await client.query<{
+    hash: string;
+    created_at: string | number | null;
+  }>(`select hash, created_at from ${journalTable(schemaName)} order by id`);
+  return rows.map((row) => ({
+    hash: row.hash,
+    createdAt: row.created_at === null ? null : Number(row.created_at),
+  }));
+}
+
+/** Session settings for migrating, each added to `reset` once set. */
+async function prepareMigrationSession(
+  client: QueryClient,
+  reset: string[],
+): Promise<void> {
+  await client.query("SET statement_timeout = 0");
+  reset.push("statement_timeout");
+  await client.query(`SET application_name = '${APPLICATION_NAME}'`);
+  reset.push("application_name");
+  try {
+    await client.query(
+      `SET client_connection_check_interval = '${CONNECTION_CHECK_INTERVAL}'`,
+    );
+    reset.push("client_connection_check_interval");
+  } catch (error) {
+    // Postgres before 14, or a server that cannot poll sockets.
+    logger.debug(
+      "client_connection_check_interval not set: %s",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
+/** pg_locks splits a bigint advisory key into classid (high 32 bits) and objid (low 32 bits). */
+function lockKeyParts(key: string): [string, string] {
+  const unsigned = BigInt.asUintN(64, BigInt(key));
+  return [(unsigned >> 32n).toString(), (unsigned & 0xffffffffn).toString()];
+}
+
+/** "pid 123 (appkit-migrate, active)" for the session holding the migration lock. */
+async function migrationLockHolder(
+  client: QueryClient,
+  key: string,
+): Promise<string | undefined> {
+  const [classid, objid] = lockKeyParts(key);
+  const { rows } = await client.query<{
+    pid: number;
+    application_name: string | null;
+    state: string | null;
+  }>(
+    `select a.pid, a.application_name, a.state
+       from pg_catalog.pg_locks l
+       join pg_catalog.pg_stat_activity a on a.pid = l.pid
+      where l.locktype = 'advisory' and l.granted
+        and l.database = (select d.oid from pg_catalog.pg_database d where d.datname = current_database())
+        and l.classid = $1::oid and l.objid = $2::oid and l.objsubid = 1`,
+    [classid, objid],
+  );
+  const holder = rows[0];
+  if (!holder) return undefined;
+  const details = [holder.application_name, holder.state].filter(Boolean);
+  return `pid ${holder.pid}${details.length > 0 ? ` (${details.join(", ")})` : ""}`;
 }
 
 /**
- * Run `work` on one dedicated connection under the per-schema advisory lock,
- * with no statement timeout and at most LOCK_TIMEOUT per table lock. The
- * connection is always unlocked, reset and released; a connection whose
- * cleanup fails is destroyed, not reused.
+ * Take the per-schema advisory lock, polling so the wait has a limit and the
+ * log names the holder. Returns how long it waited.
  */
-async function withMigrationLock<T>(
-  pool: Pick<Pool, "connect">,
+async function acquireMigrationLock(
+  client: QueryClient,
   schemaName: string,
-  work: (client: PoolClient) => Promise<T>,
-): Promise<T> {
-  const lockKey = migrationLockKey(schemaName);
-  const client = await pool.connect();
-  let locked = false;
-  try {
-    await client.query("SET statement_timeout = 0");
-    const attempt = await client.query<{ locked: boolean }>(
+  waitMs: number,
+): Promise<number> {
+  const key = migrationLockKey(schemaName);
+  const started = Date.now();
+  let reportAt = started;
+  for (;;) {
+    const { rows } = await client.query<{ locked: boolean }>(
       "select pg_catalog.pg_try_advisory_lock($1::bigint) as locked",
-      [lockKey],
+      [key],
     );
-    if (!attempt.rows[0]?.locked) {
+    if (rows[0]?.locked) return Date.now() - started;
+    const waited = Date.now() - started;
+    if (waited >= waitMs || Date.now() >= reportAt) {
+      const holder = await migrationLockHolder(client, key).catch(
+        () => undefined,
+      );
+      if (waited >= waitMs) throw new MigrationLockWaitError(holder);
       logger.info(
-        "Waiting for another instance to finish migrating schema %s",
+        "Waiting for another session to finish migrating schema %s (lock held by %s)",
         schemaName,
+        holder ?? "an unknown session",
       );
-      await client.query("select pg_catalog.pg_advisory_lock($1::bigint)", [
-        lockKey,
-      ]);
+      reportAt = Date.now() + LOCK_REPORT_MS;
     }
-    locked = true;
-    // Only now: lock_timeout would also cut short the wait for the advisory lock.
-    await client.query(`SET lock_timeout = '${LOCK_TIMEOUT}'`);
-    return await work(client);
-  } finally {
-    const cleanup: Array<() => Promise<unknown>> = [];
-    if (locked) {
-      cleanup.push(() =>
-        client.query("select pg_catalog.pg_advisory_unlock($1::bigint)", [
-          lockKey,
-        ]),
-      );
-    }
-    cleanup.push(() => client.query("RESET lock_timeout"));
-    cleanup.push(() => client.query("RESET statement_timeout"));
-
-    let cleanupError: Error | undefined;
-    for (const step of cleanup) {
-      try {
-        await step();
-      } catch (error) {
-        cleanupError ??=
-          error instanceof Error ? error : new Error(String(error));
-      }
-    }
-    // A connection that may still hold the lock or the session settings must not be reused.
-    client.release(cleanupError);
+    await sleep(Math.min(LOCK_POLL_MS, waitMs - waited));
   }
 }
 
@@ -260,6 +377,74 @@ async function inTransaction(
   } catch (error) {
     await client.query("rollback").catch(() => undefined);
     throw error;
+  }
+}
+
+/** drizzle-orm's own journal table, so drizzle-kit reads and extends it too. */
+async function ensureJournalTable(
+  client: QueryClient,
+  schemaName: string,
+): Promise<void> {
+  await client.query(
+    `CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(schemaName)}`,
+  );
+  await client.query(
+    `CREATE TABLE IF NOT EXISTS ${journalTable(schemaName)} (
+      id SERIAL PRIMARY KEY,
+      hash text NOT NULL,
+      created_at bigint
+    )`,
+  );
+}
+
+/** Record a migration the way drizzle-orm's migrator does: its file hash and the journal's `when`. */
+async function recordMigration(
+  client: QueryClient,
+  schemaName: string,
+  file: MigrationFile,
+): Promise<void> {
+  await client.query(
+    `insert into ${journalTable(schemaName)} ("hash", "created_at") values($1, $2)`,
+    [file.hash, file.when],
+  );
+}
+
+/**
+ * Run one migration and record it in one transaction. A table lock not granted
+ * within the lock timeout rolls it back; it is retried LOCK_ATTEMPTS times.
+ */
+async function applyMigration(
+  client: QueryClient,
+  schemaName: string,
+  file: MigrationFile,
+  lockTimeoutMs: number,
+): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await inTransaction(client, async () => {
+        await ensureJournalTable(client, schemaName);
+        for (const statement of file.statements) {
+          if (statement.trim()) await client.query(statement);
+        }
+        await recordMigration(client, schemaName, file);
+      });
+      return;
+    } catch (error) {
+      if (
+        attempt >= LOCK_ATTEMPTS ||
+        sqlStateOf(error) !== LOCK_NOT_AVAILABLE
+      ) {
+        throw error;
+      }
+      logger.warn(
+        "Migration %s waited over %dms for a table lock (try %d of %d); retrying",
+        file.tag,
+        lockTimeoutMs,
+        attempt,
+        LOCK_ATTEMPTS,
+      );
+      await sleep(Math.min(attempt * LOCK_POLL_MS, lockTimeoutMs));
+    }
   }
 }
 
@@ -302,7 +487,7 @@ type BaselineState =
 async function baselineState(
   client: QueryClient,
   options: ApplyMigrationsOptions,
-  baseline: JournalEntry,
+  baseline: MigrationFile,
 ): Promise<BaselineState> {
   const declared = snapshotTables(
     options.migrationsFolder,
@@ -351,52 +536,60 @@ async function baselineState(
     : { kind: "present" };
 }
 
-/**
- * Record migrations as applied without running them: create the journal table
- * as drizzle-orm's migrator does, then insert one row per tag with the
- * migrator's own hash (sha256 of the .sql file) and `created_at` (the journal's
- * `when`). Runs on the caller's connection; wrap it in a transaction.
- */
-async function recordMigrationsApplied(
-  client: QueryClient,
-  options: ApplyMigrationsOptions,
-  journal: Journal,
-  tags: readonly string[],
+/** Unlock and reset the session. A connection whose cleanup fails is destroyed, not reused. */
+async function releaseMigrationClient(
+  client: PoolClient,
+  lockKey: string | undefined,
+  reset: readonly string[],
 ): Promise<void> {
-  // One file per journal entry, in journal order.
-  const files = readMigrationFiles({
-    migrationsFolder: options.migrationsFolder,
-  });
-  const schema = quoteIdentifier(options.schemaName);
-  const table = `${schema}.${quoteIdentifier(MIGRATIONS_TABLE)}`;
-  await client.query(`CREATE SCHEMA IF NOT EXISTS ${schema}`);
-  // drizzle-orm's own definition, so its migrator later reads and extends this table.
-  await client.query(
-    `CREATE TABLE IF NOT EXISTS ${table} (
-      id SERIAL PRIMARY KEY,
-      hash text NOT NULL,
-      created_at bigint
-    )`,
-  );
-  for (const tag of tags) {
-    const index = journal.entries.findIndex((entry) => entry.tag === tag);
-    const file = files[index];
-    if (index < 0 || !file) {
-      throw new Error(`Migration ${tag} is not in the journal.`);
-    }
-    await client.query(
-      `insert into ${table} ("hash", "created_at") values($1, $2)`,
-      [file.hash, file.folderMillis],
+  const cleanup: Array<() => Promise<unknown>> = [];
+  if (lockKey) {
+    cleanup.push(() =>
+      client.query("select pg_catalog.pg_advisory_unlock($1::bigint)", [
+        lockKey,
+      ]),
     );
   }
+  for (const name of [...reset].reverse()) {
+    cleanup.push(() => client.query(`RESET ${name}`));
+  }
+  let cleanupError: Error | undefined;
+  for (const step of cleanup) {
+    try {
+      await step();
+    } catch (error) {
+      cleanupError ??=
+        error instanceof Error ? error : new Error(String(error));
+    }
+  }
+  client.release(cleanupError);
+}
+
+function tags(files: readonly MigrationFile[]): string[] {
+  return files.map((file) => file.tag);
+}
+
+function duration(ms: number): string {
+  if (ms >= 60_000) {
+    const minutes = Math.round(ms / 60_000);
+    return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  }
+  if (ms >= 1_000) return `${Math.round(ms / 1_000)}s`;
+  return `${ms}ms`;
 }
 
 /**
  * Apply every committed migration the database has not recorded yet.
  *
- * Runs on one dedicated connection as the connecting identity, which owns what
- * it creates (see ownership.ts), under a per-schema advisory lock; drizzle-orm's
- * migrator runs only when something is pending.
+ * Runs on one connection as the connecting identity, which owns what it
+ * creates (see ownership.ts). The recorded history is read first without a
+ * lock; only when something is pending does it take the per-schema advisory
+ * lock and read again. Each migration then runs and is recorded in its own
+ * transaction, so a failure keeps the ones before it.
+ *
+ * Fails closed, changing nothing, when a committed migration is older than the
+ * last recorded one but was never applied. An applied migration whose file
+ * changed, and recorded migrations that are not committed, are logged.
  *
  * Baseline adoption: when nothing is recorded yet and `0000_baseline` comes
  * first, the baseline's tables are looked up in pg_catalog. None present → it
@@ -410,60 +603,150 @@ export async function applyPendingMigrations(
 ): Promise<ApplyMigrationsResult> {
   const journal = readJournal(options.migrationsFolder);
   if (!journal || journal.entries.length === 0) {
-    return { applied: [], adopted: [] };
+    return { applied: [], adopted: [], edited: [], unknown: 0, lockWaitMs: 0 };
   }
-  assertMigrationFiles(options.migrationsFolder, journal);
+  const files = readMigrations(options.migrationsFolder, journal);
+  const { schemaName } = options;
+  const lockWaitMs = options.lockWaitMs ?? LOCK_WAIT_MS;
+  const lockTimeoutMs = options.lockTimeoutMs ?? LOCK_TIMEOUT_MS;
 
-  return withMigrationLock(pool, options.schemaName, async (client) => {
-    const adopted: string[] = [];
-    // What the failing step was applying, for the error.
-    let applying: readonly string[] = [];
-    try {
-      const lastRecorded = await lastRecordedMigration(
-        client,
-        options.schemaName,
+  let client: PoolClient;
+  try {
+    client = await pool.connect();
+  } catch (error) {
+    throw new MigrationApplyError({
+      step: "Connecting to the database",
+      cause: error,
+    });
+  }
+
+  const reset: string[] = [];
+  let locked = false;
+  const applied: string[] = [];
+  const adopted: string[] = [];
+  let pending: string[] = [];
+  let step = "Reading the recorded migrations";
+  let failed: string | undefined;
+  try {
+    let history = reconcileMigrations(
+      files,
+      await readRecordedMigrations(client, schemaName),
+    );
+    let waitedMs = 0;
+    if (history.pending.length > 0 && history.stranded.length === 0) {
+      pending = tags(history.pending);
+      step = "Waiting for the migration lock";
+      await prepareMigrationSession(client, reset);
+      waitedMs = await acquireMigrationLock(client, schemaName, lockWaitMs);
+      locked = true;
+      await client.query(`SET lock_timeout = '${lockTimeoutMs}ms'`);
+      reset.push("lock_timeout");
+      step = "Reading the recorded migrations";
+      // Another instance may have applied them while this one waited.
+      history = reconcileMigrations(
+        files,
+        await readRecordedMigrations(client, schemaName),
       );
-      let pending = pendingEntries(journal, lastRecorded);
-      if (pending.length === 0) return { applied: [], adopted };
-
-      const first = journal.entries[0];
-      if (lastRecorded === null && first?.tag === BASELINE_TAG) {
-        applying = [BASELINE_TAG];
-        const state = await baselineState(client, options, first);
-        if (state.kind === "partial") {
-          throw new MigrationBaselineMismatchError(
-            options.schemaName,
-            state.problems,
-          );
-        }
-        if (state.kind === "present") {
-          await inTransaction(client, () =>
-            recordMigrationsApplied(client, options, journal, [BASELINE_TAG]),
-          );
-          adopted.push(BASELINE_TAG);
-          pending = pending.filter((entry) => entry.tag !== BASELINE_TAG);
-          if (pending.length === 0) return { applied: [], adopted };
-        }
-      }
-
-      applying = pending.map((entry) => entry.tag);
-      await migrate(drizzle({ client }), {
-        migrationsFolder: options.migrationsFolder,
-        migrationsSchema: options.schemaName,
-        migrationsTable: MIGRATIONS_TABLE,
-      });
-      return { applied: applying, adopted };
-    } catch (error) {
-      if (
-        error instanceof MigrationBaselineMismatchError ||
-        error instanceof MigrationFilesError
-      ) {
-        throw error;
-      }
-      throw new MigrationApplyError(applying, sqlStateOf(error), {
-        cause: error,
-        adopted,
-      });
     }
-  });
+
+    if (history.stranded.length > 0) {
+      const last =
+        files.find((file) => file.when === history.lastRecorded)?.tag ??
+        `the migration recorded at ${new Date(history.lastRecorded ?? 0).toISOString()}`;
+      throw new MigrationHistoryError(schemaName, tags(history.stranded), last);
+    }
+    if (history.edited.length > 0) {
+      logger.warn(
+        "Migrations %s changed after schema %s applied them; the changes never run. Restore the files and put the change in a new migration.",
+        tags(history.edited).join(", "),
+        schemaName,
+      );
+    }
+    if (history.unknown.length > 0) {
+      logger.warn(
+        "Schema %s recorded %d migration(s) that are not committed here. A newer release applied them, or their files were deleted.",
+        schemaName,
+        history.unknown.length,
+      );
+    }
+
+    const toApply = [...history.pending];
+    pending = tags(toApply);
+    const baseline = toApply[0];
+    if (history.lastRecorded === null && baseline?.tag === BASELINE_TAG) {
+      failed = BASELINE_TAG;
+      const state = await baselineState(client, options, baseline);
+      if (state.kind === "partial") {
+        throw new MigrationBaselineMismatchError(schemaName, state.problems);
+      }
+      if (state.kind === "present") {
+        await inTransaction(client, async () => {
+          await ensureJournalTable(client, schemaName);
+          await recordMigration(client, schemaName, baseline);
+        });
+        adopted.push(BASELINE_TAG);
+        toApply.shift();
+        pending.shift();
+      }
+    }
+
+    for (const file of toApply) {
+      failed = file.tag;
+      const started = Date.now();
+      await applyMigration(client, schemaName, file, lockTimeoutMs);
+      applied.push(file.tag);
+      pending.shift();
+      logger.info(
+        "Applied migration %s to schema %s in %dms",
+        file.tag,
+        schemaName,
+        Date.now() - started,
+      );
+    }
+    return {
+      applied,
+      adopted,
+      edited: tags(history.edited),
+      unknown: history.unknown.length,
+      lockWaitMs: waitedMs,
+    };
+  } catch (error) {
+    if (
+      error instanceof MigrationBaselineMismatchError ||
+      error instanceof MigrationFilesError ||
+      error instanceof MigrationHistoryError
+    ) {
+      throw error;
+    }
+    const code = sqlStateOf(error);
+    let hint: string | undefined;
+    if (error instanceof MigrationLockWaitError) {
+      const holder = error.holder
+        ? `Session ${error.holder}`
+        : "Another session";
+      hint = `${holder} held the migration lock for over ${duration(lockWaitMs)}. Deploy again once it finishes; if it is stuck, end it with pg_terminate_backend.`;
+    } else if (code === LOCK_NOT_AVAILABLE) {
+      hint = `Another session held a lock on a table this migration changes for over ${duration(lockTimeoutMs)}, ${LOCK_ATTEMPTS} times. Deploy again once the long-running query or transaction finishes.`;
+    } else if (code === INSUFFICIENT_PRIVILEGE) {
+      const ownership = await schemaOwnership(client, schemaName).catch(
+        () => undefined,
+      );
+      hint = ownershipHint(code, ownership);
+    }
+    throw new MigrationApplyError({
+      step,
+      failed,
+      pending,
+      applied,
+      adopted,
+      hint,
+      cause: error,
+    });
+  } finally {
+    await releaseMigrationClient(
+      client,
+      locked ? migrationLockKey(schemaName) : undefined,
+      reset,
+    );
+  }
 }

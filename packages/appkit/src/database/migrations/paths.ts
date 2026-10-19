@@ -34,7 +34,7 @@ export function migrationsFolder(root: string): string {
 }
 
 /** Path of the journal inside a migrations folder. */
-function journalFile(folder: string): string {
+export function journalFile(folder: string): string {
   return path.join(folder, "meta", "_journal.json");
 }
 
