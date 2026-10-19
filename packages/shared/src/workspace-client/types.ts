@@ -20,6 +20,7 @@ import type {
   WorkspaceAuth,
   ScimClient,
   GenieClient,
+  DatabaseClient,
   JobsClient,
   ModelServingClient,
   FilesClient,
@@ -60,6 +61,9 @@ export interface WorkspaceClient extends WorkspaceAuth {
 
   /** Genie (modular SDK). */
   readonly genie: GenieClient;
+
+  /** Lakebase provisioned database instances + credentials (modular SDK). */
+  readonly database: DatabaseClient;
 
   /** Jobs (modular SDK, Jobs API 2.2). */
   readonly jobs: JobsClient;
