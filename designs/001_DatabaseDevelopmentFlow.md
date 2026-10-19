@@ -5,7 +5,7 @@
 | **Status** | Draft |
 | **Owner** | Victor Ditadi |
 
-The [Google Doc](https://docs.google.com/document/d/14jcyp2b0YTuwMg9SHU9RShIlWyJPaP_H7UUr6ONWLNk/edit) is the copy for comments and edits. Changes there are synced to this file.
+The [Google Doc](https://docs.google.com/document/d/1bsMsYsTfoFBSYS3YbXn3FvOOUQl21X829Z4u1I-fBzg/edit) is the copy for comments and edits. Changes there are synced to this file.
 
 ## Background and Motivation
 
@@ -100,6 +100,9 @@ Branches count against the project's limits, so init keeps them cheap. It create
 limit, init stops before creating anything and lists your other branches with the command that deletes them. With the
 default limit of 10, a project holds the deploy branch and about eight developers.
 
+CI needs no branch, because `appkit db check` runs offline. A CI job that wants a live branch runs
+`appkit db init --session --ttl 1h` and deletes it at the end with `appkit db clean --delete-branch`.
+
 ### The deployed app applies its migrations when it starts
 
 The app applies the committed migrations its deploy branch has not recorded, as its service principal, before it
@@ -125,7 +128,7 @@ it. If the startup check finds every missing table in `public`, its error says t
 | `appkit db init` | Point `.env` at your dev or session branch, creating it when missing. | Yes |
 | `appkit db migrate` | Write a migration when `schema.ts` changed, then apply pending migrations to your branch. | Yes |
 | `appkit db introspect` | Write `schema.ts` and a baseline from tables that already exist on your branch. | Yes |
-| `appkit db clean` | Drop the app schema on your branch. | Yes |
+| `appkit db clean` | Drop the app schema on your branch, or with `--delete-branch` the branch. | Yes |
 | `appkit db seed` | Run `config/database/seed.sql` on your branch. | Yes |
 | `appkit db verify` | Read-only check of your branch, or with `--prod` of the deployed app's binding. | Yes, or API only |
 | `appkit db check` | Offline check of the committed history, for CI. | No |
@@ -140,6 +143,10 @@ The plugin applies migrations in `setup()`, after the pool opens and before the 
 It runs only when `APPKIT_DB_MIGRATE_ON_START=true` and the process has service principal credentials
 (`DATABRICKS_CLIENT_ID` and `DATABRICKS_CLIENT_SECRET`). `apps init` writes the flag into `app.yaml` for apps that
 select the plugin. `.env` never carries it, so `npm start` on a laptop never migrates.
+
+`databricks apps run-local` reads `app.yaml`, so it sets the flag, but it sets no service principal credentials. It
+migrates only when the shell exports them. As a second guard, migrate on start refuses when `LAKEBASE_ENDPOINT` names
+a `dev-` or `session-` branch, because only a developer migrates those.
 
 The stack today infers "deployed" from `NODE_ENV`, `DATABRICKS_APP_NAME` and the credentials. The template's `start`
 script sets `NODE_ENV=production` and its `.env` sets `DATABRICKS_APP_NAME`, so a local `npm start` with M2M
@@ -337,7 +344,8 @@ and column already exists. A partial match fails start and changes nothing.
 - `defineSchema()` defaults `schemaName` to `"app"`.
 - Package export `@databricks/appkit/database-tooling`. It is internal, with no semver guarantee outside the CLI.
 - App env: `APPKIT_DB_MIGRATE_ON_START`. Local env written by init: `LAKEBASE_PROJECT`, `LAKEBASE_ENDPOINT`,
-  `PGHOST`, `PGDATABASE`, `APPKIT_DB_SESSION`.
+  `PGHOST`, `PGDATABASE`, `APPKIT_DB_SESSION`, and `DATABRICKS_CONFIG_PROFILE` or `DATABRICKS_HOST`.
+- New flags: `appkit db init --ttl <duration>` for session branches, `appkit db clean --delete-branch`.
 - Optional peer dependency: `drizzle-kit` `0.31.10`.
 
 ## Observability
@@ -362,7 +370,9 @@ the schema and the role.
   vector, including CR and U+2029.
 - **No driver text leaves the server.** Startup errors carry the SQLSTATE and the migration tag. Clients see
   `Database setup failed`.
-- **`.env`.** Init writes it with mode 0600 through a temporary file and a rename, and refuses a symlink.
+- **`.env`.** Init writes it with mode 0600 through a temporary file and a rename, and refuses a symlink. When `.env`
+  is missing, init writes its own keys and the profile or host it authenticated with. It never copies `.env.example`,
+  whose `DATABRICKS_HOST` is a placeholder.
 - **Session branches are bound to a user.** The stack today lets anyone with a copy of `.env` pass the guard for its
   session branch. With the user hash in the name, a copied `.env` fails the guard for everyone but its creator.
 
@@ -397,8 +407,8 @@ the schema and the role.
 2. [#654](https://github.com/databricks/appkit/pull/654) Migrations on deploy start. Changes from this design: the
    flag, per-migration transactions, the reconcile states with fail-closed `stranded`, the bounded lock wait,
    `application_name`, `client_connection_check_interval`, the 5s lock timeout, the lock-free read on a current
-   branch, the `-pooler` host refusal, the schema owner in the startup error, structured migration events, and a
-   real-Postgres suite.
+   branch, the `-pooler` host refusal, the dev and session branch refusal, the schema owner in the startup error,
+   structured migration events, and a real-Postgres suite.
 3. [#655](https://github.com/databricks/appkit/pull/655) `app` default schema. Changes: the `public` hint in the
    startup check and an upgrade note.
 4. [#666](https://github.com/databricks/appkit/pull/666) `appkit db migrate`. Changes: discard the run's migration
@@ -408,8 +418,8 @@ the schema and the role.
    refuse on branches you do not own, a drop refusal that matches the actual targets, and catalog tests that run SQL.
 6. [#672](https://github.com/databricks/appkit/pull/672) `appkit db init`, `clean`, `seed`. Changes: the hand-off
    scoped to the app schema's owner, the 2BP01 dependency report, resolve before create, session ids with the user
-   hash, the 5-minute scale to zero, the branch-limit stop, atomic `.env` writes, extension-aware `public` clean, and
-   drizzle-kit install.
+   hash, the 5-minute scale to zero, the branch-limit stop, `--ttl` and `--delete-branch`, atomic `.env` writes
+   without the `.env.example` placeholder, extension-aware `public` clean, and drizzle-kit install.
 7. [#674](https://github.com/databricks/appkit/pull/674) `appkit db verify`. Changes: report `ahead` rows,
    `--target`, and compare the deployed journal with the local one.
 8. New: `appkit db check`.
