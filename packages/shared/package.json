@@ -53,6 +53,7 @@
     "@databricks/sdk-experimental": "0.17.0",
     "@databricks/sdk-files": "0.52.0",
     "@databricks/sdk-genie": "0.54.0",
+    "@databricks/sdk-uc-functions": "0.51.0",
     "@databricks/sdk-jobs": "0.57.0",
     "@databricks/sdk-modelserving": "0.53.0",
     "@databricks/sdk-uc-tables": "0.52.0",

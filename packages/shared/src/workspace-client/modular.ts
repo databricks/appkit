@@ -60,6 +60,7 @@ import type { ClientOptions } from "@databricks/sdk-options/client";
 import type { PostgresClient } from "@databricks/sdk-postgres/v1";
 import { ScimClient } from "@databricks/sdk-scim/v1";
 import { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
+import type { FunctionsClient } from "@databricks/sdk-uc-functions/v1";
 import type { TablesClient } from "@databricks/sdk-uc-tables/v1";
 import type { VolumesClient } from "@databricks/sdk-uc-volumes/v1";
 import type { VectorSearchClient } from "@databricks/sdk-vectorsearch/v1";
@@ -649,6 +650,17 @@ export function buildVolumesClient(
   );
 }
 
+/** Build a modular Unity Catalog Functions client from wrapper options. */
+export function buildFunctionsClient(
+  opts: WorkspaceClientOptions,
+): FunctionsClient {
+  return lazyClient(
+    () =>
+      import("@databricks/sdk-uc-functions/v1").then((m) => m.FunctionsClient),
+    mapToClientOptions(opts),
+  );
+}
+
 /**
  * Build a modular Lakebase Postgres (autoscaling: projects, branches,
  * endpoints) client from wrapper options. Distinct from the provisioned
@@ -675,6 +687,7 @@ export type { ModelServingClient } from "@databricks/sdk-modelserving/v1";
 export type { PostgresClient } from "@databricks/sdk-postgres/v1";
 export type { ScimClient } from "@databricks/sdk-scim/v1";
 export type { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
+export type { FunctionsClient } from "@databricks/sdk-uc-functions/v1";
 export type { TablesClient } from "@databricks/sdk-uc-tables/v1";
 export type { VolumesClient } from "@databricks/sdk-uc-volumes/v1";
 export type { VectorSearchClient } from "@databricks/sdk-vectorsearch/v1";
@@ -704,6 +717,10 @@ export type {
   GenieGetMessageQueryResultResponse,
   GenieMessage,
 } from "@databricks/sdk-genie/v1";
+export type {
+  FunctionInfo,
+  GetFunctionRequest,
+} from "@databricks/sdk-uc-functions/v1";
 export type {
   BaseRun,
   CancelRunRequest,
