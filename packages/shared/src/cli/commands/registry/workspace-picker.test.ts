@@ -70,7 +70,9 @@ describe("listWorkspaceResources", () => {
   it("returns choices from a successful warehouse list (SDK)", async () => {
     const factory = () =>
       fakeClient({
-        warehouses: { list: asyncList([{ id: "w1", name: "One" }]) },
+        warehouses: {
+          listWarehousesIter: asyncList([{ id: "w1", name: "One" }]),
+        },
       });
     const res = await listWorkspaceResources(
       "sql_warehouse",
@@ -83,10 +85,12 @@ describe("listWorkspaceResources", () => {
     });
   });
 
-  it("maps job_id + settings.name for jobs", async () => {
+  it("maps jobId (bigint) + settings.name for jobs", async () => {
     const factory = () =>
       fakeClient({
-        jobs: { list: asyncList([{ job_id: 42, settings: { name: "ETL" } }]) },
+        jobs: {
+          listJobsIter: asyncList([{ jobId: 42n, settings: { name: "ETL" } }]),
+        },
       });
     const res = await listWorkspaceResources("job", undefined, factory);
     expect(res.choices).toEqual([{ value: "42", label: "ETL (42)" }]);
@@ -96,8 +100,8 @@ describe("listWorkspaceResources", () => {
     const factory = () =>
       fakeClient({
         genie: {
-          listSpaces: async () => ({
-            spaces: [{ space_id: "s1", title: "Sales" }],
+          genieListSpaces: async () => ({
+            spaces: [{ spaceId: "s1", title: "Sales" }],
           }),
         },
       });
@@ -105,23 +109,21 @@ describe("listWorkspaceResources", () => {
     expect(res.choices).toEqual([{ value: "s1", label: "Sales (s1)" }]);
   });
 
-  // genie listSpaces is single-page; the adapter must follow next_page_token
+  // genie listSpaces is single-page; the adapter must follow nextPageToken
   // so large workspaces aren't capped at one page.
-  it("follows genie next_page_token across pages", async () => {
-    const pages: Record<
-      string,
-      { spaces: unknown[]; next_page_token?: string }
-    > = {
-      "": { spaces: [{ space_id: "s1" }], next_page_token: "p2" },
-      p2: { spaces: [{ space_id: "s2" }] },
-    };
+  it("follows genie nextPageToken across pages", async () => {
+    const pages: Record<string, { spaces: unknown[]; nextPageToken?: string }> =
+      {
+        "": { spaces: [{ spaceId: "s1" }], nextPageToken: "p2" },
+        p2: { spaces: [{ spaceId: "s2" }] },
+      };
     const seen: (string | undefined)[] = [];
     const factory = () =>
       fakeClient({
         genie: {
-          listSpaces: async (req: { page_token?: string }) => {
-            seen.push(req.page_token);
-            return pages[req.page_token ?? ""];
+          genieListSpaces: async (req: { pageToken?: string }) => {
+            seen.push(req.pageToken);
+            return pages[req.pageToken ?? ""];
           },
         },
       });
@@ -134,9 +136,9 @@ describe("listWorkspaceResources", () => {
     const factory = () =>
       fakeClient({
         genie: {
-          listSpaces: async () => ({
-            spaces: [{ space_id: "s1" }],
-            next_page_token: "same",
+          genieListSpaces: async () => ({
+            spaces: [{ spaceId: "s1" }],
+            nextPageToken: "same",
           }),
         },
       });
@@ -145,9 +147,70 @@ describe("listWorkspaceResources", () => {
     expect(res.choices.length).toBeGreaterThan(0);
   });
 
+  // listInferenceEndpoints returns one unpaginated page, adapted to an iterable.
+  it("lists serving endpoints from listInferenceEndpoints' single page", async () => {
+    const factory = () =>
+      fakeClient({
+        modelServing: {
+          listInferenceEndpoints: async () => ({
+            endpoints: [{ name: "e1" }, { name: "e2" }],
+          }),
+        },
+      });
+    const res = await listWorkspaceResources(
+      "serving_endpoint",
+      undefined,
+      factory,
+    );
+    expect(res.choices.map((c) => c.value)).toEqual(["e1", "e2"]);
+  });
+
+  it("maps the camelCase fields of the typed UC/ML/apps listers", async () => {
+    const cases: Array<[string, Record<string, unknown>, unknown]> = [
+      [
+        "uc_connection",
+        {
+          connections: {
+            listConnectionsIter: asyncList([{ name: "c", fullName: "Conn" }]),
+          },
+        },
+        { value: "c", label: "Conn (c)" },
+      ],
+      [
+        "database",
+        {
+          database: { listDatabaseInstancesIter: asyncList([{ name: "db" }]) },
+        },
+        { value: "db", label: "db (db)" },
+      ],
+      [
+        "experiment",
+        {
+          experiments: {
+            listExperimentsIter: asyncList([
+              { experimentId: "7", name: "Exp" },
+            ]),
+          },
+        },
+        { value: "7", label: "Exp (7)" },
+      ],
+      [
+        "app",
+        { apps: { listAppsIter: asyncList([{ name: "a1" }]) } },
+        { value: "a1", label: "a1 (a1)" },
+      ],
+    ];
+    for (const [type, services, choice] of cases) {
+      const res = await listWorkspaceResources(type, undefined, () =>
+        fakeClient(services),
+      );
+      expect(res.choices, type).toEqual([choice]);
+    }
+  });
+
   it("passes the profile to the client factory", async () => {
     const factory = vi.fn(() =>
-      fakeClient({ warehouses: { list: asyncList([]) } }),
+      fakeClient({ warehouses: { listWarehousesIter: asyncList([]) } }),
     );
     await listWorkspaceResources("sql_warehouse", "my-profile", factory);
     expect(factory).toHaveBeenCalledWith("my-profile");
@@ -159,7 +222,7 @@ describe("listWorkspaceResources", () => {
     const factory = () =>
       fakeClient({
         warehouses: {
-          list: () =>
+          listWarehousesIter: () =>
             (async function* () {
               for (let i = 0; i < 10_000; i++) {
                 yielded++;
@@ -190,7 +253,7 @@ describe("listWorkspaceResources", () => {
     const factory = () =>
       fakeClient({
         warehouses: {
-          list: () => {
+          listWarehousesIter: () => {
             throw new Error("auth failed");
           },
         },
@@ -205,7 +268,7 @@ describe("listWorkspaceResources", () => {
     const factory = () =>
       fakeClient({
         warehouses: {
-          list: () => {
+          listWarehousesIter: () => {
             throw new Error(
               "default auth: cannot configure default credentials",
             );
