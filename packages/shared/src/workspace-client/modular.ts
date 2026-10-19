@@ -53,6 +53,7 @@ import {
 } from "@databricks/sdk-core/http";
 import { type ProfileOptions, resolve } from "@databricks/sdk-core/profiles";
 import type { DatabaseClient } from "@databricks/sdk-database/v1";
+import type { ExperimentsClient } from "@databricks/sdk-experiments/v1";
 import type { FilesClient } from "@databricks/sdk-files/v2";
 import type { GenieClient } from "@databricks/sdk-genie/v1";
 import type { JobsClient } from "@databricks/sdk-jobs/v2";
@@ -634,6 +635,17 @@ export function buildModelServingClient(
   );
 }
 
+/** Build a modular MLflow Experiments client from wrapper options. */
+export function buildExperimentsClient(
+  opts: WorkspaceClientOptions,
+): ExperimentsClient {
+  return lazyClient(
+    () =>
+      import("@databricks/sdk-experiments/v1").then((m) => m.ExperimentsClient),
+    mapToClientOptions(opts),
+  );
+}
+
 /** Build a modular Unity Catalog Tables client from wrapper options. */
 export function buildTablesClient(opts: WorkspaceClientOptions): TablesClient {
   return lazyClient(
@@ -702,6 +714,7 @@ export function buildPostgresClient(
 
 // ── Client type re-exports (for the facade accessor types) ───────────────
 export type { DatabaseClient } from "@databricks/sdk-database/v1";
+export type { ExperimentsClient } from "@databricks/sdk-experiments/v1";
 export type { FilesClient } from "@databricks/sdk-files/v2";
 export type {
   DirectoryEntry as FilesDirectoryEntry,
@@ -761,6 +774,11 @@ export type {
   FunctionInfo,
   GetFunctionRequest,
 } from "@databricks/sdk-uc-functions/v1";
+export type {
+  Experiment,
+  ListExperimentsRequest,
+  ListExperimentsResponse,
+} from "@databricks/sdk-experiments/v1";
 export type {
   BaseRun,
   CancelRunRequest,
