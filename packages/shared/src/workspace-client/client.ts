@@ -28,6 +28,8 @@ import {
   type ModelServingClient,
   buildFilesClient,
   type FilesClient,
+  buildConnectionsClient,
+  type ConnectionsClient,
   buildTablesClient,
   type TablesClient,
   buildPostgresClient,
@@ -59,6 +61,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
   #postgres?: PostgresClient;
   #volumes?: VolumesClient;
   #functions?: FunctionsClient;
+  #connections?: ConnectionsClient;
 
   constructor(opts: WorkspaceClientOptions) {
     this.#opts = opts;
@@ -118,6 +121,14 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
       this.#postgres = buildPostgresClient(this.#opts);
     }
     return this.#postgres;
+  }
+
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  get connections(): ConnectionsClient {
+    if (!this.#connections) {
+      this.#connections = buildConnectionsClient(this.#opts);
+    }
+    return this.#connections;
   }
 
   // Migrated to the modular SDK — built lazily, independent of the legacy client.

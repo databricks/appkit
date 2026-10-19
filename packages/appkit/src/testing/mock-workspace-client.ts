@@ -74,6 +74,7 @@ const FACADE_SERVICES = [
   "postgres",
   "volumes",
   "functions",
+  "connections",
   "statementExecution",
   "modelServing",
   "servingEndpoints",
