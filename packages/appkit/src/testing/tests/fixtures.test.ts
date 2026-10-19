@@ -379,6 +379,5 @@ describe("createApiError — genuine ApiError factory", () => {
     });
     // Should have response (undefined or null) and details (array)
     expect(error).toHaveProperty("response");
-    expect(error).toHaveProperty("errorInfoType");
   });
 });

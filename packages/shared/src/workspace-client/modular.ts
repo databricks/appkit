@@ -45,10 +45,14 @@ import {
   tokenProviderFn,
 } from "@databricks/sdk-auth";
 import {
+  DefaultCredentialsError,
   defaultCredentials,
+  M2mCredentialsError,
   newM2mCredentials,
   newPatCredentials,
   newU2mCredentials,
+  PatCredentialsError,
+  U2mCredentialsError,
 } from "@databricks/sdk-auth/credentials";
 import {
   type HttpClient,
@@ -74,7 +78,7 @@ import type { VectorSearchClient } from "@databricks/sdk-vectorsearch/v1";
 import { WarehousesClient } from "@databricks/sdk-warehouses/v1";
 
 import { ApiError } from "./errors";
-import type { WorkspaceClientOptions } from "./legacy";
+import type { WorkspaceClientOptions } from "./options";
 
 /**
  * Prepend `https://` to a scheme-less host. The legacy SDK normalized the host
@@ -182,6 +186,22 @@ function cachedDefaultCredentials(
 
 const execFileAsync = promisify(execFile);
 
+/** Auth could not be configured (missing or unsupported credentials). */
+export class AuthConfigError extends Error {
+  override name = "AuthConfigError";
+}
+
+/** Whether `e` means auth isn't set up, from AppKit or the modular SDK. */
+export function isAuthConfigError(e: unknown): e is Error {
+  return (
+    e instanceof AuthConfigError ||
+    e instanceof DefaultCredentialsError ||
+    e instanceof M2mCredentialsError ||
+    e instanceof PatCredentialsError ||
+    e instanceof U2mCredentialsError
+  );
+}
+
 /**
  * Databricks CLI auth for a host, not a profile: what the legacy SDK used when
  * only a host was configured. The modular CLI strategy needs a profile name.
@@ -202,7 +222,7 @@ function cliHostCredentials(host: string): TokenCredentials {
         } catch (e) {
           const err = e as { stderr?: unknown; message?: string };
           const detail = String(err.stderr ?? err.message ?? e).trim();
-          throw new Error(
+          throw new AuthConfigError(
             `cannot get an access token for ${host} from the Databricks CLI: ${detail}`,
           );
         }
@@ -224,7 +244,7 @@ function unsupportedCredentials(message: string): Credentials {
   return {
     name: () => "unsupported",
     authHeaders: async () => {
-      throw new Error(message);
+      throw new AuthConfigError(message);
     },
   };
 }

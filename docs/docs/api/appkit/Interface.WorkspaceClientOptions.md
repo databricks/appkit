@@ -1,20 +1,6 @@
 # Interface: WorkspaceClientOptions
 
-Options used to construct the wrapper. Mirrors the subset of the old SDK's
-`Config` + `ClientOptions` that AppKit relies on today; we deliberately do
-NOT re-expose every old-SDK config knob.
-
 ## Properties
-
-### authType?
-
-```ts
-optional authType: "pat";
-```
-
-Authentication strategy passed to the legacy client.
-
-***
 
 ### clientOptions?
 
@@ -54,4 +40,4 @@ optional profile: string;
 optional token: string;
 ```
 
-Bearer token. When set, `authType` defaults to "pat".
+Bearer token (PAT, or the user's OBO token).

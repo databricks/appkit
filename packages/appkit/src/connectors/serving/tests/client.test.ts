@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { Context } from "../../../workspace-client";
 import { invoke, stream } from "../client";
 
 function createMockClient(host = "https://test.databricks.com") {
@@ -222,7 +221,7 @@ describe("Serving Connector", () => {
       );
     });
 
-    test("passes SDK Context when AbortSignal is provided", async () => {
+    test("passes a cancellation context when AbortSignal is provided", async () => {
       const client = createLegacyClient();
       client.apiClient.request.mockResolvedValue({
         contents: new ReadableStream(),
@@ -235,7 +234,7 @@ describe("Serving Connector", () => {
         expect.objectContaining({
           path: "/serving-endpoints/my-endpoint/invocations",
         }),
-        expect.any(Context),
+        expect.objectContaining({ cancellationToken: expect.anything() }),
       );
     });
 

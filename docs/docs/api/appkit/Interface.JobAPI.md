@@ -27,21 +27,24 @@ Cancel a specific run.
 ### getJob()
 
 ```ts
-getJob(): Promise<ExecutionResult<Job>>;
+getJob(): Promise<ExecutionResult<{
+}>>;
 ```
 
 Get the job definition.
 
 #### Returns
 
-`Promise`\<[`ExecutionResult`](TypeAlias.ExecutionResult.md)\<`Job`\>\>
+`Promise`\<[`ExecutionResult`](TypeAlias.ExecutionResult.md)\<\{
+\}\>\>
 
 ***
 
 ### getRun()
 
 ```ts
-getRun(runId: number): Promise<ExecutionResult<Run>>;
+getRun(runId: number): Promise<ExecutionResult<{
+}>>;
 ```
 
 Get a specific run by ID.
@@ -54,14 +57,16 @@ Get a specific run by ID.
 
 #### Returns
 
-`Promise`\<[`ExecutionResult`](TypeAlias.ExecutionResult.md)\<`Run`\>\>
+`Promise`\<[`ExecutionResult`](TypeAlias.ExecutionResult.md)\<\{
+\}\>\>
 
 ***
 
 ### getRunOutput()
 
 ```ts
-getRunOutput(runId: number): Promise<ExecutionResult<RunOutput>>;
+getRunOutput(runId: number): Promise<ExecutionResult<{
+}>>;
 ```
 
 Get output of a specific run.
@@ -74,21 +79,28 @@ Get output of a specific run.
 
 #### Returns
 
-`Promise`\<[`ExecutionResult`](TypeAlias.ExecutionResult.md)\<`RunOutput`\>\>
+`Promise`\<[`ExecutionResult`](TypeAlias.ExecutionResult.md)\<\{
+\}\>\>
 
 ***
 
 ### lastRun()
 
 ```ts
-lastRun(): Promise<ExecutionResult<BaseRun | undefined>>;
+lastRun(): Promise<ExecutionResult<
+  | {
+}
+| undefined>>;
 ```
 
 Get the most recent run for this job.
 
 #### Returns
 
-`Promise`\<[`ExecutionResult`](TypeAlias.ExecutionResult.md)\<`BaseRun` \| `undefined`\>\>
+`Promise`\<[`ExecutionResult`](TypeAlias.ExecutionResult.md)\<
+  \| \{
+\}
+  \| `undefined`\>\>
 
 ***
 
@@ -97,7 +109,8 @@ Get the most recent run for this job.
 ```ts
 listRuns(options?: {
   limit?: number;
-}): Promise<ExecutionResult<BaseRun[]>>;
+}): Promise<ExecutionResult<{
+}[]>>;
 ```
 
 List runs for this job.
@@ -111,7 +124,8 @@ List runs for this job.
 
 #### Returns
 
-`Promise`\<[`ExecutionResult`](TypeAlias.ExecutionResult.md)\<`BaseRun`[]\>\>
+`Promise`\<[`ExecutionResult`](TypeAlias.ExecutionResult.md)\<\{
+\}[]\>\>
 
 ***
 
@@ -139,7 +153,8 @@ Trigger and poll until completion, yielding status updates.
 ### runNow()
 
 ```ts
-runNow(params?: Record<string, unknown>): Promise<ExecutionResult<RunNowResponse>>;
+runNow(params?: Record<string, unknown>): Promise<ExecutionResult<{
+}>>;
 ```
 
 Trigger the configured job with validated params. Returns the run response.
@@ -152,4 +167,5 @@ Trigger the configured job with validated params. Returns the run response.
 
 #### Returns
 
-`Promise`\<[`ExecutionResult`](TypeAlias.ExecutionResult.md)\<`RunNowResponse`\>\>
+`Promise`\<[`ExecutionResult`](TypeAlias.ExecutionResult.md)\<\{
+\}\>\>

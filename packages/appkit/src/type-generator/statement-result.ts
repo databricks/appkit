@@ -10,8 +10,8 @@ const logger = createLogger("type-generator:statement-result");
  * read rows from `result.dataArray`, regardless of the wire format the
  * warehouse chose.
  *
- * `@databricks/sdk-experimental`'s `executeStatement` defaults to an
- * `ARROW_STREAM` disposition. With an `INLINE` disposition the single
+ * A warehouse can answer in the `ARROW_STREAM` format. With an `INLINE`
+ * disposition the single
  * DESCRIBE row is returned as a base64-encoded Arrow IPC stream in
  * `result.attachment` and `result.dataArray` is left undefined. The metric
  * and query type generators only ever read `result.dataArray`, so without

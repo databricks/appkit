@@ -10,8 +10,8 @@ server-side, so the adapter ignores the agents-plugin tool index.
 Authentication is handled via the Databricks SDK credential chain — the
 same mechanism used by `DatabricksAdapter.fromModelServing`. The transport
 is injected via SupervisorApiAdapterCtorOptions.streamBody; the
-[fromSupervisorApi](Function.fromSupervisorApi.md) factory wires it through the SDK's
-`apiClient.request({ raw: true })`.
+[fromSupervisorApi](Function.fromSupervisorApi.md) factory wires it through the workspace client's
+raw `request()`.
 
 Set `DEBUG=appkit:agents:supervisor-api` to log the outbound request
 shape (model, instructions length, input shape, tool count) and to be

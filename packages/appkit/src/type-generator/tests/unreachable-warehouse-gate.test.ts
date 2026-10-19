@@ -10,10 +10,10 @@ const mocks = vi.hoisted(() => ({
   executeStatement: vi.fn(),
 }));
 
-// Stub the wrapper, not `@databricks/sdk-experimental` underneath it: the
-// wrapper re-exports SDK values (`ConfigError`, `Context`, `Time`, `TimeUnits`)
-// that a bare SDK factory mock would drop, breaking module init. Spreading
-// `importOriginal` keeps those intact while swapping only the factory.
+// Stub the wrapper, not the SDK underneath it: the wrapper exports runtime
+// values (`ApiError`, `isAuthConfigError`) that a bare factory mock would drop,
+// breaking module init. Spreading `importOriginal` keeps those intact while
+// swapping only the factory.
 vi.mock("../../workspace-client", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../workspace-client")>();
