@@ -43,8 +43,9 @@ export type MockWorkspaceClient = WorkspaceClient;
 /**
  * Applied beneath caller-supplied `responses`.
  *
- * `statementExecution.executeStatement`, `warehouses.get` and `warehouses.start`
- * must stay byte-identical to the old `fixtures.ts` values — suites reach them
+ * `statementExecution.executeStatement`, `warehouses.getWarehouse` and
+ * `warehouses.startWarehouse` must stay byte-identical to the old `fixtures.ts`
+ * values — suites reach them
  * implicitly through `mockServiceContext`. `currentUser.me` is
  * required: `ServiceContext.createContext` reads `.id`, so `createApp({ client })`
  * cannot boot without it.
@@ -54,8 +55,8 @@ const DEFAULT_RESPONSES: Record<string, Any> = {
     status: { state: "SUCCEEDED" },
     result: { data: [] },
   },
-  "warehouses.get": { state: "RUNNING" },
-  "warehouses.start": undefined,
+  "warehouses.getWarehouse": { state: "RUNNING" },
+  "warehouses.startWarehouse": undefined,
   "currentUser.me": {
     id: "test-service-user",
     userName: "test-service-user",

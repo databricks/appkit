@@ -7,18 +7,18 @@ const logger = createLogger("type-generator:statement-result");
 
 /**
  * Normalize a Statement Execution response so downstream parsers can always
- * read rows from `result.data_array`, regardless of the wire format the
+ * read rows from `result.dataArray`, regardless of the wire format the
  * warehouse chose.
  *
  * `@databricks/sdk-experimental`'s `executeStatement` defaults to an
  * `ARROW_STREAM` disposition. With an `INLINE` disposition the single
  * DESCRIBE row is returned as a base64-encoded Arrow IPC stream in
- * `result.attachment` and `result.data_array` is left undefined. The metric
- * and query type generators only ever read `result.data_array`, so without
+ * `result.attachment` and `result.dataArray` is left undefined. The metric
+ * and query type generators only ever read `result.dataArray`, so without
  * this normalization an Arrow response reads as "returned no rows" — the
  * registry ships empty and the runtime fail-closed gate 503s every affected
  * metric/query. (A warehouse configured to return `JSON_ARRAY` populates
- * `data_array` directly and needs no decoding — that path, and every mocked
+ * `dataArray` directly and needs no decoding — that path, and every mocked
  * test, flows through here unchanged.)
  */
 export async function normalizeResultRows(
@@ -30,18 +30,18 @@ export async function normalizeResultRows(
   // types. A deliberate throw — unlike the best-effort decode below — that both
   // callers catch per-entry as a loud per-key/per-query failure.
   if (
-    response.result?.next_chunk_index != null ||
-    response.result?.next_chunk_internal_link != null
+    response.result?.nextChunkIndex != null ||
+    response.result?.nextChunkInternalLink != null
   ) {
     throw new Error(
-      "DESCRIBE result is multi-chunk (truncated); refusing to emit partial types — see next_chunk_index",
+      "DESCRIBE result is multi-chunk (truncated); refusing to emit partial types — see nextChunkIndex",
     );
   }
 
   // Passthrough: rows already materialized (JSON_ARRAY warehouses + every
-  // mocked test). `data_array` being an empty array still counts as present —
+  // mocked test). `dataArray` being an empty array still counts as present —
   // that is a genuine "no rows" answer we must not overwrite with a decode.
-  if (response.result?.data_array !== undefined) {
+  if (response.result?.dataArray !== undefined) {
     return response;
   }
 
@@ -78,7 +78,7 @@ export async function normalizeResultRows(
       ...response,
       result: {
         ...response.result,
-        data_array: dataArray,
+        dataArray: dataArray,
       },
     };
   } catch (err) {
@@ -149,7 +149,7 @@ function isFormatRejection(
 
 /**
  * Run a DESCRIBE and return a response whose rows are readable via
- * `result.data_array`, adapting to the warehouse's result-format capability.
+ * `result.dataArray`, adapting to the warehouse's result-format capability.
  *
  * No single format is portable: standard DBSQL (PRO/CLASSIC) serves
  * `INLINE`+`JSON_ARRAY` and rejects `INLINE`+`ARROW_STREAM`; the Reyden engine
@@ -175,12 +175,16 @@ export async function describeAdaptive(
   let lastError: unknown;
   for (const format of formats) {
     try {
+      // Narrow the modular SDK's camelCase StatementResponse straight onto our
+      // subset. The only gap is `dataArray` cells (the SDK types them as
+      // `JsonValue[][]`); for a DESCRIBE they are always string/null, so the
+      // assertion is safe. `attachment` survives via the pinned pnpm patch.
       const response = (await client.statementExecution.executeStatement({
         statement,
-        warehouse_id: warehouseId,
+        warehouseId,
         // Synchronous wait: without it the call can return PENDING/RUNNING with
         // no rows, which downstream misreads as a no-result degrade.
-        wait_timeout: "30s",
+        waitTimeout: "30s",
         format,
         disposition: "INLINE",
       })) as DatabricksStatementExecutionResponse;
@@ -189,7 +193,7 @@ export async function describeAdaptive(
         normalized.status?.state === "FAILED" &&
         isFormatRejection(
           normalized.status.error?.message,
-          normalized.status.error?.error_code,
+          normalized.status.error?.errorCode,
         )
       ) {
         lastResponse = normalized;

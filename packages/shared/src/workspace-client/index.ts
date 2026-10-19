@@ -5,6 +5,7 @@
  * behind a stable facade.
  */
 export { ApiError } from "./errors";
+export { ModularApiError } from "./modular";
 export { createWorkspaceClient } from "./factory";
 export type {
   CancellationToken,
@@ -23,3 +24,5 @@ export {
   TimeUnits,
 } from "./legacy";
 export type { files, jobs, serving, sql, WorkspaceClient } from "./types";
+// Modular SDK client + model types (warehouses).
+export type * from "./modular";
