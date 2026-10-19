@@ -24,6 +24,7 @@ import type {
   FilesClient,
   TablesClient,
   VectorSearchClient,
+  PostgresClient,
 } from "./modular";
 
 // Legacy SDK type namespaces for un-migrated services, re-exported so AppKit
@@ -64,6 +65,8 @@ export interface WorkspaceClient extends WorkspaceAuth {
 
   /** Unity Catalog Tables (modular SDK). */
   readonly tables: TablesClient;
+  /** Lakebase Postgres: autoscaling projects, branches, endpoints (modular SDK). */
+  readonly postgres: PostgresClient;
 
   /** Statement Execution (modular SDK). */
   readonly statementExecution: StatementExecutionClient;
