@@ -21,6 +21,7 @@ import {
 import { type DbContext, NO_ENV_BRANCH, withBranchPool } from "./context";
 import { notYourBranch, resolveEnvBranch, takesWrites } from "./guard";
 import {
+  breakingStatements,
   discardMigrationFiles,
   type GeneratedMigration,
   generateMigrationFiles,
@@ -56,6 +57,8 @@ export interface MigrateReport {
   readonly applied: readonly string[];
   /** Tags recorded without running because their tables already existed (0000_baseline). */
   readonly adopted?: readonly string[];
+  /** Statements of the generated migration that break instances still running the previous release. */
+  readonly breaking?: readonly string[];
   /** Why nothing was applied, when applying was skipped. */
   readonly notApplied?: string;
   readonly typesFile: string;
@@ -144,5 +147,11 @@ export async function runMigrate(
       { cause: error },
     );
   }
-  return { generated, ...outcome, typesFile };
+  const breaking = breakingStatements(generated?.statements ?? []);
+  return {
+    generated,
+    ...(breaking.length > 0 ? { breaking } : {}),
+    ...outcome,
+    typesFile,
+  };
 }

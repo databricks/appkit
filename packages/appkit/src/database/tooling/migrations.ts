@@ -253,6 +253,27 @@ async function loadDrizzleKit(): Promise<typeof import("drizzle-kit/api")> {
   }
 }
 
+const BREAKS_PREVIOUS_RELEASE = [
+  /^DROP (TABLE|VIEW|MATERIALIZED VIEW|TYPE|SEQUENCE|SCHEMA)\b/i,
+  /\bDROP COLUMN\b/i,
+  /\bRENAME\b/i,
+  /\bSET DATA TYPE\b/i,
+  /\bSET NOT NULL\b/i,
+];
+
+/**
+ * Statements that break instances still running the previous release. Apps
+ * keeps them serving while the new instance migrates on start, and a code
+ * rollback cannot undo a migration.
+ */
+export function breakingStatements(statements: readonly string[]): string[] {
+  return statements.filter((statement) =>
+    BREAKS_PREVIOUS_RELEASE.some((pattern) =>
+      pattern.test(statement.trimStart()),
+    ),
+  );
+}
+
 /** Replace a file through a rename, so a crash never leaves it half written. */
 function writeFileAtomic(file: string, content: string): void {
   const temporary = path.join(

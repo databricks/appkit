@@ -129,6 +129,7 @@ describe("runMigrate", () => {
     });
     expect(report.applied).toEqual(["0000_migration"]);
     expect(report.notApplied).toBeUndefined();
+    expect(report.breaking).toBeUndefined();
     expect(fs.readFileSync(report.typesFile, "utf-8")).toContain("notes");
   });
 
@@ -325,5 +326,19 @@ describe("runMigrate", () => {
     expect(error.message).toBe("Could not load config/database/schema.ts.");
     expect((error.cause as Error).message).toMatch(/schema\.ts:\d+:\d+/);
     expect(resolveEnvBranch).not.toHaveBeenCalled();
+  });
+
+  test("reports the statements that break instances of the previous release", async () => {
+    const ctx = app(`notes: table("notes", { id: id(), body: text() })`);
+    resolveEnvBranch.mockResolvedValue(null);
+    await runMigrate(ctx, { interactive: false });
+
+    writeSchema(ctx.root, `notes: table("notes", { id: id() })`);
+    const report = await runMigrate(ctx, { interactive: false });
+
+    expect(report.generated?.statements).toEqual([
+      'ALTER TABLE "app"."notes" DROP COLUMN "body";',
+    ]);
+    expect(report.breaking).toEqual(report.generated?.statements);
   });
 });

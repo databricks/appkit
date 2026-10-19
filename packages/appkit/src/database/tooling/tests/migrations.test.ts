@@ -19,6 +19,7 @@ import {
   varchar,
 } from "../../schema-builder";
 import {
+  breakingStatements,
   discardMigrationFiles,
   generateMigrationFiles,
   MigrationRenameAmbiguityError,
@@ -340,6 +341,32 @@ describe("generateMigrationFiles", () => {
         `^Cannot read ${snapshot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: .+\\. Restore it from version control\\.$`,
       ),
     );
+  });
+});
+
+describe("breakingStatements", () => {
+  test("drops, renames, type changes and new NOT NULLs; additions and relaxations pass", () => {
+    const breaking = [
+      'DROP TABLE "app"."tags" CASCADE;',
+      'ALTER TABLE "app"."notes" DROP COLUMN "body";',
+      'ALTER TABLE "app"."notes" RENAME COLUMN "body" TO "text";',
+      'ALTER TABLE "app"."notes" RENAME TO "posts";',
+      'ALTER TABLE "app"."notes" ALTER COLUMN "n" SET DATA TYPE bigint;',
+      'ALTER TABLE "app"."notes" ALTER COLUMN "title" SET NOT NULL;',
+      'DROP TYPE "app"."mood";',
+      `ALTER TYPE "app"."mood" RENAME VALUE 'sad' TO 'blue';`,
+    ];
+    const safe = [
+      'CREATE TABLE "app"."tags" ("id" serial PRIMARY KEY);',
+      'ALTER TABLE "app"."notes" ADD COLUMN "title" text;',
+      'ALTER TABLE "app"."notes" ALTER COLUMN "title" DROP NOT NULL;',
+      'ALTER TABLE "app"."notes" ALTER COLUMN "title" DROP DEFAULT;',
+      'ALTER TABLE "app"."notes" DROP CONSTRAINT "notes_tag_fk";',
+      'DROP INDEX "app"."notes_title_idx";',
+      `ALTER TYPE "app"."mood" ADD VALUE 'calm';`,
+    ];
+
+    expect(breakingStatements([...safe, ...breaking])).toEqual(breaking);
   });
 });
 
