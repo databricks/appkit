@@ -58,6 +58,47 @@ export function runWithFilesSpanAttributes<T>(
   return filesSpanAttributesStorage.run(attributes, fn);
 }
 
+/**
+ * The modular SDK throws `@databricks/sdk-core`'s `ApiError` (status on
+ * `httpStatusCode`, code on `.code`), a different class from the wrapper's
+ * `ApiError`. Convert it so `exists()` and the plugin's `instanceof ApiError`
+ * / `.statusCode` mapping keep returning upstream 4xx statuses.
+ */
+function toWrapperApiError(error: unknown): unknown {
+  if (
+    error instanceof Error &&
+    !(error instanceof ApiError) &&
+    "httpStatusCode" in error &&
+    typeof error.httpStatusCode === "number" &&
+    error.httpStatusCode > 0
+  ) {
+    const code = "code" in error ? String(error.code) : "UNKNOWN";
+    return new ApiError(
+      error.message,
+      code,
+      error.httpStatusCode,
+      undefined,
+      [],
+    );
+  }
+  return error;
+}
+
+/** Stream a file, mapped back to the legacy `DownloadResponse` shape. */
+async function downloadFile(
+  client: WorkspaceClient,
+  resolvedPath: string,
+): Promise<DownloadResponse> {
+  const res = await client.files.downloadFile({ filePath: resolvedPath });
+  return {
+    "content-length":
+      res.contentLength === undefined ? undefined : Number(res.contentLength),
+    "content-type": res.contentType,
+    contents: res.contents,
+    "last-modified": res.lastModified,
+  };
+}
+
 interface FilesConnectorConfig {
   defaultVolume?: string;
   timeout?: number;
@@ -157,7 +198,8 @@ export class FilesConnector {
           success = true;
           span.setStatus({ code: SpanStatusCode.OK });
           return result;
-        } catch (error) {
+        } catch (thrown) {
+          const error = toWrapperApiError(thrown);
           span.recordException(error as Error);
           span.setStatus({
             code: SpanStatusCode.ERROR,
@@ -191,11 +233,20 @@ export class FilesConnector {
     }
 
     return this.traced("list", { "files.path": resolvedPath }, async () => {
+      // TODO: return the SDK's camelCase entries as-is once appkit-ui's file
+      // browser and the template's FilesPage read camelCase. Changing the
+      // `/list` JSON is breaking for app code reading `is_directory` etc.
       const entries: DirectoryEntry[] = [];
-      for await (const entry of client.files.listDirectoryContents({
-        directory_path: resolvedPath,
+      for await (const entry of client.files.listDirectoryContentsIter({
+        directoryPath: resolvedPath,
       })) {
-        entries.push(entry);
+        entries.push({
+          file_size: entry.fileSize,
+          is_directory: entry.isDirectory,
+          last_modified: entry.lastModified,
+          name: entry.name,
+          path: entry.path,
+        });
       }
       return entries;
     });
@@ -239,11 +290,9 @@ export class FilesConnector {
     filePath: string,
   ): Promise<DownloadResponse> {
     const resolvedPath = this.resolvePath(filePath);
-    return this.traced("download", { "files.path": resolvedPath }, async () => {
-      return client.files.download({
-        file_path: resolvedPath,
-      });
-    });
+    return this.traced("download", { "files.path": resolvedPath }, async () =>
+      downloadFile(client, resolvedPath),
+    );
   }
 
   async exists(client: WorkspaceClient, filePath: string): Promise<boolean> {
@@ -267,17 +316,30 @@ export class FilesConnector {
   ): Promise<FileMetadata> {
     const resolvedPath = this.resolvePath(filePath);
     return this.traced("metadata", { "files.path": resolvedPath }, async () => {
-      const response = await client.files.getMetadata({
-        file_path: resolvedPath,
+      // The modular `getFileMetadata` parses the empty HEAD body and drops the
+      // response headers that carry the metadata, so read them off a raw HEAD.
+      // TODO: switch to `client.files.getFileMetadata` once sdk-files builds the
+      // response from the HEAD headers (as `downloadFile` already does).
+      // Encode each segment so `#`, `?` and `%` in a name aren't parsed as URL
+      // syntax by the raw seam (the typed SDK calls do the same).
+      const encodedPath = resolvedPath
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/");
+      const res = await client.request({
+        method: "HEAD",
+        path: `/api/2.0/fs/files${encodedPath}`,
       });
+      const contentLength = res.headers.get("content-length");
       return {
-        contentLength: response["content-length"],
+        contentLength:
+          contentLength === null ? undefined : Number(contentLength),
         contentType: contentTypeFromPath(
           filePath,
-          response["content-type"],
+          res.headers.get("content-type") ?? undefined,
           this.customContentTypes,
         ),
-        lastModified: response["last-modified"],
+        lastModified: res.headers.get("last-modified") ?? undefined,
       };
     });
   }
@@ -286,57 +348,55 @@ export class FilesConnector {
     client: WorkspaceClient,
     filePath: string,
     contents: ReadableStream | Buffer | string,
-    options?: { overwrite?: boolean },
+    options?: { overwrite?: boolean; signal?: AbortSignal },
   ): Promise<void> {
     const resolvedPath = this.resolvePath(filePath);
 
     return this.traced("upload", { "files.path": resolvedPath }, async () => {
-      const body = contents;
       const overwrite = options?.overwrite ?? true;
-
-      // Workaround: The SDK's files.upload() has two bugs:
-      // 1. It ignores the `contents` field (sets body to undefined)
-      // 2. apiClient.request() checks `instanceof` against its own ReadableStream
-      //    subclass, so standard ReadableStream instances get JSON.stringified to "{}"
-      // Bypass both by calling the REST API directly with SDK-provided auth.
-      const hostValue = client.config.host;
-      if (!hostValue) {
-        throw new Error(
-          "Databricks host is not configured. Set DATABRICKS_HOST or configure client.config.host.",
+      try {
+        if (contents instanceof ReadableStream) {
+          await client.files.uploadFile(
+            { filePath: resolvedPath, contents, overwrite },
+            { signal: options?.signal },
+          );
+        } else {
+          // `uploadFile` takes only a ReadableStream, which goes out chunked
+          // and can't be retried. Send in-memory contents as bytes instead, so
+          // the request carries Content-Length and the transport can retry it.
+          const encodedPath = resolvedPath
+            .split("/")
+            .map(encodeURIComponent)
+            .join("/");
+          const res = await client.request({
+            method: "PUT",
+            path: `/api/2.0/fs/files${encodedPath}`,
+            query: { overwrite: String(overwrite) },
+            headers: new Headers({
+              "Content-Type": "application/octet-stream",
+            }),
+            body:
+              typeof contents === "string"
+                ? new TextEncoder().encode(contents)
+                : new Uint8Array(contents),
+            signal: options?.signal,
+          });
+          await res.body?.cancel();
+        }
+      } catch (e) {
+        const wrapped = toWrapperApiError(e);
+        if (!(wrapped instanceof ApiError)) throw e;
+        logger.error(
+          `Upload failed (${wrapped.statusCode}): ${wrapped.message}`,
         );
-      }
-      const host = hostValue.startsWith("http")
-        ? hostValue
-        : `https://${hostValue}`;
-      const url = new URL(`/api/2.0/fs/files${resolvedPath}`, host);
-      url.searchParams.set("overwrite", String(overwrite));
-
-      const headers = new Headers({
-        "Content-Type": "application/octet-stream",
-        "User-Agent": client.apiClient.userAgent(),
-      });
-      const fetchOptions: RequestInit = { method: "PUT", headers, body };
-
-      if (body instanceof ReadableStream) {
-        fetchOptions.duplex = "half";
-      } else if (body instanceof Buffer) {
-        headers.set("Content-Length", String(body.length));
-      } else if (typeof body === "string") {
-        headers.set("Content-Length", String(Buffer.byteLength(body)));
-      }
-
-      await client.config.authenticate(headers);
-
-      const res = await fetch(url.toString(), fetchOptions);
-
-      if (!res.ok) {
-        const text = await res.text();
-        logger.error(`Upload failed (${res.status}): ${text}`);
-        const safeMessage = text.length > 200 ? `${text.slice(0, 200)}…` : text;
+        const safeMessage =
+          wrapped.message.length > 200
+            ? `${wrapped.message.slice(0, 200)}…`
+            : wrapped.message;
         throw new ApiError(
           `Upload failed: ${safeMessage}`,
           "UPLOAD_FAILED",
-          res.status,
+          wrapped.statusCode,
           undefined,
           [],
         );
@@ -353,9 +413,7 @@ export class FilesConnector {
       "createDirectory",
       { "files.path": resolvedPath },
       async () => {
-        await client.files.createDirectory({
-          directory_path: resolvedPath,
-        });
+        await client.files.createDirectory({ directoryPath: resolvedPath });
       },
     );
   }
@@ -363,9 +421,7 @@ export class FilesConnector {
   async delete(client: WorkspaceClient, filePath: string): Promise<void> {
     const resolvedPath = this.resolvePath(filePath);
     return this.traced("delete", { "files.path": resolvedPath }, async () => {
-      await client.files.delete({
-        file_path: resolvedPath,
-      });
+      await client.files.deleteFile({ filePath: resolvedPath });
     });
   }
 
@@ -384,9 +440,7 @@ export class FilesConnector {
         return { ...meta, textPreview: null, isText: false, isImage };
       }
 
-      const response = await client.files.download({
-        file_path: resolvedPath,
-      });
+      const response = await downloadFile(client, resolvedPath);
       if (!response.contents) {
         return { ...meta, textPreview: "", isText: true, isImage: false };
       }

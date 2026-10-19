@@ -485,9 +485,26 @@ The `list()` method with no arguments lists the volume root.
 ## Types
 
 ```ts
-// Re-exported from @databricks/sdk-experimental
-type DirectoryEntry = files.DirectoryEntry;
-type DownloadResponse = files.DownloadResponse;
+/** @deprecated Use FilesDirectoryEntry. Still returned by list() and /list. */
+interface DirectoryEntry {
+  file_size?: number;
+  is_directory?: boolean;
+  last_modified?: number;
+  name?: string;
+  path?: string;
+}
+
+/** @deprecated Use FilesDownloadResponse. Still returned by download(). */
+interface DownloadResponse {
+  "content-length"?: number;
+  "content-type"?: string;
+  contents?: ReadableStream;
+  "last-modified"?: string;
+}
+
+// Modular SDK shapes (camelCase; contentLength is bigint)
+type FilesDirectoryEntry = { fileSize?: number; isDirectory?: boolean; lastModified?: number; name?: string; path?: string };
+type FilesDownloadResponse = { contentLength?: bigint; contentType?: string; contents?: ReadableStream; lastModified?: string };
 
 interface FileMetadata {
   /** File size in bytes. */
