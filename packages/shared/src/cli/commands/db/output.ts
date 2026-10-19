@@ -1,8 +1,9 @@
 import path from "node:path";
 import process from "node:process";
 
-import type { MigrateReport } from "@databricks/appkit/database-tooling";
 import pc from "picocolors";
+
+import type { MigrateReport } from "./tooling-contract";
 
 /** Prompts only when a human can answer them. */
 export function isInteractive(): boolean {

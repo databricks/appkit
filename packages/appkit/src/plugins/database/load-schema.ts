@@ -6,7 +6,7 @@ import type { Schema } from "../../database/schema-builder";
 import { assertFinalizedSchema } from "../../database/schema-builder/define-schema";
 
 /** Same application-relative convention used by appkit generate-types. */
-const DEFAULT_SCHEMA_FILE = "config/database/schema.ts";
+export const DEFAULT_SCHEMA_FILE = "config/database/schema.ts";
 
 interface LoadSchemaOptions {
   /** Report why the module failed to import. Only for local CLI runs: see the catch below. */

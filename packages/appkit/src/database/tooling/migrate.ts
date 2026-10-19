@@ -1,32 +1,49 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { loadDefaultDatabaseSchema } from "../../plugins/database/load-schema";
+import {
+  DEFAULT_SCHEMA_FILE,
+  loadDefaultDatabaseSchema,
+} from "../../plugins/database/load-schema";
 import {
   DATABASE_TYPES_FILE,
-  generateDatabaseTypes,
+  writeDatabaseTypes,
 } from "../../type-generator/database";
-import { applyPendingMigrations } from "../migrations/apply";
-import { migrationsFolder, readJournal } from "../migrations/paths";
+import {
+  applyPendingMigrations,
+  MigrationApplyError,
+} from "../migrations/apply";
+import {
+  journalFile,
+  migrationsFolder,
+  readJournal,
+} from "../migrations/paths";
 import { type DbContext, openBranchPool } from "./context";
 import { checkAppkitBranch } from "./guard";
-import { type GeneratedMigration, generateMigrationFiles } from "./migrations";
+import {
+  discardMigrationFiles,
+  type GeneratedMigration,
+  generateMigrationFiles,
+} from "./migrations";
 import { resourceId } from "./targets";
-
-/** Same application-relative conventions as the plugin and `appkit generate-types`. */
-const SCHEMA_FILE = "config/database/schema.ts";
 
 /** Whether the checkout has a config/database/schema.ts yet. */
 function hasSchemaFile(root: string): boolean {
-  return fs.existsSync(path.join(root, SCHEMA_FILE));
+  return fs.existsSync(path.join(root, DEFAULT_SCHEMA_FILE));
 }
 
 /** Without schema.ts, point to introspect instead of a load error. */
 function requireSchemaFile(root: string): void {
   if (hasSchemaFile(root)) return;
   throw new Error(
-    `No ${SCHEMA_FILE} yet, so there is nothing to migrate. Run \`appkit db introspect\` to write it from the branch's tables, or create it.`,
+    `No ${DEFAULT_SCHEMA_FILE} yet, so there is nothing to migrate. Run \`appkit db introspect\` to write it from the branch's tables, or create it.`,
   );
+}
+
+/** The journal's text before this run writes to it; null when there is none. */
+function readJournalText(folder: string): string | null {
+  const file = journalFile(folder);
+  return fs.existsSync(file) ? fs.readFileSync(file, "utf-8") : null;
 }
 const DATABASE_TYPES_PATH = path.join(
   "shared/appkit-types",
@@ -100,6 +117,7 @@ export async function runMigrate(
     showImportError: true,
   });
   const folder = migrationsFolder(ctx.root);
+  const journalBefore = readJournalText(folder);
   const generated = await generateMigrationFiles({
     folder,
     schema,
@@ -108,18 +126,29 @@ export async function runMigrate(
 
   // The types follow schema.ts alone, so they are current even if applying fails.
   const typesFile = path.join(ctx.root, DATABASE_TYPES_PATH);
-  await generateDatabaseTypes({
-    schemaFile: path.join(ctx.root, SCHEMA_FILE),
-    outFile: typesFile,
-  });
+  await writeDatabaseTypes(schema, typesFile);
 
   let outcome: ApplyOutcome;
   try {
     outcome = await applyToEnvBranch(ctx, folder, schema.$schemaName);
   } catch (error) {
     if (!generated) throw error;
+    const file = path.relative(ctx.root, generated.file);
+    // A failed migration left in the journal runs first on every later try, so a
+    // fix in schema.ts would stack behind it and never apply.
+    if (
+      error instanceof MigrationApplyError &&
+      error.failed === generated.tag &&
+      error.code
+    ) {
+      discardMigrationFiles(folder, generated, journalBefore);
+      throw new Error(
+        `${error.message} Removed ${file}, so the next run writes it again from ${DEFAULT_SCHEMA_FILE}. Change ${DEFAULT_SCHEMA_FILE} or the branch's data, then rerun \`appkit db migrate\`.`,
+        { cause: error },
+      );
+    }
     throw new Error(
-      `Wrote ${path.relative(ctx.root, generated.file)}, but did not apply it: ${error instanceof Error ? error.message : String(error)}`,
+      `Wrote ${file}, but did not apply it: ${error instanceof Error ? error.message : String(error)}`,
       { cause: error },
     );
   }

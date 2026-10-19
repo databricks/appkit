@@ -1,10 +1,11 @@
 import type { LakebasePoolConfig } from "@databricks/lakebase";
 import type { Pool } from "pg";
 
-import { initializeLakebasePool } from "../../connectors/lakebase";
+import { createLakebasePool } from "../../connectors/lakebase";
 import { endpointHosts } from "../../connectors/lakebase/endpoint-host";
 import { getClientOptions } from "../../context/client-options";
 import { createWorkspaceClient } from "../../workspace-client";
+import { currentIdentity } from "./identity";
 import { LakebaseApi, type LakebaseEndpoint } from "./lakebase-api";
 
 /** One REST call through the SDK's unified-auth client. */
@@ -97,18 +98,25 @@ async function assertHostServesEndpoint(
   }
 }
 
-/** null when PGHOST / PGDATABASE / LAKEBASE_ENDPOINT are not configured. */
+/**
+ * null when PGHOST / PGDATABASE / LAKEBASE_ENDPOINT are not configured. The
+ * pool is created directly: initializeLakebasePool would look the endpoint and
+ * the user up a second time.
+ */
 export async function openBranchPool(ctx: DbContext): Promise<Pool | null> {
   const { PGHOST, PGDATABASE, LAKEBASE_ENDPOINT } = ctx.env;
   if (!PGHOST || !PGDATABASE || !LAKEBASE_ENDPOINT) return null;
-  await assertHostServesEndpoint(ctx, LAKEBASE_ENDPOINT, PGHOST);
+  const [user] = await Promise.all([
+    ctx.env.PGUSER || currentIdentity(ctx).then(({ userName }) => userName),
+    assertHostServesEndpoint(ctx, LAKEBASE_ENDPOINT, PGHOST),
+  ]);
   const port = ctx.env.PGPORT ? Number(ctx.env.PGPORT) : undefined;
   const sslMode = ctx.env.PGSSLMODE as LakebasePoolConfig["sslMode"];
-  return initializeLakebasePool({
+  return createLakebasePool({
     host: PGHOST,
     database: PGDATABASE,
     endpoint: LAKEBASE_ENDPOINT,
-    user: ctx.env.PGUSER || undefined,
+    user,
     ...(port ? { port } : {}),
     ...(sslMode ? { sslMode } : {}),
     // Only apiClient.request and currentUser.me are used (see ToolingWorkspaceClient).

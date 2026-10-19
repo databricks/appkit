@@ -1,10 +1,11 @@
 import { Command } from "commander";
 
+import { loadDatabaseTooling } from "./load-tooling";
 import { fail, isInteractive, printMigrateReport } from "./output";
 
 async function runDbMigrate(): Promise<void> {
   try {
-    const tooling = await import("@databricks/appkit/database-tooling");
+    const tooling = await loadDatabaseTooling();
     const report = await tooling.runMigrate(tooling.createDbContext(), {
       interactive: isInteractive(),
     });

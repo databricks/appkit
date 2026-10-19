@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-const { createWorkspaceClient, initializeLakebasePool } = vi.hoisted(() => ({
+const { createWorkspaceClient, createLakebasePool } = vi.hoisted(() => ({
   createWorkspaceClient: vi.fn(),
-  initializeLakebasePool: vi.fn(),
+  createLakebasePool: vi.fn(),
 }));
 
-vi.mock("../../../connectors/lakebase", () => ({ initializeLakebasePool }));
+vi.mock("../../../connectors/lakebase", () => ({ createLakebasePool }));
 vi.mock("../../../workspace-client", () => ({ createWorkspaceClient }));
 
 import { getClientOptions } from "../../../context/client-options";
@@ -19,7 +19,7 @@ const HOST = "primary.dev-alice-3f9a2c.example.com";
 const pool = { end: vi.fn() };
 
 beforeEach(() => {
-  initializeLakebasePool.mockReset().mockResolvedValue(pool);
+  createLakebasePool.mockReset().mockReturnValue(pool);
   createWorkspaceClient.mockReset();
 });
 afterEach(cleanupTempApps);
@@ -38,7 +38,7 @@ describe("openBranchPool", () => {
       ),
     ).resolves.toBeNull();
     expect(lakebase.calls).toEqual([]);
-    expect(initializeLakebasePool).not.toHaveBeenCalled();
+    expect(createLakebasePool).not.toHaveBeenCalled();
   });
 
   test("connects to PGHOST once it is a host of LAKEBASE_ENDPOINT", async () => {
@@ -56,7 +56,7 @@ describe("openBranchPool", () => {
 
     await expect(openBranchPool(ctx)).resolves.toBe(pool);
     expect(lakebase.calls).toEqual([`getEndpoint ${ENDPOINT}`]);
-    expect(initializeLakebasePool).toHaveBeenCalledWith(
+    expect(createLakebasePool).toHaveBeenCalledWith(
       expect.objectContaining({
         host: HOST.toUpperCase(),
         database: "databricks_postgres",
@@ -64,6 +64,28 @@ describe("openBranchPool", () => {
         user: "alice@example.com",
         max: 2,
       }),
+    );
+  });
+
+  test("without PGUSER the pool connects as the Databricks identity, and the endpoint is looked up once", async () => {
+    const lakebase = new FakeLakebase();
+    lakebase.addBranch(BRANCH);
+    const ctx = fakeContext({
+      root: tempApp(),
+      env: {
+        PGHOST: HOST,
+        PGDATABASE: "databricks_postgres",
+        LAKEBASE_ENDPOINT: ENDPOINT,
+      },
+      userName: "4b2c1e0a-9d8f-4e7a-b6c5-3d2e1f0a9b8c",
+      api: lakebase.api(),
+    });
+
+    await openBranchPool(ctx);
+
+    expect(lakebase.calls).toEqual([`getEndpoint ${ENDPOINT}`]);
+    expect(createLakebasePool).toHaveBeenCalledWith(
+      expect.objectContaining({ user: "4b2c1e0a-9d8f-4e7a-b6c5-3d2e1f0a9b8c" }),
     );
   });
 
@@ -114,7 +136,7 @@ describe("openBranchPool", () => {
     );
     expect(error.cause).toBe(lookupFailure);
 
-    expect(initializeLakebasePool).not.toHaveBeenCalled();
+    expect(createLakebasePool).not.toHaveBeenCalled();
   });
 });
 

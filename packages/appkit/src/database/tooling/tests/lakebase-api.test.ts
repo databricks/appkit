@@ -34,16 +34,20 @@ const apiError = (statusCode: number, message: string) =>
 
 describe("LakebaseApi", () => {
   test("getBranch: GET /api/2.0/postgres/{name}; 404 → null; other errors keep their status", async () => {
+    const branch = {
+      name: "projects/p/branches/b",
+      status: { current_state: "READY" },
+    };
     const fake = client([
-      { name: "projects/p/branches/b" },
+      branch,
       apiError(404, "NOT_FOUND"),
       apiError(403, "PERMISSION_DENIED"),
     ]);
     const api = new LakebaseApi(fake);
 
-    await expect(api.getBranch("projects/p/branches/b")).resolves.toEqual({
-      name: "projects/p/branches/b",
-    });
+    await expect(api.getBranch("projects/p/branches/b")).resolves.toEqual(
+      branch,
+    );
     await expect(
       api.getBranch("projects/p/branches/missing"),
     ).resolves.toBeNull();
@@ -83,5 +87,40 @@ describe("LakebaseApi", () => {
       ["GET", "/api/2.0/postgres/projects/p/branches/b/endpoints/primary"],
       ["GET", "/api/2.0/postgres/projects/p/branches/b/endpoints/gone"],
     ]);
+  });
+
+  test("getBranch refuses a branch the guard could not classify: no status, or a status of the wrong type", async () => {
+    const api = new LakebaseApi(
+      client([
+        { name: "projects/p/branches/b" },
+        { name: "projects/p/branches/b", status: { default: "true" } },
+      ]),
+    );
+
+    await expect(api.getBranch("projects/p/branches/b")).rejects.toThrow(
+      "Lakebase: get branch projects/p/branches/b failed: unexpected response (status: ",
+    );
+    await expect(api.getBranch("projects/p/branches/b")).rejects.toThrow(
+      /unexpected response \(status\.default: /,
+    );
+  });
+
+  test("getBranch keeps the fields it does not check", async () => {
+    const branch = {
+      name: "projects/p/branches/b",
+      uid: "br-1",
+      status: { default: true, logical_size_bytes: 10 },
+    };
+    const api = new LakebaseApi(client([branch]));
+
+    await expect(api.getBranch(branch.name)).resolves.toEqual(branch);
+  });
+
+  test("getEndpoint refuses a response without a name", async () => {
+    const api = new LakebaseApi(client([{ status: {} }]));
+
+    await expect(
+      api.getEndpoint("projects/p/branches/b/endpoints/primary"),
+    ).rejects.toThrow(/unexpected response \(name: /);
   });
 });

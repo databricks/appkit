@@ -65,13 +65,15 @@ export async function checkAppkitBranch(
   const local = readLocalTarget(ctx.env);
   const name = parseResourceName(local.endpoint ?? undefined)?.branch;
   if (!name) return null;
-  const branch = await ctx.api().getBranch(name);
+  const [branch, { userName }] = await Promise.all([
+    ctx.api().getBranch(name),
+    currentIdentity(ctx),
+  ]);
   if (!branch) {
     throw new Error(
       `The .env branch ${name} does not exist (deleted or expired). Run \`appkit db init\` to create or pick one.`,
     );
   }
-  const { userName } = await currentIdentity(ctx);
   return {
     branch,
     verdict: classifyBranch({

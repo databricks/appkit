@@ -1,4 +1,6 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 
 import {
@@ -164,13 +166,19 @@ function findRenameAmbiguity(
   return null;
 }
 
-/** Whether drizzle-kit itself is not installed; module loaders may wrap that error. */
+/**
+ * Whether drizzle-kit itself is not installed, or is a release without the
+ * `./api` export; module loaders may wrap that error.
+ */
 function isDrizzleKitMissing(error: unknown): boolean {
   let current = error;
   for (let depth = 0; depth < 3 && current instanceof Error; depth++) {
+    const code = (current as { code?: unknown }).code;
     if (
-      (current as { code?: unknown }).code === "ERR_MODULE_NOT_FOUND" &&
-      /['"]drizzle-kit['"]/.test(current.message)
+      (code === "ERR_MODULE_NOT_FOUND" &&
+        /['"]drizzle-kit['"]/.test(current.message)) ||
+      (code === "ERR_PACKAGE_PATH_NOT_EXPORTED" &&
+        current.message.includes("drizzle-kit"))
     ) {
       return true;
     }
@@ -179,11 +187,65 @@ function isDrizzleKitMissing(error: unknown): boolean {
   return false;
 }
 
+interface InstalledPackage {
+  readonly version: string;
+  /** The resolved entry file, to resolve that package's own imports from. */
+  readonly entry: string;
+}
+
+/** The package `name` resolves to from `from`; null when it does not resolve. */
+function installedPackage(name: string, from: string): InstalledPackage | null {
+  let entry: string;
+  try {
+    entry = createRequire(from).resolve(name);
+  } catch {
+    return null;
+  }
+  // Neither drizzle-kit nor drizzle-orm exports ./package.json.
+  for (
+    let dir = path.dirname(entry);
+    dir !== path.dirname(dir);
+    dir = path.dirname(dir)
+  ) {
+    const file = path.join(dir, "package.json");
+    if (!fs.existsSync(file)) continue;
+    const pkg = readJsonFile<{ name?: unknown; version?: unknown }>(file);
+    if (pkg.name === name && typeof pkg.version === "string") {
+      return { version: pkg.version, entry };
+    }
+  }
+  return null;
+}
+
+/**
+ * Why the drizzle-kit that resolves from `from` must not write migrations;
+ * undefined when it may, or when it is not installed at all. drizzle-kit reads
+ * the schema's tables through whichever drizzle-orm it resolves, and declares
+ * no drizzle-orm dependency of its own.
+ */
+export function drizzleKitMismatch(
+  from: string = import.meta.url,
+): string | undefined {
+  const kit = installedPackage("drizzle-kit", from);
+  if (!kit) return undefined;
+  if (kit.version !== DRIZZLE_KIT_VERSION) {
+    return `AppKit writes migrations with drizzle-kit ${DRIZZLE_KIT_VERSION}, but ${kit.version} is installed. Install that version: npm install --save-dev drizzle-kit@${DRIZZLE_KIT_VERSION}`;
+  }
+  const orm = installedPackage("drizzle-orm", import.meta.url);
+  const kitOrm = installedPackage("drizzle-orm", kit.entry);
+  if (orm && kitOrm && kitOrm.version !== orm.version) {
+    return `drizzle-kit loads drizzle-orm ${kitOrm.version}, but AppKit builds schemas with ${orm.version}. Use the same version: npm install drizzle-orm@${orm.version}`;
+  }
+  return undefined;
+}
+
 /**
  * drizzle-kit is large, so apps install it as a dev dependency and it is loaded
  * only when a migration is generated.
  */
 async function loadDrizzleKit(): Promise<typeof import("drizzle-kit/api")> {
+  const mismatch = drizzleKitMismatch();
+  if (mismatch) throw new Error(mismatch);
   try {
     return await import("drizzle-kit/api");
   } catch (error) {
@@ -192,6 +254,20 @@ async function loadDrizzleKit(): Promise<typeof import("drizzle-kit/api")> {
       `Generating migrations needs drizzle-kit, which is not installed. Add it as a dev dependency: npm install --save-dev drizzle-kit@${DRIZZLE_KIT_VERSION}`,
       { cause: error },
     );
+  }
+}
+
+/** Replace a file through a rename, so a crash never leaves it half written. */
+function writeFileAtomic(file: string, content: string): void {
+  const temporary = path.join(
+    path.dirname(file),
+    `.${path.basename(file)}.${randomUUID()}.tmp`,
+  );
+  try {
+    fs.writeFileSync(temporary, content);
+    fs.renameSync(temporary, file);
+  } finally {
+    fs.rmSync(temporary, { force: true });
   }
 }
 
@@ -257,6 +333,30 @@ export async function generateMigrationFiles(
   );
   fs.writeFileSync(file, statements.join(BREAKPOINT));
   // The journal is written last: it is what makes the migration visible.
-  fs.writeFileSync(journalFile(options.folder), JSON.stringify(next, null, 2));
+  writeFileAtomic(journalFile(options.folder), JSON.stringify(next, null, 2));
   return { tag, file, statements };
+}
+
+/**
+ * Remove a migration generateMigrationFiles wrote and put back the journal it
+ * replaced (null: there was none, so the folders it created go too).
+ */
+export function discardMigrationFiles(
+  folder: string,
+  migration: GeneratedMigration,
+  journalBefore: string | null,
+): void {
+  fs.rmSync(migration.file, { force: true });
+  fs.rmSync(snapshotFile(folder, Number.parseInt(migration.tag, 10)), {
+    force: true,
+  });
+  if (journalBefore !== null) {
+    writeFileAtomic(journalFile(folder), journalBefore);
+    return;
+  }
+  fs.rmSync(journalFile(folder), { force: true });
+  for (const dir of [path.join(folder, "meta"), folder]) {
+    if (fs.existsSync(dir) && fs.readdirSync(dir).length === 0)
+      fs.rmdirSync(dir);
+  }
 }

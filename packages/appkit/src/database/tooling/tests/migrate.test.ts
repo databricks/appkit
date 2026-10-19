@@ -11,13 +11,17 @@ const { applyPendingMigrations, checkAppkitBranch, openBranchPool } =
     openBranchPool: vi.fn(),
   }));
 
-vi.mock("../../migrations/apply", () => ({ applyPendingMigrations }));
+vi.mock("../../migrations/apply", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../migrations/apply")>()),
+  applyPendingMigrations,
+}));
 vi.mock("../guard", () => ({ checkAppkitBranch }));
 vi.mock("../context", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../context")>()),
   openBranchPool,
 }));
 
+import { MigrationApplyError } from "../../migrations/apply";
 import type { DbContext } from "../context";
 import { runMigrate } from "../migrate";
 
@@ -27,9 +31,7 @@ const builder = path.resolve(
 );
 const roots: string[] = [];
 
-function app(tables: string): DbContext {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "appkit-db-migrate-"));
-  roots.push(root);
+function writeSchema(root: string, tables: string): void {
   const file = path.join(root, "config/database/schema.ts");
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(
@@ -37,6 +39,12 @@ function app(tables: string): DbContext {
     `import { defineSchema, id, text } from ${JSON.stringify(builder)};
      export const schema = defineSchema(({ table }) => ({ ${tables} }));`,
   );
+}
+
+function app(tables: string): DbContext {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "appkit-db-migrate-"));
+  roots.push(root);
+  writeSchema(root, tables);
   return {
     root,
     env: {},
@@ -212,6 +220,77 @@ describe("runMigrate", () => {
         "utf-8",
       ),
     ).toContain("notes");
+  });
+
+  test("when the migration this run wrote fails to apply, it is removed so a fix in schema.ts can replace it", async () => {
+    const ctx = app(`notes: table("notes", { id: id() })`);
+    checkAppkitBranch.mockResolvedValue(null);
+    await runMigrate(ctx, { interactive: false });
+    const folder = path.join(ctx.root, "config/database/migrations");
+    const journal = fs.readFileSync(
+      path.join(folder, "meta/_journal.json"),
+      "utf-8",
+    );
+
+    writeSchema(
+      ctx.root,
+      `notes: table("notes", { id: id(), title: text().notNull() })`,
+    );
+    checkAppkitBranch.mockResolvedValue(devBranch);
+    openBranchPool.mockResolvedValue(pool);
+    const failure = new MigrationApplyError({
+      step: "Applying migrations",
+      failed: "0001_migration",
+      pending: ["0001_migration"],
+      cause: Object.assign(
+        new Error('column "title" of relation "notes" contains null values'),
+        { code: "23502" },
+      ),
+    });
+    applyPendingMigrations.mockRejectedValue(failure);
+
+    const error = (await runMigrate(ctx, { interactive: false }).catch(
+      (caught: unknown) => caught,
+    )) as Error;
+
+    expect(error.message).toBe(
+      `${failure.message} Removed ${path.join("config/database/migrations", "0001_migration.sql")}, so the next run writes it again from config/database/schema.ts. Change config/database/schema.ts or the branch's data, then rerun \`appkit db migrate\`.`,
+    );
+    expect(error.cause).toBe(failure);
+    expect(fs.existsSync(path.join(folder, "0001_migration.sql"))).toBe(false);
+    expect(fs.existsSync(path.join(folder, "meta/0001_snapshot.json"))).toBe(
+      false,
+    );
+    expect(
+      fs.readFileSync(path.join(folder, "meta/_journal.json"), "utf-8"),
+    ).toBe(journal);
+  });
+
+  test("when an earlier migration fails, the one this run wrote stays for the next try", async () => {
+    const ctx = app(`notes: table("notes", { id: id() })`);
+    checkAppkitBranch.mockResolvedValue(null);
+    await runMigrate(ctx, { interactive: false });
+
+    writeSchema(ctx.root, `notes: table("notes", { id: id(), body: text() })`);
+    checkAppkitBranch.mockResolvedValue(devBranch);
+    openBranchPool.mockResolvedValue(pool);
+    applyPendingMigrations.mockRejectedValue(
+      new MigrationApplyError({
+        step: "Applying migrations",
+        failed: "0000_migration",
+        pending: ["0000_migration", "0001_migration"],
+        cause: Object.assign(new Error("duplicate key"), { code: "23505" }),
+      }),
+    );
+
+    await expect(runMigrate(ctx, { interactive: false })).rejects.toThrow(
+      /^Wrote .*0001_migration\.sql, but did not apply it: Migration 0000_migration failed/,
+    );
+    expect(
+      fs.existsSync(
+        path.join(ctx.root, "config/database/migrations/0001_migration.sql"),
+      ),
+    ).toBe(true);
   });
 
   test("a guard failure after generating says so too, and never connects", async () => {

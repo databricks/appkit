@@ -19,6 +19,7 @@ import {
   varchar,
 } from "../../schema-builder";
 import {
+  discardMigrationFiles,
   generateMigrationFiles,
   MigrationRenameAmbiguityError,
 } from "../migrations";
@@ -339,5 +340,44 @@ describe("generateMigrationFiles", () => {
         `^Cannot read ${snapshot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: .+\\. Restore it from version control\\.$`,
       ),
     );
+  });
+});
+
+describe("discardMigrationFiles", () => {
+  test("a first migration goes with the folders it created", async () => {
+    const folder = tempFolder();
+    const migration = await generateMigrationFiles({
+      folder,
+      schema: blog(),
+      interactive: false,
+    });
+
+    discardMigrationFiles(folder, migration as never, null);
+
+    expect(fs.existsSync(folder)).toBe(false);
+  });
+
+  test("a later migration goes, and the previous journal comes back byte for byte", async () => {
+    const folder = tempFolder();
+    await generateMigrationFiles({
+      folder,
+      schema: blog(),
+      interactive: false,
+    });
+    const journalFile = path.join(folder, "meta/_journal.json");
+    const journalBefore = `${fs.readFileSync(journalFile, "utf-8")}\n`;
+    fs.writeFileSync(journalFile, journalBefore);
+    const filesBefore = listFiles(folder);
+    const migration = await generateMigrationFiles({
+      folder,
+      schema: blog({ summary: text() }),
+      interactive: false,
+    });
+    expect(listFiles(folder)).not.toEqual(filesBefore);
+
+    discardMigrationFiles(folder, migration as never, journalBefore);
+
+    expect(listFiles(folder)).toEqual(filesBefore);
+    expect(fs.readFileSync(journalFile, "utf-8")).toBe(journalBefore);
   });
 });
