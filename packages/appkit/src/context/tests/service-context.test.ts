@@ -629,7 +629,7 @@ describe("ServiceContext", () => {
     test("should return product name and version", () => {
       const options = ServiceContext.getClientOptions();
 
-      expect(options.product).toBe("@databricks/appkit");
+      expect(options.product).toBe("databricks-appkit");
       expect(options.productVersion).toBeDefined();
     });
 

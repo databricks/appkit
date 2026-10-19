@@ -70,9 +70,7 @@ describe("User-Agent attribution (wire)", () => {
     // A real server received it, so this is the transport's User-Agent, not a
     // mocked value. The raw seam sends AppKit's product segment only; typed
     // modular clients append the SDK's own client-info after it.
-    expect(capturedUserAgents[0]).toMatch(
-      /^@databricks\/appkit\/\d+\.\d+\.\d+/,
-    );
+    expect(capturedUserAgents[0]).toMatch(/^databricks-appkit\/\d+\.\d+\.\d+/);
   });
 
   test("raw-fetch upload path stamps the AppKit User-Agent on the wire", async () => {
@@ -84,9 +82,7 @@ describe("User-Agent attribution (wire)", () => {
     );
 
     expect(capturedUserAgents).toHaveLength(1);
-    expect(capturedUserAgents[0]).toMatch(
-      /^@databricks\/appkit\/\d+\.\d+\.\d+/,
-    );
+    expect(capturedUserAgents[0]).toMatch(/^databricks-appkit\/\d+\.\d+\.\d+/);
   });
 
   test("dev mode adds the mode/dev User-Agent segment", async () => {

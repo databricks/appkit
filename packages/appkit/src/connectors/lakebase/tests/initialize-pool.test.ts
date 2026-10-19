@@ -55,7 +55,7 @@ describe("AppKit Lakebase connector initialization", () => {
     expect(await initializeLakebasePool()).toBe(pool);
     expect(mocks.me).toHaveBeenCalledOnce();
     expect(mocks.createWorkspaceClient).toHaveBeenCalledWith({
-      clientOptions: expect.objectContaining({ product: "@databricks/appkit" }),
+      clientOptions: expect.objectContaining({ product: "databricks-appkit" }),
     });
     expect(mocks.createPool).toHaveBeenCalledWith({
       user: "local-user@example.test",

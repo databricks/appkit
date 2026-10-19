@@ -320,22 +320,18 @@ function mapToClientOptions(opts: WorkspaceClientOptions): ClientOptions {
 }
 
 /**
- * Wrap the SDK's default fetch transport to prepend AppKit's product segment to
- * the outgoing `User-Agent`, preserving the exact legacy string (e.g.
- * `@databricks/appkit/0.75.1`) that Databricks-side dashboards match on.
+ * Wrap the SDK's default fetch transport to prepend AppKit's product segment
+ * (e.g. `databricks-appkit/0.88.1`) to the outgoing `User-Agent`, which
+ * Databricks-side dashboards match on.
  *
- * Why the transport and not `setProduct`: the modular SDK's client-info API
- * validates the product as a simple token and rejects `@databricks/appkit` (the
- * `@`/`/`), and it is process-global. Setting the header on the `httpClient`
- * instead keeps the literal product name, is per-client, and — unlike a pnpm
- * patch — ships inside appkit's bundled `dist`, so it also reaches deployed apps
- * (npm-installed from the tarball, where pnpm patches do not apply). The SDK's
- * own client-info (`sdk-js-core/…`, runtime) is already on `request.headers`, so
- * prepending keeps it intact after AppKit's segment.
+ * Why the transport and not the SDK's `setProduct`: that is process-global,
+ * while the header on the `httpClient` is per-client, and the wrapper ships
+ * inside appkit's bundled `dist`, so it also reaches deployed apps. The SDK's
+ * own client-info (`sdk-js-core/…`, runtime) is already on `request.headers`,
+ * so prepending keeps it intact after AppKit's segment.
  *
- * Returns `undefined` when no product is configured (build-time callers), leaving
- * the SDK's default User-Agent untouched — matching the legacy behavior where
- * build-time clients carried no AppKit UA.
+ * The wrapper also retries (see `sendWithRetry`). With no product configured
+ * (build-time callers) it adds no AppKit segment, like the legacy behavior.
  */
 function buildHttpClient(opts: WorkspaceClientOptions): HttpClient {
   const co = opts.clientOptions;

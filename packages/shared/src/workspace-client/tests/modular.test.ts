@@ -336,31 +336,31 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     );
   });
 
-  test("User-Agent: prepends the exact @databricks/appkit product segment (dashboards match on it)", async () => {
+  test("User-Agent: prepends the exact databricks-appkit product segment (dashboards match on it)", async () => {
     // Regression: the modular SDK's `setProduct` rejects `@databricks/appkit`
     // (the `@`/`/`). We set the UA on the httpClient transport instead, keeping
     // the literal legacy product string that Databricks-side dashboards match.
     buildWarehousesClient({
       clientOptions: {
-        product: "@databricks/appkit",
+        product: "databricks-appkit",
         productVersion: "0.64.0",
         userAgentExtra: { mode: "dev" },
       },
     } as never);
     // The SDK's own client-info UA is already on the request; ours prepends.
     const ua = await sentUserAgent(ctorOpts[0].httpClient, "sdk-js-core/1.0.0");
-    expect(ua).toBe("@databricks/appkit/0.64.0 mode/dev sdk-js-core/1.0.0");
+    expect(ua).toBe("databricks-appkit/0.64.0 mode/dev sdk-js-core/1.0.0");
   });
 
   test("User-Agent: sets the product segment even when the request has no prior UA", async () => {
     buildWarehousesClient({
       clientOptions: {
-        product: "@databricks/appkit",
+        product: "databricks-appkit",
         productVersion: "0.64.0",
       },
     } as never);
     const ua = await sentUserAgent(ctorOpts[0].httpClient);
-    expect(ua).toBe("@databricks/appkit/0.64.0");
+    expect(ua).toBe("databricks-appkit/0.64.0");
   });
 
   test("genie (asUser) uses the OBO token as PAT and keeps the AppKit User-Agent", async () => {
@@ -370,7 +370,7 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
       token: "user-token",
       host: "https://x",
       clientOptions: {
-        product: "@databricks/appkit",
+        product: "databricks-appkit",
         productVersion: "0.64.0",
       },
     } as never).genieGetConversationMessage({} as never);
@@ -380,7 +380,7 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     });
     expect(m2mOpts).toEqual([]);
     expect(await sentUserAgent(ctorOpts[0].httpClient)).toBe(
-      "@databricks/appkit/0.64.0",
+      "databricks-appkit/0.64.0",
     );
   });
 
@@ -406,7 +406,7 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
       host: "x.cloud.databricks.com",
       token: "user-token",
       clientOptions: {
-        product: "@databricks/appkit",
+        product: "databricks-appkit",
         productVersion: "0.64.0",
       },
     } as never).getApp({} as never);
@@ -417,7 +417,7 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     });
     expect(m2mOpts).toEqual([]);
     expect(await sentUserAgent(ctorOpts[0].httpClient)).toBe(
-      "@databricks/appkit/0.64.0",
+      "databricks-appkit/0.64.0",
     );
   });
 
@@ -442,7 +442,7 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
       token: "user-token",
       host: "https://x",
       clientOptions: {
-        product: "@databricks/appkit",
+        product: "databricks-appkit",
         productVersion: "0.64.0",
       },
     } as never).getDatabaseInstance({} as never);
@@ -452,7 +452,7 @@ describe("modular mapToClientOptions (via buildWarehousesClient)", () => {
     });
     expect(m2mOpts).toEqual([]);
     expect(await sentUserAgent(ctorOpts[0].httpClient)).toBe(
-      "@databricks/appkit/0.64.0",
+      "databricks-appkit/0.64.0",
     );
   });
 
@@ -778,7 +778,7 @@ describe("buildWorkspaceAuth (auth + raw-request seam)", () => {
       host: "ws.cloud.databricks.com",
       token: "t",
       clientOptions: {
-        product: "@databricks/appkit",
+        product: "databricks-appkit",
         productVersion: "0.64.0",
       },
     } as never);
@@ -794,7 +794,7 @@ describe("buildWorkspaceAuth (auth + raw-request seam)", () => {
       "https://ws.cloud.databricks.com/api/2.0/sql/warehouses?skip_cannot_use=true",
     );
     expect(sent[0].method).toBe("GET");
-    expect(sent[0].headers.get("User-Agent")).toBe("@databricks/appkit/0.64.0");
+    expect(sent[0].headers.get("User-Agent")).toBe("databricks-appkit/0.64.0");
     expect(sent[0].headers.get("Authorization")).toBe("Bearer t");
     expect(sent[0].headers.get("X-Extra")).toBe("1");
   });
