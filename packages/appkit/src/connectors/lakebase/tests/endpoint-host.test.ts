@@ -316,3 +316,108 @@ describe("assertEndpointHostMatches", () => {
     ]);
   });
 });
+
+// A request-only client (no typed postgres, no legacy apiClient) can't read the
+// endpoint, so the check is skipped with a warning instead of blocking startup.
+test("skips verification for a request-only client", async () => {
+  const { endpoint, host } = names();
+  const request = vi.fn();
+  await assertEndpointHostMatches({
+    endpoint,
+    host,
+    workspaceClient: { request } as unknown as Client,
+  });
+  expect(request).not.toHaveBeenCalled();
+  expect(warnings()).toContain("Could not verify");
+});
+
+// AppKit's workspace client carries the typed Lakebase Postgres client, which
+// wins over its raw `request()` seam.
+describe("assertEndpointHostMatches with the typed postgres client", () => {
+  function postgresClient(
+    impl: (
+      req: { name: string },
+      options: { signal: AbortSignal },
+    ) => Promise<unknown>,
+  ) {
+    const getEndpoint = vi.fn(impl);
+    const request = vi.fn();
+    return {
+      getEndpoint,
+      request,
+      client: { postgres: { getEndpoint }, request } as unknown as Client,
+    };
+  }
+
+  test("rejects a mismatch read through postgres.getEndpoint", async () => {
+    const { endpoint, host } = names();
+    const { getEndpoint, request, client } = postgresClient(async () => ({
+      status: {
+        hosts: {
+          host: "ep-expected.database.example.com",
+          readOnlyHost: "ep-ro.database.example.com",
+        },
+      },
+    }));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(
+      assertEndpointHostMatches({ endpoint, host, workspaceClient: client }),
+    ).rejects.toThrow("ep-expected.database.example.com");
+    expect(getEndpoint).toHaveBeenCalledWith(
+      { name: endpoint },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  test("accepts the camelCase read-only host", async () => {
+    const { endpoint, host } = names();
+    const { client } = postgresClient(async () => ({
+      status: { hosts: { host: "ep-rw.example.com", readOnlyHost: host } },
+    }));
+
+    await assertEndpointHostMatches({
+      endpoint,
+      host,
+      workspaceClient: client,
+    });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  test("warns when the typed client reports a 404 via httpStatusCode", async () => {
+    const { endpoint, host } = names();
+    const { client } = postgresClient(async () => {
+      throw Object.assign(new Error("not found"), { httpStatusCode: 404 });
+    });
+
+    await assertEndpointHostMatches({
+      endpoint,
+      host,
+      workspaceClient: client,
+    });
+    expect(warnings()).toContain("was not found");
+  });
+
+  test("aborts the typed lookup when the deadline expires", async () => {
+    vi.useFakeTimers();
+    const { endpoint, host } = names();
+    let seen: AbortSignal | undefined;
+    const { client } = postgresClient(
+      (_req, options) =>
+        new Promise(() => {
+          seen = options.signal;
+        }),
+    );
+
+    const check = assertEndpointHostMatches({
+      endpoint,
+      host,
+      workspaceClient: client,
+    });
+    await vi.advanceTimersByTimeAsync(3_000);
+    await check;
+    expect(seen?.aborted).toBe(true);
+    expect(warnings()).toContain("timed out");
+  });
+});

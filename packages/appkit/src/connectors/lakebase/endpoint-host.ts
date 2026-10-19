@@ -74,16 +74,26 @@ async function compareHosts(
       reason,
     );
   try {
+    const lookup =
+      "postgres" in client && client.postgres
+        ? // AppKit's workspace client: the typed Lakebase Postgres client.
+          client.postgres.getEndpoint(
+            { name: endpoint },
+            { signal: controller.signal },
+          )
+        : "apiClient" in client
+          ? client.apiClient.request(
+              {
+                path: `/api/2.0/postgres/${endpoint}`,
+                method: "GET",
+                headers: new Headers({ Accept: "application/json" }),
+                raw: false,
+              },
+              contextFromAbortSignal(controller.signal),
+            )
+          : Promise.resolve(undefined);
     const response = await Promise.race([
-      client.apiClient.request(
-        {
-          path: `/api/2.0/postgres/${endpoint}`,
-          method: "GET",
-          headers: new Headers({ Accept: "application/json" }),
-          raw: false,
-        },
-        contextFromAbortSignal(controller.signal),
-      ),
+      lookup,
       new Promise<undefined>((resolve) => {
         timer = setTimeout(() => {
           controller.abort();
@@ -97,8 +107,9 @@ async function compareHosts(
     if (
       typeof error === "object" &&
       error !== null &&
-      "statusCode" in error &&
-      error.statusCode === 404
+      // The typed client's sdk-core ApiError reports `httpStatusCode`.
+      (("statusCode" in error && error.statusCode === 404) ||
+        ("httpStatusCode" in error && error.httpStatusCode === 404))
     ) {
       logger.warn(
         "LAKEBASE_ENDPOINT %s was not found. Check the project, branch, and endpoint names; `databricks postgres list-endpoints projects/{project}/branches/{branch}` lists them with their hosts.",
