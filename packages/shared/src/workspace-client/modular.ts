@@ -16,6 +16,12 @@
  * (`patches/@databricks__sdk-statementexecution@0.46.0.patch`) that restores the
  * undocumented Reyden `attachment` response field, which the SDK's generated
  * unmarshal transform would otherwise strip.
+ *
+ * NOTE: genie relies on a pinned pnpm patch
+ * (`patches/@databricks__sdk-genie@0.54.0.patch`): the generated model types the
+ * query result's `data_array` as protobuf `ListValue[]` (`{ values: [...] }`), but
+ * the API returns plain `JSON_ARRAY` rows (`[["a", null], ...]`), so the unmarshal
+ * schema rejected every real query result. The patch restores `(string | null)[][]`.
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -39,6 +45,7 @@ import {
   newFetchHttpClient,
 } from "@databricks/sdk-core/http";
 import { type ProfileOptions, resolve } from "@databricks/sdk-core/profiles";
+import type { GenieClient } from "@databricks/sdk-genie/v1";
 import type { ClientOptions } from "@databricks/sdk-options/client";
 import { ScimClient } from "@databricks/sdk-scim/v1";
 import { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
@@ -499,7 +506,46 @@ export function buildScimClient(opts: WorkspaceClientOptions): ScimClient {
   return new ScimClient(mapToClientOptions(opts));
 }
 
+/**
+ * Defer loading an SDK client's module until its first method call, so app
+ * boot doesn't pay for clients it never uses. Generated methods return either
+ * a Promise or (`*Iter`) an AsyncGenerator, so each proxied call returns the
+ * pending result as a Promise that is also async-iterable.
+ */
+function lazyClient<T extends object>(
+  load: () => Promise<new (options: ClientOptions) => T>,
+  options: ClientOptions,
+): T {
+  let client: Promise<T> | undefined;
+  return new Proxy({} as T, {
+    get(_target, prop) {
+      // Not thenable, or `await facade.someClient` would hang.
+      if (typeof prop === "symbol" || prop === "then") return undefined;
+      return (...args: unknown[]) => {
+        client ??= load().then((Client) => new Client(options));
+        const result = client.then((c) =>
+          (c as Record<string, (...a: unknown[]) => unknown>)[prop](...args),
+        );
+        return Object.assign(result, {
+          async *[Symbol.asyncIterator]() {
+            yield* (await result) as AsyncIterable<unknown>;
+          },
+        });
+      };
+    },
+  });
+}
+
+/** Build a modular Genie client from wrapper options. */
+export function buildGenieClient(opts: WorkspaceClientOptions): GenieClient {
+  return lazyClient(
+    () => import("@databricks/sdk-genie/v1").then((m) => m.GenieClient),
+    mapToClientOptions(opts),
+  );
+}
+
 // ── Client type re-exports (for the facade accessor types) ───────────────
+export type { GenieClient } from "@databricks/sdk-genie/v1";
 export type { ScimClient } from "@databricks/sdk-scim/v1";
 export type { StatementExecutionClient } from "@databricks/sdk-statementexecution/v1";
 export type { WarehousesClient } from "@databricks/sdk-warehouses/v1";
@@ -524,6 +570,10 @@ export type {
   StatementStatus,
   StatementStatus_State,
 } from "@databricks/sdk-statementexecution/v1";
+export type {
+  GenieGetMessageQueryResultResponse,
+  GenieMessage,
+} from "@databricks/sdk-genie/v1";
 export type {
   EndpointHealth,
   EndpointInfo,

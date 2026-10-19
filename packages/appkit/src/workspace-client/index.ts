@@ -5,14 +5,7 @@
  * behind a stable facade.
  */
 
-export {
-  ApiError,
-  ConfigError,
-  Context,
-  createWorkspaceClient,
-  Time,
-  TimeUnits,
-} from "shared";
+export { ApiError, ConfigError, Context, createWorkspaceClient } from "shared";
 // Forwards every wrapper type — legacy service namespaces (files/jobs/serving),
 // the client option/waiter types, and the modular SDK client + model types
 // (warehouses, statementExecution). `sql` is gone: its statement + warehouse

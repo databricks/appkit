@@ -18,6 +18,8 @@ import {
   buildWarehousesClient,
   buildWorkspaceAuth,
   type ScimClient,
+  buildGenieClient,
+  type GenieClient,
   type StatementExecutionClient,
   type WarehousesClient,
   type WorkspaceAuth,
@@ -32,6 +34,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
   #statementExecution?: StatementExecutionClient;
   #auth?: WorkspaceAuth;
   #currentUser?: ScimClient;
+  #genie?: GenieClient;
 
   constructor(opts: WorkspaceClientOptions) {
     this.#opts = opts;
@@ -49,8 +52,12 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#warehouses;
   }
 
-  get genie() {
-    return this.#getLegacy().genie;
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  get genie(): GenieClient {
+    if (!this.#genie) {
+      this.#genie = buildGenieClient(this.#opts);
+    }
+    return this.#genie;
   }
 
   get jobs() {
