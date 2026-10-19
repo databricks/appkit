@@ -18,6 +18,7 @@ import type {
   StatementExecutionClient,
   WarehousesClient,
   WorkspaceAuth,
+  ScimClient,
 } from "./modular";
 
 // Legacy SDK type namespaces for un-migrated services, re-exported so AppKit
@@ -59,8 +60,8 @@ export interface WorkspaceClient extends WorkspaceAuth {
   /** Serving Endpoints. */
   readonly servingEndpoints: LegacyWorkspaceClient["servingEndpoints"];
 
-  /** Current user. */
-  readonly currentUser: LegacyWorkspaceClient["currentUser"];
+  /** Current user (modular SDK SCIM client; `me({})` returns the caller). */
+  readonly currentUser: ScimClient;
 
   /**
    * Legacy SDK `Config`. Prefer `getHost()` / `authenticate(headers)` (modular,

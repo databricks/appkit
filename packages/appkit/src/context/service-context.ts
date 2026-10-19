@@ -44,6 +44,8 @@ export interface ServiceContextState {
  */
 export class ServiceContext {
   private static instance: ServiceContextState | null = null;
+  /** Workspace host resolved at init (profile-aware); dev fallback for OBO. */
+  private static resolvedHost: string | undefined;
   private static initPromise: Promise<ServiceContextState> | null = null;
 
   /**
@@ -111,11 +113,11 @@ export class ServiceContext {
       throw AuthenticationError.missingToken("user token");
     }
 
-    // Local templates can configure only a profile, whose host the SDK resolved.
+    // Local templates can configure only a profile, whose host init resolved.
     const host =
       process.env.DATABRICKS_HOST ||
       (process.env.NODE_ENV === "development" && ServiceContext.isInitialized()
-        ? ServiceContext.get().client.config?.host
+        ? ServiceContext.resolvedHost
         : undefined);
     if (!host) {
       throw ConfigurationError.missingEnvVar("DATABRICKS_HOST");
@@ -183,12 +185,14 @@ export class ServiceContext {
       const wsClient =
         client ?? createWorkspaceClient({ clientOptions: getClientOptions() });
 
-      const [resolvedWorkspaceId, currentUser, resolvedResources] =
+      const [resolvedWorkspaceId, currentUser, resolvedResources, host] =
         await Promise.all([
           ServiceContext.getWorkspaceId(wsClient),
-          wsClient.currentUser.me(),
+          wsClient.currentUser.me({}),
           WarehouseResource.resolve(wsClient, options?.warehouseId),
+          ServiceContext.resolveHost(wsClient),
         ]);
+      ServiceContext.resolvedHost = host;
 
       if (!currentUser.id) {
         throw ConfigurationError.resourceNotFound("Service user ID");
@@ -241,11 +245,26 @@ export class ServiceContext {
   }
 
   /**
+   * Resolve the host locally (env or profile, no network). Never fails startup:
+   * without a host, createCallerContext throws missingEnvVar instead.
+   */
+  private static async resolveHost(
+    client: WorkspaceClient,
+  ): Promise<string | undefined> {
+    try {
+      return await client.getHost();
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Reset the service context. Only for testing purposes.
    */
   static reset(): void {
     ServiceContext.instance = null;
     ServiceContext.initPromise = null;
+    ServiceContext.resolvedHost = undefined;
     WarehouseResource.reset();
   }
 }
