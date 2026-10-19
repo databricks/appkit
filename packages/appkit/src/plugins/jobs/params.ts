@@ -21,36 +21,34 @@ export function mapParams(
 ): Record<string, unknown> {
   switch (taskType) {
     case "notebook":
-      // notebook_params expects Record<string, string>, values coerced to string
+      // notebookParams expects Record<string, string>, values coerced to string
       assertPrimitiveValues(params);
       return {
-        notebook_params: Object.fromEntries(
+        notebookParams: Object.fromEntries(
           Object.entries(params).map(([k, v]) => [k, String(v)]),
         ),
       };
     case "python_wheel":
       assertPrimitiveValues(params);
       return {
-        python_named_params: Object.fromEntries(
+        pythonNamedParams: Object.fromEntries(
           Object.entries(params).map(([k, v]) => [k, String(v)]),
         ),
       };
     case "python_script":
-      // python_params expects string[] (positional args)
+      // pythonParams expects string[] (positional args)
       return {
-        python_params: Array.isArray(params.args)
-          ? params.args.map(String)
-          : [],
+        pythonParams: Array.isArray(params.args) ? params.args.map(String) : [],
       };
     case "spark_jar":
-      // jar_params expects string[]
+      // jarParams expects string[]
       return {
-        jar_params: Array.isArray(params.args) ? params.args.map(String) : [],
+        jarParams: Array.isArray(params.args) ? params.args.map(String) : [],
       };
     case "sql":
       assertPrimitiveValues(params);
       return {
-        sql_params: Object.fromEntries(
+        sqlParams: Object.fromEntries(
           Object.entries(params).map(([k, v]) => [k, String(v)]),
         ),
       };

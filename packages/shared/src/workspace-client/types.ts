@@ -8,7 +8,7 @@
  * service means changing its accessor's type here, its getter in `client.ts`,
  * and the connector that consumes it.
  *
- * Type-namespace re-exports (`files`, `jobs`, `serving`, `sql`) point at
+ * Type-namespace re-exports (`files`, `serving`, `sql`) point at
  * `@databricks/sdk-experimental` so existing AppKit call-site shapes stay
  * stable. They move to the modular `@databricks/sdk-<service>` model exports
  * as each service migrates.
@@ -20,6 +20,7 @@ import type {
   WorkspaceAuth,
   ScimClient,
   GenieClient,
+  JobsClient,
 } from "./modular";
 
 // Legacy SDK type namespaces for un-migrated services, re-exported so AppKit
@@ -30,8 +31,8 @@ import type {
 // as `sql.EndpointInfo[]`. It is not on the modular `listWarehouses` because
 // that request has no `skip_cannot_use` filter, so it could pick a warehouse
 // the caller can't use. Statement + warehouse service types come from `./modular`.
-export type { files, jobs, serving, sql } from "@databricks/sdk-experimental";
-// Modular SDK client + model types (warehouses, statementExecution, genie).
+export type { files, serving, sql } from "@databricks/sdk-experimental";
+// Modular SDK client + model types (warehouses, statementExecution, genie, jobs).
 export type * from "./modular";
 
 /**
@@ -52,8 +53,8 @@ export interface WorkspaceClient extends WorkspaceAuth {
   /** Genie (modular SDK). */
   readonly genie: GenieClient;
 
-  /** Jobs. */
-  readonly jobs: LegacyWorkspaceClient["jobs"];
+  /** Jobs (modular SDK, Jobs API 2.2). */
+  readonly jobs: JobsClient;
 
   /** Statement Execution (modular SDK). */
   readonly statementExecution: StatementExecutionClient;

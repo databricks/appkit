@@ -6,7 +6,7 @@
  */
 
 export { ApiError, ConfigError, Context, createWorkspaceClient } from "shared";
-// Forwards every wrapper type — legacy service namespaces (files/jobs/serving),
+// Forwards every wrapper type — legacy service namespaces (files/serving),
 // the client option/waiter types, and the modular SDK client + model types
 // (warehouses, statementExecution). `sql` is gone: its statement + warehouse
 // types now come from the modular SDK.

@@ -20,6 +20,8 @@ import {
   type ScimClient,
   buildGenieClient,
   type GenieClient,
+  buildJobsClient,
+  type JobsClient,
   type StatementExecutionClient,
   type WarehousesClient,
   type WorkspaceAuth,
@@ -35,6 +37,7 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
   #auth?: WorkspaceAuth;
   #currentUser?: ScimClient;
   #genie?: GenieClient;
+  #jobs?: JobsClient;
 
   constructor(opts: WorkspaceClientOptions) {
     this.#opts = opts;
@@ -60,8 +63,12 @@ export class AppKitWorkspaceClient implements WorkspaceClient {
     return this.#genie;
   }
 
-  get jobs() {
-    return this.#getLegacy().jobs;
+  // Migrated to the modular SDK — built lazily, independent of the legacy client.
+  get jobs(): JobsClient {
+    if (!this.#jobs) {
+      this.#jobs = buildJobsClient(this.#opts);
+    }
+    return this.#jobs;
   }
 
   // Migrated to the modular SDK — built lazily, independent of the legacy client.

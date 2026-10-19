@@ -8,7 +8,14 @@ import type {
 } from "shared";
 import { toJSONSchema } from "zod";
 
-import { JobsConnector } from "../../connectors/jobs";
+import {
+  type JobBaseRun,
+  type JobDetails,
+  type JobRun,
+  type JobRunNowResponse,
+  type JobRunOutput,
+  JobsConnector,
+} from "../../connectors/jobs";
 import { getCurrentPrincipalId, getWorkspaceClient } from "../../context";
 import { ExecutionError, ValidationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
@@ -16,7 +23,6 @@ import type { ExecutionResult } from "../../plugin";
 import { Plugin, toPlugin } from "../../plugin";
 import type { ResourceRequirement } from "../../registry";
 import { defineManifest, ResourceType } from "../../registry";
-import type { jobs as jobsTypes } from "../../workspace-client";
 import {
   JOBS_READ_DEFAULTS,
   JOBS_STREAM_DEFAULTS,
@@ -270,26 +276,26 @@ class JobsPlugin extends Plugin {
     ): Promise<ExecutionResult<never> | null> => {
       const result = await self.execute(
         async (signal) =>
-          self.connector.getRun(client, { run_id: runId }, signal),
+          self.connector.getRun(client, { runId: BigInt(runId) }, signal),
         self._readSettings(["jobs:getRun", jobKey, runId]),
         userKey,
       );
       if (!result.ok) return errorResult(result.status);
-      if (result.data.job_id !== jobId) return errorResult(404);
+      if (result.data.jobId !== jobId) return errorResult(404);
       return null;
     };
 
     return {
       runNow: async (
         params?: Record<string, unknown>,
-      ): Promise<ExecutionResult<jobsTypes.RunNowResponse>> => {
+      ): Promise<ExecutionResult<JobRunNowResponse>> => {
         const sdkFields = self._validateAndMap(jobKey, params);
 
         const result = await self.execute(
           async (signal) =>
             self.connector.runNow(
               client,
-              { ...sdkFields, job_id: jobId },
+              { ...sdkFields, jobId: BigInt(jobId) },
               signal,
             ),
           self._writeSettings(),
@@ -308,7 +314,7 @@ class JobsPlugin extends Plugin {
           async (signal) =>
             self.connector.runNow(
               client,
-              { ...sdkFields, job_id: jobId },
+              { ...sdkFields, jobId: BigInt(jobId) },
               signal,
             ),
           self._writeSettings(),
@@ -318,9 +324,9 @@ class JobsPlugin extends Plugin {
         if (!runResult.ok) {
           throw new ExecutionError("Failed to trigger job run");
         }
-        const runId = runResult.data.run_id;
+        const runId = runResult.data.runId;
         if (!runId) {
-          throw new Error("runNow did not return a run_id");
+          throw new Error("runNow did not return a runId");
         }
 
         const basePollInterval =
@@ -339,7 +345,7 @@ class JobsPlugin extends Plugin {
 
           const runStatusResult = await self.execute(
             async (signal) =>
-              self.connector.getRun(client, { run_id: runId }, signal),
+              self.connector.getRun(client, { runId: BigInt(runId) }, signal),
             {
               default: {
                 ...JOBS_READ_DEFAULTS,
@@ -354,7 +360,7 @@ class JobsPlugin extends Plugin {
             );
           }
           const run = runStatusResult.data;
-          const state = run.state?.life_cycle_state;
+          const state = run.state?.lifeCycleState;
 
           yield { status: state, timestamp: Date.now(), run };
 
@@ -369,14 +375,12 @@ class JobsPlugin extends Plugin {
         }
       },
 
-      lastRun: async (): Promise<
-        ExecutionResult<jobsTypes.BaseRun | undefined>
-      > => {
+      lastRun: async (): Promise<ExecutionResult<JobBaseRun | undefined>> => {
         const result = await self.execute(
           async (signal) =>
             self.connector.listRuns(
               client,
-              { job_id: jobId, limit: 1 },
+              { jobId: BigInt(jobId), limit: 1 },
               signal,
             ),
           self._readSettings(["jobs:lastRun", jobKey]),
@@ -388,12 +392,12 @@ class JobsPlugin extends Plugin {
 
       listRuns: async (options?: {
         limit?: number;
-      }): Promise<ExecutionResult<jobsTypes.BaseRun[]>> => {
+      }): Promise<ExecutionResult<JobBaseRun[]>> => {
         const result = await self.execute(
           async (signal) =>
             self.connector.listRuns(
               client,
-              { job_id: jobId, limit: options?.limit },
+              { jobId: BigInt(jobId), limit: options?.limit },
               signal,
             ),
           self._readSettings([
@@ -406,28 +410,30 @@ class JobsPlugin extends Plugin {
         return result.ok ? result : errorResult(result.status);
       },
 
-      getRun: async (
-        runId: number,
-      ): Promise<ExecutionResult<jobsTypes.Run>> => {
+      getRun: async (runId: number): Promise<ExecutionResult<JobRun>> => {
         const result = await self.execute(
           async (signal) =>
-            self.connector.getRun(client, { run_id: runId }, signal),
+            self.connector.getRun(client, { runId: BigInt(runId) }, signal),
           self._readSettings(["jobs:getRun", jobKey, runId]),
           userKey,
         );
         if (!result.ok) return errorResult(result.status);
-        if (result.data.job_id !== jobId) return errorResult(404);
+        if (result.data.jobId !== jobId) return errorResult(404);
         return result;
       },
 
       getRunOutput: async (
         runId: number,
-      ): Promise<ExecutionResult<jobsTypes.RunOutput>> => {
+      ): Promise<ExecutionResult<JobRunOutput>> => {
         const scopeError = await verifyRunScope(runId);
         if (scopeError) return scopeError;
         const result = await self.execute(
           async (signal) =>
-            self.connector.getRunOutput(client, { run_id: runId }, signal),
+            self.connector.getRunOutput(
+              client,
+              { runId: BigInt(runId) },
+              signal,
+            ),
           self._readSettings(["jobs:getRunOutput", jobKey, runId]),
           userKey,
         );
@@ -439,17 +445,17 @@ class JobsPlugin extends Plugin {
         if (scopeError) return scopeError;
         const result = await self.execute(
           async (signal) =>
-            self.connector.cancelRun(client, { run_id: runId }, signal),
+            self.connector.cancelRun(client, { runId: BigInt(runId) }, signal),
           self._writeSettings(),
           userKey,
         );
         return result.ok ? result : errorResult(result.status);
       },
 
-      getJob: async (): Promise<ExecutionResult<jobsTypes.Job>> => {
+      getJob: async (): Promise<ExecutionResult<JobDetails>> => {
         const result = await self.execute(
           async (signal) =>
-            self.connector.getJob(client, { job_id: jobId }, signal),
+            self.connector.getJob(client, { jobId: BigInt(jobId) }, signal),
           self._readSettings(["jobs:getJob", jobKey]),
           userKey,
         );
@@ -567,7 +573,7 @@ class JobsPlugin extends Plugin {
           this._sendStatusError(res, result.status);
           return;
         }
-        res.json({ runId: result.data.run_id });
+        res.json({ runId: result.data.runId });
       }
     } catch (error) {
       if (error instanceof ValidationError) {
@@ -674,7 +680,7 @@ class JobsPlugin extends Plugin {
             return;
           }
           res.json({
-            status: result.data?.state?.life_cycle_state ?? null,
+            status: result.data?.state?.lifeCycleState ?? null,
             run: result.data ?? null,
           });
         } catch (error) {

@@ -292,6 +292,9 @@ importers:
       '@databricks/sdk-genie':
         specifier: 0.54.0
         version: 0.54.0(patch_hash=664f3e13b155eb1b5499486a4f6fc1ab9a6a502e2c6b200d06749bd25dd9ae54)
+      '@databricks/sdk-jobs':
+        specifier: 0.57.0
+        version: 0.57.0
       '@databricks/sdk-options':
         specifier: 0.51.0
         version: 0.51.0
@@ -628,6 +631,9 @@ importers:
       '@databricks/sdk-genie':
         specifier: 0.54.0
         version: 0.54.0(patch_hash=664f3e13b155eb1b5499486a4f6fc1ab9a6a502e2c6b200d06749bd25dd9ae54)
+      '@databricks/sdk-jobs':
+        specifier: 0.57.0
+        version: 0.57.0
       '@databricks/sdk-options':
         specifier: 0.51.0
         version: 0.51.0
@@ -2023,6 +2029,10 @@ packages:
 
   '@databricks/sdk-genie@0.54.0':
     resolution: {integrity: sha512-xT+dyuXocgwPJ5VA1Kr5/dSdKzzR9hRAkEOybeO2i+v891kuuFzVd/M9OM31PtO2/YZp95vdFH5Sb+jVGtm4nw==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-jobs@0.57.0':
+    resolution: {integrity: sha512-LUBLNRhJq0OtUUU6+2T/zRzZMEd4UL0lVm7qTxLIfuDPDNDPy/EHGs3rQ1cXt1Fv0t3Rik7QT/SueZixSsH/Bg==}
     engines: {node: '>=22.0.0'}
 
   '@databricks/sdk-options@0.51.0':
@@ -14338,6 +14348,15 @@ snapshots:
       - supports-color
 
   '@databricks/sdk-genie@0.54.0(patch_hash=664f3e13b155eb1b5499486a4f6fc1ab9a6a502e2c6b200d06749bd25dd9ae54)':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
+  '@databricks/sdk-jobs@0.57.0':
     dependencies:
       '@databricks/sdk-auth': 0.51.0
       '@databricks/sdk-core': 0.51.0
