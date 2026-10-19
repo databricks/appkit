@@ -864,11 +864,10 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     try {
       const { getWorkspaceClient } = await import("../../context");
       const wsClient = getWorkspaceClient();
-      await wsClient.config.ensureResolved();
-      host = wsClient.config.host;
+      host = await wsClient.getHost();
       authenticate = async () => {
         const headers = new Headers();
-        await wsClient.config.authenticate(headers);
+        await wsClient.authenticate(headers);
         return Object.fromEntries(headers.entries());
       };
     } catch {

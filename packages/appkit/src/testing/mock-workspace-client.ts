@@ -271,7 +271,26 @@ export function createMockWorkspaceClient(
     return legacy;
   }
 
+  // Modular auth seam. Seed via `responses: { request: ... }` (a `Response`, or
+  // a function returning one); `request` defaults to a fresh `{}` JSON body.
+  const seamDefaults: Record<string, (...args: Any[]) => Any> = {
+    getHost: async () => configTarget.host,
+    authenticate: async (headers: Headers) => {
+      headers.set("Authorization", "Bearer test-token");
+    },
+    request: async () => new Response("{}"),
+  };
+  const seam: Pick<WorkspaceClient, "getHost" | "authenticate" | "request"> =
+    Object.fromEntries(
+      Object.entries(seamDefaults).map(([key, impl]) => {
+        const fn = key in merged ? mint(key) : vi.fn(impl);
+        fns.set(key, fn);
+        return [key, fn];
+      }),
+    ) as Any;
+
   const client: WorkspaceClient = {
+    ...seam,
     ...(Object.fromEntries(
       FACADE_SERVICES.map((name) => [name, service(name)]),
     ) as Pick<WorkspaceClient, (typeof FACADE_SERVICES)[number]>),

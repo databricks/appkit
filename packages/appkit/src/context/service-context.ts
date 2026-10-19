@@ -226,20 +226,18 @@ export class ServiceContext {
       return process.env.DATABRICKS_WORKSPACE_ID;
     }
 
-    const response = (await client.apiClient.request({
+    const response = await client.request({
       path: "/api/2.0/preview/scim/v2/Me",
       method: "GET",
-      headers: new Headers(),
-      raw: false,
-      query: {},
-      responseHeaders: ["x-databricks-org-id"],
-    })) as { "x-databricks-org-id": string };
+    });
+    await response.body?.cancel();
+    const workspaceId = response.headers.get("x-databricks-org-id");
 
-    if (!response["x-databricks-org-id"]) {
+    if (!workspaceId) {
       throw ConfigurationError.resourceNotFound("Workspace ID");
     }
 
-    return response["x-databricks-org-id"];
+    return workspaceId;
   }
 
   /**

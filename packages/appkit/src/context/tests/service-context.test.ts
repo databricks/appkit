@@ -19,7 +19,15 @@ const { mockMe, mockApiRequest, MockWorkspaceClient, MockConfigError } =
 
     const MockWorkspaceClient = vi.fn().mockImplementation(() => ({
       currentUser: { me: mockMe },
-      apiClient: { request: mockApiRequest },
+      // Tests script legacy-style results; adapt them to the raw `Response`
+      // `client.request` returns (org id → response header, else JSON body).
+      request: async (req: unknown) => {
+        const result = await mockApiRequest(req);
+        const orgId = result?.["x-databricks-org-id"];
+        return orgId !== undefined
+          ? new Response(null, { headers: { "x-databricks-org-id": orgId } })
+          : new Response(JSON.stringify(result ?? {}));
+      },
     }));
 
     class MockConfigError extends Error {
@@ -411,7 +419,6 @@ describe("ServiceContext", () => {
         expect.objectContaining({
           path: "/api/2.0/preview/scim/v2/Me",
           method: "GET",
-          responseHeaders: ["x-databricks-org-id"],
         }),
       );
     });

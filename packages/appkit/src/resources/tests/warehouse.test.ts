@@ -67,7 +67,7 @@ describe("warehouse resource bindings", () => {
     const client = createMockWorkspaceClient();
     const bindings = await WarehouseResource.resolve(client, true);
     expect(await bindings.warehouseId).toBe("configured-warehouse");
-    expect(client.apiClient.request).not.toHaveBeenCalled();
+    expect(client.request).not.toHaveBeenCalled();
     expect(getWarehouseId).toThrow(InitializationError);
     WarehouseResource.bind(bindings);
     expect(getWarehouseId()).toBe(bindings.warehouseId);
@@ -78,7 +78,7 @@ describe("warehouse resource bindings", () => {
     const client = createMockWorkspaceClient();
     const bindings = await WarehouseResource.resolve(client);
     expect(bindings.warehouseId).toBeUndefined();
-    expect(client.apiClient.request).not.toHaveBeenCalled();
+    expect(client.request).not.toHaveBeenCalled();
     WarehouseResource.bind(bindings);
     expect(getWarehouseId).toThrow(ConfigurationError);
     expect(getWarehouseId).toThrow("No plugin requires a SQL Warehouse");
@@ -95,7 +95,7 @@ describe("warehouse resource bindings", () => {
     );
     WarehouseResource.bind(binding);
     expect(await getWarehouseId()).toBe("plugin-warehouse");
-    expect(client.apiClient.request).not.toHaveBeenCalled();
+    expect(client.request).not.toHaveBeenCalled();
   });
 
   test("shares one ID across declarations with different environment variables", () => {
@@ -174,13 +174,15 @@ describe("warehouse resource bindings", () => {
       vi.stubEnv("DATABRICKS_WAREHOUSE_ID", "");
       vi.stubEnv("DATABRICKS_APPS_AGENTIC_MODE", "");
       const client = createMockWorkspaceClient();
-      vi.mocked(client.apiClient.request).mockResolvedValue(response);
+      vi.mocked(client.request).mockResolvedValue(
+        new Response(JSON.stringify(response)),
+      );
       const error = await WarehouseResource.resolve(client, true).catch(
         (e: unknown) => e,
       );
       expect(error).toBeInstanceOf(ConfigurationError);
       expect(error).not.toBeInstanceOf(TypeError);
-      expect(client.apiClient.request).toHaveBeenCalledTimes(1);
+      expect(client.request).toHaveBeenCalledTimes(1);
     },
   );
 });
