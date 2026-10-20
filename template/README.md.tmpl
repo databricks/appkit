@@ -15,6 +15,9 @@ A Databricks App powered by [AppKit](https://developers.databricks.com/docs/appk
 {{- if .plugins.genie}}
 - **Genie** -- AI/BI Genie conversational interface for natural language data queries
 {{- end}}
+{{- if .plugins.design}}
+- **Design** -- Dev-only design canvas at `/design`: renders components from `client/src/design/`; click **Select** (on the canvas or any app page) to pick elements and send them to your coding agent via `.appkit/design-selection.json`
+{{- end}}
 - **Server** -- Express HTTP server with static file serving and Vite dev mode
 
 ## Prerequisites
