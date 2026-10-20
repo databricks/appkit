@@ -78,7 +78,7 @@ export async function assertSchemaMatchesDatabase(
     const absent = tableNames.filter((name) => !found.has(name));
     const advice =
       (await inPublicInstead(dataPath, schemaName, absent)) ??
-      "Create them, or commit migrations under config/database/migrations and set APPKIT_DB_MIGRATE_ON_START=true in app.yaml so the deployed app applies them on start.";
+      "Run `npx appkit db migrate` locally, or commit migrations under config/database/migrations and set APPKIT_DB_MIGRATE_ON_START=true in app.yaml so the deployed app applies them on start.";
     throw databaseSetupFailed(
       `the declared schema does not match the database: ${problems.join("; ")}. ${advice}`,
     );

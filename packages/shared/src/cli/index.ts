@@ -8,6 +8,7 @@ import { Command } from "commander";
 
 import { agentCommand } from "./commands/agent/index.js";
 import { codemodCommand } from "./commands/codemod/index.js";
+import { dbCommand } from "./commands/db/index.js";
 import { docsCommand } from "./commands/docs.js";
 import { doctorCommand } from "./commands/doctor/index.js";
 import { generateTypesCommand } from "./commands/generate-types.js";
@@ -35,6 +36,8 @@ cmd.addCommand(docsCommand);
 cmd.addCommand(pluginCommand);
 cmd.addCommand(codemodCommand);
 cmd.addCommand(doctorCommand);
+// Hidden from --help until the database plugin is offered by `databricks apps init`.
+cmd.addCommand(dbCommand, { hidden: true });
 // Registry commands are executable but hidden from --help while the feature
 // is still in development (registry + add work end-to-end but aren't announced).
 cmd.addCommand(registryCommand, { hidden: true });
