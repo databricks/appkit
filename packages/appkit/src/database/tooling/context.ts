@@ -28,6 +28,8 @@ export interface ToolingWorkspaceClient {
   readonly currentUser: {
     me(request: { attributes?: string }): Promise<{ userName?: string }>;
   };
+  /** The resolved workspace host, which init writes to a new .env. */
+  getHost(): Promise<string>;
 }
 
 /** Where a command runs: the app root, its environment and its Databricks identity. */

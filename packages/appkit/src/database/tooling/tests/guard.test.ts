@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, test } from "vitest";
 
-import { classifyBranch, resolveEnvBranch, takesWrites } from "../guard";
-import { devBranchId } from "../naming";
+import {
+  classifyBranch,
+  resolveEnvBranch,
+  takesWrites,
+  writableEnvBranch,
+} from "../guard";
+import { devBranchId, sessionBranchId } from "../naming";
 import {
   cleanupTempApps,
   databricksYml,
@@ -15,6 +20,7 @@ afterEach(cleanupTempApps);
 const USER = "alice@example.com";
 const P = "projects/p";
 const dev = `${P}/branches/${devBranchId(USER)}`;
+const session = `${P}/branches/${sessionBranchId(USER, "k2x9q0ab")}`;
 
 function verdict(
   name: string,
@@ -33,9 +39,7 @@ function verdict(
 describe("classifyBranch", () => {
   test("only this developer's dev branch and this checkout's session branch take writes", () => {
     expect(verdict(dev)).toEqual({ kind: "dev" });
-    expect(verdict(`${P}/branches/session-k2x9q0ab`)).toEqual({
-      kind: "session",
-    });
+    expect(verdict(session)).toEqual({ kind: "session" });
     expect(takesWrites("dev")).toBe(true);
     expect(takesWrites("session")).toBe(true);
   });
@@ -57,11 +61,14 @@ describe("classifyBranch", () => {
       verdict(`${P}/branches/${devBranchId("bob@example.com")}`).kind,
     ).toBe("other");
     expect(verdict(`${P}/branches/session-other`).kind).toBe("other");
-    expect(verdict(`${P}/branches/session-k2x9q0ab`, {}, null).kind).toBe(
-      "other",
-    );
-    expect(verdict(`${P}/branches/staging`).reason).toContain(
-      devBranchId(USER),
+    expect(verdict(session, {}, null).kind).toBe("other");
+    // Bob's .env copied into Alice's checkout names Bob's session branch.
+    expect(
+      verdict(`${P}/branches/${sessionBranchId("bob@example.com", "k2x9q0ab")}`)
+        .kind,
+    ).toBe("other");
+    expect(verdict(`${P}/branches/staging`).reason).toBe(
+      `it is not your dev branch (${devBranchId(USER)}) or this checkout's session branch (${sessionBranchId(USER, "k2x9q0ab")})`,
     );
     for (const kind of ["default", "protected", "deploy-target", "other"]) {
       expect(takesWrites(kind as "other")).toBe(false);
@@ -168,5 +175,60 @@ describe("resolveEnvBranch", () => {
         fakeContext({ root: tempApp(), env: envFor(dev), api: lakebase.api() }),
       ),
     ).rejects.toThrow(/does not exist.*appkit db init/);
+  });
+});
+
+describe("writableEnvBranch", () => {
+  const envFor = (branch: string, sessionId?: string) => ({
+    PGHOST: "primary.example.com",
+    PGDATABASE: "databricks_postgres",
+    LAKEBASE_ENDPOINT: `${branch}/endpoints/primary`,
+    ...(sessionId ? { APPKIT_DB_SESSION: sessionId } : {}),
+  });
+
+  test("returns your dev or session branch", async () => {
+    const lakebase = new FakeLakebase();
+    lakebase.addBranch(dev);
+    lakebase.addBranch(session);
+
+    await expect(
+      writableEnvBranch(
+        fakeContext({ root: tempApp(), env: envFor(dev), api: lakebase.api() }),
+        "seed",
+      ),
+    ).resolves.toMatchObject({ name: dev });
+    await expect(
+      writableEnvBranch(
+        fakeContext({
+          root: tempApp(),
+          env: envFor(session, "k2x9q0ab"),
+          api: lakebase.api(),
+        }),
+        "seed",
+      ),
+    ).resolves.toMatchObject({ name: session });
+  });
+
+  test("refuses another branch, and says what to run without one", async () => {
+    const lakebase = new FakeLakebase();
+    lakebase.addBranch(`${P}/branches/production`, { default: true });
+
+    await expect(
+      writableEnvBranch(
+        fakeContext({
+          root: tempApp(),
+          env: envFor(`${P}/branches/production`),
+          api: lakebase.api(),
+        }),
+        "clean",
+      ),
+    ).rejects.toThrow(
+      "Refusing to clean: production is not your dev or session branch (it is the project's default branch).",
+    );
+    await expect(
+      writableEnvBranch(fakeContext({ root: tempApp() }), "seed"),
+    ).rejects.toThrow(
+      "Did not seed: no branch is configured in .env (PGHOST, PGDATABASE and LAKEBASE_ENDPOINT); run `appkit db init`.",
+    );
   });
 });

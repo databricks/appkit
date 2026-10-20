@@ -6,10 +6,25 @@
  * Internal to the AppKit CLI: it has no semver guarantee, and only the CLI of
  * the same AppKit release should import it.
  */
+export {
+  type CleanReport,
+  deleteSessionBranch,
+  previewClean,
+  runClean,
+} from "./clean";
 export { createDbContext, type DbContext } from "./context";
+export {
+  type InitOptions,
+  type InitReport,
+  type InitStart,
+  runInit,
+  type SchemaStart,
+} from "./init";
 export {
   type IntrospectOptions,
   type IntrospectReport,
   runIntrospect,
 } from "./introspect";
 export { type MigrateOptions, type MigrateReport, runMigrate } from "./migrate";
+export { runSeed } from "./seed";
+export type { BranchMode } from "./targets";

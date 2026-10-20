@@ -1,11 +1,18 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { currentIdentity } from "../identity";
+import { currentIdentity, identityTypeOf } from "../identity";
 import { cleanupTempApps, fakeContext, tempApp } from "./fakes";
 
 afterEach(cleanupTempApps);
 
 describe("identity", () => {
+  test("an email is a USER, a client ID is a SERVICE_PRINCIPAL", () => {
+    expect(identityTypeOf("alice@example.com")).toBe("USER");
+    expect(identityTypeOf("11111111-2222-3333-4444-555555555555")).toBe(
+      "SERVICE_PRINCIPAL",
+    );
+  });
+
   test("currentUser.me() is called once per context", async () => {
     const ctx = fakeContext({ root: tempApp() });
     const me = vi.fn(async (_request: object) => ({
@@ -16,6 +23,7 @@ describe("identity", () => {
 
     await expect(currentIdentity(counted)).resolves.toEqual({
       userName: "alice@example.com",
+      identityType: "USER",
     });
     await currentIdentity(counted);
     expect(me).toHaveBeenCalledOnce();
