@@ -45,7 +45,7 @@ function readJournalText(folder: string): string | null {
   const file = journalFile(folder);
   return fs.existsSync(file) ? fs.readFileSync(file, "utf-8") : null;
 }
-const DATABASE_TYPES_PATH = path.join(
+export const DATABASE_TYPES_PATH = path.join(
   "shared/appkit-types",
   DATABASE_TYPES_FILE,
 );

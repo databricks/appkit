@@ -19,6 +19,26 @@ export interface MigrateReport {
   readonly typesFile: string;
 }
 
+export interface Skip {
+  readonly table: string;
+  readonly column?: string;
+  readonly reason: string;
+}
+
+export interface IntrospectReport {
+  readonly branch: string;
+  readonly schemaName: string;
+  readonly tables: readonly string[];
+  readonly schemaFile: string;
+  readonly backupFile: string | null;
+  readonly skipped: readonly Skip[];
+  readonly warnings: readonly string[];
+  readonly approximated: readonly string[];
+  readonly migration: GeneratedMigration | null;
+  readonly recorded: readonly string[];
+  readonly typesFile: string;
+}
+
 /**
  * The exports of `@databricks/appkit/database-tooling` the CLI calls. `shared`
  * must not depend on appkit, so the CLI imports the tooling dynamically and
@@ -35,4 +55,8 @@ export interface DatabaseTooling<Ctx extends DbContext = DbContext> {
     ctx: Ctx,
     options: { interactive: boolean },
   ) => Promise<MigrateReport>;
+  readonly runIntrospect: (
+    ctx: Ctx,
+    options: { interactive: boolean; schemaName?: string },
+  ) => Promise<IntrospectReport>;
 }
