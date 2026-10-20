@@ -49,8 +49,9 @@ export async function resolveDerivedValues(
 }
 
 /**
- * Columns for an AI Search index, as the plugin's development-mode discovery
- * finds them: the Delta Sync source table's columns minus embedding vectors.
+ * Columns for an AI Search index: the Delta Sync source table's columns minus
+ * embedding vectors, limited to `columnsToSync` when the index syncs a subset
+ * (other source columns aren't in the index, and querying them fails).
  * Production refuses to start without `columns`, so they are written into the
  * plugin config at add time. Throws when the index has no source table.
  */
@@ -71,7 +72,12 @@ export async function discoverIndexColumns(
   }
   const excluded = new Set(spec.embeddingVectorColumns?.map((c) => c.name));
   const table = await client.tables.getTable({ fullNameArg: spec.sourceTable });
+  const synced = spec.columnsToSync?.length
+    ? new Set(spec.columnsToSync)
+    : undefined;
   return (table.columns ?? []).flatMap((c) =>
-    c.name && !excluded.has(c.name) ? [c.name] : [],
+    c.name && !excluded.has(c.name) && (!synced || synced.has(c.name))
+      ? [c.name]
+      : [],
   );
 }

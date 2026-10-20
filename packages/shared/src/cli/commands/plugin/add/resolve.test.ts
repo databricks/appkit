@@ -3,6 +3,7 @@ import { expect, test, vi } from "vitest";
 import type { ManifestResource } from "./plan";
 import { discoverIndexColumns, resolveDerivedValues } from "./resolve";
 
+let columnsToSync: string[] | undefined;
 const listEndpointsIter = vi.fn(async function* () {
   yield { name: "ro", status: { endpointType: "ENDPOINT_TYPE_READ_ONLY" } };
   yield {
@@ -23,12 +24,20 @@ vi.mock("../../registry/workspace-picker.js", () => ({
           deltaSyncIndexSpec: {
             sourceTable: "c.s.t",
             embeddingVectorColumns: [{ name: "vec" }],
+            columnsToSync,
           },
         },
       }),
     },
     tables: {
-      getTable: async () => ({ columns: [{ name: "id" }, { name: "vec" }] }),
+      getTable: async () => ({
+        columns: [
+          { name: "id" },
+          { name: "text" },
+          { name: "vec" },
+          { name: "notes" },
+        ],
+      }),
     },
   }),
 }));
@@ -77,5 +86,18 @@ test("skips the API when every derived field is set", async () => {
 });
 
 test("discoverIndexColumns drops embedding columns", async () => {
-  expect(await discoverIndexColumns("c.s.i", undefined)).toEqual(["id"]);
+  columnsToSync = undefined;
+  expect(await discoverIndexColumns("c.s.i", undefined)).toEqual([
+    "id",
+    "text",
+    "notes",
+  ]);
+});
+
+test("discoverIndexColumns keeps only synced columns", async () => {
+  columnsToSync = ["id", "text", "vec"];
+  expect(await discoverIndexColumns("c.s.i", undefined)).toEqual([
+    "id",
+    "text",
+  ]);
 });
