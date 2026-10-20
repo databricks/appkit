@@ -52,7 +52,7 @@ function patchAppYaml(file: string, entries: AppYamlEnvEntry[]): string[] {
   const added: string[] = [];
   for (const entry of entries) {
     if (existingNames.has(entry.name)) continue;
-    seq.add(doc.createNode({ name: entry.name, valueFrom: entry.valueFrom }));
+    seq.add(doc.createNode(entry));
     added.push(entry.name);
   }
 
@@ -89,7 +89,11 @@ function patchDatabricksYml(
   file: string,
   plan: ConfigPlan,
 ): { added: string[]; changed: boolean } {
-  if (plan.bundleVariables.length === 0 && plan.resourceBindings.length === 0) {
+  if (
+    plan.bundleVariables.length === 0 &&
+    plan.resourceBindings.length === 0 &&
+    !plan.userApiScopes?.length
+  ) {
     return { added: [], changed: false };
   }
   const doc = loadDoc(file);
@@ -124,6 +128,21 @@ function patchDatabricksYml(
       if (existing.has(binding.name)) continue;
       bindings.add(doc.createNode(bindingToNode(binding)));
       added.push(binding.name);
+    }
+  }
+
+  if (plan.userApiScopes?.length) {
+    const app = ensureMap(doc, ["resources", "apps", "app"]);
+    let scopes = app.get("user_api_scopes") as YAMLSeq | undefined;
+    if (!scopes || typeof (scopes as YAMLSeq).add !== "function") {
+      app.set("user_api_scopes", doc.createNode([]));
+      scopes = app.get("user_api_scopes") as YAMLSeq;
+    }
+    const existing = new Set(scopes.toJSON() as unknown[]);
+    for (const scope of plan.userApiScopes) {
+      if (existing.has(scope)) continue;
+      scopes.add(scope);
+      added.push(scope);
     }
   }
 

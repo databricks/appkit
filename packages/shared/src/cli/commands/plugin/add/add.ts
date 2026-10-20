@@ -1,0 +1,332 @@
+import fs from "node:fs";
+import path from "node:path";
+import process from "node:process";
+
+import { Command } from "commander";
+import pc from "picocolors";
+
+import { profileFromEnv } from "../../registry/add";
+import {
+  planHasContent,
+  reportConfigWrite,
+  validateBundle,
+  writeConfig,
+} from "../../registry/config-writer";
+import { serializeEnvAppend } from "../../registry/env-reconcile";
+import {
+  AUTH_MODE_BOTH,
+  AUTH_MODE_FIELD,
+  AUTH_MODE_OBO,
+  AUTH_MODE_SP,
+  type AuthMode,
+  authKey,
+  buildAddPlan,
+  findMissingValues,
+  type ManifestPlugin,
+  type ManifestResource,
+  oboCapable,
+  parseSetAuthModes,
+  parseSetValues,
+  resolveAuthModes,
+  resourceConfigured,
+  selectResources,
+} from "./plan";
+
+const MANIFEST_FILE = "appkit.plugins.json";
+const SERVER_SUBDIRS = ["server", "api", "backend"];
+
+interface AddOptions {
+  set: string[];
+  authMode?: string;
+  cwd?: string;
+  yes?: boolean;
+  register?: boolean;
+  profile?: string;
+}
+
+function loadPlugin(cwd: string, name: string): ManifestPlugin {
+  const file = path.join(cwd, MANIFEST_FILE);
+  if (!fs.existsSync(file)) {
+    throw new Error(
+      `${MANIFEST_FILE} not found in ${cwd}; run \`appkit plugin sync --write\` first`,
+    );
+  }
+  const manifest = JSON.parse(fs.readFileSync(file, "utf-8")) as {
+    plugins?: Record<string, ManifestPlugin>;
+  };
+  const plugins = manifest.plugins ?? {};
+  const plugin = plugins[name];
+  if (!plugin) {
+    throw new Error(
+      `unknown plugin "${name}"; available: ${Object.keys(plugins).sort().join(", ")}`,
+    );
+  }
+  return {
+    ...plugin,
+    name,
+    resources: {
+      required: plugin.resources?.required ?? [],
+      optional: plugin.resources?.optional ?? [],
+    },
+  };
+}
+
+function authModeLabel(mode: AuthMode): string {
+  if (mode === AUTH_MODE_OBO) return "on behalf of user";
+  if (mode === AUTH_MODE_BOTH) return "service principal and on behalf of user";
+  return "service principal";
+}
+
+/** Bails out of the command on Ctrl+C in a prompt. */
+async function answered<T>(value: T | symbol): Promise<T> {
+  const { cancel, isCancel } = await import("@clack/prompts");
+  if (isCancel(value)) {
+    cancel("Cancelled.");
+    process.exit(1);
+  }
+  return value as T;
+}
+
+/** Asks which optional resources to configure (they're only added with values). */
+async function promptOptional(
+  plugin: ManifestPlugin,
+  values: Record<string, string>,
+): Promise<ManifestResource[]> {
+  const { confirm } = await import("@clack/prompts");
+  const picked: ManifestResource[] = [];
+  for (const r of plugin.resources.optional) {
+    if (resourceConfigured(r, values)) continue;
+    const yes = await answered(
+      await confirm({
+        message: `Configure ${r.alias}? ${pc.dim(`${r.description ?? ""} (optional)`)}`,
+        initialValue: false,
+      }),
+    );
+    if (yes) picked.push(r);
+  }
+  return picked;
+}
+
+/**
+ * As `apps init`: one question for the app, and for "Mixed" one per
+ * OBO-capable resource. Resources without --set authMode only.
+ */
+async function promptAuthModes(
+  resources: ManifestResource[],
+): Promise<Record<string, AuthMode>> {
+  const capable = resources.filter(oboCapable);
+  if (capable.length === 0) return {};
+  const { log, select } = await import("@clack/prompts");
+  const appMode = await answered(
+    await select({
+      message: "How should the app access resources?",
+      options: [
+        { value: AUTH_MODE_SP, label: "Service principal" },
+        { value: AUTH_MODE_OBO, label: "On behalf of user" },
+        { value: "mixed", label: "Mixed (choose per resource)" },
+      ],
+    }),
+  );
+  const modes: Record<string, AuthMode> = {};
+  for (const r of capable) {
+    modes[authKey(r)] =
+      appMode === "mixed"
+        ? await answered(
+            await select<AuthMode>({
+              message: `How should the app access ${r.alias}?`,
+              options: [
+                { value: AUTH_MODE_OBO, label: "On behalf of user" },
+                { value: AUTH_MODE_SP, label: "Service principal" },
+                { value: AUTH_MODE_BOTH, label: "Both" },
+              ],
+            }),
+          )
+        : (appMode as AuthMode);
+    log.info(`${r.alias}: ${authModeLabel(modes[authKey(r)])}`);
+  }
+  for (const r of resources) {
+    if (!oboCapable(r)) {
+      log.info(`${r.alias}: ${authModeLabel(AUTH_MODE_SP)} (only option)`);
+    }
+  }
+  return modes;
+}
+
+async function runPluginAdd(name: string, opts: AddOptions): Promise<void> {
+  const cwd = opts.cwd ? path.resolve(opts.cwd) : process.cwd();
+  if (
+    opts.authMode !== undefined &&
+    opts.authMode !== AUTH_MODE_SP &&
+    opts.authMode !== AUTH_MODE_OBO
+  ) {
+    throw new Error(
+      `invalid --auth-mode value: "${opts.authMode}" (must be obo or sp; use --set <plugin>.<resourceKey>.${AUTH_MODE_FIELD}=both for a single resource)`,
+    );
+  }
+  const plugin = loadPlugin(cwd, name);
+  const values = parseSetValues(opts.set, plugin);
+  const setModes = parseSetAuthModes(opts.set, plugin);
+  const interactive = !opts.yes && Boolean(process.stdin.isTTY);
+
+  let resources = selectResources(plugin, values);
+  if (interactive) resources.push(...(await promptOptional(plugin, values)));
+
+  const promptedModes =
+    interactive && opts.authMode === undefined
+      ? await promptAuthModes(
+          resources.filter((r) => !(authKey(r) in setModes)),
+        )
+      : {};
+  const { modes, keptSP } = resolveAuthModes(
+    resources,
+    setModes,
+    promptedModes,
+    opts.authMode,
+  );
+  if (keptSP.length > 0) {
+    console.log(
+      `Note: these resources cannot be accessed on behalf of the user and use the service principal: ${keptSP.join(", ")}`,
+    );
+  }
+
+  const missing = findMissingValues(plugin.name, resources, values, modes);
+  if (missing.length > 0 && !interactive) {
+    const m = missing[0];
+    throw new Error(
+      `missing value for ${m.setKey}; use --set ${m.setKey}=value`,
+    );
+  }
+  if (missing.length > 0) {
+    const { text } = await import("@clack/prompts");
+    for (const m of missing) {
+      const field = m.resource.fields?.[m.field];
+      const value = await answered(
+        await text({
+          message: `${m.resource.alias}: ${m.field}`,
+          placeholder: field?.description,
+          validate: (v) =>
+            !v?.trim() || /[\r\n]/.test(v) ? "Enter a value" : undefined,
+        }),
+      );
+      values[`${m.resource.resourceKey}.${m.field}`] = value.trim();
+    }
+  }
+  resources = selectResources(plugin, values);
+
+  const plan = buildAddPlan(plugin, resources, values, modes);
+
+  if (opts.register !== false) await registerInServer(cwd, plugin);
+
+  const { appendToFile, readEnvFile } =
+    await import("../../registry/env-writer.js");
+  const envPath = path.join(cwd, ".env");
+  const existing = readEnvFile(envPath);
+  const newEnv = plan.dotEnv.filter(
+    (e, i) =>
+      !(e.env in existing) &&
+      plan.dotEnv.findIndex((x) => x.env === e.env) === i,
+  );
+  appendToFile(envPath, serializeEnvAppend(newEnv));
+  if (newEnv.length > 0) {
+    console.log(
+      `${pc.green("Updated .env:")} ${newEnv.map((e) => e.env).join(", ")}`,
+    );
+  }
+
+  if (planHasContent(plan)) {
+    const result = writeConfig(cwd, plan);
+    reportConfigWrite(result);
+    if (result.databricksYmlChanged) {
+      validateBundle(cwd, opts.profile ?? profileFromEnv(cwd));
+    }
+  }
+}
+
+async function registerInServer(
+  cwd: string,
+  plugin: ManifestPlugin,
+): Promise<void> {
+  const serverRoot =
+    SERVER_SUBDIRS.map((s) => path.join(cwd, s)).find((p) =>
+      fs.existsSync(p),
+    ) ?? cwd;
+  const importPath =
+    plugin.stability === "beta" ? `${plugin.package}/beta` : plugin.package;
+  // Lazy: server-register pulls in the @ast-grep/napi native addon.
+  const { registerPluginInServer } =
+    await import("../../registry/server-register.js");
+  {
+    {
+      const result = registerPluginInServer(
+        serverRoot,
+        importPath,
+        plugin.name,
+      );
+      const shown =
+        result.file && path.relative(cwd, path.join(serverRoot, result.file));
+      if (result.status === "wired") {
+        console.log(`${pc.green("Registered")} ${plugin.name} in ${shown}`);
+      } else if (result.status === "already") {
+        console.log(pc.dim(`${plugin.name} is already registered in ${shown}`));
+      } else {
+        console.log(
+          pc.yellow(
+            `Couldn't auto-register ${plugin.name}: ${result.reason}.`,
+          ) +
+            `\nAdd it to your server's createApp call:\n` +
+            pc.dim(
+              `  import { ${plugin.name} } from "${importPath}";\n` +
+                `  createApp({ plugins: [${plugin.name}(), /* ... */] });`,
+            ),
+        );
+      }
+    }
+  }
+}
+
+export const pluginAddCommand = new Command("add")
+  .description(
+    "Add a plugin from appkit.plugins.json to the app: server registration, .env, app.yaml and databricks.yml",
+  )
+  .argument("<plugin>", "Plugin name, as in appkit.plugins.json")
+  .option(
+    "--set <plugin.resourceKey.field=value>",
+    "Set resource values (format: plugin.resourceKey.field=value, can specify multiple)",
+    (v: string, acc: string[]) => [...acc, v],
+    [] as string[],
+  )
+  .option(
+    "--auth-mode <mode>",
+    "Default resource auth mode: obo (on behalf of the user) or sp (service principal). With obo, resources that cannot be accessed on behalf of the user use sp. Prompts if not provided in interactive mode, otherwise sp.",
+  )
+  .option("-C, --cwd <dir>", "Run as if started in <dir>")
+  .option("-y, --yes", "Don't prompt; fail on missing required values")
+  .option("--no-register", "Don't edit the server entry to register the plugin")
+  .option(
+    "-p, --profile <name>",
+    "Databricks profile for bundle validate (defaults to the app's DATABRICKS_CONFIG_PROFILE)",
+  )
+  .addHelpText(
+    "after",
+    `
+Resource configuration (--set), as in \`databricks apps init\`:
+  Set resource values using --set plugin.resourceKey.field=value
+  Keys are defined in the app's appkit.plugins.json manifest.
+  Multi-field resources (e.g., database, secret) require all fields to be set together.
+  Use --set plugin.resourceKey.authMode=obo|sp|both to choose how the app accesses a resource:
+  on behalf of the user (obo), as the app's service principal (sp), or both.
+  obo/both add the resource's user_api_scopes; sp/both bind it with its permission.
+
+Existing entries in .env, app.yaml and databricks.yml are never overwritten.
+
+Examples:
+  $ appkit plugin add analytics --set analytics.sql-warehouse.id=abc123
+  $ appkit plugin add analytics --auth-mode obo --set analytics.sql-warehouse.id=abc123
+  $ appkit plugin add jobs --auth-mode obo --set jobs.job.authMode=sp --set jobs.job.id=42`,
+  )
+  .action((name: string, opts: AddOptions) =>
+    runPluginAdd(name, opts).catch((err: Error) => {
+      console.error(pc.red(err.message));
+      process.exit(1);
+    }),
+  );
