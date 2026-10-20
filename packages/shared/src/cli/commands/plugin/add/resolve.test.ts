@@ -1,7 +1,7 @@
 import { expect, test, vi } from "vitest";
 
 import type { ManifestResource } from "./plan";
-import { resolveDerivedValues } from "./resolve";
+import { discoverIndexColumns, resolveDerivedValues } from "./resolve";
 
 const listEndpointsIter = vi.fn(async function* () {
   yield { name: "ro", status: { endpointType: "ENDPOINT_TYPE_READ_ONLY" } };
@@ -16,6 +16,20 @@ const listDatabasesIter = vi.fn(async function* () {
 vi.mock("../../registry/workspace-picker.js", () => ({
   makeWorkspaceClient: () => ({
     postgres: { listEndpointsIter, listDatabasesIter },
+    vectorSearch: {
+      getVectorIndex: async () => ({
+        indexSpec: {
+          $case: "deltaSyncIndexSpec",
+          deltaSyncIndexSpec: {
+            sourceTable: "c.s.t",
+            embeddingVectorColumns: [{ name: "vec" }],
+          },
+        },
+      }),
+    },
+    tables: {
+      getTable: async () => ({ columns: [{ name: "id" }, { name: "vec" }] }),
+    },
   }),
 }));
 
@@ -60,4 +74,8 @@ test("skips the API when every derived field is set", async () => {
     undefined,
   );
   expect(listEndpointsIter).not.toHaveBeenCalled();
+});
+
+test("discoverIndexColumns drops embedding columns", async () => {
+  expect(await discoverIndexColumns("c.s.i", undefined)).toEqual(["id"]);
 });

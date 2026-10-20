@@ -32,7 +32,7 @@ import {
   resourceConfigured,
   selectResources,
 } from "./plan";
-import { resolveDerivedValues } from "./resolve";
+import { discoverIndexColumns, resolveDerivedValues } from "./resolve";
 
 const MANIFEST_FILE = "appkit.plugins.json";
 const SERVER_SUBDIRS = ["server", "api", "backend"];
@@ -182,6 +182,51 @@ async function fillMissing(
   }
 }
 
+/**
+ * Columns for the aiSearch default index: discovered from the workspace, else
+ * prompted. Without a terminal it fails before anything is written, since the
+ * app would not start in production without them.
+ */
+async function aiSearchColumns(
+  values: Record<string, string>,
+  profile: string | undefined,
+  interactive: boolean,
+): Promise<string[]> {
+  const indexName = values["vector-search-index.id"];
+  try {
+    const columns = await discoverIndexColumns(indexName, profile);
+    if (columns.length > 0) {
+      console.log(pc.dim(`Index columns: ${columns.join(", ")}`));
+      return columns;
+    }
+  } catch (err) {
+    console.warn(
+      pc.yellow(
+        `Could not discover the columns of ${indexName}: ${(err as Error).message}`,
+      ),
+    );
+  }
+  if (!interactive) {
+    throw new Error(
+      `aiSearch needs the columns of ${indexName} to start in production; run with workspace access (--profile) or interactively to enter them`,
+    );
+  }
+  const { text } = await import("@clack/prompts");
+  const answer = await answered(
+    await text({
+      message: `Columns to return from ${indexName} (comma-separated)`,
+      validate: (v) =>
+        v?.split(",").some((c) => c.trim())
+          ? undefined
+          : "Enter at least one column",
+    }),
+  );
+  return answer
+    .split(",")
+    .map((c) => c.trim())
+    .filter(Boolean);
+}
+
 async function runPluginAdd(name: string, opts: AddOptions): Promise<void> {
   const cwd = opts.cwd ? path.resolve(opts.cwd) : process.cwd();
   if (
@@ -246,14 +291,19 @@ async function runPluginAdd(name: string, opts: AddOptions): Promise<void> {
   await fillMissing(missingNow(), values, interactive);
   resources = selectResources(plugin, values);
 
+  const config = pluginConfig(
+    plugin,
+    resources,
+    modes,
+    plugin.name === "aiSearch" && opts.register !== false
+      ? await aiSearchColumns(values, profile, interactive)
+      : undefined,
+  );
+
   const plan = buildAddPlan(plugin, resources, values, modes);
 
   if (opts.register !== false) {
-    await registerInServer(
-      cwd,
-      plugin,
-      pluginCallArgs(plugin, resources, modes),
-    );
+    await registerInServer(cwd, plugin, config ? toSource(config) : "");
   }
 
   const { appendToFile, readEnvFile } =
@@ -281,36 +331,55 @@ async function runPluginAdd(name: string, opts: AddOptions): Promise<void> {
   }
 }
 
-/**
- * `createApp` arguments that make a plugin access its resources on behalf of
- * the user, for plugins that otherwise default to the service principal (which
- * an OBO plan leaves unbound). files reads a plugin-level `auth`; aiSearch reads
- * it per index, and its `default` index takes DATABRICKS_VS_INDEX_NAME.
- */
-const OBO_CALL_ARGS: Record<string, string> = {
-  files: `{ auth: "on-behalf-of-user" }`,
-  aiSearch: `{ indexes: { default: { auth: "on-behalf-of-user" } } }`,
-};
+/** Plugins that default to the service principal unless told otherwise. */
+const AUTH_OPTION_PLUGINS = new Set(["files", "aiSearch"]);
+const OBO = "on-behalf-of-user";
 
-/** The `createApp` call arguments for the plugin: the auth option, if any. */
-export function pluginCallArgs(
+/**
+ * The `createApp` config for the plugin, or undefined for none. An OBO plan
+ * leaves the service principal unbound, so plugins that default to it must be
+ * told: files reads a plugin-level `auth`, aiSearch reads it per index. The
+ * aiSearch `default` index takes DATABRICKS_VS_INDEX_NAME, and production
+ * refuses to start without its `columns`.
+ */
+export function pluginConfig(
   plugin: ManifestPlugin,
   resources: ManifestResource[],
   modes: Record<string, AuthMode>,
-): string {
-  const oboArgs = OBO_CALL_ARGS[plugin.name];
-  if (!oboArgs) return "";
-  const obo = resources.filter((r) => modes[authKey(r)] === AUTH_MODE_OBO);
-  if (obo.length === 0) return "";
-  if (obo.length < resources.length) {
-    console.warn(
-      pc.yellow(
-        `${plugin.name} is registered with one auth setting for all its resources; set auth per volume or index in its config to mix on-behalf-of-user (${obo.map((r) => r.resourceKey).join(", ")}) with service principal access.`,
-      ),
-    );
-    return "";
+  columns?: string[],
+): Record<string, unknown> | undefined {
+  let obo = false;
+  if (AUTH_OPTION_PLUGINS.has(plugin.name)) {
+    const oboRes = resources.filter((r) => modes[authKey(r)] === AUTH_MODE_OBO);
+    obo = oboRes.length > 0 && oboRes.length === resources.length;
+    if (oboRes.length > 0 && !obo) {
+      console.warn(
+        pc.yellow(
+          `${plugin.name} is registered with one auth setting for all its resources; set auth per volume or index in its config to mix on-behalf-of-user (${oboRes.map((r) => r.resourceKey).join(", ")}) with service principal access.`,
+        ),
+      );
+    }
   }
-  return oboArgs;
+  if (plugin.name === "aiSearch") {
+    const index = { ...(columns && { columns }), ...(obo && { auth: OBO }) };
+    return Object.keys(index).length > 0
+      ? { indexes: { default: index } }
+      : undefined;
+  }
+  return obo ? { auth: OBO } : undefined;
+}
+
+/** Source text for a config literal: `{ auth: "x", columns: ["a"] }`. */
+export function toSource(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(toSource).join(", ")}]`;
+  if (v && typeof v === "object") {
+    const props = Object.entries(v).map(
+      ([k, x]) =>
+        `${/^[A-Za-z_$][\w$]*$/.test(k) ? k : JSON.stringify(k)}: ${toSource(x)}`,
+    );
+    return `{ ${props.join(", ")} }`;
+  }
+  return JSON.stringify(v);
 }
 
 async function registerInServer(
