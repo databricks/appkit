@@ -38,6 +38,21 @@ afterEach(() => {
 });
 
 describe("registerPluginInServer", () => {
+  it("passes call args and accepts the AppKit package import path", () => {
+    const dir = makeTempDir();
+    const file = writeServer(dir, "server.ts", "server()");
+    const result = registerPluginInServer(
+      dir,
+      "@databricks/appkit",
+      "files",
+      `{ auth: "on-behalf-of-user" }`,
+    );
+    expect(result.status).toBe("wired");
+    const out = fs.readFileSync(file, "utf-8");
+    expect(out).toContain(`files({ auth: "on-behalf-of-user" }), server()`);
+    expect(out).toContain(`import { files } from "@databricks/appkit";`);
+  });
+
   it("wires a plugin into a server root that is a subdir (e.g. api/)", () => {
     // The server root is the resolved subdir, not the repo root — entry files
     // are looked up within it, so an app laid out under api/ still gets wired.

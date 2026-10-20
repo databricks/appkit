@@ -24,6 +24,7 @@ import {
   findMissingValues,
   type ManifestPlugin,
   type ManifestResource,
+  type MissingValue,
   oboCapable,
   parseSetAuthModes,
   parseSetValues,
@@ -31,6 +32,7 @@ import {
   resourceConfigured,
   selectResources,
 } from "./plan";
+import { resolveDerivedValues } from "./resolve";
 
 const MANIFEST_FILE = "appkit.plugins.json";
 const SERVER_SUBDIRS = ["server", "api", "backend"];
@@ -152,6 +154,34 @@ async function promptAuthModes(
   return modes;
 }
 
+/** Prompts for each missing value, or fails on the first one when not interactive. */
+async function fillMissing(
+  missing: MissingValue[],
+  values: Record<string, string>,
+  interactive: boolean,
+): Promise<void> {
+  if (missing.length > 0 && !interactive) {
+    const m = missing[0];
+    throw new Error(
+      `missing value for ${m.setKey}; use --set ${m.setKey}=value`,
+    );
+  }
+  if (missing.length === 0) return;
+  const { text } = await import("@clack/prompts");
+  for (const m of missing) {
+    const field = m.resource.fields?.[m.field];
+    const value = await answered(
+      await text({
+        message: `${m.resource.alias}: ${m.field}`,
+        placeholder: field?.description,
+        validate: (v) =>
+          !v?.trim() || /[\r\n]/.test(v) ? "Enter a value" : undefined,
+      }),
+    );
+    values[`${m.resource.resourceKey}.${m.field}`] = value.trim();
+  }
+}
+
 async function runPluginAdd(name: string, opts: AddOptions): Promise<void> {
   const cwd = opts.cwd ? path.resolve(opts.cwd) : process.cwd();
   if (
@@ -189,33 +219,42 @@ async function runPluginAdd(name: string, opts: AddOptions): Promise<void> {
     );
   }
 
-  const missing = findMissingValues(plugin.name, resources, values, modes);
-  if (missing.length > 0 && !interactive) {
-    const m = missing[0];
-    throw new Error(
-      `missing value for ${m.setKey}; use --set ${m.setKey}=value`,
-    );
-  }
-  if (missing.length > 0) {
-    const { text } = await import("@clack/prompts");
-    for (const m of missing) {
-      const field = m.resource.fields?.[m.field];
-      const value = await answered(
-        await text({
-          message: `${m.resource.alias}: ${m.field}`,
-          placeholder: field?.description,
-          validate: (v) =>
-            !v?.trim() || /[\r\n]/.test(v) ? "Enter a value" : undefined,
-        }),
+  const missingNow = () =>
+    findMissingValues(plugin.name, resources, values, modes);
+  // Values the user supplies come first: the derived ones need them.
+  await fillMissing(
+    missingNow().filter((m) => !m.resource.fields?.[m.field]?.resolve),
+    values,
+    interactive,
+  );
+  const profile = opts.profile ?? profileFromEnv(cwd);
+  for (const r of resources) {
+    try {
+      for (const [k, v] of Object.entries(
+        await resolveDerivedValues(r, values, profile),
+      )) {
+        values[k] ||= v;
+      }
+    } catch (err) {
+      console.warn(
+        pc.yellow(
+          `Could not resolve derived values for ${r.alias}: ${(err as Error).message}`,
+        ),
       );
-      values[`${m.resource.resourceKey}.${m.field}`] = value.trim();
     }
   }
+  await fillMissing(missingNow(), values, interactive);
   resources = selectResources(plugin, values);
 
   const plan = buildAddPlan(plugin, resources, values, modes);
 
-  if (opts.register !== false) await registerInServer(cwd, plugin);
+  if (opts.register !== false) {
+    await registerInServer(
+      cwd,
+      plugin,
+      pluginCallArgs(plugin, resources, modes),
+    );
+  }
 
   const { appendToFile, readEnvFile } =
     await import("../../registry/env-writer.js");
@@ -237,50 +276,91 @@ async function runPluginAdd(name: string, opts: AddOptions): Promise<void> {
     const result = writeConfig(cwd, plan);
     reportConfigWrite(result);
     if (result.databricksYmlChanged) {
-      validateBundle(cwd, opts.profile ?? profileFromEnv(cwd));
+      validateBundle(cwd, profile);
     }
   }
+}
+
+/**
+ * Plugins whose identity is a plugin-level `auth` option (default service
+ * principal) rather than per-request: OBO-only resources need it set, or the
+ * runtime uses the service principal that the OBO plan leaves unbound.
+ */
+const AUTH_CONFIG_PLUGINS = new Set(["files", "aiSearch"]);
+
+/** The `createApp` call arguments for the plugin: the auth option, if any. */
+function pluginCallArgs(
+  plugin: ManifestPlugin,
+  resources: ManifestResource[],
+  modes: Record<string, AuthMode>,
+): string {
+  if (!AUTH_CONFIG_PLUGINS.has(plugin.name)) return "";
+  const obo = resources.filter((r) => modes[authKey(r)] === AUTH_MODE_OBO);
+  if (obo.length === 0) return "";
+  if (obo.length < resources.length) {
+    console.warn(
+      pc.yellow(
+        `${plugin.name} has one auth option for all its resources; set auth per volume in its config to mix on-behalf-of-user (${obo.map((r) => r.resourceKey).join(", ")}) with service principal access.`,
+      ),
+    );
+    return "";
+  }
+  return `{ auth: "on-behalf-of-user" }`;
 }
 
 async function registerInServer(
   cwd: string,
   plugin: ManifestPlugin,
+  callArgs: string,
 ): Promise<void> {
   const serverRoot =
     SERVER_SUBDIRS.map((s) => path.join(cwd, s)).find((p) =>
       fs.existsSync(p),
     ) ?? cwd;
-  const importPath =
-    plugin.stability === "beta" ? `${plugin.package}/beta` : plugin.package;
   // Lazy: server-register pulls in the @ast-grep/napi native addon.
-  const { registerPluginInServer } =
+  const { findServerFile, registerPluginInServer } =
     await import("../../registry/server-register.js");
-  {
-    {
-      const result = registerPluginInServer(
-        serverRoot,
-        importPath,
-        plugin.name,
+  let importPath =
+    plugin.stability === "beta" ? `${plugin.package}/beta` : plugin.package;
+  // Local plugins are recorded relative to the app root; imports resolve
+  // relative to the server file.
+  if (plugin.package.startsWith(".")) {
+    const from = path.dirname(findServerFile(serverRoot) ?? serverRoot);
+    const rel = path
+      .relative(from, path.resolve(cwd, plugin.package))
+      .split(path.sep)
+      .join("/");
+    importPath = rel.startsWith(".") ? rel : `./${rel}`;
+  }
+  const call = `${plugin.name}(${callArgs})`;
+  const result = registerPluginInServer(
+    serverRoot,
+    importPath,
+    plugin.name,
+    callArgs,
+  );
+  const shown =
+    result.file && path.relative(cwd, path.join(serverRoot, result.file));
+  if (result.status === "wired") {
+    console.log(`${pc.green("Registered")} ${call} in ${shown}`);
+  } else if (result.status === "already") {
+    console.log(pc.dim(`${plugin.name} is already registered in ${shown}`));
+    if (callArgs) {
+      console.warn(
+        pc.yellow(
+          `  Make sure it is configured as ${call} for the chosen auth mode.`,
+        ),
       );
-      const shown =
-        result.file && path.relative(cwd, path.join(serverRoot, result.file));
-      if (result.status === "wired") {
-        console.log(`${pc.green("Registered")} ${plugin.name} in ${shown}`);
-      } else if (result.status === "already") {
-        console.log(pc.dim(`${plugin.name} is already registered in ${shown}`));
-      } else {
-        console.log(
-          pc.yellow(
-            `Couldn't auto-register ${plugin.name}: ${result.reason}.`,
-          ) +
-            `\nAdd it to your server's createApp call:\n` +
-            pc.dim(
-              `  import { ${plugin.name} } from "${importPath}";\n` +
-                `  createApp({ plugins: [${plugin.name}(), /* ... */] });`,
-            ),
-        );
-      }
     }
+  } else {
+    console.log(
+      pc.yellow(`Couldn't auto-register ${plugin.name}: ${result.reason}.`) +
+        "\nAdd it to your server's createApp call:\n" +
+        pc.dim(
+          `  import { ${plugin.name} } from "${importPath}";\n` +
+            `  createApp({ plugins: [${call}, /* ... */] });`,
+        ),
+    );
   }
 }
 

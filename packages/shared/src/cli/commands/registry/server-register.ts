@@ -20,7 +20,7 @@ export interface RegisterResult {
   reason?: string;
 }
 
-function findServerFile(serverRoot: string): string | null {
+export function findServerFile(serverRoot: string): string | null {
   for (const candidate of SERVER_FILE_CANDIDATES) {
     const p = path.join(serverRoot, candidate);
     if (fs.existsSync(p)) return p;
@@ -87,6 +87,8 @@ export function registerPluginInServer(
   serverRoot: string,
   importPath: string,
   exportName: string,
+  /** Call arguments, e.g. `{ auth: "on-behalf-of-user" }` (CLI-built, never registry data). */
+  callArgs = "",
 ): RegisterResult {
   // exportName and importPath are interpolated into the user's server source.
   // Registry items are untrusted, so refuse anything that isn't a plain JS
@@ -127,7 +129,7 @@ export function registerPluginInServer(
   const edits = [];
 
   // toPlugin exports are factories, registered as a call: `hello()`.
-  const newElem = `${exportName}()`;
+  const newElem = `${exportName}(${callArgs})`;
 
   // Insert before the first element, matching its indentation so the array
   // formatting is preserved (or inline for a single-line array).
