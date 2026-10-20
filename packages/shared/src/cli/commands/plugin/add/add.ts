@@ -282,30 +282,35 @@ async function runPluginAdd(name: string, opts: AddOptions): Promise<void> {
 }
 
 /**
- * Plugins whose identity is a plugin-level `auth` option (default service
- * principal) rather than per-request: OBO-only resources need it set, or the
- * runtime uses the service principal that the OBO plan leaves unbound.
+ * `createApp` arguments that make a plugin access its resources on behalf of
+ * the user, for plugins that otherwise default to the service principal (which
+ * an OBO plan leaves unbound). files reads a plugin-level `auth`; aiSearch reads
+ * it per index, and its `default` index takes DATABRICKS_VS_INDEX_NAME.
  */
-const AUTH_CONFIG_PLUGINS = new Set(["files", "aiSearch"]);
+const OBO_CALL_ARGS: Record<string, string> = {
+  files: `{ auth: "on-behalf-of-user" }`,
+  aiSearch: `{ indexes: { default: { auth: "on-behalf-of-user" } } }`,
+};
 
 /** The `createApp` call arguments for the plugin: the auth option, if any. */
-function pluginCallArgs(
+export function pluginCallArgs(
   plugin: ManifestPlugin,
   resources: ManifestResource[],
   modes: Record<string, AuthMode>,
 ): string {
-  if (!AUTH_CONFIG_PLUGINS.has(plugin.name)) return "";
+  const oboArgs = OBO_CALL_ARGS[plugin.name];
+  if (!oboArgs) return "";
   const obo = resources.filter((r) => modes[authKey(r)] === AUTH_MODE_OBO);
   if (obo.length === 0) return "";
   if (obo.length < resources.length) {
     console.warn(
       pc.yellow(
-        `${plugin.name} has one auth option for all its resources; set auth per volume in its config to mix on-behalf-of-user (${obo.map((r) => r.resourceKey).join(", ")}) with service principal access.`,
+        `${plugin.name} is registered with one auth setting for all its resources; set auth per volume or index in its config to mix on-behalf-of-user (${obo.map((r) => r.resourceKey).join(", ")}) with service principal access.`,
       ),
     );
     return "";
   }
-  return `{ auth: "on-behalf-of-user" }`;
+  return oboArgs;
 }
 
 async function registerInServer(
