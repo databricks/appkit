@@ -213,3 +213,39 @@ test("fields with a resolver are required even when localOnly", () => {
     ),
   ).toEqual(["lakebase.postgres.host"]);
 });
+
+test("a manifest default fills the bundle variable", () => {
+  const p: ManifestPlugin = {
+    ...plugin,
+    resources: {
+      required: [
+        {
+          ...warehouse,
+          fields: { id: { env: "DATABRICKS_WAREHOUSE_ID", value: "dflt" } },
+        },
+      ],
+      optional: [],
+    },
+  };
+  const plan = buildAddPlan(p, p.resources.required, {}, {});
+  expect(plan.bundleVariables[0]).toMatchObject({
+    name: "sql_warehouse_id",
+    value: "dflt",
+  });
+});
+
+test("a resource without binding metadata uses the built-in binding", () => {
+  const { binding: _, ...noBinding } = warehouse;
+  const plan = buildAddPlan(
+    plugin,
+    [noBinding],
+    { "sql-warehouse.id": "wh" },
+    {},
+  );
+  expect(plan.unverifiedTypes).toEqual([]);
+  expect(plan.resourceBindings[0]).toMatchObject({
+    name: "sql-warehouse",
+    type: "sql_warehouse",
+    fields: { id: "${var.sql_warehouse_id}" },
+  });
+});

@@ -310,16 +310,36 @@ async function runPluginAdd(name: string, opts: AddOptions): Promise<void> {
     await import("../../registry/env-writer.js");
   const envPath = path.join(cwd, ".env");
   const existing = readEnvFile(envPath);
-  const newEnv = plan.dotEnv.filter(
-    (e, i) =>
-      !(e.env in existing) &&
-      plan.dotEnv.findIndex((x) => x.env === e.env) === i,
+  const dotEnv = plan.dotEnv.filter(
+    (e, i) => plan.dotEnv.findIndex((x) => x.env === e.env) === i,
   );
+  // Empty placeholders (`KEY=`) are filled in place; set values are kept.
+  const filled = dotEnv.filter((e) => existing[e.env] === "" && e.value);
+  if (filled.length > 0) {
+    let content = fs.readFileSync(envPath, "utf-8");
+    for (const e of filled) {
+      // e.env is a validated identifier, so it is safe in the pattern.
+      content = content.replace(
+        new RegExp(`^(\\s*(?:export\\s+)?${e.env}\\s*=).*$`, "m"),
+        (_, key: string) => key + e.value,
+      );
+    }
+    fs.writeFileSync(envPath, content);
+  }
+  const newEnv = dotEnv.filter((e) => !(e.env in existing));
   appendToFile(envPath, serializeEnvAppend(newEnv));
-  if (newEnv.length > 0) {
-    console.log(
-      `${pc.green("Updated .env:")} ${newEnv.map((e) => e.env).join(", ")}`,
-    );
+  const updated = [...filled, ...newEnv].map((e) => e.env);
+  if (updated.length > 0) {
+    console.log(`${pc.green("Updated .env:")} ${updated.join(", ")}`);
+  }
+  for (const e of dotEnv) {
+    if (existing[e.env] && e.value && existing[e.env] !== e.value) {
+      console.warn(
+        pc.yellow(
+          `.env already sets ${e.env}; kept it (the app.yaml and databricks.yml entries use the new value).`,
+        ),
+      );
+    }
   }
 
   if (planHasContent(plan)) {
@@ -332,13 +352,13 @@ async function runPluginAdd(name: string, opts: AddOptions): Promise<void> {
 }
 
 /** Plugins that default to the service principal unless told otherwise. */
-const AUTH_OPTION_PLUGINS = new Set(["files", "aiSearch"]);
+const AUTH_OPTION_PLUGINS = new Set(["files", "aiSearch", "agents"]);
 const OBO = "on-behalf-of-user";
 
 /**
  * The `createApp` config for the plugin, or undefined for none. An OBO plan
  * leaves the service principal unbound, so plugins that default to it must be
- * told: files reads a plugin-level `auth`, aiSearch reads it per index. The
+ * told: files and agents read a plugin-level `auth`, aiSearch reads it per index. The
  * aiSearch `default` index takes DATABRICKS_VS_INDEX_NAME, and production
  * refuses to start without its `columns`.
  */
@@ -350,8 +370,11 @@ export function pluginConfig(
 ): Record<string, unknown> | undefined {
   let obo = false;
   if (AUTH_OPTION_PLUGINS.has(plugin.name)) {
-    const oboRes = resources.filter((r) => modes[authKey(r)] === AUTH_MODE_OBO);
-    obo = oboRes.length > 0 && oboRes.length === resources.length;
+    // Resources that can't be accessed on behalf of the user (e.g. an agents
+    // tracing experiment) stay on the service principal and don't count.
+    const capable = resources.filter(oboCapable);
+    const oboRes = capable.filter((r) => modes[authKey(r)] === AUTH_MODE_OBO);
+    obo = oboRes.length > 0 && oboRes.length === capable.length;
     if (oboRes.length > 0 && !obo) {
       console.warn(
         pc.yellow(
@@ -394,8 +417,11 @@ async function registerInServer(
   // Lazy: server-register pulls in the @ast-grep/napi native addon.
   const { findServerFile, registerPluginInServer } =
     await import("../../registry/server-register.js");
+  // The /beta subpath is AppKit's; other packages export their plugins as is.
   let importPath =
-    plugin.stability === "beta" ? `${plugin.package}/beta` : plugin.package;
+    plugin.stability === "beta" && plugin.package === "@databricks/appkit"
+      ? `${plugin.package}/beta`
+      : plugin.package;
   // Local plugins are recorded relative to the app root; imports resolve
   // relative to the server file.
   if (plugin.package.startsWith(".")) {

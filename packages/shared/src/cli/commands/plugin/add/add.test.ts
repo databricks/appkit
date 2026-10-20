@@ -42,3 +42,14 @@ test("toSource escapes strings and quotes non-identifier keys", () => {
     `{ "a-b": ["x\\"); evil()"] }`,
   );
 });
+
+test("agents OBO sets plugin auth; resources that can't be OBO don't block it", () => {
+  const experiment: ManifestResource = {
+    type: "experiment",
+    alias: "Experiment",
+    resourceKey: "agents-mlflow-experiment",
+  };
+  expect(pluginConfig(plugin("agents"), [index, experiment], obo)).toEqual({
+    auth: "on-behalf-of-user",
+  });
+});

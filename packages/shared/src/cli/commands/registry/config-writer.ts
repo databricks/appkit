@@ -80,6 +80,20 @@ function ensureMap(
 }
 
 /**
+ * Key of the bundle's app under `resources.apps`: the only one there (apps
+ * are often named after the project, not `app`), else `app`. Throws when
+ * several apps exist and none is `app`, rather than guess or add a new one.
+ */
+function appKey(doc: ReturnType<typeof parseDocument>): string {
+  const keys = Object.keys(doc.toJSON()?.resources?.apps ?? {});
+  if (keys.length === 1) return keys[0];
+  if (keys.length === 0 || keys.includes("app")) return "app";
+  throw new Error(
+    `databricks.yml defines several apps (${keys.join(", ")}); add the resources to the right one by hand`,
+  );
+}
+
+/**
  * Additively patches `databricks.yml`: adds bundle `variables`, the app
  * `resources` bindings, and the target-level variable values — each only if
  * not already present. Returns the names added plus whether the file changed
@@ -113,7 +127,7 @@ function patchDatabricksYml(
 
   // App resource bindings.
   if (plan.resourceBindings.length > 0) {
-    const app = ensureMap(doc, ["resources", "apps", "app"]);
+    const app = ensureMap(doc, ["resources", "apps", appKey(doc)]);
     let bindings = app.get("resources") as YAMLSeq | undefined;
     if (!bindings || typeof (bindings as YAMLSeq).add !== "function") {
       app.set("resources", doc.createNode([]));
@@ -132,7 +146,7 @@ function patchDatabricksYml(
   }
 
   if (plan.userApiScopes?.length) {
-    const app = ensureMap(doc, ["resources", "apps", "app"]);
+    const app = ensureMap(doc, ["resources", "apps", appKey(doc)]);
     let scopes = app.get("user_api_scopes") as YAMLSeq | undefined;
     if (!scopes || typeof (scopes as YAMLSeq).add !== "function") {
       app.set("user_api_scopes", doc.createNode([]));
