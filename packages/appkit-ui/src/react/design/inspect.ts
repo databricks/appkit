@@ -187,6 +187,16 @@ function prepareClone(src: Element, dst: Element, tasks: Promise<unknown>[]) {
   }
 }
 
+const ROOT_RESET: Record<string, string> = {
+  position: "relative",
+  inset: "auto",
+  margin: "0",
+  transform: "none",
+  translate: "none",
+  rotate: "none",
+  scale: "none",
+};
+
 /**
  * Rasterizes an element via an SVG `<foreignObject>` with inlined computed
  * styles, as a JPEG data URL. Best-effort: returns undefined when the browser
@@ -207,6 +217,14 @@ export async function captureElement(
     const tasks: Promise<unknown>[] = [];
     prepareClone(el, clone, tasks);
     await Promise.all(tasks);
+    // The crop is the element's own box, so its placement in the page
+    // (absolute/fixed offsets, margins, transforms) must not move it out.
+    const root = wrap.firstElementChild as HTMLElement | null;
+    if (root) {
+      for (const [prop, value] of Object.entries(ROOT_RESET)) {
+        root.style.setProperty(prop, value);
+      }
+    }
     const xml = new XMLSerializer().serializeToString(wrap);
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><foreignObject width="100%" height="100%">${xml}</foreignObject></svg>`;
     const img = new Image();
