@@ -138,13 +138,14 @@ describe("buildAddPlan", () => {
   const values = { "sql-warehouse.id": "wh", "job.id": "42" };
   const resources = selectResources(plugin, values);
 
-  test("sp binds the resource with its permission and no scopes", () => {
+  test("sp binds the resource with its permission; only plugin scopes", () => {
     const plan = buildAddPlan(plugin, resources, values, {});
     expect(resources.map((r) => r.resourceKey)).toEqual([
       "sql-warehouse",
       "job",
     ]);
-    expect(plan.userApiScopes).toEqual([]);
+    // Plugin scopes (genie-style always-OBO routes) apply in sp mode too.
+    expect(plan.userApiScopes).toEqual(["ai-gateway"]);
     expect(plan.appYamlEnv).toEqual([
       { name: "DATABRICKS_WAREHOUSE_ID", valueFrom: "sql-warehouse" },
       { name: "DATABRICKS_JOB_ID", valueFrom: "job" },
@@ -191,4 +192,24 @@ test("findMissingValues names the --set key", () => {
   expect(
     findMissingValues("analytics", [warehouse], {}, {}).map((m) => m.setKey),
   ).toEqual(["analytics.sql-warehouse.id"]);
+});
+
+test("fields with a resolver are required even when localOnly", () => {
+  const pg = {
+    type: "postgres",
+    alias: "Postgres",
+    resourceKey: "postgres",
+    appOnly: true,
+    fields: {
+      branch: {},
+      host: { env: "PGHOST", localOnly: true, resolve: "postgres:host" },
+      port: { env: "PGPORT", localOnly: true, value: "5432" },
+    },
+    binding: { yamlKey: "postgres", varFields: [["branch", "branch"]] },
+  } satisfies ManifestPlugin["resources"]["required"][number];
+  expect(
+    findMissingValues("lakebase", [pg], { "postgres.branch": "b" }, {}).map(
+      (m) => m.setKey,
+    ),
+  ).toEqual(["lakebase.postgres.host"]);
 });

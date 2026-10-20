@@ -26,6 +26,8 @@ export interface ManifestField {
   value?: string;
   localOnly?: boolean;
   bundleIgnore?: boolean;
+  /** Derived-value resolver key, e.g. "postgres:host" (see resolve.ts). */
+  resolve?: string;
 }
 
 export interface ManifestResource {
@@ -288,7 +290,8 @@ export interface MissingValue {
  * Values still needed, in prompt order: for each resource bound to the service
  * principal (sp/both), every field its binding references; for resources
  * accessed only on behalf of the user, every field with an env var (its
- * app.yaml entry carries the literal value).
+ * app.yaml entry carries the literal value). Fields with a resolver (e.g.
+ * Lakebase PGHOST) are always needed: local .env must carry them to connect.
  */
 export function findMissingValues(
   pluginName: string,
@@ -304,7 +307,8 @@ export function findMissingValues(
             (f) => r.fields?.[f].env && !r.fields[f].localOnly,
           )
         : variableFields(r);
-    for (const field of fields) {
+    const resolved = fieldNames(r).filter((f) => r.fields?.[f].resolve);
+    for (const field of new Set([...fields, ...resolved])) {
       if (values[valueKey(r, field)] || r.fields?.[field]?.value) continue;
       missing.push({
         resource: r,
@@ -341,7 +345,7 @@ export interface AddPlan extends ConfigPlan {
  * Builds the file changes for a plugin's resources, mirroring the CLI
  * generator: OBO-only resources get a literal app.yaml `value` and no bundle
  * binding; sp/both resources get variables, a binding and `valueFrom`;
- * obo/both resources add their scope (plus the plugin's own scopes) to
+ * obo/both resources add their scope, and the plugin always adds its own, to
  * user_api_scopes.
  */
 export function buildAddPlan(
@@ -405,7 +409,9 @@ export function buildAddPlan(
     });
   }
 
-  if (scopes.length > 0) scopes.push(...(plugin.scopes ?? []));
+  // Plugin scopes (e.g. genie) cover routes that always run on behalf of the
+  // user, so they apply whatever the resources' auth mode is.
+  scopes.push(...(plugin.scopes ?? []));
   return {
     dotEnv,
     appYamlEnv,
