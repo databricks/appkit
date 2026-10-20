@@ -40,6 +40,19 @@ describe("ownership: one owner per branch", () => {
     );
   });
 
+  test("public, which the app never owns, gets the grant or the default schema", () => {
+    expect(
+      ownershipHint("42501", {
+        schemaName: "public",
+        owner: "pg_database_owner",
+        currentUser: "app-sp",
+      }),
+    ).toBe(
+      `Schema public belongs to "pg_database_owner", and the app's role "app-sp" has no CREATE on it. ` +
+        `Grant it once with GRANT CREATE ON SCHEMA public TO "app-sp", or drop schemaName from defineSchema() to use the default schema app, which the app creates and owns.`,
+    );
+  });
+
   test("any other failure gets no ownership hint", () => {
     expect(ownershipHint("42P07")).toBeUndefined();
     expect(ownershipHint(undefined)).toBeUndefined();
