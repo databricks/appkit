@@ -121,6 +121,12 @@ const APP_TEMPLATES: AppTemplate[] = [
     description:
       "Node.js app with Lakebase Autoscaling (Postgres) CRUD operations",
   },
+  {
+    name: "ui-only",
+    features: ["design"],
+    description:
+      "Empty UI-only app (server + dev-only design canvas) for quick PoCs",
+  },
 ];
 
 function run(cmd: string, args: string[], opts?: { cwd?: string }): number {

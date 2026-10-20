@@ -1,0 +1,11 @@
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "name": "design",
+  "displayName": "Design Plugin",
+  "description": "Dev-only design canvas at /design: renders components from client/src/design, lets you click-select elements in the canvas or the running app and hand them to a coding agent",
+  "stability": "beta",
+  "resources": {
+    "required": [],
+    "optional": []
+  }
+}
