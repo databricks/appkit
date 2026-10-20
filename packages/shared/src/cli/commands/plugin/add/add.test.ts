@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { pluginCallArgs } from "./add";
+import { pluginConfig, toSource } from "./add";
 import type { ManifestPlugin, ManifestResource } from "./plan";
 
 const index: ManifestResource = {
@@ -16,19 +16,29 @@ const plugin = (name: string): ManifestPlugin => ({
 });
 const obo = { "vector_search_index:vector-search-index": "obo" } as const;
 
-test("aiSearch OBO sets auth on the default index, where the routes read it", () => {
-  expect(pluginCallArgs(plugin("aiSearch"), [index], obo)).toBe(
-    `{ indexes: { default: { auth: "on-behalf-of-user" } } }`,
+test("aiSearch sets columns and OBO auth on the default index", () => {
+  const config = pluginConfig(plugin("aiSearch"), [index], obo, ["id", "t"]);
+  expect(toSource(config)).toBe(
+    `{ indexes: { default: { columns: ["id", "t"], auth: "on-behalf-of-user" } } }`,
   );
+  expect(pluginConfig(plugin("aiSearch"), [index], {}, ["id"])).toEqual({
+    indexes: { default: { columns: ["id"] } },
+  });
 });
 
 test("files OBO sets the plugin-level auth", () => {
-  expect(pluginCallArgs(plugin("files"), [index], obo)).toBe(
-    `{ auth: "on-behalf-of-user" }`,
-  );
+  expect(pluginConfig(plugin("files"), [index], obo)).toEqual({
+    auth: "on-behalf-of-user",
+  });
 });
 
-test("no args for sp/both or plugins without an auth option", () => {
-  expect(pluginCallArgs(plugin("aiSearch"), [index], {})).toBe("");
-  expect(pluginCallArgs(plugin("analytics"), [index], obo)).toBe("");
+test("no config for sp or plugins without an auth option", () => {
+  expect(pluginConfig(plugin("files"), [index], {})).toBeUndefined();
+  expect(pluginConfig(plugin("analytics"), [index], obo)).toBeUndefined();
+});
+
+test("toSource escapes strings and quotes non-identifier keys", () => {
+  expect(toSource({ "a-b": ['x"); evil()'] })).toBe(
+    `{ "a-b": ["x\\"); evil()"] }`,
+  );
 });

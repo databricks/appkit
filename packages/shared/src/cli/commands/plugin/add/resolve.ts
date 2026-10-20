@@ -47,3 +47,31 @@ export async function resolveDerivedValues(
   }
   return out;
 }
+
+/**
+ * Columns for an AI Search index, as the plugin's development-mode discovery
+ * finds them: the Delta Sync source table's columns minus embedding vectors.
+ * Production refuses to start without `columns`, so they are written into the
+ * plugin config at add time. Throws when the index has no source table.
+ */
+export async function discoverIndexColumns(
+  indexName: string,
+  profile: string | undefined,
+): Promise<string[]> {
+  const { makeWorkspaceClient } =
+    await import("../../registry/workspace-picker.js");
+  const client = makeWorkspaceClient(profile);
+  const index = await client.vectorSearch.getVectorIndex({ name: indexName });
+  const spec =
+    index.indexSpec?.$case === "deltaSyncIndexSpec"
+      ? index.indexSpec.deltaSyncIndexSpec
+      : undefined;
+  if (!spec?.sourceTable) {
+    throw new Error(`index ${indexName} has no Delta Sync source table`);
+  }
+  const excluded = new Set(spec.embeddingVectorColumns?.map((c) => c.name));
+  const table = await client.tables.getTable({ fullNameArg: spec.sourceTable });
+  return (table.columns ?? []).flatMap((c) =>
+    c.name && !excluded.has(c.name) ? [c.name] : [],
+  );
+}
