@@ -22,6 +22,7 @@ const {
   const expressApp = {
     use: vi.fn().mockReturnThis(),
     get: vi.fn().mockReturnThis(),
+    post: vi.fn().mockReturnThis(),
     listen: vi.fn((_port: any, _host: any, cb: any) => {
       cb?.();
       return httpServer;
@@ -71,10 +72,12 @@ vi.mock("get-port", async (importOriginal) => {
 // Mock express
 vi.mock("express", () => {
   const jsonMiddleware = vi.fn();
+  const rawMiddleware = vi.fn();
   const staticMiddleware = vi.fn();
 
   const expressFn: any = vi.fn(() => mockExpressApp);
   expressFn.json = vi.fn(() => jsonMiddleware);
+  expressFn.raw = vi.fn(() => rawMiddleware);
   expressFn.static = vi.fn(() => staticMiddleware);
   expressFn.Router = vi.fn(() => ({
     get: vi.fn(),
