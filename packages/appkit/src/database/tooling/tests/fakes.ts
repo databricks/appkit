@@ -84,10 +84,8 @@ export function fakeContext(options: {
     root: options.root,
     env: { ...options.env },
     workspace: () => ({
-      apiClient: {
-        request: async () => {
-          throw new Error("no raw API calls expected");
-        },
+      request: async () => {
+        throw new Error("no raw API calls expected");
       },
       currentUser: { me: async () => ({ userName }) },
     }),

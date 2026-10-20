@@ -4,28 +4,30 @@ import type { Pool } from "pg";
 import { createLakebasePool } from "../../connectors/lakebase";
 import { endpointHosts } from "../../connectors/lakebase/endpoint-host";
 import { getClientOptions } from "../../context/client-options";
-import { createWorkspaceClient } from "../../workspace-client";
+import {
+  createWorkspaceClient,
+  type WorkspaceRequest,
+} from "../../workspace-client";
 import { currentIdentity } from "./identity";
 import { LakebaseApi, type LakebaseEndpoint } from "./lakebase-api";
 
-/** One REST call through the SDK's unified-auth client. */
+/** One Lakebase REST call, before LakebaseApi encodes it as a workspace request. */
 export interface ToolingRequest {
   path: string;
   method: "GET" | "POST" | "PATCH" | "DELETE";
   query?: Record<string, string | number | boolean | undefined>;
-  headers: Headers;
-  raw: boolean;
   payload?: unknown;
 }
 
 /**
- * The slice of the SDK client the tooling uses. It is also everything the
- * Lakebase pool needs: token refresh calls `apiClient.request` and the user
- * lookup calls `currentUser.me`.
+ * The slice of AppKit's workspace client the tooling uses. It is also all the
+ * Lakebase pool needs, since token refresh goes through `request`.
  */
 export interface ToolingWorkspaceClient {
-  readonly apiClient: { request(options: ToolingRequest): Promise<unknown> };
-  readonly currentUser: { me(): Promise<{ userName?: string }> };
+  request(request: WorkspaceRequest): Promise<Response>;
+  readonly currentUser: {
+    me(request: { attributes?: string }): Promise<{ userName?: string }>;
+  };
 }
 
 /** Where a command runs: the app root, its environment and its Databricks identity. */
@@ -54,7 +56,7 @@ export function createDbContext(
         client = createWorkspaceClient({
           ...(profile ? { profile } : {}),
           clientOptions: getClientOptions(),
-        }).toLegacyWorkspaceClient();
+        });
       }
       return client;
     },
@@ -128,10 +130,7 @@ async function openBranchPool(ctx: DbContext): Promise<Pool> {
     user,
     ...(port ? { port } : {}),
     ...(sslMode ? { sslMode } : {}),
-    // Only apiClient.request and currentUser.me are used (see ToolingWorkspaceClient).
-    workspaceClient: ctx.workspace() as unknown as NonNullable<
-      LakebasePoolConfig["workspaceClient"]
-    >,
+    workspaceClient: ctx.workspace(),
     // One-shot CLI pools: a small cap, and no lingering idle connections.
     max: 2,
     idleTimeoutMillis: 1_000,

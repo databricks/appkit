@@ -1,30 +1,45 @@
 import { describe, expect, test } from "vitest";
 
-import type { ToolingRequest } from "../context";
+import type { WorkspaceRequest } from "../../../workspace-client";
 import { LakebaseApi, LakebaseApiError } from "../lakebase-api";
 
-type Reply = unknown | ((request: ToolingRequest) => unknown);
+/** A request as LakebaseApi sent it, with its JSON body decoded. */
+interface Sent {
+  method: string;
+  path: string;
+  query?: Record<string, string>;
+  headers: Headers;
+  payload?: unknown;
+}
 
-/** apiClient fake: replies in order, records each request. */
+type Reply = unknown | ((request: Sent) => unknown);
+
+/** Workspace client fake: replies in order with JSON, records each request. */
 function client(replies: Reply[]) {
-  const requests: ToolingRequest[] = [];
+  const requests: Sent[] = [];
   return {
     requests,
-    apiClient: {
-      async request(request: ToolingRequest) {
-        requests.push(request);
-        if (replies.length === 0)
-          throw new Error(
-            `unexpected request ${request.method} ${request.path}`,
-          );
-        const reply = replies.shift();
-        const value =
-          typeof reply === "function"
-            ? (reply as (r: ToolingRequest) => unknown)(request)
-            : reply;
-        if (value instanceof Error) throw value;
-        return value;
-      },
+    async request(request: WorkspaceRequest): Promise<Response> {
+      const sent: Sent = {
+        method: request.method,
+        path: request.path,
+        query: request.query,
+        headers: new Headers(request.headers),
+        payload:
+          typeof request.body === "string"
+            ? JSON.parse(request.body)
+            : undefined,
+      };
+      requests.push(sent);
+      if (replies.length === 0)
+        throw new Error(`unexpected request ${sent.method} ${sent.path}`);
+      const reply = replies.shift();
+      const value =
+        typeof reply === "function"
+          ? (reply as (r: Sent) => unknown)(sent)
+          : reply;
+      if (value instanceof Error) throw value;
+      return new Response(value === undefined ? null : JSON.stringify(value));
     },
   };
 }
@@ -63,10 +78,25 @@ describe("LakebaseApi", () => {
     expect(fake.requests[0]).toMatchObject({
       path: "/api/2.0/postgres/projects/p/branches/b",
       method: "GET",
-      raw: false,
     });
+    expect(fake.requests[0]?.query).toBeUndefined();
+    expect(fake.requests[0]?.payload).toBeUndefined();
     expect(fake.requests[0]?.headers.get("Accept")).toBe("application/json");
     expect(fake.requests[0]?.headers.get("Content-Type")).toBeNull();
+  });
+
+  test("a request that fails before a status keeps its message and has no status", async () => {
+    const api = new LakebaseApi(client([new Error("socket hang up")]));
+
+    const error = await api
+      .getBranch("projects/p/branches/b")
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(LakebaseApiError);
+    expect(error).toMatchObject({
+      message:
+        "Lakebase: get branch projects/p/branches/b failed: socket hang up",
+      statusCode: undefined,
+    });
   });
 
   test("getEndpoint: GET /api/2.0/postgres/{name}; 404 → null", async () => {

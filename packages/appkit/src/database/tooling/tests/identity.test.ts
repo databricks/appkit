@@ -8,7 +8,9 @@ afterEach(cleanupTempApps);
 describe("identity", () => {
   test("currentUser.me() is called once per context", async () => {
     const ctx = fakeContext({ root: tempApp() });
-    const me = vi.fn(async () => ({ userName: "alice@example.com" }));
+    const me = vi.fn(async (_request: object) => ({
+      userName: "alice@example.com",
+    }));
     const client = { ...ctx.workspace(), currentUser: { me } };
     const counted = { ...ctx, workspace: () => client };
 
@@ -17,6 +19,7 @@ describe("identity", () => {
     });
     await currentIdentity(counted);
     expect(me).toHaveBeenCalledOnce();
+    expect(me).toHaveBeenCalledWith({});
   });
 
   test("no userName is an error that points at the profile", async () => {

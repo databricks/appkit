@@ -174,17 +174,15 @@ describe("withBranchPool", () => {
 
 describe("createDbContext", () => {
   test("the workspace client uses the .env profile and AppKit's client options, once", () => {
-    const legacy = { apiClient: {}, currentUser: {} };
-    createWorkspaceClient.mockReturnValue({
-      toLegacyWorkspaceClient: () => legacy,
-    });
+    const client = { request: vi.fn(), currentUser: {} };
+    createWorkspaceClient.mockReturnValue(client);
     const ctx = createDbContext({
       root: tempApp(),
       env: { DATABRICKS_CONFIG_PROFILE: "dev" },
     });
 
-    expect(ctx.workspace()).toBe(legacy);
-    expect(ctx.workspace()).toBe(legacy);
+    expect(ctx.workspace()).toBe(client);
+    expect(ctx.workspace()).toBe(client);
     expect(createWorkspaceClient).toHaveBeenCalledOnce();
     expect(createWorkspaceClient).toHaveBeenCalledWith({
       profile: "dev",

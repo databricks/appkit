@@ -13,7 +13,7 @@ export function currentIdentity(ctx: DbContext): Promise<Identity> {
   if (!identity) {
     identity = ctx
       .workspace()
-      .currentUser.me()
+      .currentUser.me({})
       .then(({ userName }) => {
         if (!userName) {
           throw new Error(

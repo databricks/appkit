@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import type { ToolingRequest, ToolingWorkspaceClient } from "./context";
 
-// Lakebase Postgres REST API through the SDK's unified-auth client. Paths,
+// Lakebase Postgres REST API through the workspace client's raw requests. Paths,
 // query parameters and bodies mirror the Go SDK (service/postgres/impl.go).
 
 export interface LakebaseBranch {
@@ -74,9 +74,19 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** Workspace requests take string query values; unset ones are left out. */
+function encodeQuery(
+  query: ToolingRequest["query"],
+): Record<string, string> | undefined {
+  const entries = Object.entries(query ?? {}).flatMap(([key, value]) =>
+    value === undefined ? [] : [[key, String(value)] as const],
+  );
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
 export class LakebaseApi {
   constructor(
-    private readonly client: Pick<ToolingWorkspaceClient, "apiClient">,
+    private readonly client: Pick<ToolingWorkspaceClient, "request">,
   ) {}
 
   getBranch(name: string): Promise<LakebaseBranch | null> {
@@ -104,18 +114,25 @@ export class LakebaseApi {
 
   private async call<T>(
     operation: string,
-    request: Omit<ToolingRequest, "headers" | "raw">,
+    request: ToolingRequest,
   ): Promise<T> {
     const headers = new Headers({ Accept: "application/json" });
     if (request.payload !== undefined) {
       headers.set("Content-Type", "application/json");
     }
     try {
-      return (await this.client.apiClient.request({
-        ...request,
+      const response = await this.client.request({
+        method: request.method,
+        path: request.path,
+        query: encodeQuery(request.query),
         headers,
-        raw: false,
-      })) as T;
+        body:
+          request.payload === undefined
+            ? undefined
+            : JSON.stringify(request.payload),
+      });
+      const text = await response.text();
+      return (text ? JSON.parse(text) : {}) as T;
     } catch (error) {
       throw new LakebaseApiError(operation, messageOf(error), {
         statusCode: statusCodeOf(error),
