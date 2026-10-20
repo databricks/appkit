@@ -75,3 +75,9 @@ export type {
   UseDatabaseWriteOptions,
   UseDatabaseWriteState,
 } from "./hooks/use-database-write";
+
+// Design canvas + element picker. Track the dev-only `design` plugin, which
+// ships at beta from '@databricks/appkit/beta' and mounts both for you.
+export { DesignCanvas, type DesignCanvasProps } from "./design/design-canvas";
+export { DesignPicker, mountDesignPicker } from "./design/design-picker";
+export type { DesignElementInfo } from "./design/inspect";
