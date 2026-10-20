@@ -49,7 +49,43 @@ test("agents OBO sets plugin auth; resources that can't be OBO don't block it", 
     alias: "Experiment",
     resourceKey: "agents-mlflow-experiment",
   };
-  expect(pluginConfig(plugin("agents"), [index, experiment], obo)).toEqual({
+  const endpoint: ManifestResource = {
+    type: "serving_endpoint",
+    alias: "LLM",
+    resourceKey: "agents-serving-endpoint",
+    scope: "model-serving",
+  };
+  expect(
+    pluginConfig(plugin("agents"), [endpoint, experiment], {
+      "serving_endpoint:agents-serving-endpoint": "obo",
+    }),
+  ).toEqual({
     auth: "on-behalf-of-user",
   });
+});
+
+test("agents auth follows the model endpoint, not the skills volume", () => {
+  const endpoint: ManifestResource = {
+    type: "serving_endpoint",
+    alias: "LLM",
+    resourceKey: "agents-serving-endpoint",
+    scope: "model-serving",
+  };
+  const skills: ManifestResource = {
+    type: "volume",
+    alias: "Skills",
+    resourceKey: "agents-skills",
+    scope: "files",
+  };
+  const modelObo = {
+    "serving_endpoint:agents-serving-endpoint": "obo",
+  } as const;
+  expect(pluginConfig(plugin("agents"), [endpoint, skills], modelObo)).toEqual({
+    auth: "on-behalf-of-user",
+  });
+  expect(
+    pluginConfig(plugin("agents"), [endpoint, skills], {
+      "volume:agents-skills": "obo",
+    }),
+  ).toBeUndefined();
 });
