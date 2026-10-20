@@ -143,7 +143,30 @@ When you create the app with the Lakebase resource using the [Getting started](#
 
 ### Local development
 
-To develop locally against a deployed Lakebase database:
+Develop against a Lakebase branch of your own, so local runs never write to the
+branch the app deploys to:
+
+```bash
+npx appkit db init --schema none
+```
+
+It creates your dev branch from the project's default branch, gives it an endpoint
+and a Postgres role for your Databricks identity, and points `.env` at it. The role
+is a member of `DATABRICKS_SUPERUSER`, so you read and write every table the branch
+copied. Copied objects keep their owner, usually the app's Service Principal, so
+changing them (DDL) needs that owner; what you create on your branch is yours.
+`--schema none` leaves the branch's schemas as they are. Apps that use the
+[Database plugin](./database.md#set-up-your-branch) drop it, so `db init` also sets
+up the app schema.
+
+:::caution
+A new branch starts with a copy of the default branch's rows, production data
+included. See [Set up your branch](./database.md#set-up-your-branch).
+:::
+
+#### Against the deployed branch
+
+To develop locally against the branch the app deploys to:
 
 1. **Deploy the app first.** The Service Principal creates the database schema and tables on first deploy. Apps generated from `databricks apps init` handle this automatically - they check if tables exist on startup and skip creation if they do.
 

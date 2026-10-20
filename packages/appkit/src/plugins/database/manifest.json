@@ -4,7 +4,6 @@
   "displayName": "Database (Beta)",
   "description": "Schema-driven typed access to Databricks Lakebase PostgreSQL",
   "stability": "beta",
-  "hidden": true,
   "resources": {
     "required": [
       {
@@ -17,6 +16,7 @@
           "project": {
             "description": "Lakebase project resource name",
             "examples": ["projects/{project-id}"],
+            "bundleIgnore": true,
             "discovery": {
               "type": "kind",
               "resourceKind": "postgres_project",

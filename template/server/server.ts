@@ -27,4 +27,7 @@ createApp({
     await setupSampleLakebaseRoutes(appkit);
   },
 {{- end}}
-}).catch(console.error);
+}).catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
