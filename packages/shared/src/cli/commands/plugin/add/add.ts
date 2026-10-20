@@ -370,11 +370,28 @@ export function pluginConfig(
 ): Record<string, unknown> | undefined {
   let obo = false;
   if (AUTH_OPTION_PLUGINS.has(plugin.name)) {
-    // Resources that can't be accessed on behalf of the user (e.g. an agents
-    // tracing experiment) stay on the service principal and don't count.
-    const capable = resources.filter(oboCapable);
-    const oboRes = capable.filter((r) => modes[authKey(r)] === AUTH_MODE_OBO);
-    obo = oboRes.length > 0 && oboRes.length === capable.length;
+    // The resources whose access the option governs. For agents that is the
+    // model endpoint: skills load from their volume as the service principal
+    // at boot whatever `auth` is, and the tracing experiment can't be OBO.
+    // Elsewhere, every resource that can be accessed on behalf of the user.
+    const governed = resources.filter(
+      (r) =>
+        oboCapable(r) &&
+        (plugin.name !== "agents" || r.type === "serving_endpoint"),
+    );
+    const oboRes = governed.filter((r) => modes[authKey(r)] === AUTH_MODE_OBO);
+    obo = oboRes.length > 0 && oboRes.length === governed.length;
+    if (plugin.name === "agents") {
+      for (const r of resources) {
+        if (r.type === "volume" && modes[authKey(r)] === AUTH_MODE_OBO) {
+          console.warn(
+            pc.yellow(
+              `agents loads skills from ${r.resourceKey} as the service principal at boot, which gets no access in obo mode; use --set agents.${r.resourceKey}.authMode=sp (or both).`,
+            ),
+          );
+        }
+      }
+    }
     if (oboRes.length > 0 && !obo) {
       console.warn(
         pc.yellow(
