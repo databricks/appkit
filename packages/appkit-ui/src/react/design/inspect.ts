@@ -15,10 +15,17 @@ export interface DesignElementInfo {
 const STACK_DEPTH = 6;
 
 interface Fiber {
+  tag: number;
   type: unknown;
   return: Fiber | null;
+  child: Fiber | null;
+  sibling: Fiber | null;
+  alternate: Fiber | null;
+  stateNode: unknown;
   memoizedProps?: Record<string, unknown>;
 }
+
+const HOST_ROOT = 3;
 
 type ComponentType = {
   displayName?: string;
@@ -30,6 +37,30 @@ type ComponentType = {
 function fiberOf(el: Element): Fiber | undefined {
   const key = Object.keys(el).find((k) => k.startsWith("__reactFiber$"));
   return key ? (el as unknown as Record<string, Fiber>)[key] : undefined;
+}
+
+/**
+ * The element's fiber and its ancestors, innermost first, each resolved to its
+ * *current* (committed) version. The DOM-attached fiber and its `return` links
+ * can belong to the previous render, whose props are stale; the current tree
+ * is the one reachable through `child` links from the root's `current`.
+ */
+function currentChain(el: Element): Fiber[] {
+  const chain: Fiber[] = [];
+  for (let f = fiberOf(el) ?? null; f; f = f.return) chain.push(f);
+  const root = chain[chain.length - 1];
+  if (root?.tag !== HOST_ROOT) return chain;
+  let cur = (root.stateNode as { current: Fiber }).current;
+  const resolved = [cur];
+  for (let i = chain.length - 2; i >= 0; i--) {
+    const want = chain[i];
+    let c = cur.child;
+    while (c && c !== want && c.alternate !== want) c = c.sibling;
+    if (!c) return chain;
+    cur = c;
+    resolved.push(c);
+  }
+  return resolved.reverse();
 }
 
 /** Name of a function / memo / forwardRef component fiber, else undefined. */
@@ -64,51 +95,104 @@ function serializeProps(value: unknown, depth = 0): unknown {
 }
 
 export function inspectElement(el: Element): DesignElementInfo {
+  const chain = currentChain(el);
   const stack: string[] = [];
   let props: Record<string, unknown> | undefined;
-  for (let f = fiberOf(el) ?? null; f && stack.length < STACK_DEPTH;) {
+  let source: string | undefined;
+  for (const f of chain) {
+    // Native elements carry `data-source`; component call sites (including
+    // library components that never reach the DOM) carry `data-appkit-source`.
+    const loc =
+      f.memoizedProps?.["data-source"] ??
+      f.memoizedProps?.["data-appkit-source"];
+    if (!source && typeof loc === "string") source = loc;
     const name = componentName(f.type);
-    if (name) {
-      if (stack.length === 0) {
-        props = serializeProps(f.memoizedProps ?? {}) as Record<
-          string,
-          unknown
-        >;
-      }
-      stack.push(name);
+    if (!name || stack.length >= STACK_DEPTH) continue;
+    if (stack.length === 0) {
+      props = serializeProps(f.memoizedProps ?? {}) as Record<string, unknown>;
+      delete props["data-appkit-source"];
     }
-    f = f.return;
+    stack.push(name);
   }
+  source ??=
+    el.closest("[data-source]")?.getAttribute("data-source") ?? undefined;
   const text = el.textContent?.trim().replace(/\s+/g, " ").slice(0, 120);
   return {
     component: stack[0],
     ...(stack.length ? { stack } : {}),
-    source:
-      el.closest("[data-source]")?.getAttribute("data-source") ?? undefined,
+    ...(source ? { source } : {}),
     ...(props ? { props } : {}),
     tag: el.tagName.toLowerCase(),
     ...(text ? { text } : {}),
   };
 }
 
-function inlineStyles(src: Element, dst: Element) {
+async function toDataUrl(url: string): Promise<string> {
+  const blob = await (await fetch(url)).blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Copies computed styles onto the clone and embeds what an SVG image can't
+ * load by itself: canvas pixels, `<img>` sources and CSS background images
+ * (as data URLs). Resources that can't be fetched (CORS) are left as-is.
+ */
+function prepareClone(src: Element, dst: Element, tasks: Promise<unknown>[]) {
   const cs = getComputedStyle(src);
   let css = "";
   for (let i = 0; i < cs.length; i++) {
     css += `${cs[i]}:${cs.getPropertyValue(cs[i])};`;
   }
   dst.setAttribute("style", css);
+
+  if (src instanceof HTMLCanvasElement) {
+    try {
+      const img = document.createElement("img");
+      img.setAttribute("style", css);
+      img.src = src.toDataURL();
+      dst.replaceWith(img);
+    } catch {
+      // tainted canvas: keep the empty clone
+    }
+    return;
+  }
+  if (src instanceof HTMLImageElement && src.currentSrc) {
+    dst.removeAttribute("srcset");
+    tasks.push(
+      toDataUrl(src.currentSrc)
+        .then((u) => dst.setAttribute("src", u))
+        .catch(() => {}),
+    );
+  }
+  const bg = cs.getPropertyValue("background-image");
+  const urls = [...bg.matchAll(/url\("?([^")]+)"?\)/g)].map((m) => m[1]);
+  if (urls.length) {
+    tasks.push(
+      Promise.all(urls.map((u) => toDataUrl(u).catch(() => u))).then((data) => {
+        let out = bg;
+        urls.forEach((u, i) => {
+          out = out.replace(u, data[i]);
+        });
+        (dst as HTMLElement).style.setProperty("background-image", out);
+      }),
+    );
+  }
   for (let i = 0; i < src.children.length; i++) {
-    inlineStyles(src.children[i], dst.children[i]);
+    prepareClone(src.children[i], dst.children[i], tasks);
   }
 }
 
 /**
  * Rasterizes an element via an SVG `<foreignObject>` with inlined computed
  * styles, as a JPEG data URL. Best-effort: returns undefined when the browser
- * refuses (e.g. cross-origin images taint the canvas).
+ * refuses to rasterize.
  */
-// ponytail: no external images/fonts are embedded; add html-to-image if screenshots need pixel fidelity
+// ponytail: web fonts and cross-origin resources without CORS aren't embedded; add html-to-image if that matters
 export async function captureElement(
   el: Element,
   maxWidth = 800,
@@ -117,8 +201,13 @@ export async function captureElement(
     const { width, height } = el.getBoundingClientRect();
     if (!width || !height) return undefined;
     const clone = el.cloneNode(true) as Element;
-    inlineStyles(el, clone);
-    const xml = new XMLSerializer().serializeToString(clone);
+    // A parent so the root itself can be swapped (a selected <canvas>).
+    const wrap = document.createElement("div");
+    wrap.appendChild(clone);
+    const tasks: Promise<unknown>[] = [];
+    prepareClone(el, clone, tasks);
+    await Promise.all(tasks);
+    const xml = new XMLSerializer().serializeToString(wrap);
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><foreignObject width="100%" height="100%">${xml}</foreignObject></svg>`;
     const img = new Image();
     img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;

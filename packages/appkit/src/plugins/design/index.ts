@@ -3,6 +3,7 @@ import type { BasePluginConfig, IAppRouter } from "shared";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import { defineManifest } from "../../registry";
+import { reactSourceLocPlugin } from "../server/react-source-loc-vite-plugin";
 import manifest from "./manifest.json";
 import { type DesignSelectionInput, DesignSelectionStore } from "./store";
 import { designVitePlugin } from "./vite-plugin";
@@ -41,7 +42,13 @@ class DesignPlugin extends Plugin<BasePluginConfig> {
 
   /** Consumed by the server plugin when it starts the Vite dev server. */
   vitePlugins() {
-    return isDev() ? [designVitePlugin()] : [];
+    if (!isDev()) return [];
+    return [
+      designVitePlugin(),
+      // Locates component call sites (`<Button>`), which the server's own
+      // transform skips because it only tags native elements.
+      reactSourceLocPlugin({ projectRoot: process.cwd(), components: true }),
+    ];
   }
 
   injectRoutes(router: IAppRouter): void {
