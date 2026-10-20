@@ -4,6 +4,7 @@ import type { ManifestResource } from "./plan";
 import { discoverIndexColumns, resolveDerivedValues } from "./resolve";
 
 let columnsToSync: string[] | undefined;
+let columnsToIndex: string[] | undefined;
 const listEndpointsIter = vi.fn(async function* () {
   yield { name: "ro", status: { endpointType: "ENDPOINT_TYPE_READ_ONLY" } };
   yield {
@@ -25,6 +26,7 @@ vi.mock("../../registry/workspace-picker.js", () => ({
             sourceTable: "c.s.t",
             embeddingVectorColumns: [{ name: "vec" }],
             columnsToSync,
+            columnsToIndex,
           },
         },
       }),
@@ -100,4 +102,14 @@ test("discoverIndexColumns keeps only synced columns", async () => {
     "id",
     "text",
   ]);
+});
+
+test("discoverIndexColumns honors the columnsToIndex alias", async () => {
+  columnsToSync = undefined;
+  columnsToIndex = ["id", "text", "vec"];
+  expect(await discoverIndexColumns("c.s.i", undefined)).toEqual([
+    "id",
+    "text",
+  ]);
+  columnsToIndex = undefined;
 });
