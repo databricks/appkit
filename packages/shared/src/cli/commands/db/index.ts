@@ -1,5 +1,6 @@
 import { Command } from "commander";
 
+import { dbCheckCommand } from "./check";
 import { dbCleanCommand } from "./clean";
 import { dbInitCommand } from "./init";
 import { dbIntrospectCommand } from "./introspect";
@@ -18,4 +19,5 @@ export const dbCommand = new Command("db")
   .addCommand(dbIntrospectCommand)
   .addCommand(dbCleanCommand)
   .addCommand(dbSeedCommand)
-  .addCommand(dbVerifyCommand);
+  .addCommand(dbVerifyCommand)
+  .addCommand(dbCheckCommand);
