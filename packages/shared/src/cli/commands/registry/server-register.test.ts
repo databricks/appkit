@@ -38,6 +38,17 @@ afterEach(() => {
 });
 
 describe("registerPluginInServer", () => {
+  it("accepts an external npm package and rejects code in the path", () => {
+    const dir = makeTempDir();
+    writeServer(dir, "server.ts", "server()");
+    expect(
+      registerPluginInServer(dir, "@example/analytics", "analytics").status,
+    ).toBe("wired");
+    expect(registerPluginInServer(dir, `x"; evil(); "`, "other").status).toBe(
+      "skipped",
+    );
+  });
+
   it("passes call args and accepts the AppKit package import path", () => {
     const dir = makeTempDir();
     const file = writeServer(dir, "server.ts", "server()");

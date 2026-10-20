@@ -1,3 +1,4 @@
+import { DABS_BINDING_BY_TYPE } from "../../../../schemas/manifest";
 import type { AppYamlEnvEntry, ResourceBinding } from "../../../deploy-config";
 import type { BundleVariable, ConfigPlan } from "../../registry/config-plan";
 import { isValidEnvName } from "../../registry/requirements";
@@ -39,11 +40,26 @@ export interface ManifestResource {
   fields?: Record<string, ManifestField>;
   scope?: string;
   appOnly?: boolean;
-  binding?: {
-    yamlKey: string;
-    varFields: [string, string][];
-    staticFields?: [string, string][];
-  };
+  binding?: Binding;
+}
+
+type FieldPair = readonly [string, string];
+interface Binding {
+  yamlKey: string;
+  varFields: readonly FieldPair[];
+  staticFields?: readonly FieldPair[];
+}
+
+/**
+ * The resource's databricks.yml binding: the manifest's, else the built-in
+ * one for its type (`binding` is optional in the manifest schema; the
+ * Databricks CLI generator falls back the same way).
+ */
+function bindingOf(r: ManifestResource): Binding | undefined {
+  return (
+    r.binding ??
+    (DABS_BINDING_BY_TYPE as Record<string, Binding | undefined>)[r.type]
+  );
 }
 
 /** A plugin entry of the app's appkit.plugins.json (the fields used here). */
@@ -75,7 +91,7 @@ function allResources(p: ManifestPlugin): ManifestResource[] {
 
 /** Manifest fields the resource's databricks.yml binding references. */
 function bindingVarFields(r: ManifestResource): string[] {
-  return (r.binding?.varFields ?? []).map(([f]) => f);
+  return (bindingOf(r)?.varFields ?? []).map(([f]) => f);
 }
 
 /**
@@ -385,7 +401,8 @@ export function buildAddPlan(
     }
 
     if (oboOnly) continue;
-    if (!r.binding) {
+    const binding = bindingOf(r);
+    if (!binding) {
       unverifiedTypes.push(r.type);
       continue;
     }
@@ -393,17 +410,17 @@ export function buildAddPlan(
       bundleVariables.push({
         name: varName(r, f),
         description: r.fields?.[f]?.description || r.description,
-        value: values[valueKey(r, f)] || undefined,
+        value: values[valueKey(r, f)] || r.fields?.[f]?.value || undefined,
       });
     }
     const fields: Record<string, string> = {};
-    for (const [mf, yf] of r.binding.varFields) {
+    for (const [mf, yf] of binding.varFields) {
       fields[yf] = `\${var.${varName(r, mf)}}`;
     }
-    for (const [yf, v] of r.binding.staticFields ?? []) fields[yf] = v;
+    for (const [yf, v] of binding.staticFields ?? []) fields[yf] = v;
     resourceBindings.push({
       name: r.resourceKey,
-      type: r.binding.yamlKey,
+      type: binding.yamlKey,
       permission: r.permission,
       fields,
     });

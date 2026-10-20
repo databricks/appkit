@@ -93,13 +93,14 @@ export function registerPluginInServer(
   // exportName and importPath are interpolated into the user's server source.
   // Registry items are untrusted, so refuse anything that isn't a plain JS
   // identifier / clean relative module path — prevents code injection via a
-  // crafted export name or import path. Core plugins import from the AppKit package.
+  // crafted export name or import path. Plugins declared by an npm package
+  // (AppKit's or another) import from a plain package specifier.
   if (!JS_IDENTIFIER.test(exportName)) {
     return { status: "skipped", reason: "invalid plugin export name" };
   }
   if (
     !/^[.][./A-Za-z0-9_-]*$/.test(importPath) &&
-    !/^@databricks\/appkit(\/beta)?$/.test(importPath)
+    !/^(@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*(\/[\w.-]+)*$/i.test(importPath)
   ) {
     return { status: "skipped", reason: "invalid plugin import path" };
   }
