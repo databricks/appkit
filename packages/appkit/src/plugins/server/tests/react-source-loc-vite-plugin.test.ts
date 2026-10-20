@@ -27,9 +27,11 @@ async function transformSource(
   root: string = clientRoot,
   id: string = moduleId,
   rootForPaths: string = projectRoot,
+  components = false,
 ): Promise<string> {
   const { transform } = reactSourceLocPlugin({
     projectRoot: rootForPaths,
+    components,
   }) as unknown as TestableHooks;
 
   const result = await transform?.(code, id);
@@ -55,6 +57,41 @@ describe("reactSourceLocPlugin", () => {
     expect(output).toMatch(/<div data-source="[^"]+" className="a">/);
     expect(output).toMatch(/<span data-source="[^"]+" \/>/);
     expect(output).not.toContain("motion.div data-source");
+  });
+
+  it("components mode tags component call sites only, never fragments", async () => {
+    const code = `export function App() {
+  return (
+    <Fragment>
+      <React.Fragment>
+        <Button variant="x" />
+        <Ui.Card>
+          <div />
+        </Ui.Card>
+        <>
+          <svg:rect />
+        </>
+      </React.Fragment>
+    </Fragment>
+  );
+}
+`;
+    const output = await transformSource(
+      code,
+      clientRoot,
+      moduleId,
+      projectRoot,
+      true,
+    );
+    expect(output).toMatch(
+      /<Button data-appkit-source="client\/src\/Example\.tsx:5:8" variant="x" \/>/,
+    );
+    expect(output).toMatch(/<Ui\.Card data-appkit-source="[^"]+">/);
+    expect(output).toContain("<Fragment>");
+    expect(output).toContain("<React.Fragment>");
+    expect(output).toContain("<div />");
+    expect(output).toContain("<svg:rect />");
+    expect(output).not.toContain("data-source=");
   });
 
   it("skips components, fragments, namespaced tags, and existing data-source", async () => {

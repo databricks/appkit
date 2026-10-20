@@ -45,7 +45,7 @@ A frame that throws shows its error in place. It doesn't break the rest of the c
 
 In development, a **Select** button appears in the bottom-right corner of the canvas and of every app page. Click it, then click elements to add or remove them (Escape stops selecting). Add an optional note and click **Send to agent**.
 
-Each element is traced back to its source through the `data-source="file:line:col"` attribute that the dev server adds to native JSX elements. The nearest React component and its props come from React's fiber tree.
+Each element is traced back to its source `file:line:col`: the dev server tags native JSX elements with `data-source`, and the design plugin also tags component call sites (such as `<Button>` from a library) with `data-appkit-source`. The picker reads these, plus the nearest React component and its current props, from React's fiber tree. Screenshots include images, canvases, and CSS background images. Web fonts and cross-origin resources served without CORS are not embedded.
 
 ## Handing selections to the agent
 
