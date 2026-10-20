@@ -82,6 +82,7 @@ This Software contains code from the following open source projects:
 | [sonner](https://www.npmjs.com/package/sonner) | 2.0.7 | MIT | https://sonner.emilkowal.ski/ |
 | [tailwind-merge](https://www.npmjs.com/package/tailwind-merge) | 3.4.0 | MIT | https://github.com/dcastil/tailwind-merge |
 | [vaul](https://www.npmjs.com/package/vaul) | 1.1.2 | MIT | https://vaul.emilkowal.ski/ |
+| [web-vitals](https://www.npmjs.com/package/web-vitals) | 6.1.1 | Apache-2.0 | https://github.com/GoogleChrome/web-vitals#readme |
 | [ws](https://www.npmjs.com/package/ws) | 7.5.10, 8.21.0 | MIT | https://github.com/websockets/ws |
 | [yaml](https://www.npmjs.com/package/yaml) | 2.8.2 | ISC | https://eemeli.org/yaml/ |
 | [zod](https://www.npmjs.com/package/zod) | 4.3.6 | MIT | https://zod.dev |
