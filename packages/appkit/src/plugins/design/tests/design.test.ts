@@ -60,6 +60,24 @@ describe("DesignSelectionStore", () => {
       false,
     );
   });
+
+  test("concurrent reads never see a partially written file", async () => {
+    const store = new DesignSelectionStore(tmp());
+    await store.add({ elements: [{ tag: "div" }] });
+
+    let writing = true;
+    const counts: number[] = [];
+    const readers = Array.from({ length: 4 }, async () => {
+      while (writing) counts.push((await store.read()).selections.length);
+    });
+    for (let i = 0; i < 100; i++) await store.add({ elements: [{ tag: "p" }] });
+    writing = false;
+    await Promise.all(readers);
+
+    expect(counts.length).toBeGreaterThan(0);
+    expect(counts.every((n) => n >= 1)).toBe(true);
+    expect((await store.read()).selections).toHaveLength(101);
+  });
 });
 
 describe("design plugin outside development", () => {

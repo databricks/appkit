@@ -6,6 +6,21 @@ export interface DesignCanvasProps {
   modules: Record<string, Record<string, unknown>>;
 }
 
+/** memo / forwardRef components are objects, not functions. */
+const WRAPPED_COMPONENTS = new Set([
+  Symbol.for("react.memo"),
+  Symbol.for("react.forward_ref"),
+]);
+
+function isComponent(value: unknown): boolean {
+  if (typeof value === "function") return true;
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    WRAPPED_COMPONENTS.has((value as { $$typeof?: symbol }).$$typeof as symbol)
+  );
+}
+
 class Boundary extends Component<{ children: ReactNode }, { error?: Error }> {
   state: { error?: Error } = {};
   static getDerivedStateFromError(error: Error) {
@@ -35,9 +50,7 @@ export function DesignCanvas({ modules }: DesignCanvasProps) {
     .sort(([a], [b]) => a.localeCompare(b))
     .flatMap(([file, mod]) =>
       Object.entries(mod)
-        .filter(
-          ([name, value]) => /^[A-Z]/.test(name) && typeof value === "function",
-        )
+        .filter(([name, value]) => /^[A-Z]/.test(name) && isComponent(value))
         .map(([name, value]) => ({
           id: `${file}#${name}`,
           label: `${file.replace(/^\/src\/design\//, "")} · ${name}`,

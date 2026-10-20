@@ -46,7 +46,8 @@ const str = (v: unknown) => (typeof v === "string" ? v : undefined);
 
 /**
  * Append-only store of design selections. Writes are serialized so concurrent
- * sends can't interleave their read-modify-write.
+ * sends can't interleave their read-modify-write, and each write replaces the
+ * file atomically.
  *
  * @internal
  */
@@ -61,11 +62,16 @@ export class DesignSelectionStore {
   }
 
   async read(): Promise<DesignSelectionFile> {
+    let raw: string;
     try {
-      return JSON.parse(await fs.readFile(this.filePath, "utf-8"));
-    } catch {
-      return { selections: [] };
+      raw = await fs.readFile(this.filePath, "utf-8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return { selections: [] };
+      }
+      throw error;
     }
+    return JSON.parse(raw);
   }
 
   add(input: DesignSelectionInput): Promise<DesignSelection> {
@@ -106,7 +112,11 @@ export class DesignSelectionStore {
 
   private async write(file: DesignSelectionFile) {
     await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-    await fs.writeFile(this.filePath, `${JSON.stringify(file, null, 2)}\n`);
+    // Write-then-rename is atomic, so concurrent reads never see a truncated
+    // file (reads don't go through the queue).
+    const tmp = `${this.filePath}.${randomUUID()}.tmp`;
+    await fs.writeFile(tmp, `${JSON.stringify(file, null, 2)}\n`);
+    await fs.rename(tmp, this.filePath);
   }
 
   /** Keeps only known fields and moves the screenshot out to an image file. */
