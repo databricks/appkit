@@ -36,6 +36,7 @@ const WITHOUT_SCHEMA = {
   migrate: "there is nothing to migrate",
   clean: "clean cannot tell which schema to drop",
   verify: "there is nothing to verify",
+  check: "there is nothing to check",
 } as const;
 
 /** Without schema.ts, point to introspect instead of a load error. */
