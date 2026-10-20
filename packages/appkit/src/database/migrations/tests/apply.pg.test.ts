@@ -442,6 +442,7 @@ describe.skipIf(!url)("applyPendingMigrations against Postgres", () => {
       expect(await readMigrationDrift(newPool(), options(folder))).toEqual({
         pending: ["0000_notes", "0001_introspect"],
         stranded: [],
+        edited: [],
         unknown: 0,
       });
 
@@ -450,6 +451,7 @@ describe.skipIf(!url)("applyPendingMigrations against Postgres", () => {
       expect(await readMigrationDrift(newPool(), options(folder))).toEqual({
         pending: ["0001_introspect"],
         stranded: [],
+        edited: [],
         unknown: 1,
       });
     });

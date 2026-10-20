@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import {
   parseProject,
   parseResourceName,
+  readBundle,
   readDeployBranches,
   readDeployTarget,
   readLocalTarget,
@@ -124,6 +125,24 @@ targets:
     ]);
   });
 
+  test("a branch set on an app's postgres resource counts, in an included file too", () => {
+    const root = tempApp({
+      "databricks.yml": "include:\n  - resources/*.yml\n",
+      "resources/app.yml": `resources:
+  apps:
+    app:
+      name: shop
+      resources:
+        - name: postgres
+          postgres:
+            branch: projects/p/branches/production
+`,
+    });
+    expect(readDeployBranches(root)).toEqual([
+      "projects/p/branches/production",
+    ]);
+  });
+
   test("empty without databricks.yml or without a postgres binding", () => {
     expect(readDeployBranches(tempApp())).toEqual([]);
     expect(
@@ -140,7 +159,7 @@ targets:
 });
 
 describe("readDeployTarget", () => {
-  test("reads the default target's postgres variables", () => {
+  test("reads the default target's postgres resource", () => {
     const root = tempApp({
       "databricks.yml": databricksYml(
         "projects/p/branches/production",
@@ -169,10 +188,187 @@ targets:
     });
   });
 
-  test("null without databricks.yml or without a postgres binding", () => {
+  test("null without databricks.yml, a default target or a postgres binding", () => {
     expect(readDeployTarget(tempApp())).toBeNull();
     expect(
       readDeployTarget(tempApp({ "databricks.yml": "bundle:\n  name: x\n" })),
     ).toBeNull();
+    expect(
+      readDeployTarget(
+        tempApp({
+          "databricks.yml": `variables:
+  postgres_branch:
+    default: projects/p/branches/main
+targets:
+  dev: {}
+  prod: {}
+`,
+        }),
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("readBundle", () => {
+  test("resolves each target's app, postgres resource and host from its variables", () => {
+    const root = tempApp({
+      "databricks.yml": `bundle:
+  name: shop
+variables:
+  postgres_branch:
+    default: projects/p/branches/main
+  postgres_database:
+    default: projects/p/branches/main/databases/db
+  suffix:
+    default: dev
+workspace:
+  host: https://dev.cloud.databricks.com
+resources:
+  apps:
+    app:
+      name: \${bundle.name}-\${var.suffix}
+      resources:
+        - name: postgres
+          postgres:
+            branch: \${var.postgres_branch}
+            database: \${var.postgres_database}
+targets:
+  default:
+    default: true
+  prod:
+    workspace:
+      host: https://prod.cloud.databricks.com
+    variables:
+      suffix: \${bundle.target}
+      postgres_branch: projects/p/branches/production
+      postgres_database: projects/p/branches/production/databases/db
+`,
+    });
+
+    expect(readBundle(root)).toEqual({
+      file: "databricks.yml",
+      targets: [
+        {
+          name: "default",
+          isDefault: true,
+          host: "https://dev.cloud.databricks.com",
+          apps: [
+            {
+              key: "app",
+              declaredName: "${bundle.name}-${var.suffix}",
+              name: "shop-dev",
+              postgres: {
+                branch: "projects/p/branches/main",
+                database: "projects/p/branches/main/databases/db",
+              },
+            },
+          ],
+          postgresBranch: "projects/p/branches/main",
+          postgresDatabase: "projects/p/branches/main/databases/db",
+        },
+        {
+          name: "prod",
+          isDefault: false,
+          host: "https://prod.cloud.databricks.com",
+          apps: [
+            {
+              key: "app",
+              declaredName: "${bundle.name}-${var.suffix}",
+              name: "shop-prod",
+              postgres: {
+                branch: "projects/p/branches/production",
+                database: "projects/p/branches/production/databases/db",
+              },
+            },
+          ],
+          postgresBranch: "projects/p/branches/production",
+          postgresDatabase: "projects/p/branches/production/databases/db",
+        },
+      ],
+    });
+  });
+
+  test("follows include:, and a target's app override merges resources by name", () => {
+    const root = tempApp({
+      "databricks.yml": `include:
+  - resources/*.yml
+targets:
+  default:
+    default: true
+    resources:
+      apps:
+        app:
+          resources:
+            - name: postgres
+              postgres:
+                branch: projects/p/branches/production
+`,
+      "resources/app.yml": `resources:
+  apps:
+    app:
+      name: shop
+      resources:
+        - name: warehouse
+          sql_warehouse:
+            id: w
+        - name: postgres
+          postgres:
+            branch: projects/p/branches/main
+            database: projects/p/branches/main/databases/db
+`,
+      "resources/notes.txt": "not yaml: [",
+    });
+
+    const [target] = readBundle(root)?.targets ?? [];
+    expect(target?.apps).toEqual([
+      {
+        key: "app",
+        declaredName: "shop",
+        name: "shop",
+        postgres: {
+          branch: "projects/p/branches/production",
+          database: "projects/p/branches/main/databases/db",
+        },
+      },
+    ]);
+  });
+
+  test("a reference only a deploy resolves reads as null; no targets is one default target", () => {
+    const root = tempApp({
+      "databricks.yml": `variables:
+  warehouse:
+    lookup:
+      warehouse: Shared
+resources:
+  apps:
+    app:
+      name: shop-\${workspace.current_user.short_name}
+`,
+    });
+    expect(readBundle(root)?.targets).toEqual([
+      {
+        name: "default",
+        isDefault: true,
+        host: null,
+        apps: [
+          {
+            key: "app",
+            declaredName: "shop-${workspace.current_user.short_name}",
+            name: null,
+            postgres: null,
+          },
+        ],
+        postgresBranch: null,
+        postgresDatabase: null,
+      },
+    ]);
+  });
+
+  test("an invalid included file throws, naming it", () => {
+    const root = tempApp({
+      "databricks.yml": "include:\n  - resources/*.yml\n",
+      "resources/app.yml": "resources: [\n",
+    });
+    expect(() => readBundle(root)).toThrow(/^Cannot read app\.yml, /);
   });
 });

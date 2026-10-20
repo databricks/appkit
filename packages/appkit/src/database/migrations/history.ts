@@ -32,29 +32,38 @@ interface MigrationHistory {
 
 /**
  * Match each committed migration with a recorded row by `when` = `created_at`,
- * the pair drizzle-orm's migrator writes, then compare hashes.
+ * the pair drizzle-orm's migrator writes, then compare hashes. Two entries can
+ * share a `when` after a hand edit or a merge, so each `when` keeps every hash
+ * recorded at it.
  */
 export function reconcileMigrations(
   files: readonly MigrationFile[],
   recorded: readonly RecordedMigration[],
 ): MigrationHistory {
-  const hashAt = new Map<number, string>();
+  const hashesAt = new Map<number, Set<string>>();
   for (const row of recorded) {
-    if (row.createdAt !== null) hashAt.set(row.createdAt, row.hash);
+    if (row.createdAt === null) continue;
+    const hashes = hashesAt.get(row.createdAt) ?? new Set<string>();
+    hashes.add(row.hash);
+    hashesAt.set(row.createdAt, hashes);
   }
-  const lastRecorded = hashAt.size > 0 ? Math.max(...hashAt.keys()) : null;
+  const lastRecorded = hashesAt.size > 0 ? Math.max(...hashesAt.keys()) : null;
 
   const pending: MigrationFile[] = [];
   const stranded: MigrationFile[] = [];
   const edited: MigrationFile[] = [];
   for (const file of files) {
-    const hash = hashAt.get(file.when);
-    if (hash === undefined) {
-      if (lastRecorded === null || file.when > lastRecorded) pending.push(file);
-      else stranded.push(file);
-    } else if (hash !== file.hash) {
-      edited.push(file);
-    }
+    const hashes = hashesAt.get(file.when);
+    if (hashes?.has(file.hash)) continue;
+    // A row at this `when` that is another entry's: this one never ran.
+    const sibling = files.some(
+      (other) =>
+        other !== file && other.when === file.when && hashes?.has(other.hash),
+    );
+    if (hashes && !sibling) edited.push(file);
+    else if (lastRecorded === null || file.when > lastRecorded) {
+      pending.push(file);
+    } else stranded.push(file);
   }
   const committed = new Set(files.map((file) => file.when));
   const unknown = recorded.filter(

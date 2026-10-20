@@ -5,8 +5,11 @@ import pc from "picocolors";
 
 import type {
   CleanReport,
+  DeployVerifyReport,
   IntrospectReport,
+  LocalVerifyReport,
   MigrateReport,
+  VerifyReport,
 } from "./tooling-contract";
 
 /** Prompts only when a human can answer them. */
@@ -94,6 +97,85 @@ export function printCleanReport(report: CleanReport): void {
       `Also removed, because they depended on it: ${report.dependents.join(", ")}`,
     );
   }
+}
+
+const REBUILD =
+  "`appkit db clean` and then `appkit db migrate` rebuild the branch from this checkout's migrations, in order";
+
+/** The one next step for a failed local verify, most fundamental gap first. */
+function localVerifyHint(report: LocalVerifyReport): string {
+  if (report.editedMigrations.length > 0) {
+    return "Restore the edited migrations from version control, and put the change in a new migration.";
+  }
+  if (report.unknownMigrations > 0) {
+    return `${REBUILD}. If the branch ran migrations you have not pulled yet, pull them instead.`;
+  }
+  if (report.strandedMigrations.length > 0) return `${REBUILD}.`;
+  // Pending migrations explain the gap; without them, schema.ts changed or the branch was edited.
+  return report.pendingMigrations.length > 0
+    ? "Run `appkit db migrate` to apply the pending migrations."
+    : "If you changed schema.ts, run `appkit db migrate`; if the branch was changed by hand, `appkit db clean` and then `appkit db migrate` rebuild it from the migrations.";
+}
+
+function printLocalVerifyReport(report: LocalVerifyReport): void {
+  const branch = shortName(report.branch);
+  if (report.ok) {
+    ok(
+      `${branch} has every table and column config/database/schema.ts declares, and every committed migration`,
+    );
+    return;
+  }
+  for (const problem of report.schemaProblems) warn(`Schema: ${problem}`);
+  if (report.pendingMigrations.length > 0) {
+    warn(`Pending migrations: ${report.pendingMigrations.join(", ")}`);
+  }
+  for (const tag of report.strandedMigrations) {
+    warn(
+      `Never runs: ${tag}: it is older than a migration the branch already ran (merged out of order); the deployed app skips it too once it ran a newer one`,
+    );
+  }
+  for (const tag of report.editedMigrations) {
+    warn(
+      `Never runs: ${tag}: it changed after the branch ran it, and a branch that ran it keeps the old version`,
+    );
+  }
+  if (report.unknownMigrations > 0) {
+    const one = report.unknownMigrations === 1;
+    warn(
+      `Not committed: the branch ran ${report.unknownMigrations} migration${one ? "" : "s"} this checkout does not have, for example from another git branch`,
+    );
+  }
+  console.error(
+    `${pc.red("✖")} ${branch} does not match config/database/schema.ts and the committed migrations. ${localVerifyHint(report)}`,
+  );
+}
+
+function printDeployVerifyReport(report: DeployVerifyReport): void {
+  const where = `target ${report.target}${report.host ? ` on ${report.host}` : ""}`;
+  const app = report.app ? `app ${report.app}` : "The deployed app";
+  const branch = shortName(report.branch);
+  if (report.ok) {
+    ok(
+      `${app} (${where}) is running, bound to ${branch} with CAN_CONNECT_AND_CREATE, and its service principal has a role there`,
+    );
+    if (report.migrations?.checked === "deployed code") {
+      ok("Its active deployment has every committed migration");
+    } else if (report.migrations) {
+      ok(
+        "Every committed migration was generated before its active deployment; its code could not be read, so verify compared times",
+      );
+    }
+    return;
+  }
+  for (const problem of report.problems) warn(problem);
+  console.error(
+    `${pc.red("✖")} ${app} (${where}) cannot use ${branch} yet. Fix the above, then run \`appkit db verify --deployed -t ${report.target}\` again.`,
+  );
+}
+
+export function printVerifyReport(report: VerifyReport): void {
+  if (report.kind === "local") printLocalVerifyReport(report);
+  else printDeployVerifyReport(report);
 }
 
 export function printIntrospectReport(report: IntrospectReport): void {
