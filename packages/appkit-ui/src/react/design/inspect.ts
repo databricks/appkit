@@ -150,6 +150,21 @@ function prepareClone(src: Element, dst: Element, tasks: Promise<unknown>[]) {
   }
   dst.setAttribute("style", css);
 
+  // Live form state lives in DOM properties, which serialization drops.
+  if (src instanceof HTMLInputElement) {
+    if (src.type === "checkbox" || src.type === "radio") {
+      dst.toggleAttribute("checked", src.checked);
+    } else {
+      dst.setAttribute("value", src.value);
+    }
+  } else if (src instanceof HTMLTextAreaElement) {
+    dst.textContent = src.value;
+  } else if (src instanceof HTMLSelectElement) {
+    dst.querySelectorAll("option").forEach((o, i) => {
+      o.toggleAttribute("selected", src.options[i]?.selected ?? false);
+    });
+  }
+
   if (src instanceof HTMLCanvasElement) {
     try {
       const img = document.createElement("img");

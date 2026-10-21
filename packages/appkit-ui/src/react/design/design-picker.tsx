@@ -109,23 +109,37 @@ export function DesignPicker() {
           : [...prev, { el, info: inspectElement(el) }],
       );
     };
+    // A pick mustn't act on the page either: e.g. a pointerdown would let an
+    // open dialog dismiss itself before the click selects its content.
+    const swallow = (e: Event) => {
+      if (own(e.target)) return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setActive(false);
+    const PRESS = ["pointerdown", "mousedown", "pointerup", "mouseup"];
     document.addEventListener("mousemove", onMove, true);
     document.addEventListener("click", onClick, true);
     document.addEventListener("keydown", onKey, true);
+    for (const t of PRESS) window.addEventListener(t, swallow, true);
     return () => {
       document.removeEventListener("mousemove", onMove, true);
       document.removeEventListener("click", onClick, true);
       document.removeEventListener("keydown", onKey, true);
+      for (const t of PRESS) window.removeEventListener(t, swallow, true);
       setHovered(null);
     };
   }, [active]);
 
   async function send() {
     setStatus("sending");
+    // Picks and the note can change while the request is in flight; only
+    // what was actually sent is cleared afterwards.
+    const sending = picked;
+    const sentNote = note;
     try {
       const elements = await Promise.all(
-        picked.map(async ({ el, info }) => ({
+        sending.map(async ({ el, info }) => ({
           ...info,
           screenshot: await captureElement(el),
         })),
@@ -135,14 +149,18 @@ export function DesignPicker() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           elements,
-          note: note.trim() || undefined,
+          note: sentNote.trim() || undefined,
           url: location.pathname,
         }),
       });
       if (!res.ok) throw new Error(String(res.status));
-      setPicked([]);
-      setNote("");
-      setActive(false);
+      setPicked((prev) => {
+        const remaining = prev.filter((p) => !sending.includes(p));
+        // Idempotent, so safe in an updater that StrictMode may run twice.
+        if (remaining.length === 0) setActive(false);
+        return remaining;
+      });
+      setNote((n) => (n === sentNote ? "" : n));
       setStatus("sent");
     } catch {
       setStatus("error");
@@ -234,7 +252,24 @@ export function mountDesignPicker() {
   if (document.getElementById(ROOT_ID)) return;
   const host = document.createElement("div");
   host.id = ROOT_ID;
-  host.style.cssText = "position:relative;z-index:2147483647";
+  // Modal dialogs set `pointer-events: none` on <body> and dismiss on any
+  // outside press; the picker must stay usable and not count as "outside".
+  host.style.cssText =
+    "position:relative;z-index:2147483647;pointer-events:auto";
+  for (const t of ["pointerdown", "mousedown", "focusin", "touchstart"]) {
+    host.addEventListener(t, (e) => e.stopPropagation());
+  }
+  // Focus traps also watch `focusout` on the document and pull focus back when
+  // it leaves the dialog; let it move into the picker (e.g. the note box).
+  window.addEventListener(
+    "focusout",
+    (e) => {
+      if (e.relatedTarget instanceof Node && host.contains(e.relatedTarget)) {
+        e.stopPropagation();
+      }
+    },
+    true,
+  );
   document.body.appendChild(host);
   createRoot(host).render(<DesignPicker />);
 }
