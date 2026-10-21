@@ -6,6 +6,9 @@ import path from "node:path";
 const SELECTION_FILE = ".appkit/design-selection.json";
 const SCREENSHOT_DIR = ".appkit/design-screenshots";
 
+/** File names the store writes into {@link SCREENSHOT_DIR}. */
+export const SCREENSHOT_NAME = /^[A-Za-z0-9-]+\.(png|jpeg)$/;
+
 const DATA_URL = /^data:image\/(png|jpeg);base64,([A-Za-z0-9+/=]+)$/;
 
 /** One picked element, as sent by the browser picker. */
@@ -53,12 +56,14 @@ const str = (v: unknown) => (typeof v === "string" ? v : undefined);
  */
 export class DesignSelectionStore {
   readonly filePath: string;
+  readonly screenshotDir: string;
   private readonly root: string;
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(root: string = process.cwd()) {
     this.root = root;
     this.filePath = path.resolve(root, SELECTION_FILE);
+    this.screenshotDir = path.resolve(root, SCREENSHOT_DIR);
   }
 
   async read(): Promise<DesignSelectionFile> {

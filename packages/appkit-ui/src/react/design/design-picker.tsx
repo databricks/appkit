@@ -1,80 +1,110 @@
-import { type CSSProperties, useEffect, useReducer, useState } from "react";
-import { createRoot } from "react-dom/client";
+import { MousePointerClick, Send, X } from "lucide-react";
+import {
+  type CSSProperties,
+  useEffect,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "../ui/card";
+import { Textarea } from "../ui/textarea";
 import {
   captureElement,
   type DesignElementInfo,
   inspectElement,
 } from "./inspect";
+import {
+  DESIGN_SELECTION_MESSAGE,
+  type DesignSelectionMessage,
+  postDesignSelection,
+} from "./message";
 
-/** Endpoint the `design()` plugin mounts in development. */
+/** Endpoints the `design()` plugin mounts in development. */
 const SELECTION_ENDPOINT = "/api/design/selection";
+const SCREENSHOT_ENDPOINT = "/api/design/screenshots";
 const ROOT_ID = "appkit-design-picker";
-/** Same violet as the `<Variants>` picker, so dev chrome reads as dev chrome. */
-const ACCENT = "#8b5cf6";
 
-type Status = "idle" | "sending" | "sent" | "error";
+type Status = "idle" | "sending" | "sent-builder" | "sent-file" | "error";
 
 interface Picked {
   el: Element;
   info: DesignElementInfo;
 }
 
-function box(el: Element, style: CSSProperties, key?: number) {
+/** Props for {@link DesignPicker}. */
+export interface DesignPickerProps {
+  /** Whether clicks select elements. */
+  active: boolean;
+  onActiveChange: (active: boolean) => void;
+  /** Origins an embedding app builder may be on (the plugin's `builderOrigin`). */
+  builderOrigins?: string[];
+}
+
+function Outline({
+  el,
+  style,
+  label,
+}: {
+  el: Element;
+  style: CSSProperties;
+  label?: number;
+}) {
   const r = el.getBoundingClientRect();
   return (
     <div
-      key={key}
+      className="pointer-events-none fixed rounded-sm"
       style={{
-        position: "fixed",
         top: r.top,
         left: r.left,
         width: r.width,
         height: r.height,
-        pointerEvents: "none",
-        borderRadius: 2,
         ...style,
       }}
-    />
+    >
+      {label !== undefined && (
+        <span className="bg-primary text-primary-foreground absolute -top-2.5 -left-2.5 flex size-5 items-center justify-center rounded-full text-[10px] font-semibold shadow">
+          {label}
+        </span>
+      )}
+    </div>
   );
 }
 
-const panel: CSSProperties = {
-  position: "fixed",
-  right: 16,
-  bottom: 64,
-  width: 320,
-  maxHeight: "60vh",
-  overflow: "auto",
-  background: "#fff",
-  color: "#111",
-  border: `1px solid ${ACCENT}`,
-  borderRadius: 8,
-  padding: 12,
-  font: "12px/1.4 system-ui, sans-serif",
-  boxShadow: "0 8px 24px rgba(0,0,0,.18)",
+const HOVER_STYLE: CSSProperties = {
+  outline: "2px dashed var(--primary)",
+  outlineOffset: 2,
 };
-
-const button: CSSProperties = {
-  background: ACCENT,
-  color: "#fff",
-  border: 0,
-  borderRadius: 6,
-  padding: "6px 12px",
-  font: "600 12px system-ui, sans-serif",
-  cursor: "pointer",
+const SELECTED_STYLE: CSSProperties = {
+  outline: "2px solid var(--primary)",
+  outlineOffset: 2,
+  background: "color-mix(in oklch, var(--primary) 10%, transparent)",
 };
 
 /**
- * Dev-only click-to-select overlay. Toggle it with the floating button (or
- * Escape to stop), click elements to add/remove them, add a note, and send the
- * selection to the `design()` plugin for the coding agent to pick up.
+ * Click-to-select overlay and send panel of the design canvas. While
+ * `active`, clicks select or deselect elements (Escape stops). Sends are
+ * persisted by the `design()` plugin and, when the canvas is embedded by an
+ * allowed app builder, posted to it as a {@link DesignSelectionMessage}.
  *
- * Injected into every page by the design plugin's dev server; you don't
- * render it yourself.
+ * Rendered by {@link DesignCanvas}; you don't mount it yourself.
  */
-export function DesignPicker() {
-  const [active, setActive] = useState(false);
+export function DesignPicker({
+  active,
+  onActiveChange,
+  builderOrigins = [],
+}: DesignPickerProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState<Element | null>(null);
   const [picked, setPicked] = useState<Picked[]>([]);
   const [note, setNote] = useState("");
@@ -91,10 +121,34 @@ export function DesignPicker() {
     };
   }, []);
 
+  // Modal dialogs set `pointer-events: none` on <body>, dismiss on any outside
+  // press and trap focus. The picker (outside the dialog) must stay usable and
+  // must not count as "outside".
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const stop = (e: Event) => e.stopPropagation();
+    const PRESS = ["pointerdown", "mousedown", "focusin", "touchstart"];
+    for (const t of PRESS) root.addEventListener(t, stop);
+    // Focus traps watch `focusout` on the document and pull focus back when
+    // it leaves the dialog; let it move into the picker (e.g. the note box).
+    const onFocusOut = (e: FocusEvent) => {
+      if (e.relatedTarget instanceof Node && root.contains(e.relatedTarget)) {
+        e.stopPropagation();
+      }
+    };
+    window.addEventListener("focusout", onFocusOut, true);
+    return () => {
+      for (const t of PRESS) root.removeEventListener(t, stop);
+      window.removeEventListener("focusout", onFocusOut, true);
+    };
+  }, []);
+
   useEffect(() => {
     if (!active) return;
     const own = (t: EventTarget | null) =>
-      !(t instanceof Element) || !!t.closest(`#${ROOT_ID}`);
+      !(t instanceof Element) ||
+      !!t.closest(`#${ROOT_ID}, [data-design-chrome]`);
     const onMove = (e: MouseEvent) =>
       setHovered(own(e.target) ? null : (e.target as Element));
     const onClick = (e: MouseEvent) => {
@@ -116,7 +170,8 @@ export function DesignPicker() {
       e.preventDefault();
       e.stopPropagation();
     };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setActive(false);
+    const onKey = (e: KeyboardEvent) =>
+      e.key === "Escape" && onActiveChange(false);
     const PRESS = ["pointerdown", "mousedown", "pointerup", "mouseup"];
     document.addEventListener("mousemove", onMove, true);
     document.addEventListener("click", onClick, true);
@@ -129,14 +184,14 @@ export function DesignPicker() {
       for (const t of PRESS) window.removeEventListener(t, swallow, true);
       setHovered(null);
     };
-  }, [active]);
+  }, [active, onActiveChange]);
 
   async function send() {
     setStatus("sending");
     // Picks and the note can change while the request is in flight; only
     // what was actually sent is cleared afterwards.
     const sending = picked;
-    const sentNote = note;
+    const sentNote = note.trim() || undefined;
     try {
       const elements = await Promise.all(
         sending.map(async ({ el, info }) => ({
@@ -149,127 +204,171 @@ export function DesignPicker() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           elements,
-          note: sentNote.trim() || undefined,
+          note: sentNote,
           url: location.pathname,
         }),
       });
       if (!res.ok) throw new Error(String(res.status));
+      const { selection } = (await res.json()) as {
+        selection?: { id: string; elements: { screenshot?: string }[] };
+      };
+
+      const message: DesignSelectionMessage = {
+        type: DESIGN_SELECTION_MESSAGE,
+        version: 1,
+        id: selection?.id,
+        url: location.pathname,
+        ...(sentNote ? { note: sentNote } : {}),
+        selections: elements.map((el, i) => {
+          const saved = selection?.elements[i]?.screenshot;
+          return saved
+            ? {
+                ...el,
+                screenshotUrl: `${location.origin}${SCREENSHOT_ENDPOINT}/${saved.split("/").pop()}`,
+              }
+            : el;
+        }),
+      };
+      const posted = postDesignSelection(message, builderOrigins);
+
       setPicked((prev) => {
         const remaining = prev.filter((p) => !sending.includes(p));
         // Idempotent, so safe in an updater that StrictMode may run twice.
-        if (remaining.length === 0) setActive(false);
+        if (remaining.length === 0) onActiveChange(false);
         return remaining;
       });
-      setNote((n) => (n === sentNote ? "" : n));
-      setStatus("sent");
+      setNote((n) => (n.trim() === (sentNote ?? "") ? "" : n));
+      setStatus(posted ? "sent-builder" : "sent-file");
     } catch {
       setStatus("error");
     }
   }
 
+  const showPanel = active || picked.length > 0 || status !== "idle";
+
   return (
-    <>
-      {active && hovered && box(hovered, { outline: `2px dashed ${ACCENT}` })}
-      {picked.map((p, i) =>
-        box(
-          p.el,
-          { outline: `2px solid ${ACCENT}`, background: `${ACCENT}22` },
-          i,
-        ),
-      )}
-      {(picked.length > 0 || status !== "idle") && (
-        <div style={panel}>
-          {picked.map((p, i) => (
-            <div
-              key={`${p.info.source}-${i}`}
-              style={{ display: "flex", gap: 8, marginBottom: 6 }}
-            >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <strong>{p.info.component ?? `<${p.info.tag}>`}</strong>
-                <div style={{ color: "#666", wordBreak: "break-all" }}>
-                  {p.info.source ?? "no source location"}
-                </div>
-              </div>
-              <button
-                type="button"
-                aria-label="Remove"
-                style={{ ...button, background: "transparent", color: "#666" }}
-                onClick={() =>
-                  setPicked((prev) => prev.filter((x) => x.el !== p.el))
-                }
-              >
-                ×
-              </button>
-            </div>
-          ))}
+    <div
+      ref={rootRef}
+      id={ROOT_ID}
+      className="pointer-events-auto relative z-[2147483647]"
+    >
+      {active && hovered && <Outline el={hovered} style={HOVER_STYLE} />}
+      {picked.map((p, i) => (
+        <Outline key={i} el={p.el} style={SELECTED_STYLE} label={i + 1} />
+      ))}
+      {showPanel && (
+        <Card className="fixed right-6 bottom-6 w-[22rem] gap-4 py-4 shadow-lg">
+          <CardHeader className="px-4">
+            <CardTitle className="text-sm">
+              {picked.length > 0
+                ? `${picked.length} selected`
+                : active
+                  ? "Selecting"
+                  : "Selection"}
+            </CardTitle>
+            <CardDescription className="text-xs">
+              {active
+                ? "Click elements to add or remove them. Esc to stop."
+                : "Turn on Select to pick more elements."}
+            </CardDescription>
+            {picked.length > 0 && (
+              <CardAction>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setPicked([])}
+                  disabled={status === "sending"}
+                >
+                  Clear
+                </Button>
+              </CardAction>
+            )}
+          </CardHeader>
+
           {picked.length > 0 && (
-            <>
-              <textarea
-                placeholder="Note for the agent (optional)"
+            <CardContent className="flex flex-col gap-3 px-4">
+              <ul className="flex max-h-48 flex-col gap-1 overflow-y-auto">
+                {picked.map((p, i) => (
+                  <li
+                    key={i}
+                    className="hover:bg-muted flex items-center gap-2 rounded-md px-1.5 py-1"
+                  >
+                    <span className="bg-primary text-primary-foreground flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold">
+                      {i + 1}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate text-sm font-medium">
+                          {p.info.component ?? `<${p.info.tag}>`}
+                        </span>
+                        <Badge
+                          variant="secondary"
+                          className="px-1.5 py-0 font-mono text-[10px]"
+                        >
+                          {p.info.tag}
+                        </Badge>
+                      </div>
+                      <div className="text-muted-foreground truncate font-mono text-[11px]">
+                        {p.info.source ?? "no source location"}
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-7"
+                      aria-label="Remove"
+                      onClick={() =>
+                        setPicked((prev) => prev.filter((x) => x.el !== p.el))
+                      }
+                    >
+                      <X className="size-3.5" />
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+              <Textarea
+                placeholder="What should change? (optional)"
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 rows={3}
-                style={{
-                  width: "100%",
-                  boxSizing: "border-box",
-                  margin: "6px 0",
-                }}
+                className="resize-none text-sm"
               />
-              <button
-                type="button"
-                style={button}
-                disabled={status === "sending"}
-                onClick={send}
-              >
+            </CardContent>
+          )}
+
+          <CardFooter className="flex-col items-stretch gap-2 px-4">
+            {picked.length > 0 ? (
+              <Button disabled={status === "sending"} onClick={send}>
+                <Send className="size-4" />
                 {status === "sending"
                   ? "Sending…"
                   : `Send ${picked.length} to agent`}
-              </button>
-            </>
-          )}
-          {status === "sent" && <div>Sent. Ask your agent to apply it.</div>}
-          {status === "error" && (
-            <div style={{ color: "#b91c1c" }}>
-              Couldn't send. Is the design() plugin registered?
-            </div>
-          )}
-        </div>
+              </Button>
+            ) : (
+              active && (
+                <div className="text-muted-foreground flex items-center gap-2 text-xs">
+                  <MousePointerClick className="size-4" />
+                  Nothing selected yet
+                </div>
+              )
+            )}
+            {status === "sent-builder" && (
+              <p className="text-xs">Sent to the app builder.</p>
+            )}
+            {status === "sent-file" && (
+              <p className="text-xs">
+                Saved to <code>.appkit/design-selection.json</code>. Ask your
+                agent to apply it.
+              </p>
+            )}
+            {status === "error" && (
+              <p className="text-destructive text-xs">
+                Couldn't send. Is the design() plugin registered?
+              </p>
+            )}
+          </CardFooter>
+        </Card>
       )}
-      <button
-        type="button"
-        style={{ ...button, position: "fixed", right: 16, bottom: 16 }}
-        aria-pressed={active}
-        onClick={() => setActive((a) => !a)}
-      >
-        {active ? "Selecting… (Esc)" : "Select"}
-      </button>
-    </>
+    </div>
   );
-}
-
-/** Mounts {@link DesignPicker} into its own root on `document.body`, once. */
-export function mountDesignPicker() {
-  if (document.getElementById(ROOT_ID)) return;
-  const host = document.createElement("div");
-  host.id = ROOT_ID;
-  // Modal dialogs set `pointer-events: none` on <body> and dismiss on any
-  // outside press; the picker must stay usable and not count as "outside".
-  host.style.cssText =
-    "position:relative;z-index:2147483647;pointer-events:auto";
-  for (const t of ["pointerdown", "mousedown", "focusin", "touchstart"]) {
-    host.addEventListener(t, (e) => e.stopPropagation());
-  }
-  // Focus traps also watch `focusout` on the document and pull focus back when
-  // it leaves the dialog; let it move into the picker (e.g. the note box).
-  window.addEventListener(
-    "focusout",
-    (e) => {
-      if (e.relatedTarget instanceof Node && host.contains(e.relatedTarget)) {
-        e.stopPropagation();
-      }
-    },
-    true,
-  );
-  document.body.appendChild(host);
-  createRoot(host).render(<DesignPicker />);
 }
