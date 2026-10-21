@@ -179,6 +179,134 @@ interface GeneratedDatabaseRegistry {
       key: "id";
     };
   };
+  "orders": {
+    row: {
+      "id": number;
+      "team_id": string;
+      "created_by": string;
+      "status": string;
+      "total_cents": number;
+      "approved_by": string | null;
+    };
+    publicRow: {
+      "id": number;
+      "team_id": string;
+      "created_by": string;
+      "status": string;
+      "total_cents": number;
+      "approved_by": string | null;
+    };
+    insert: {
+      "team_id": string;
+      "created_by": string;
+      "status": string;
+      "total_cents": number;
+      "approved_by"?: string | null;
+    };
+    update: {
+      "team_id"?: string;
+      "created_by"?: string;
+      "status"?: string;
+      "total_cents"?: number;
+      "approved_by"?: string | null;
+    };
+    filters: DatabaseLogicalFilter<{
+      "id"?: number | readonly (number)[] | { eq?: number; neq?: number; in?: readonly (number)[]; gt?: number; gte?: number; lt?: number; lte?: number; };
+      "team_id"?: string | readonly (string)[] | { eq?: string; neq?: string; in?: readonly (string)[]; like?: string; ilike?: string; };
+      "created_by"?: string | readonly (string)[] | { eq?: string; neq?: string; in?: readonly (string)[]; like?: string; ilike?: string; };
+      "status"?: string | readonly (string)[] | { eq?: string; neq?: string; in?: readonly (string)[]; like?: string; ilike?: string; };
+      "total_cents"?: number | readonly (number)[] | { eq?: number; neq?: number; in?: readonly (number)[]; gt?: number; gte?: number; lt?: number; lte?: number; };
+      "approved_by"?: string | readonly (string)[] | { eq?: string; neq?: string; in?: readonly (string)[]; like?: string; ilike?: string; is?: null; };
+    }>;
+    includes: {};
+    hasPrimaryKey: true;
+    api: {
+      insert: {
+        "team_id": string;
+        "created_by": string;
+        "status": string;
+        "total_cents": number;
+        "approved_by"?: string | null;
+      };
+      update: {
+        "team_id"?: string;
+        "created_by"?: string;
+        "status"?: string;
+        "total_cents"?: number;
+        "approved_by"?: string | null;
+      };
+      filters: DatabaseLogicalFilter<{
+        "id"?: number | { eq?: number; neq?: number; in?: readonly (number)[]; gt?: number; gte?: number; lt?: number; lte?: number; };
+        "team_id"?: string | { eq?: string; neq?: string; in?: readonly (string)[]; like?: string; ilike?: string; };
+        "created_by"?: string | { eq?: string; neq?: string; in?: readonly (string)[]; like?: string; ilike?: string; };
+        "status"?: string | { eq?: string; neq?: string; in?: readonly (string)[]; like?: string; ilike?: string; };
+        "total_cents"?: number | { eq?: number; neq?: number; in?: readonly (number)[]; gt?: number; gte?: number; lt?: number; lte?: number; };
+        "approved_by"?: string | { eq?: string; neq?: string; in?: readonly (string)[]; like?: string; ilike?: string; is?: null; };
+      }>;
+      orderable: "id" | "team_id" | "created_by" | "status" | "total_cents" | "approved_by";
+      key: "id";
+    };
+  };
+  "team_members": {
+    row: {
+      "id": number;
+      "user_id": string;
+      "team_id": string;
+      "role": string;
+      "approval_limit_cents": number;
+    };
+    publicRow: {
+      "id": number;
+      "user_id": string;
+      "team_id": string;
+      "role": string;
+      "approval_limit_cents": number;
+    };
+    insert: {
+      "user_id": string;
+      "team_id": string;
+      "role": string;
+      "approval_limit_cents": number;
+    };
+    update: {
+      "user_id"?: string;
+      "team_id"?: string;
+      "role"?: string;
+      "approval_limit_cents"?: number;
+    };
+    filters: DatabaseLogicalFilter<{
+      "id"?: number | readonly (number)[] | { eq?: number; neq?: number; in?: readonly (number)[]; gt?: number; gte?: number; lt?: number; lte?: number; };
+      "user_id"?: string | readonly (string)[] | { eq?: string; neq?: string; in?: readonly (string)[]; like?: string; ilike?: string; };
+      "team_id"?: string | readonly (string)[] | { eq?: string; neq?: string; in?: readonly (string)[]; like?: string; ilike?: string; };
+      "role"?: string | readonly (string)[] | { eq?: string; neq?: string; in?: readonly (string)[]; like?: string; ilike?: string; };
+      "approval_limit_cents"?: number | readonly (number)[] | { eq?: number; neq?: number; in?: readonly (number)[]; gt?: number; gte?: number; lt?: number; lte?: number; };
+    }>;
+    includes: {};
+    hasPrimaryKey: true;
+    api: {
+      insert: {
+        "user_id": string;
+        "team_id": string;
+        "role": string;
+        "approval_limit_cents": number;
+      };
+      update: {
+        "user_id"?: string;
+        "team_id"?: string;
+        "role"?: string;
+        "approval_limit_cents"?: number;
+      };
+      filters: DatabaseLogicalFilter<{
+        "id"?: number | { eq?: number; neq?: number; in?: readonly (number)[]; gt?: number; gte?: number; lt?: number; lte?: number; };
+        "user_id"?: string | { eq?: string; neq?: string; in?: readonly (string)[]; like?: string; ilike?: string; };
+        "team_id"?: string | { eq?: string; neq?: string; in?: readonly (string)[]; like?: string; ilike?: string; };
+        "role"?: string | { eq?: string; neq?: string; in?: readonly (string)[]; like?: string; ilike?: string; };
+        "approval_limit_cents"?: number | { eq?: number; neq?: number; in?: readonly (number)[]; gt?: number; gte?: number; lt?: number; lte?: number; };
+      }>;
+      orderable: "id" | "user_id" | "team_id" | "role" | "approval_limit_cents";
+      key: "id";
+    };
+  };
 }
 
 declare module "@databricks/appkit" {

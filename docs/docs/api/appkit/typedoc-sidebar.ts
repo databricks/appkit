@@ -83,6 +83,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Class.OperationError",
+          label: "OperationError"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Class.Plugin",
           label: "Plugin"
         },
@@ -127,6 +132,11 @@ const typedocSidebar: SidebarsConfig = {
       type: "category",
       label: "Interfaces",
       items: [
+        {
+          type: "doc",
+          id: "api/appkit/Interface.Actor",
+          label: "Actor"
+        },
         {
           type: "doc",
           id: "api/appkit/Interface.AgentAdapter",
@@ -411,6 +421,16 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.Operation",
+          label: "Operation"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.OperationContext",
+          label: "OperationContext"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.PluginManifest",
           label: "PluginManifest"
         },
@@ -682,6 +702,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.DatabaseRoutes",
+          label: "DatabaseRoutes"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.EntityHooks",
           label: "EntityHooks"
         },
@@ -754,6 +779,16 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.Plugins",
           label: "Plugins"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.Policy",
+          label: "Policy"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.PolicyResult",
+          label: "PolicyResult"
         },
         {
           type: "doc",
@@ -967,6 +1002,21 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.defineManifest",
           label: "defineManifest"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.defineMutation",
+          label: "defineMutation"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.definePolicy",
+          label: "definePolicy"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.defineQuery",
+          label: "defineQuery"
         },
         {
           type: "doc",
@@ -1286,6 +1336,11 @@ const typedocSidebar: SidebarsConfig = {
           id: "api/appkit/Function.runInUserContext",
           label: "runInUserContext",
           className: "typedoc-sidebar-item-deprecated"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.runOperation",
+          label: "runOperation"
         },
         {
           type: "doc",

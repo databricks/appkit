@@ -121,8 +121,21 @@ export type {
   SearchResult,
 } from "./plugins/ai-search/types";
 export * from "./plugins/beta-exports.generated";
-export { database } from "./plugins/database";
+export {
+  database,
+  defineMutation,
+  definePolicy,
+  defineQuery,
+  OperationError,
+  runOperation,
+} from "./plugins/database";
 export type {
+  Actor,
+  DatabaseRoutes,
+  Operation,
+  OperationContext,
+  Policy,
+  PolicyResult,
   DatabaseApiConfig,
   DatabaseApiWriteOperation,
   DatabaseApiWritesConfig,

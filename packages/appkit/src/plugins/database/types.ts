@@ -1,6 +1,7 @@
 import type { DatabaseRegistry } from "../../database/contract";
 import type { Schema } from "../../database/schema-builder";
 import type { EntityMutationHooks } from "./hooks";
+import type { DatabaseRoutes } from "./operations";
 
 type RegistryTableName = Extract<keyof DatabaseRegistry, string>;
 
@@ -103,4 +104,15 @@ export type IDatabaseConfig<TSchema extends Schema = DefaultDatabaseSchema> = {
   readonly hooks?: {
     readonly [TTable in SchemaTableName<TSchema>]?: EntityHooks<TTable>;
   };
+  /**
+   * Operations exposed over HTTP under `/api/database`, keyed
+   * `"METHOD /path"`. Each runs through the same pipeline: the actor comes from
+   * the Apps proxy (`x-forwarded-user`), the input is validated, `authorize`
+   * must return `true`, then `execute` runs as the service principal.
+   *
+   * When omitted, setup merges the default exports of
+   * `config/database/routes/*.ts`. Passing `routes` disables that discovery.
+   * A route that overlaps another or a generated CRUD route fails setup.
+   */
+  readonly routes?: DatabaseRoutes;
 };

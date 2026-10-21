@@ -86,11 +86,13 @@ afterEach(() => {
 const beforeCreate = () => hooks.beforeCreate(values, context);
 
 describe("inline playground database registration", () => {
-  test("declares three tables in the conventional schema file", () => {
+  test("declares the note and order tables in the conventional schema file", () => {
     expect(Object.keys(schema.$tables)).toEqual([
       "boards",
       "notes",
       "note_events",
+      "orders",
+      "team_members",
     ]);
   });
 
@@ -98,8 +100,9 @@ describe("inline playground database registration", () => {
     expect(databaseConfig.schema).toBeUndefined();
   });
 
-  test("enables reads for all tables and HTTP writes only for boards and notes", () => {
+  test("generates CRUD only for the note tables and writes only for boards and notes", () => {
     expect(databaseConfig.api).toEqual({
+      tables: ["boards", "notes", "note_events"],
       writes: { tables: ["boards", "notes"] },
     });
   });

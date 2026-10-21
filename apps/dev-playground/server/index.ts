@@ -76,9 +76,14 @@ createApp({
       ? [
           // The schema is loaded from config/database/schema.ts.
           database({
-            // Reads are generated for all three tables. Only boards and notes
-            // accept HTTP writes; the audit trail is written by the hook.
-            api: { writes: { tables: ["boards", "notes"] } },
+            // Reads are generated for the three note tables. Only boards and
+            // notes accept HTTP writes; the audit trail is written by the hook.
+            // orders and team_members get no generated routes: they are reached
+            // only through the authorized operations in config/database/routes.
+            api: {
+              tables: ["boards", "notes", "note_events"],
+              writes: { tables: ["boards", "notes"] },
+            },
             // Example of Hooks integration between Database and Agents
             hooks: {
               // Hook per entity

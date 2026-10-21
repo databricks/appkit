@@ -6,6 +6,7 @@ import {
   defineSchema,
   fk,
   id,
+  integer,
   text,
   timestamp,
   varchar,
@@ -40,5 +41,26 @@ export const schema = defineSchema(({ table }) => {
     created_at: timestamp({ withTimezone: true }).defaultNow().notNull(),
   });
 
-  return { boards, notes, note_events };
+  // Operations example (config/database/routes/orders.ts). Exposed only through
+  // operations, never generated CRUD; see orders.sql for the tables and seed.
+  const orders = table("orders", {
+    id: id(),
+    team_id: text().notNull(),
+    created_by: text().notNull(),
+    status: varchar(16).notNull(),
+    total_cents: integer().notNull(),
+    approved_by: text(),
+  });
+
+  // Example permission data. AppKit has no team or role source; an app owns
+  // whatever its policies read.
+  const team_members = table("team_members", {
+    id: id(),
+    user_id: text().notNull(),
+    team_id: text().notNull(),
+    role: varchar(16).notNull(),
+    approval_limit_cents: integer().notNull(),
+  });
+
+  return { boards, notes, note_events, orders, team_members };
 });
