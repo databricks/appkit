@@ -369,9 +369,21 @@ describe("database routes", () => {
     expect(seen).not.toHaveBeenCalled();
   });
 
-  test("fails setup when a route overlaps generated CRUD", async () => {
+  test.each(["GET /notes/:noteId", "GET /Notes", "GET /notes/"])(
+    "fails setup when %s overlaps generated CRUD",
+    async (key) => {
+      await expect(mount({ routes: { [key]: echo } })).rejects.toThrow(
+        /collides/,
+      );
+    },
+  );
+
+  test("fails setup for routes Express treats as one", async () => {
     await expect(
-      mount({ routes: { "GET /notes/:noteId": echo } }),
+      mount({
+        api: false,
+        routes: { "GET /status": echo, "GET /STATUS/": echo },
+      }),
     ).rejects.toThrow(/collides/);
   });
 

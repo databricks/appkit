@@ -233,9 +233,17 @@ export function parseRouteKey(key: string): {
   return { method, path: match[2] };
 }
 
-/** Identity of a route for collision checks: parameter names do not matter to Express. */
+/**
+ * Identity of a route for collision checks, matching Express's defaults:
+ * parameter names, letter case, and a trailing slash do not tell routes apart.
+ */
 export function routeSignature(method: string, routePath: string): string {
-  return `${method.toLowerCase()} ${routePath.replace(/:[^/]+/g, ":")}`;
+  const path =
+    routePath
+      .replace(/:[^/]+/g, ":")
+      .toLowerCase()
+      .replace(/\/+$/, "") || "/";
+  return `${method.toLowerCase()} ${path}`;
 }
 
 /** Same application-relative convention as `config/database/schema.ts`. */
