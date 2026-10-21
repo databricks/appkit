@@ -80,6 +80,28 @@ describe("DesignSelectionStore", () => {
   });
 });
 
+describe("builderOrigin", () => {
+  const construct = (builderOrigin: string | string[]) => {
+    const { plugin: DesignPlugin, config } = design({ builderOrigin });
+    return new DesignPlugin(config);
+  };
+
+  test("accepts bare origins", () => {
+    expect(() =>
+      construct(["https://builder.example.com", "http://localhost:3000"]),
+    ).not.toThrow();
+  });
+
+  test.each([
+    "*",
+    "https://builder.example.com/path",
+    "builder.example.com",
+    "null",
+  ])("rejects %s", (origin) => {
+    expect(() => construct(origin)).toThrow(/bare origin/);
+  });
+});
+
 describe("design plugin outside development", () => {
   let app: TestApp<never> | undefined;
   afterEach(async () => {

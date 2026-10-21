@@ -10,7 +10,6 @@ import { forwardRef, memo, useState } from "react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { DesignCanvas } from "../design-canvas";
-import { DesignPicker } from "../design-picker";
 import { inspectElement } from "../inspect";
 
 afterEach(cleanup);
@@ -85,27 +84,51 @@ describe("DesignCanvas", () => {
   });
 });
 
+function renderCanvas(builderOrigins?: string[]) {
+  render(
+    <DesignCanvas
+      builderOrigins={builderOrigins}
+      modules={{
+        "/src/design/Actions.tsx": {
+          Actions: () => (
+            <>
+              <button type="button">First action</button>
+              <button type="button">Second action</button>
+            </>
+          ),
+        },
+      }}
+    />,
+  );
+}
+
+const okResponse = () =>
+  new Response(
+    JSON.stringify({
+      ok: true,
+      selection: {
+        id: "sel-1",
+        elements: [{ screenshot: ".appkit/design-screenshots/sel-1-0.jpeg" }],
+      },
+    }),
+    { status: 200 },
+  );
+
 describe("DesignPicker", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   test("a finished send keeps picks added while it was in flight", async () => {
     let release!: () => void;
     const fetchMock = vi.fn(
       () =>
         new Promise<Response>((resolve) => {
-          release = () => resolve(new Response("{}", { status: 200 }));
+          release = () => resolve(okResponse());
         }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    render(
-      <>
-        <button type="button">First action</button>
-        <button type="button">Second action</button>
-        <div id="appkit-design-picker">
-          <DesignPicker />
-        </div>
-      </>,
-    );
+    renderCanvas();
 
-    fireEvent.click(screen.getByText("Select"));
+    fireEvent.click(screen.getByRole("button", { name: /Select/ }));
     fireEvent.click(screen.getByText("First action"));
     fireEvent.click(screen.getByText("Send 1 to agent"));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
@@ -124,6 +147,69 @@ describe("DesignPicker", () => {
     await waitFor(() =>
       expect(screen.getByText("Send 1 to agent")).toBeTruthy(),
     );
-    vi.unstubAllGlobals();
+  });
+
+  test("posts the selection to the embedding builder, only to its origin", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => okResponse()),
+    );
+    const postMessage = vi.fn();
+    const parent = Object.getOwnPropertyDescriptor(window, "parent");
+    Object.defineProperty(window, "parent", {
+      configurable: true,
+      value: { postMessage },
+    });
+    try {
+      renderCanvas(["https://builder.example.com"]);
+      fireEvent.click(screen.getByRole("button", { name: /Select/ }));
+      fireEvent.click(screen.getByText("First action"));
+      fireEvent.change(screen.getByPlaceholderText(/What should change/), {
+        target: { value: "make it primary" },
+      });
+      fireEvent.click(screen.getByText("Send 1 to agent"));
+      await screen.findByText("Sent to the app builder.");
+
+      expect(postMessage).toHaveBeenCalledTimes(1);
+      const [message, origin] = postMessage.mock.calls[0];
+      expect(origin).toBe("https://builder.example.com");
+      expect(message).toMatchObject({
+        type: "appkit:design-selection",
+        version: 1,
+        id: "sel-1",
+        note: "make it primary",
+        selections: [
+          {
+            text: "First action",
+            screenshotUrl: `${location.origin}/api/design/screenshots/sel-1-0.jpeg`,
+          },
+        ],
+      });
+    } finally {
+      if (parent) Object.defineProperty(window, "parent", parent);
+    }
+  });
+
+  test("without a builder origin it only saves to the file", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => okResponse()),
+    );
+    const postMessage = vi.fn();
+    const parent = Object.getOwnPropertyDescriptor(window, "parent");
+    Object.defineProperty(window, "parent", {
+      configurable: true,
+      value: { postMessage },
+    });
+    try {
+      renderCanvas();
+      fireEvent.click(screen.getByRole("button", { name: /Select/ }));
+      fireEvent.click(screen.getByText("First action"));
+      fireEvent.click(screen.getByText("Send 1 to agent"));
+      await screen.findByText(/Saved to/);
+      expect(postMessage).not.toHaveBeenCalled();
+    } finally {
+      if (parent) Object.defineProperty(window, "parent", parent);
+    }
   });
 });

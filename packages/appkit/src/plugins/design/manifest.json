@@ -7,5 +7,19 @@
   "resources": {
     "required": [],
     "optional": []
+  },
+  "config": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "builderOrigin": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Origins of the app builder that embeds the app (e.g. [\"https://builder.example.com\"]; a single string is also accepted). When /design runs inside that window (iframe parent or opener), each send is also posted to it with window.postMessage. '*' is not allowed."
+        }
+      }
+    }
   }
 }
