@@ -31,8 +31,8 @@ export const approveOrder = defineMutation({
   input: z.object({ id: z.coerce.number().int().positive() }),
   authorize: canApproveOrder,
   execute: async ({ actor, input, db }) => {
-    // The state check is part of the write: of two concurrent approvals, the
-    // second re-reads the committed row, matches nothing, and gets a 409.
+    // canApproveOrder holds the order's row lock, so a concurrent approval
+    // waits for this commit, then finds the order no longer pending: a 409.
     const [order] = await db.sql<Order>`
       update orders set status = 'approved', approved_by = ${actor.userId}
       where id = ${input.id} and status = 'pending'
