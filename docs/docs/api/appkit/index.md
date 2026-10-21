@@ -26,6 +26,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [IdentityExpiredError](Class.IdentityExpiredError.md) | The downstream service rejected the active caller's credentials. |
 | [InitializationError](Class.InitializationError.md) | Error thrown when a service or component is not properly initialized. Use when accessing services before they are ready. |
 | [MlflowClient](Class.MlflowClient.md) | A thin client over the Databricks workspace REST API, owning the host + bearer token so callers (eval-run creation, assessment writes, the judge's serving endpoint) don't each re-derive URLs or re-attach auth. The host is normalized once at construction. |
+| [OperationError](Class.OperationError.md) | A failure whose message is written for the caller: denial, bad input, or a business conflict. |
 | [Plugin](Class.Plugin.md) | Base abstract class for creating AppKit plugins. |
 | [PolicyDeniedError](Class.PolicyDeniedError.md) | Thrown when a policy denies an action. |
 | [ResourceRegistry](Class.ResourceRegistry.md) | Central registry for tracking plugin resource requirements. Deduplication uses type + resourceKey (machine-stable); alias is for display only. |
@@ -39,6 +40,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 
 | Interface | Description |
 | ------ | ------ |
+| [Actor](Interface.Actor.md) | The authenticated user a request acts for. Never the database identity. |
 | [AgentAdapter](Interface.AgentAdapter.md) | - |
 | [AgentDefinition](Interface.AgentDefinition.md) | - |
 | [AgentInput](Interface.AgentInput.md) | - |
@@ -95,6 +97,8 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [MatchResult](Interface.MatchResult.md) | Result of a deterministic matcher run against a value. |
 | [McpConnectAllResult](Interface.McpConnectAllResult.md) | Per-endpoint outcome of [AppKitMcpClient.connectAll](Class.AppKitMcpClient.md#connectall). Callers (the agents plugin in particular) use the split to warn at startup when some MCP servers are unreachable without aborting boot for the rest. |
 | [Message](Interface.Message.md) | - |
+| [Operation](Interface.Operation.md) | - |
+| [OperationContext](Interface.OperationContext.md) | What `authorize` and `execute` receive. `db` always runs as the app's service principal. |
 | [PluginManifest](Interface.PluginManifest.md) | Plugin manifest that declares metadata and resource requirements. Attached to plugin classes as a static property. Extends the shared PluginManifest with strict resource types. |
 | [PluginToolkitProvider](Interface.PluginToolkitProvider.md) | Minimum shape every entry in the [Plugins](TypeAlias.Plugins.md) map must expose. Core plugins (analytics, files, genie, lakebase) implement this directly via their `.toolkit()` method. The agents plugin and standalone `runAgent` synthesize this shape for any registered plugin that doesn't implement `.toolkit()` directly (falling back to `getAgentTools()` walking). |
 | [PostResult](Interface.PostResult.md) | Structured result for a best-effort POST that must not throw. |
@@ -153,6 +157,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [DatabaseApiWriteOperation](TypeAlias.DatabaseApiWriteOperation.md) | Generated HTTP write operations. |
 | [DatabaseApiWritesConfig](TypeAlias.DatabaseApiWritesConfig.md) | All writes by default; false keeps reads only, and an object narrows writes. |
 | [DatabaseExports](TypeAlias.DatabaseExports.md) | Typed database API published by the plugin. |
+| [DatabaseRoutes](TypeAlias.DatabaseRoutes.md) | Operations exposed over HTTP, keyed `"METHOD /path"` under `/api/database`. |
 | [EntityHooks](TypeAlias.EntityHooks.md) | Response shaping and mutation lifecycle declared for one table. |
 | [EvalProgress](TypeAlias.EvalProgress.md) | - |
 | [ExecutionContext](TypeAlias.ExecutionContext.md) | - |
@@ -168,6 +173,8 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [Matcher](TypeAlias.Matcher.md) | A deterministic matcher: inspects a string value and returns a result. |
 | [PluginData](TypeAlias.PluginData.md) | Tuple of plugin class, config, and name. Created by `toPlugin()` and passed to `createApp()`. |
 | [Plugins](TypeAlias.Plugins.md) | Plugin map passed to the function form of [AgentDefinition.tools](Interface.AgentDefinition.md#tools). Each entry exposes a `.toolkit(opts?)` method that returns a record of [ToolkitEntry](Interface.ToolkitEntry.md) markers ready to be spread into a tool record. |
+| [Policy](TypeAlias.Policy.md) | - |
+| [PolicyResult](TypeAlias.PolicyResult.md) | Only a literal `true` allows; `false` or `{ deny }` refuses with 403. |
 | [ReadSerializer](TypeAlias.ReadSerializer.md) | Shape one already private-safe row before it reaches the wire. A `Promise` is not assignable to the return type, so an async callback fails to compile: serializers run inside the response path and must not add latency there. |
 | [ResolvedToolEntry](TypeAlias.ResolvedToolEntry.md) | Internal tool-index entry after a tool record has been resolved to a dispatchable form. |
 | [ResourceFieldEntry](TypeAlias.ResourceFieldEntry.md) | - |
@@ -218,6 +225,9 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [defineEval](Function.defineEval.md) | Define an agent eval. Default-export the result from a `server/agents/<id>/evals/*.eval.ts` file. |
 | [defineEvalConfig](Function.defineEvalConfig.md) | Define per-directory eval config. Default-export from `evals.config.ts`. |
 | [defineManifest](Function.defineManifest.md) | Validates a raw manifest (typically a `manifest.json` import) against the canonical Zod schema and returns it as a strict [PluginManifest](Interface.PluginManifest.md). |
+| [defineMutation](Function.defineMutation.md) | A state change. `authorize` and `execute` share one transaction, so a refusal or failure rolls back. |
+| [definePolicy](Function.definePolicy.md) | Type a reusable authorization check; the input type is what the policy reads. |
+| [defineQuery](Function.defineQuery.md) | A read. Runs `authorize` then `execute` outside a transaction. |
 | [defineSchema](Function.defineSchema.md) | Compile one declared schema. The returned type keeps the table names the builder returned, so `api.tables` and `hooks` can name only real tables. |
 | [defineTool](Function.defineTool.md) | Defines a single tool entry for a plugin's internal registry. |
 | [discoverEvalConfigs](Function.discoverEvalConfigs.md) | Discover the per-agent `evals.config.ts` (from [defineEvalConfig](Function.defineEvalConfig.md)) at `<rootDir>/server/agents/<agent>/evals/evals.config.ts`. Config is per-agent: each agent's config applies only to that agent's evals. Agents without a config file are omitted. Returns a stable, sorted list. |
@@ -281,6 +291,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [runEvalsInDir](Function.runEvalsInDir.md) | Discover, load, and run every eval under each agent's `evals/` dir, driving the agents on a running app. Never throws for an individual eval — load/run failures become non-passing [EvalResult](Interface.EvalResult.md)s. |
 | [runInCallerContext](Function.runInCallerContext.md) | Run a function with an immutable snapshot of the caller context. Nested and concurrent scopes keep their own identities. |
 | [~~runInUserContext~~](Function.runInUserContext.md) | - |
+| [runOperation](Function.runOperation.md) | The one execution path for an operation, whoever calls it: validate the input, authorize, then execute with the service-principal `db`. |
 | [runWithRetries](Function.runWithRetries.md) | Run `attempt` up to `1 + retries` times, stopping as soon as it returns a result that is neither a thrown error / per-eval timeout (`error`) nor a transport/agent turn failure (`infraFailure`). Assertion failures set neither, so a failed-but-completed eval is returned on the first try and never retried. Returns the last result when every attempt failed on infra. |
 | [summarize](Function.summarize.md) | - |
 | [text](Function.text.md) | - |

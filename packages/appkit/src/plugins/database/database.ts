@@ -28,6 +28,17 @@ import type { DatabaseExports } from "./entity-types";
 import { createDatabaseState, type DatabaseState } from "./lifecycle";
 import { loadDefaultDatabaseSchema } from "./load-schema";
 import manifest from "./manifest.json";
+import {
+  type AnyOperation,
+  isOperation,
+  loadDefaultDatabaseRoutes,
+  operationErrorResponse,
+  parseRouteKey,
+  type RouteMethod,
+  resolveActor,
+  routeSignature,
+  runOperation,
+} from "./operations";
 import type {
   DatabaseHooks,
   DefaultDatabaseSchema,
@@ -48,6 +59,12 @@ export class DatabasePlugin<
   private exposure: CrudExposure = { tables: [], writes: new Map() };
   private resolvedSchema: Schema | null = null;
   private crudTables: Map<string, CrudTable> | null = null;
+  private operationRoutes: {
+    key: string;
+    method: RouteMethod;
+    path: string;
+    operation: AnyOperation;
+  }[] = [];
 
   constructor(config: IDatabaseConfig<TSchema> = {}) {
     assertDatabaseConfig(config);
@@ -56,6 +73,7 @@ export class DatabasePlugin<
       schema: config.schema,
       api: config.api,
       hooks: config.hooks,
+      routes: config.routes,
     };
   }
 
@@ -93,6 +111,17 @@ export class DatabasePlugin<
           (operation, options) => this.execute(operation, options),
           this.hooks(),
         );
+        let operationRoutes: DatabasePlugin["operationRoutes"];
+        try {
+          operationRoutes = resolveOperationRoutes(
+            this.config.routes ?? (await loadDefaultDatabaseRoutes()),
+            exposure,
+          );
+        } catch (error) {
+          candidate.deactivate();
+          await candidate.pool.end().catch(() => undefined);
+          throw error;
+        }
         if (this.draining) {
           // Setup may finish while shutdown is waiting; never publish that state.
           candidate.deactivate();
@@ -101,6 +130,7 @@ export class DatabasePlugin<
         }
         this.resolvedSchema = schema;
         this.exposure = exposure;
+        this.operationRoutes = operationRoutes;
         this.state = candidate;
         this.printTables(schema);
       })();
@@ -124,6 +154,15 @@ export class DatabasePlugin<
 
   /** Register generated CRUD, subject to the configured table and write restrictions. */
   injectRoutes(router: express.Router): void {
+    // Before CRUD, so a static operation path is not captured by `/:id`.
+    for (const route of this.operationRoutes) {
+      this.route(router, {
+        name: route.key,
+        method: route.method,
+        path: route.path,
+        handler: (req, res) => this.handleOperation(route, req, res),
+      });
+    }
     if (this.exposure.tables.length === 0) return;
     const tables = this.exposedTables();
     const hooks = this.hooks();
@@ -181,6 +220,51 @@ export class DatabasePlugin<
         });
       }
     }
+  }
+
+  /** Run one operation route: the actor comes from the proxy headers, never the request data. */
+  private async handleOperation(
+    route: (typeof this.operationRoutes)[number],
+    req: express.Request,
+    res: express.Response,
+  ): Promise<void> {
+    const source = route.method === "get" ? req.query : req.body;
+    const input = {
+      ...(typeof source === "object" && source !== null ? source : {}),
+      // Path parameters address the resource, so the body cannot replace them.
+      ...req.params,
+    };
+    await this.telemetry.startActiveSpan(
+      "database.operation.route",
+      {
+        attributes: {
+          operation: route.key,
+          "http.route": `/api/${this.name}${route.path}`,
+        },
+      },
+      async (span) => {
+        try {
+          const result = await runOperation(
+            route.operation,
+            { actor: resolveActor(req), input },
+            this.exports(),
+          );
+          span.setAttribute("outcome", "success");
+          res.status(200).setHeader("Cache-Control", "no-store");
+          res.json(result ?? null);
+        } catch (error) {
+          const { status, body } = operationErrorResponse(error);
+          span.setAttribute("outcome", status < 500 ? "rejected" : "failed");
+          span.setAttribute("http.status_code", status);
+          if (!res.headersSent) {
+            res.status(status).setHeader("Cache-Control", "no-store");
+            res.json(body);
+          }
+        } finally {
+          span.end();
+        }
+      },
+    );
   }
 
   /** Name every declared table once at boot, beside what reaches it over HTTP. */
@@ -310,6 +394,46 @@ export class DatabasePlugin<
       },
     );
   }
+}
+
+/**
+ * Validate operation routes against each other and against the generated CRUD
+ * they share `/api/database` with: an exact overlap fails setup instead of
+ * letting one silently shadow the other.
+ */
+function resolveOperationRoutes(
+  routes: Readonly<Record<string, unknown>>,
+  exposure: CrudExposure,
+) {
+  const taken = new Set<string>();
+  for (const table of exposure.tables) {
+    // Conservative: assume every keyed CRUD route, whatever the writes config.
+    for (const [method, routePath] of [
+      ["get", `/${table}`],
+      ["post", `/${table}`],
+      ["get", `/${table}/:id`],
+      ["patch", `/${table}/:id`],
+      ["delete", `/${table}/:id`],
+    ]) {
+      taken.add(routeSignature(method, routePath));
+    }
+  }
+  return Object.entries(routes).map(([key, operation]) => {
+    const { method, path } = parseRouteKey(key);
+    if (!isOperation(operation)) {
+      throw databaseSetupFailed(
+        `Route ${JSON.stringify(key)} must map to an operation created with defineQuery() or defineMutation().`,
+      );
+    }
+    const signature = routeSignature(method, path);
+    if (taken.has(signature)) {
+      throw databaseSetupFailed(
+        `Route ${JSON.stringify(key)} collides with another route or a generated CRUD route. Exclude the table with api.tables or change the path.`,
+      );
+    }
+    taken.add(signature);
+    return { key, method, path, operation };
+  });
 }
 
 type DatabaseRegistration<TSchema extends Schema> = {
