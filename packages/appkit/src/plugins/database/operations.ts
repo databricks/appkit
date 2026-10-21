@@ -54,25 +54,31 @@ export type AnyOperation = Operation<any, any>;
 /** Operations exposed over HTTP, keyed `"METHOD /path"` under `/api/database`. */
 export type DatabaseRoutes = Readonly<Record<string, AnyOperation>>;
 
-/** Only objects built by the define helpers are runnable, so `authorize` was checked. */
-const defined = new WeakSet<object>();
+/**
+ * Marks objects built by the define helpers. A registry symbol, not a
+ * module-local WeakSet: a dev loader can evaluate this module twice, and an
+ * operation from one copy must still run in the other.
+ */
+const OPERATION = Symbol.for("@databricks/appkit/database.operation");
+
+function hasPolicies(authorize: unknown): boolean {
+  const policies = [authorize].flat();
+  return (
+    policies.length > 0 &&
+    policies.every((policy) => typeof policy === "function")
+  );
+}
 
 function defineOperation<S extends z.ZodType, R>(
   kind: Operation["kind"],
   definition: OperationDefinition<S, R>,
 ): Operation<S, R> {
-  const policies = [definition.authorize].flat();
-  if (
-    policies.length === 0 ||
-    policies.some((policy) => typeof policy !== "function")
-  ) {
+  if (!hasPolicies(definition.authorize)) {
     throw databaseSetupFailed(
       "An operation requires authorize: a policy function or a non-empty array of them.",
     );
   }
-  const operation = Object.freeze({ ...definition, kind });
-  defined.add(operation);
-  return operation;
+  return Object.freeze({ ...definition, kind, [OPERATION]: true });
 }
 
 /** A read. Runs `authorize` then `execute` outside a transaction. */
@@ -94,8 +100,16 @@ export function definePolicy<I>(policy: Policy<I>): Policy<I> {
   return policy;
 }
 
+/** The mark alone is not trusted: the policies are checked again here. */
 export function isOperation(value: unknown): value is AnyOperation {
-  return typeof value === "object" && value !== null && defined.has(value);
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<PropertyKey, unknown>;
+  return (
+    candidate[OPERATION] === true &&
+    (candidate.kind === "query" || candidate.kind === "mutation") &&
+    typeof candidate.execute === "function" &&
+    hasPolicies(candidate.authorize)
+  );
 }
 
 /** A failure whose message is written for the caller: denial, bad input, or a business conflict. */
@@ -110,6 +124,31 @@ export class OperationError extends AppKitError {
   ) {
     super(message, { clientMessage: message });
   }
+}
+
+const OPERATION_STATUSES = new Set([400, 401, 403, 404, 409, 500]);
+
+/** By shape, not `instanceof`: route files may load another copy of this module. */
+export function isOperationError(error: unknown): error is OperationError {
+  if (!(error instanceof Error)) return false;
+  const candidate = error as Partial<OperationError>;
+  return (
+    candidate.code === "OPERATION_ERROR" &&
+    OPERATION_STATUSES.has(candidate.statusCode as number) &&
+    typeof candidate.clientMessage === "string"
+  );
+}
+
+/** A hook's deliberate rejection, by shape for the same reason. */
+function isValidationError(error: unknown): error is Error & {
+  clientMessage: string;
+  issues: readonly { path: readonly unknown[]; message: string }[];
+} {
+  return (
+    error instanceof Error &&
+    (error as { code?: unknown }).code === "DATABASE_VALIDATION_ERROR" &&
+    Array.isArray((error as { issues?: unknown }).issues)
+  );
 }
 
 const AUTHORIZATION_FAILED = "Authorization check failed";
@@ -188,12 +227,25 @@ export function operationErrorResponse(error: unknown): {
   status: number;
   body: { error: string; details?: readonly unknown[] };
 } {
-  if (error instanceof OperationError) {
+  if (isOperationError(error)) {
     return {
       status: error.statusCode,
       body: error.details
         ? { error: error.clientMessage, details: error.details }
         : { error: error.clientMessage },
+    };
+  }
+  if (isValidationError(error)) {
+    // Hook-authored issues, the same signal generated CRUD answers with 422.
+    const details = error.issues
+      .filter((issue) => issue.path.length > 0)
+      .map((issue) => ({ path: issue.path.join("."), message: issue.message }));
+    return {
+      status: 422,
+      body:
+        details.length > 0
+          ? { error: error.clientMessage, details }
+          : { error: error.clientMessage },
     };
   }
   if (error instanceof DatabasePluginError) {

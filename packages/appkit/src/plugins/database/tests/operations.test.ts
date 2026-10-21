@@ -9,6 +9,7 @@ import { z } from "zod";
 
 import type { DataPath } from "../../../database/runtime";
 import { defineSchema, id, text } from "../../../database/schema-builder";
+import { DatabaseValidationError } from "../../../errors";
 import type { ITelemetry } from "../../../telemetry";
 import type { DatabaseExports } from "../entity-types";
 import {
@@ -17,6 +18,7 @@ import {
   defineQuery,
   loadDefaultDatabaseRoutes,
   type OperationError,
+  OperationError as OperationErrorClass,
   operationErrorResponse,
   runOperation,
 } from "../operations";
@@ -196,6 +198,51 @@ describe("runOperation", () => {
     });
   });
 
+  test("answers a hook's validation rejection with 422, like generated CRUD", () => {
+    const response = operationErrorResponse(
+      new DatabaseValidationError("title is empty", [
+        { path: ["title"], message: "Title is required" },
+      ]),
+    );
+    expect(response).toEqual({
+      status: 422,
+      body: {
+        error: "Database request failed validation",
+        details: [{ path: "title", message: "Title is required" }],
+      },
+    });
+  });
+
+  test("runs operations and errors from another copy of the module", async () => {
+    // A dev loader (jiti, --conditions=development) can evaluate the module twice.
+    vi.resetModules();
+    const other = await import("../operations");
+    expect(other.OperationError).not.toBe(OperationErrorClass);
+    const op = other.defineMutation({
+      input: z.object({}),
+      authorize: () => true,
+      execute: async () => {
+        throw new other.OperationError(409, "Order is not pending");
+      },
+    });
+    const error = await failure(
+      runOperation(op, { actor: alice, input: {} }, fakeDb(state)),
+    );
+    expect(operationErrorResponse(error)).toEqual({
+      status: 409,
+      body: { error: "Order is not pending" },
+    });
+    // The shared mark alone does not make an object runnable.
+    const forged = { ...op, authorize: [] } as never;
+    expect(
+      (
+        await failure(
+          runOperation(forged, { actor: alice, input: {} }, fakeDb(state)),
+        )
+      ).statusCode,
+    ).toBe(500);
+  });
+
   test("refuses to define or run an operation without authorization", async () => {
     expect(() =>
       defineQuery({
@@ -348,6 +395,35 @@ describe("database routes", () => {
       body: { id: "8", userId: "mallory", actorId: "mallory" },
     });
     expect(sent).toEqual({ status: 200, body: { id: "7", by: "alice" } });
+  });
+
+  test("answers a hook's validation rejection inside a mutation with 422", async () => {
+    const handlers = await mount({
+      api: false,
+      routes: {
+        "POST /notes": defineMutation({
+          input: z.object({}),
+          authorize: () => true,
+          execute: async () => {
+            throw new DatabaseValidationError("body is empty", [
+              { path: ["body"], message: "Body is required" },
+            ]);
+          },
+        }),
+      },
+    });
+    expect(
+      await call(handlers.get("post /notes"), {
+        headers: { "x-forwarded-user": "alice" },
+        body: {},
+      }),
+    ).toEqual({
+      status: 422,
+      body: {
+        error: "Database request failed validation",
+        details: [{ path: "body", message: "Body is required" }],
+      },
+    });
   });
 
   test("answers 401 without the proxy header and 403 for a refused actor", async () => {

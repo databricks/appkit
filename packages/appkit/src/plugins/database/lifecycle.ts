@@ -23,7 +23,7 @@ import type {
   SqlTag,
   TransactionClient,
 } from "./entity-types";
-import { OperationError } from "./operations";
+import { isOperationError } from "./operations";
 import { assertSchemaMatchesDatabase } from "./schema-check";
 import { createMutationScope, type MutationScope } from "./scope";
 import type { DatabaseHooks } from "./types";
@@ -157,10 +157,7 @@ function buildDatabaseExports(context: ExportContext): DatabaseExports {
       return await runTransaction(context, callback);
     } catch (error) {
       // Both carry a message written for the caller, not driver detail.
-      if (
-        error instanceof DatabaseValidationError ||
-        error instanceof OperationError
-      ) {
+      if (error instanceof DatabaseValidationError || isOperationError(error)) {
         throw error;
       }
       throw classifyDatabaseError(error, "transaction");
