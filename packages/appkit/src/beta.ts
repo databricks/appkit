@@ -127,12 +127,6 @@ export type {
   DatabaseApiWriteOperation,
   DatabaseApiWritesConfig,
   DatabaseExports,
-  EntityHooks,
-  EntityMutationHooks,
-  HookApp,
-  HookContext,
   IDatabaseConfig,
-  ReadSerializer,
-  ReadSerializerContext,
   TransactionClient,
 } from "./plugins/database";
