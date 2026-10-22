@@ -22,7 +22,7 @@ import {
 } from "./use-database-read";
 
 /** Options for {@link useDatabaseList}. */
-export type UseDatabaseListOptions<Row> = UseDatabaseReadOptions<Row>;
+export type UseDatabaseListOptions = UseDatabaseReadOptions;
 
 /** What {@link useDatabaseList} returns: one page of rows and its state. */
 export type UseDatabaseListResult<Row> = UseDatabaseReadResult<
@@ -41,7 +41,7 @@ export type UseDatabaseListResult<Row> = UseDatabaseReadResult<
  * @param entity - A table the generated registry exposes
  * @param params - `where`, `order`, `select`, `include`, `limit`, `offset`;
  *   `null` holds the hook idle, for params that depend on another read
- * @param options - `enabled`, `keepPreviousData`, and `shape`
+ * @param options - `enabled` and `keepPreviousData`
  * @returns The page, loading and error state, and `refetch`
  *
  * @example
@@ -54,27 +54,23 @@ export type UseDatabaseListResult<Row> = UseDatabaseReadResult<
  * notes.data?.items.map((note) => note.body);
  * ```
  */
-export function useDatabaseList<
-  K extends DatabaseKeyedEntity,
-  Row = DatabaseListRow<K>,
->(
+export function useDatabaseList<K extends DatabaseKeyedEntity>(
   entity: K,
   params?: undefined,
-  options?: UseDatabaseListOptions<Row>,
-): UseDatabaseListResult<Row>;
+  options?: UseDatabaseListOptions,
+): UseDatabaseListResult<DatabaseListRow<K>>;
 export function useDatabaseList<
   K extends DatabaseEntity,
   const P extends DatabaseListParams<K>,
-  Row = DatabaseListRow<K, P>,
 >(
   entity: K,
   params: (P & ExactDatabaseParams<P, DatabaseListParams<K>>) | null,
-  options?: UseDatabaseListOptions<Row>,
-): UseDatabaseListResult<Row>;
+  options?: UseDatabaseListOptions,
+): UseDatabaseListResult<DatabaseListRow<K, P>>;
 export function useDatabaseList(
   entity: string,
   params?: DatabaseListQuery | null,
-  options: UseDatabaseListOptions<unknown> = {},
+  options: UseDatabaseListOptions = {},
 ): UseDatabaseListResult<unknown> {
   const enabled = (options.enabled ?? true) && params !== null;
   // Encode only an enabled read: a held read's params may still be incomplete.
@@ -95,7 +91,6 @@ export function useDatabaseList(
     enabled,
     accept: isDatabaseListPage,
     keepPreviousData: options.keepPreviousData ?? false,
-    shape: options.shape,
   });
   return read as UseDatabaseListResult<unknown>;
 }

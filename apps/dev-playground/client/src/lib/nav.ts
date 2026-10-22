@@ -64,7 +64,7 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         to: "/database",
         label: "Database",
         description:
-          "Declare a Postgres schema and get typed entities, generated CRUD routes, and transactional hooks.",
+          "Declare a Postgres schema and get typed entities and generated CRUD routes.",
         icon: DatabaseZapIcon,
       },
       {

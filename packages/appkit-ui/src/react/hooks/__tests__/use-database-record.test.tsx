@@ -190,22 +190,6 @@ describe("useDatabaseRecord", () => {
     expect(result.current.error).toMatchObject({ code: "NOT_FOUND" });
   });
 
-  test("applies a shape function to the record", async () => {
-    const { result } = renderHook(() =>
-      useDatabaseRecord(
-        "notes",
-        7,
-        {},
-        {
-          shape: (row) => ({ title: String((row as { body: string }).body) }),
-        },
-      ),
-    );
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.data).toEqual({ title: "note 7" });
-  });
-
   test("reads once under StrictMode and keeps the request across the remount", async () => {
     const { result } = renderHook(() => useDatabaseRecord("notes", 3), {
       wrapper: StrictMode,

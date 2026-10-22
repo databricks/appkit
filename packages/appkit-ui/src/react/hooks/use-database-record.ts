@@ -20,7 +20,7 @@ import {
 } from "./use-database-read";
 
 /** Options for {@link useDatabaseRecord}. */
-export type UseDatabaseRecordOptions<Row> = UseDatabaseReadOptions<Row>;
+export type UseDatabaseRecordOptions = UseDatabaseReadOptions;
 
 /** What {@link useDatabaseRecord} returns: one row and its state. */
 export type UseDatabaseRecordResult<Row> = UseDatabaseReadResult<Row>;
@@ -37,7 +37,7 @@ export type UseDatabaseRecordResult<Row> = UseDatabaseReadResult<Row>;
  * @param entity - A table the generated registry exposes with a public key
  * @param id - The row's public key, or `null`/`undefined` to wait
  * @param params - `select` and `include`; pass `{}` to reach `options` alone
- * @param options - `enabled`, `keepPreviousData`, and `shape`
+ * @param options - `enabled` and `keepPreviousData`
  * @returns The row, loading and error state, and `refetch`
  *
  * @example
@@ -51,13 +51,12 @@ export type UseDatabaseRecordResult<Row> = UseDatabaseReadResult<Row>;
 export function useDatabaseRecord<
   K extends DatabaseKeyedEntity,
   const P extends DatabaseRecordParams<K> = Record<never, never>,
-  Row = DatabaseRecordRow<K, P>,
 >(
   entity: K,
   id: DatabaseId<K> | null | undefined,
   params?: P & ExactDatabaseParams<P, DatabaseRecordParams<K>>,
-  options: UseDatabaseRecordOptions<Row> = {},
-): UseDatabaseRecordResult<Row> {
+  options: UseDatabaseRecordOptions = {},
+): UseDatabaseRecordResult<DatabaseRecordRow<K, P>> {
   const enabled = (options.enabled ?? true) && id !== null && id !== undefined;
   const recordParams = (params ?? {}) as { include?: unknown };
   // Encode only an enabled read: a held read's params may still be incomplete.
@@ -78,8 +77,7 @@ export function useDatabaseRecord<
     enabled,
     accept: isDatabaseRow,
     keepPreviousData: options.keepPreviousData ?? false,
-    shape: options.shape as UseDatabaseReadOptions<unknown>["shape"],
   });
   // The server projected and encoded the row; the types describe that wire.
-  return read as UseDatabaseRecordResult<Row>;
+  return read as UseDatabaseRecordResult<DatabaseRecordRow<K, P>>;
 }
