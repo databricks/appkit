@@ -136,7 +136,10 @@ describe("decodeCreateBody / decodeUpdateBody", () => {
       deep = { deep };
     }
     expect(() => decodeCreateBody(users, { profile: deep })).toThrow(
-      expect.objectContaining({ category: "INVALID_REQUEST" }),
+      expect.objectContaining({
+        category: "INVALID_REQUEST",
+        details: [{ path: ["profile"], message: expect.any(String) }],
+      }),
     );
   });
 });

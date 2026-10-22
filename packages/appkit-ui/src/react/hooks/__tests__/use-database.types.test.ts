@@ -258,67 +258,47 @@ test("read hooks type entities, params, and rows from the generated registry", (
   expect(diagnostics).toEqual([]);
 });
 
-test("serialized<T>() replaces the row type and keeps entity, id, and params checked", () => {
+test("read rows come only from the registry: no shape, serialized<T>(), or row type argument", () => {
   const diagnostics = compileTypeProbe(`
-    import {
-      type DatabaseListPage,
-      type UseDatabaseListResult,
-      serialized,
-      useDatabaseList,
-      useDatabaseRecord,
-    } from "@databricks/appkit-ui/react/beta";
+    import { useDatabaseList, useDatabaseRecord } from "@databricks/appkit-ui/react/beta";
 
     ${REGISTRY}
 
-    interface PostCard { id: number; headline: string; comment_count: number }
+    interface PostCard { id: number; headline: string }
 
-    export function Shaped() {
-      const cards = useDatabaseList(
-        "posts",
-        { order: { id: "desc" }, limit: 5 },
-        { shape: serialized<PostCard>() },
-      );
-      const typed: UseDatabaseListResult<PostCard> = cards;
-      const page: DatabaseListPage<PostCard> | null = cards.data;
-      const headline: string | undefined = cards.data?.items[0]?.headline;
-      // @ts-expect-error the shaped row replaces the inferred one
-      cards.data?.items[0]?.title;
-
-      const card = useDatabaseRecord("posts", 7, undefined, {
-        shape: serialized<PostCard>(),
-        enabled: false,
-      });
-      const count: number | undefined = card.data?.comment_count;
-      void [typed, page, headline, count];
+    export function Controls() {
+      // The probes below differ from these calls only in what was removed.
+      useDatabaseList<"posts", {}>("posts", {});
+      useDatabaseRecord<"posts", {}>("posts", 7);
+      useDatabaseList("posts", {}, { enabled: false });
+      useDatabaseRecord("posts", 7, {}, { enabled: false });
     }
 
-    export function StillChecked() {
-      // @ts-expect-error the entity stays checked with a shape
-      useDatabaseList("missing", {}, { shape: serialized<PostCard>() });
-      // @ts-expect-error private filters stay rejected with a shape
-      useDatabaseList("users", { where: { secret: "token" } }, { shape: serialized<PostCard>() });
-      // @ts-expect-error unknown params stay rejected with a shape
-      useDatabaseList("users", { includeTotal: true }, { shape: serialized<PostCard>() });
-      // @ts-expect-error includes stay bounded with a shape
-      useDatabaseList("posts", { include: { users: { limit: 1 } } }, { shape: serialized<PostCard>() });
-      // @ts-expect-error keyless entities stay rejected with a shape
-      useDatabaseRecord("events", "x", {}, { shape: serialized<PostCard>() });
-      // @ts-expect-error the id stays checked with a shape
-      useDatabaseRecord("posts", "7", {}, { shape: serialized<PostCard>() });
-      // @ts-expect-error record params stay checked with a shape
-      useDatabaseRecord("users", "ada", { select: ["secret"] }, { shape: serialized<PostCard>() });
-      // @ts-expect-error a shape is only built by serialized<T>()
-      useDatabaseList("posts", {}, { shape: { headline: "x" } });
+    export function Removed() {
+      // @ts-expect-error a list takes no caller-chosen row type
+      useDatabaseList<"posts", {}, PostCard>("posts", {});
+      // @ts-expect-error a record takes no caller-chosen row type
+      useDatabaseRecord<"posts", {}, PostCard>("posts", 7);
+      // @ts-expect-error a list takes no shape option
+      useDatabaseList("posts", {}, { shape: (row: unknown) => row as PostCard });
+      // @ts-expect-error a record takes no shape option
+      useDatabaseRecord("posts", 7, {}, { shape: (row: unknown) => row as PostCard });
     }
+
+    // @ts-expect-error serialized<T>() is not exported
+    export type Serialized = typeof import("@databricks/appkit-ui/react/beta").serialized;
+    // @ts-expect-error DatabaseShape is not exported
+    export type Shape = import("@databricks/appkit-ui/react/beta").DatabaseShape<PostCard>;
+    // @ts-expect-error DatabaseRowShape is not exported
+    export type RowShape = import("@databricks/appkit-ui/react/beta").DatabaseRowShape<PostCard>;
   `);
 
   expect(diagnostics).toEqual([]);
 });
 
-test("read hooks take null params, keepPreviousData, and a parse shape", () => {
+test("read hooks take null params and keepPreviousData", () => {
   const diagnostics = compileTypeProbe(`
     import {
-      type DatabaseListPage,
       type UseDatabaseListResult,
       type UseDatabaseRecordResult,
       useDatabaseList,
@@ -326,9 +306,6 @@ test("read hooks take null params, keepPreviousData, and a parse shape", () => {
     } from "@databricks/appkit-ui/react/beta";
 
     ${REGISTRY}
-
-    interface PostCard { id: number; headline: string }
-    declare function parsePostCard(row: unknown): PostCard;
 
     export function Dependent(userSlug: string | undefined, offset: number) {
       // Null params hold the read; the non-null branch keeps its exact type.
@@ -341,24 +318,13 @@ test("read hooks take null params, keepPreviousData, and a parse shape", () => {
       const typed: UseDatabaseListResult<{ id: number; user_slug: string; title: string; total: string; payload: unknown }> = posts;
       // @ts-expect-error the non-null branch is still checked exactly
       useDatabaseList("posts", userSlug ? { where: { secret: userSlug } } : null);
-      void [title, typed];
-    }
-
-    export function Parsed() {
-      const cards = useDatabaseList("posts", { limit: 5 }, { shape: parsePostCard });
-      const page: DatabaseListPage<PostCard> | null = cards.data;
-      const inline = useDatabaseList("posts", { limit: 5 }, {
-        shape: (row) => ({ id: Number((row as { id: unknown }).id), headline: "x" }),
-      });
-      const headline: string | undefined = inline.data?.items[0]?.headline;
-      // @ts-expect-error the parsed row replaces the inferred one
-      cards.data?.items[0]?.title;
-
-      const card = useDatabaseRecord("posts", 7, {}, { shape: parsePostCard, keepPreviousData: true });
-      const record: UseDatabaseRecordResult<PostCard> = card;
-      // @ts-expect-error a shape is a parse function or serialized<T>(), not a value
-      useDatabaseList("posts", {}, { shape: parsePostCard(null) });
-      void [page, headline, record];
+      const post: UseDatabaseRecordResult<{ title: string }> = useDatabaseRecord(
+        "posts",
+        7,
+        { select: ["title"] },
+        { keepPreviousData: true },
+      );
+      void [title, typed, post];
     }
   `);
 

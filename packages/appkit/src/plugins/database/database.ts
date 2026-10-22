@@ -28,11 +28,7 @@ import type { DatabaseExports } from "./entity-types";
 import { createDatabaseState, type DatabaseState } from "./lifecycle";
 import { loadDefaultDatabaseSchema } from "./load-schema";
 import manifest from "./manifest.json";
-import type {
-  DatabaseHooks,
-  DefaultDatabaseSchema,
-  IDatabaseConfig,
-} from "./types";
+import type { DefaultDatabaseSchema, IDatabaseConfig } from "./types";
 
 /** Schema-driven database plugin */
 export class DatabasePlugin<
@@ -55,7 +51,6 @@ export class DatabasePlugin<
     this.config = {
       schema: config.schema,
       api: config.api,
-      hooks: config.hooks,
     };
   }
 
@@ -80,18 +75,9 @@ export class DatabasePlugin<
           this.config.api,
           Object.keys(schema.$tables),
         );
-        // A hook key naming no declared table would silently never run.
-        for (const name of Object.keys(this.hooks() ?? {})) {
-          if (!Object.hasOwn(schema.$tables, name)) {
-            throw databaseSetupFailed(
-              `hooks names undeclared table ${JSON.stringify(name)}. Use a table declared in schema.`,
-            );
-          }
-        }
         const candidate = await createDatabaseState(
           schema,
           (operation, options) => this.execute(operation, options),
-          this.hooks(),
         );
         if (this.draining) {
           // Setup may finish while shutdown is waiting; never publish that state.
@@ -126,7 +112,6 @@ export class DatabasePlugin<
   injectRoutes(router: express.Router): void {
     if (this.exposure.tables.length === 0) return;
     const tables = this.exposedTables();
-    const hooks = this.hooks();
     // Every exposed name is a declared table, so its export is an entity client.
     const entities = () =>
       this.exports() as unknown as Record<string, CrudEntity>;
@@ -135,7 +120,6 @@ export class DatabasePlugin<
       const deps: CrudRouteDeps = {
         table,
         entity: () => entities()[table.name],
-        serialize: hooks?.[table.name]?.serialize,
         runRouteSpan: (operation, route, run) =>
           this.runRouteSpan(table.name, operation, route, run),
       };
@@ -221,7 +205,7 @@ export class DatabasePlugin<
 
   /**
    * Publish `{ relations: { table: { relation: targetTable } } }` so the React
-   * hooks can tell which reads a write affects: a `boards` read that includes
+   * clients can tell which reads a write affects: a `boards` read that includes
    * `notes` shows notes rows. Only edges between exposed tables exist, and
    * they are the names `include` already accepts, so this reveals nothing the
    * routes and the generated types do not.
@@ -243,11 +227,6 @@ export class DatabasePlugin<
         ]),
     );
     return Object.keys(relations).length > 0 ? { relations } : {};
-  }
-
-  /** Typed hook keys are schema table names, which routing addresses at runtime. */
-  private hooks(): DatabaseHooks | undefined {
-    return this.config.hooks as DatabaseHooks | undefined;
   }
 
   /** Return the typed database API only while the plugin is active. */
