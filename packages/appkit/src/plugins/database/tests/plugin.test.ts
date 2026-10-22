@@ -154,23 +154,19 @@ describe("DatabasePlugin", () => {
         routedSchema,
         expect.any(Function),
         undefined,
-        undefined,
       );
     },
   );
 
-  test("applies API restrictions and hooks to the discovered schema", async () => {
+  test("applies API restrictions to the discovered schema", async () => {
     mocks.loadDefaultDatabaseSchema.mockResolvedValue(routedSchema);
-    const hooks = { notes: { beforeCreate: vi.fn() } };
     const { routes } = await registerRoutes({
       api: { tables: ["notes"], writes: false },
-      hooks,
     });
     expect(routes).toEqual(["get /notes", "get /notes/:id"]);
     expect(mocks.createDatabaseState).toHaveBeenCalledWith(
       routedSchema,
       expect.any(Function),
-      hooks,
       undefined,
     );
   });
@@ -181,7 +177,6 @@ describe("DatabasePlugin", () => {
     expect(mocks.createDatabaseState).toHaveBeenCalledWith(
       routedSchema,
       expect.any(Function),
-      undefined,
       pool,
     );
   });
@@ -195,7 +190,6 @@ describe("DatabasePlugin", () => {
     expect(mocks.createDatabaseState).toHaveBeenCalledWith(
       routedSchema,
       expect.any(Function),
-      undefined,
       pool,
     );
   });
@@ -470,17 +464,13 @@ describe("DatabasePlugin", () => {
       });
       database({
         schema: routedSchema,
-        hooks: { notes: { serialize: (row) => row } },
-      });
-      database({
-        schema: routedSchema,
         // @ts-expect-error only a declared table can be exposed
         api: { tables: ["missing"] },
       });
       database({
         schema: routedSchema,
-        // @ts-expect-error only a declared table can shape its own responses
-        hooks: { missing: { serialize: (row) => row } },
+        // @ts-expect-error lifecycle hooks were removed
+        hooks: { notes: {} },
       });
     };
     const assertApiTypes = () => {
@@ -643,17 +633,6 @@ describe("DatabasePlugin", () => {
     }
   });
 
-  test("fails setup on a hook key that names no declared table", async () => {
-    mocks.createDatabaseState.mockResolvedValue(candidate());
-    const plugin = new DatabasePlugin({
-      schema: routedSchema,
-      hooks: { missing: { beforeCreate: () => undefined } } as never,
-    });
-    await expect(plugin.setup()).rejects.toMatchObject({
-      category: "SETUP_FAILED",
-    });
-  });
-
   test.each([undefined, true] as const)(
     "refuses ambiguous route names with api=%j",
     async (api) => {
@@ -737,7 +716,6 @@ describe("DatabasePlugin", () => {
     expect(mocks.createDatabaseState).toHaveBeenCalledWith(
       internalSchema,
       expect.any(Function),
-      undefined,
       undefined,
     );
   });
