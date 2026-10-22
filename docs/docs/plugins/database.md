@@ -110,7 +110,7 @@ An explicit schema always takes precedence and skips file discovery. An invalid
 explicit schema fails setup instead of falling back to another file.
 
 Run `appkit generate-types` to generate the database registry. With that registry,
-configuration without an explicit schema still infers table names and hook payloads.
+configuration without an explicit schema still infers table names.
 An explicitly supplied schema also checks configuration keys against its own table
 names.
 
@@ -152,7 +152,7 @@ database({
 `api.tables: []` disables all generated routes. An empty write-table or
 write-operation list keeps reads and disables writes. Tables omitted from
 `api.tables` also cannot be included through relations on exposed tables.
-These restrictions apply to HTTP only, not to the server-side client or hooks.
+These restrictions apply to HTTP only, not to the server-side client.
 
 An omitted restriction uses its default. A malformed restriction fails setup.
 For example, `{ api: { write: false } }` is an error, not permission to generate
@@ -192,45 +192,42 @@ Validation is not authorization. A valid request can still read or change any
 exposed row. Use custom authorized routes when that is not the desired access
 model.
 
-## Mutation hooks
+## Transactions
 
-A table can declare `beforeCreate`, `afterCreate`, `beforeUpdate`, `afterUpdate`,
-`beforeUpsert`, `afterUpsert`, `beforeDelete`, and `afterDelete`. Hooks and the
-mutation run in one database transaction. Related writes through
-`ctx.app.database` join that same transaction. This does not make writes through
-other plugins or external services transactional.
+A root write outside `database.transaction()` uses the connection pool directly.
+Related writes belong in one explicit transaction. The callback receives a
+transaction client with the same entity methods and `sql` tag. A later
+`transaction()` call inside that callback joins the open transaction instead of
+opening another one. A root write made while the callback is running also joins
+it, and keeps the predicate from the query that issued the write. A read or an
+`sql` call made on the root client does not join.
 
 ```ts
-import { DatabaseValidationError } from "@databricks/appkit";
-
-database({
-  hooks: {
-    notes: {
-      beforeCreate(values) {
-        if (typeof values.body === "string" && values.body.length > 5_000) {
-          throw new DatabaseValidationError("Note too long", [
-            { path: ["body"], message: "Must be at most 5000 characters" },
-          ]);
-        }
-      },
-    },
-  },
+const note = await appkit.database.transaction(async (tx) => {
+  const created = await tx.notes.create({ body: "Ship it" });
+  await tx.note_events.create({ note_id: created.id, action: "created" });
+  return created;
 });
 ```
 
-A `before*` hook can return replacement values, which are validated again before
-persistence. `DatabaseValidationError` produces HTTP 422 with issues limited to
-public columns. Other hook failures return an opaque server error.
+The callback commits when it returns and rolls back when it throws. A thrown
+`DatabaseValidationError` keeps its identity. Any other thrown error becomes an
+opaque transaction failure. The transaction does not cover writes through other
+plugins or external services.
 
-Keep hooks short and await all database work. A transaction has a 30-second
-callback deadline, a shared budget of 100 database operations, and a maximum
-mutation nesting depth of 8. Repeating the same entity and mutation operation in
-a nested hook chain is rejected. PostgreSQL also enforces a 30-second
-`statement_timeout` and a 30-second `idle_in_transaction_session_timeout`.
+`update()` returns `null` and `delete()` returns `false` when no row matches.
+Those results do not abort the caller's transaction. A later write in the same
+callback can still commit.
+
+Await every database call inside the callback. The callback has a 30-second
+deadline and one shared budget. That budget counts entity writes and `tx.sql`
+statements. It does not count reads. The 101st counted operation rejects the
+transaction. PostgreSQL also enforces a 30-second `statement_timeout` and a
+30-second `idle_in_transaction_session_timeout`.
 
 The callback deadline does not cancel arbitrary JavaScript, HTTP requests, or
-other external side effects. Avoid putting external side effects in hooks that
-need database rollback semantics.
+other external side effects. Avoid starting external work that needs the
+database rollback to undo it.
 
 ## Browser client (beta)
 
@@ -323,10 +320,6 @@ return optional properties for their possible columns; a literal tuple returns
 those properties as required. This also applies to detail and included rows.
 Params typed broadly with an optional `select` keep row fields optional.
 
-If a server-side read serializer changes a list or detail row, the schema-based
-return type cannot describe that custom response. Validate or narrow custom
-read results in the caller; the client does not infer serializer output.
-
 ### Values
 
 `create` and `update` accept only the fields the generated route accepts.
@@ -339,13 +332,11 @@ including inside JSON values. Use an explicit `null` to clear a nullable column;
 a non-finite number never implicitly becomes null. Query numbers must also be
 finite.
 
-Skip an update when a form has no changes. If an update remains empty after
-`beforeUpdate`, the server returns `INVALID_REQUEST` with a `body` detail
-explaining that at least one field is required. An initially empty patch is
-still allowed when `beforeUpdate` supplies its values.
+Skip an update when a form has no changes. An empty update returns
+`INVALID_REQUEST` with a `body` detail explaining that at least one field is
+required, and the stored row does not change.
 
-The answered row is the public row the database holds after any `before*` hook
-ran. A read serializer never reshapes a write's response.
+The answered row is the public row the database holds after the write.
 
 ### Errors
 
@@ -464,54 +455,6 @@ request. To pass options without params, use `{}` for the params:
 - A successful write through a write hook restarts mounted reads. See
   [Refresh reads after a write](#refresh-reads-after-a-write).
 
-### Serializer-shaped reads
-
-A read serializer can change the rows a list or detail route returns. The
-`shape` option types the result, and can check it. The entity, id, and
-parameters are still checked against the generated registry either way.
-
-To check each row at runtime, pass a function that takes one decoded row and
-returns it typed, such as a zod schema's `parse`. It runs once per response, on
-each list item or on the record, and its return value becomes the row. If it
-throws, the read fails with `INTERNAL`; the thrown error is in `error.cause`,
-not in the message, since it may quote row values.
-
-```tsx
-import { useDatabaseList } from "@databricks/appkit-ui/react/beta";
-import { z } from "zod";
-
-// server: serialize: (row) => ({ id: row.id, excerpt: String(row.body).slice(0, 80) })
-const NoteCard = z.object({ id: z.number(), excerpt: z.string() });
-
-const notes = useDatabaseList(
-  "notes",
-  { limit: 20 },
-  { shape: NoteCard.parse },
-);
-notes.data?.items[0]?.excerpt;
-```
-
-Zod 4's `parse` works unbound. For a library whose parse method needs its
-schema as `this`, pass an arrow: `shape: (row) => schema.parse(row)`.
-
-To only declare the type, pass `serialized<T>()`. Nothing checks it at runtime,
-so keep `T` in step with the serializer.
-
-```tsx
-import { serialized, useDatabaseList } from "@databricks/appkit-ui/react/beta";
-
-interface NoteCard {
-  id: number;
-  excerpt: string;
-}
-
-const notes = useDatabaseList(
-  "notes",
-  { limit: 20 },
-  { shape: serialized<NoteCard>() },
-);
-```
-
 ### Write rows
 
 ```tsx
@@ -595,10 +538,10 @@ When a write succeeds, every mounted database read restarts, so lists and
 includes that show the changed row refresh without a manual `refetch()`. Each
 read keeps its last `data` while it reloads. A failed write restarts nothing.
 
-The default restarts every read because a [mutation hook](#mutation-hooks) on
-the server may write other tables in the same transaction, and the browser
-cannot see that. When a page mounts many reads, pass `invalidate` to restart
-only the reads that show the tables you name, or none:
+The default restarts every read because a foreign key declared with
+`onDelete("cascade")` can change other tables, and the browser cannot see that.
+When a page mounts many reads, pass `invalidate` to restart only the reads that
+show the tables you name, or none:
 
 ```ts
 // A board's title changes only boards rows.
@@ -647,4 +590,3 @@ await invalidateDatabaseReads(["boards", "notes"]);
 - [`database`](../api/appkit/Function.database.md)
 - [`IDatabaseConfig`](../api/appkit/TypeAlias.IDatabaseConfig.md)
 - [`DatabaseApiConfig`](../api/appkit/TypeAlias.DatabaseApiConfig.md)
-- [`EntityHooks`](../api/appkit/TypeAlias.EntityHooks.md)

@@ -25,7 +25,6 @@ type Page = { items: unknown[]; limit: number; offset: number };
 interface ReadOptions {
   enabled?: boolean;
   keepPreviousData?: boolean;
-  shape?: (row: unknown) => unknown;
 }
 
 interface WriteOptions<Args extends unknown[], T> {

@@ -1,6 +1,5 @@
 import type { DatabaseRegistry } from "../../database/contract";
 import type { Schema } from "../../database/schema-builder";
-import type { EntityMutationHooks } from "./hooks";
 
 type RegistryTableName = Extract<keyof DatabaseRegistry, string>;
 
@@ -10,7 +9,7 @@ export type DefaultDatabaseSchema = Schema<
 >;
 
 /** Table names declared by one finalized schema. */
-export type SchemaTableName<TSchema extends Schema> = Extract<
+type SchemaTableName<TSchema extends Schema> = Extract<
   keyof TSchema["$tables"],
   string
 >;
@@ -54,31 +53,6 @@ export type DatabaseApiConfig<TSchema extends Schema> =
       readonly writes?: DatabaseApiWritesConfig<TSchema>;
     };
 
-/** Which entity and generated operation produced the row being shaped. */
-export interface ReadSerializerContext {
-  readonly entity: string;
-  readonly operation: "list" | "detail";
-}
-
-/**
- * Shape one already private-safe row before it reaches the wire. A `Promise`
- * is not assignable to the return type, so an async callback fails to compile:
- * serializers run inside the response path and must not add latency there.
- */
-export type ReadSerializer = (
-  row: Record<string, unknown>,
-  context: ReadSerializerContext,
-) => Record<string, unknown>;
-
-/** Response shaping and mutation lifecycle declared for one table. */
-export type EntityHooks<TTable extends string = string> =
-  EntityMutationHooks<TTable> & {
-    readonly serialize?: ReadSerializer;
-  };
-
-/** Hooks addressed by runtime table name, once the typed keys are erased. */
-export type DatabaseHooks = Readonly<Record<string, EntityHooks | undefined>>;
-
 /** Configuration for one schema-bound DatabasePlugin instance. */
 export type IDatabaseConfig<TSchema extends Schema = DefaultDatabaseSchema> = {
   /**
@@ -100,7 +74,4 @@ export type IDatabaseConfig<TSchema extends Schema = DefaultDatabaseSchema> = {
    * @defaultValue true
    */
   readonly api?: DatabaseApiConfig<TSchema>;
-  readonly hooks?: {
-    readonly [TTable in SchemaTableName<TSchema>]?: EntityHooks<TTable>;
-  };
 };

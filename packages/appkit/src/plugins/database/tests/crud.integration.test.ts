@@ -1,11 +1,11 @@
+import { mockServiceContext } from "@tools/test-helpers";
 import type { Request, RequestHandler, Response } from "express";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import type { DataPath, Row } from "../../../database/runtime";
 import { defineSchema, id, text } from "../../../database/schema-builder";
 import { DatabaseValidationError } from "../../../errors";
 import type { ITelemetry } from "../../../telemetry";
-import type { EntityHooks } from "../types";
 
 const mocks = vi.hoisted(() => ({
   initializeLakebasePool: vi.fn(),
@@ -127,7 +127,7 @@ function fakeResponse() {
   };
 }
 
-async function mount(hooks: Record<string, EntityHooks>) {
+async function mount() {
   const database = memoryDataPath();
   mocks.initializeLakebasePool.mockResolvedValue({
     end: vi.fn(async () => undefined),
@@ -137,14 +137,19 @@ async function mount(hooks: Record<string, EntityHooks>) {
 
   const plugin = new DatabasePlugin({
     schema,
-    hooks,
   });
   (plugin as unknown as { telemetry: ITelemetry }).telemetry = {
     startActiveSpan: <T>(
       _name: string,
       _options: unknown,
       run: (span: unknown) => Promise<T>,
-    ) => run({ setAttribute: () => undefined, end: () => undefined }),
+    ) =>
+      run({
+        setAttribute: () => undefined,
+        recordException: () => undefined,
+        setStatus: () => undefined,
+        end: () => undefined,
+      }),
   } as unknown as ITelemetry;
   await plugin.setup();
 
@@ -190,36 +195,41 @@ async function mount(hooks: Record<string, EntityHooks>) {
   return { plugin, database, post, patch };
 }
 
-const notesOf = (plugin: DatabasePlugin<typeof schema>) =>
+const databaseOf = (plugin: DatabasePlugin<typeof schema>) =>
   plugin.exports() as unknown as {
     notes: { create(values: Row): Promise<Row> };
+    transaction<T>(
+      callback: (tx: {
+        notes: { create(values: Row): Promise<Row> };
+        audits: { create(values: Row): Promise<Row> };
+      }) => Promise<T>,
+    ): Promise<T>;
   };
 
-const auditingHooks: Record<string, EntityHooks> = {
-  notes: {
-    afterCreate: async (row, context) => {
-      const tx = context.app.database as unknown as {
-        audits: { create(values: Row): Promise<Row> };
-      };
-      await tx.audits.create({ action: `created:${row.id}` });
-    },
-  },
-};
+let context: Awaited<ReturnType<typeof mockServiceContext>>;
 
-beforeEach(() => {
+beforeEach(async () => {
   mocks.initializeLakebasePool.mockReset();
   mocks.createDrizzleDb.mockReset();
   mocks.createDrizzleDataPath.mockReset();
+  context = await mockServiceContext();
 });
 
-describe("generated CRUD over hooked mutations", () => {
-  test("commits the mutation and the hook's related write together", async () => {
-    const { database, post } = await mount(auditingHooks);
+afterEach(() => {
+  context.restore();
+});
 
-    const response = await post("/notes", { body: "hello" });
+describe("generated CRUD and explicit transactions", () => {
+  test("commits a note and its related audit write together", async () => {
+    const { plugin, database } = await mount();
 
-    expect(response.sent.status).toBe(201);
-    expect(response.json()).toEqual({ id: 1, body: "hello" });
+    const created = await databaseOf(plugin).transaction(async (tx) => {
+      const note = await tx.notes.create({ body: "hello" });
+      await tx.audits.create({ action: `created:${note.id}` });
+      return note;
+    });
+
+    expect(created).toEqual({ id: 1, body: "hello" });
     expect(database.committed.notes).toEqual([{ id: 1, body: "hello" }]);
     expect(database.committed.audits).toEqual([{ id: 2, action: "created:1" }]);
     expect(database.log).toEqual([
@@ -230,24 +240,19 @@ describe("generated CRUD over hooked mutations", () => {
     ]);
   });
 
-  test("rolls both writes back when the hook fails after the mutation", async () => {
-    const { database, post } = await mount({
-      notes: {
-        afterCreate: async (_row, context) => {
-          const tx = context.app.database as unknown as {
-            audits: { create(values: Row): Promise<Row> };
-          };
-          await tx.audits.create({ action: "created" });
-          throw new Error("audit sink rejected 'hello'");
-        },
-      },
-    });
+  test("rolls both writes back when the transaction callback fails", async () => {
+    const { plugin, database } = await mount();
 
-    const response = await post("/notes", { body: "hello" });
+    const error = await databaseOf(plugin)
+      .transaction(async (tx) => {
+        await tx.notes.create({ body: "hello" });
+        await tx.audits.create({ action: "created" });
+        throw new Error("audit sink rejected 'hello'");
+      })
+      .catch((caught) => caught);
 
-    expect(response.sent.status).toBe(500);
-    expect(response.json()).toEqual({ error: "Database operation failed" });
-    expect(response.sent.body).not.toContain("audit sink");
+    expect(error).toMatchObject({ category: "INTERNAL", phase: "transaction" });
+    expect(error.message).not.toContain("audit sink");
     expect(database.committed).toEqual({ notes: [], audits: [] });
     expect(database.log).toEqual([
       "begin",
@@ -257,32 +262,27 @@ describe("generated CRUD over hooked mutations", () => {
     ]);
   });
 
-  test("answers a before hook's validation failure with 422 and writes nothing", async () => {
-    const { database, post } = await mount({
-      notes: {
-        beforeCreate: () => {
-          throw new DatabaseValidationError("invalid note", [
-            { path: ["body"], message: "must not be empty" },
-            { path: ["secret"], message: "leaks a private column" },
-          ]);
-        },
-      },
-    });
+  test("keeps a transaction callback's validation error and writes nothing", async () => {
+    const { plugin, database } = await mount();
+    const issues = [
+      { path: ["body"], message: "must not be empty" },
+      { path: ["secret"], message: "leaks a private column" },
+    ];
 
-    const response = await post("/notes", { body: "" });
+    const error = await databaseOf(plugin)
+      .transaction(async () => {
+        throw new DatabaseValidationError("invalid note", issues);
+      })
+      .catch((caught) => caught);
 
-    expect(response.sent.status).toBe(422);
-    expect(response.json()).toEqual({
-      error: "Database request failed validation",
-      details: [{ path: ["body"], message: "must not be empty" }],
-    });
-    expect(response.sent.body).not.toContain("secret");
+    expect(error).toBeInstanceOf(DatabaseValidationError);
+    expect(error.issues).toEqual(issues);
     expect(database.committed.notes).toEqual([]);
     expect(database.log).toEqual(["begin", "rollback"]);
   });
 
   test("explains an empty patch without changing the stored row", async () => {
-    const { database, patch } = await mount({});
+    const { database, patch } = await mount();
     database.committed.notes.push({ id: 1, body: "original" });
     const response = await patch("/notes/:id", "1", {});
 
@@ -301,55 +301,15 @@ describe("generated CRUD over hooked mutations", () => {
     expect(database.log).toEqual([]);
   });
 
-  test("still lets beforeUpdate fill an initially empty patch", async () => {
-    const { database, patch } = await mount({
-      notes: { beforeUpdate: () => ({ body: "from hook" }) },
-    });
-    database.committed.notes.push({ id: 1, body: "original" });
-    const response = await patch("/notes/:id", "1", {});
+  test("commits a direct create without opening a transaction", async () => {
+    const { plugin, database, post } = await mount();
 
-    expect(response.sent.status).toBe(200);
-    expect(response.json()).toEqual({ id: 1, body: "from hook" });
-    expect(database.committed.notes).toEqual([{ id: 1, body: "from hook" }]);
-    expect(database.log).toEqual(["begin", "update:notes", "commit"]);
-  });
+    const response = await post("/notes", { body: "hello" });
+    const direct = await databaseOf(plugin).notes.create({ body: "again" });
 
-  test("keeps an empty hook-authored patch an opaque server fault", async () => {
-    const { database, patch } = await mount({
-      notes: { beforeUpdate: () => ({}) },
-    });
-    database.committed.notes.push({ id: 1, body: "original" });
-    const response = await patch("/notes/:id", "1", { body: "changed" });
-
-    expect(response.sent.status).toBe(500);
-    expect(response.json()).toEqual({ error: "Database operation failed" });
-    expect(database.committed.notes).toEqual([{ id: 1, body: "original" }]);
-    expect(database.log).toEqual(["begin", "rollback"]);
-  });
-
-  test("gives a programmatic caller the same lifecycle as the route", async () => {
-    const seen: string[] = [];
-    const trace: Record<string, EntityHooks> = {
-      notes: {
-        beforeCreate: (values) => {
-          seen.push("before");
-          return { ...values, body: `${values.body}!` };
-        },
-        afterCreate: (row) => {
-          seen.push(`after:${row.body}`);
-        },
-      },
-    };
-
-    const http = await mount(trace);
-    await http.post("/notes", { body: "a" });
-    const overHttp = [...seen, ...http.database.log];
-
-    seen.length = 0;
-    const direct = await mount(trace);
-    await notesOf(direct.plugin).notes.create({ body: "a" });
-
-    expect([...seen, ...direct.database.log]).toEqual(overHttp);
-    expect(direct.database.committed.notes).toEqual([{ id: 1, body: "a!" }]);
+    expect(response.sent.status).toBe(201);
+    expect(response.json()).toEqual({ id: 1, body: "hello" });
+    expect(direct).toEqual({ id: 2, body: "again" });
+    expect(database.log).toEqual(["insert:notes", "insert:notes"]);
   });
 });
