@@ -84,7 +84,7 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
         this.config.pool?.workspaceClient ??
         createWorkspaceClient({
           clientOptions: getClientOptions(),
-        }).toLegacyWorkspaceClient(),
+        }),
     };
     const [user] = await Promise.all([
       getUsernameWithApiLookup(poolConfig),
@@ -109,7 +109,7 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
       const pool = oboManager.getPool(
         userKey,
         {
-          workspaceClient: ctx.client.toLegacyWorkspaceClient(),
+          workspaceClient: ctx.client,
           user: userKey,
         },
         ctx.tokenFingerprint,
@@ -305,7 +305,7 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
       const user = ctx.principal.userEmail ?? ctx.principal.userId;
       return {
         ...this.config.pool,
-        workspaceClient: ctx.client.toLegacyWorkspaceClient(),
+        workspaceClient: ctx.client,
         user,
       };
     }

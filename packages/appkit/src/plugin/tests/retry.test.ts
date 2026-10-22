@@ -1,4 +1,5 @@
 import type { RetryConfig } from "shared";
+import { ModularApiError } from "shared/workspace-client";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { AuthenticationError } from "../../errors/authentication";
@@ -34,6 +35,19 @@ describe("RetryInterceptor", () => {
     const result = await interceptor.intercept(fn, context);
 
     expect(result).toBe("success");
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not retry a modular SDK 4xx (status is read from httpStatusCode)", async () => {
+    const interceptor = new RetryInterceptor({ enabled: true, attempts: 3 });
+    const body = new TextEncoder().encode(
+      JSON.stringify({ error_code: "INVALID_PARAMETER_VALUE", message: "no" }),
+    );
+    const fn = vi
+      .fn()
+      .mockRejectedValue(ModularApiError.fromHttpError(400, undefined, body));
+
+    await expect(interceptor.intercept(fn, context)).rejects.toThrow("no");
     expect(fn).toHaveBeenCalledTimes(1);
   });
 

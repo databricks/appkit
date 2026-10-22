@@ -8,8 +8,8 @@ import {
 import { WarehouseResource } from "../resources/warehouse";
 import {
   type ClientOptions,
-  ConfigError,
   createWorkspaceClient,
+  isAuthConfigError,
   type WorkspaceClient,
 } from "../workspace-client";
 import { type CallerContext, snapshotCallerContext } from "./caller-context";
@@ -44,6 +44,8 @@ export interface ServiceContextState {
  */
 export class ServiceContext {
   private static instance: ServiceContextState | null = null;
+  /** Workspace host resolved at init (profile-aware); dev fallback for OBO. */
+  private static resolvedHost: string | undefined;
   private static initPromise: Promise<ServiceContextState> | null = null;
 
   /**
@@ -111,11 +113,11 @@ export class ServiceContext {
       throw AuthenticationError.missingToken("user token");
     }
 
-    // Local templates can configure only a profile, whose host the SDK resolved.
+    // Local templates can configure only a profile, whose host init resolved.
     const host =
       process.env.DATABRICKS_HOST ||
       (process.env.NODE_ENV === "development" && ServiceContext.isInitialized()
-        ? ServiceContext.get().client.config?.host
+        ? ServiceContext.resolvedHost
         : undefined);
     if (!host) {
       throw ConfigurationError.missingEnvVar("DATABRICKS_HOST");
@@ -123,13 +125,11 @@ export class ServiceContext {
 
     const serviceCtx = ServiceContext.get();
 
-    // Create user client with the OAuth token from Databricks Apps
-    // Note: We use authType: "pat" because the token is passed as a Bearer token
-    // just like a PAT, even though it's technically an OAuth token
+    // Create user client with the OAuth token from Databricks Apps. An explicit
+    // token is sent as a Bearer token, like a PAT, though it's an OAuth token.
     const userClient = createWorkspaceClient({
       token,
       host,
-      authType: "pat",
       clientOptions: getClientOptions(),
     });
 
@@ -183,12 +183,14 @@ export class ServiceContext {
       const wsClient =
         client ?? createWorkspaceClient({ clientOptions: getClientOptions() });
 
-      const [resolvedWorkspaceId, currentUser, resolvedResources] =
+      const [resolvedWorkspaceId, currentUser, resolvedResources, host] =
         await Promise.all([
           ServiceContext.getWorkspaceId(wsClient),
-          wsClient.currentUser.me(),
+          wsClient.currentUser.me({}),
           WarehouseResource.resolve(wsClient, options?.warehouseId),
+          ServiceContext.resolveHost(wsClient),
         ]);
+      ServiceContext.resolvedHost = host;
 
       if (!currentUser.id) {
         throw ConfigurationError.resourceNotFound("Service user ID");
@@ -209,9 +211,9 @@ export class ServiceContext {
         workspaceId: Promise.resolve(resolvedWorkspaceId),
       });
     } catch (e) {
-      if (e instanceof ConfigError) {
+      if (isAuthConfigError(e)) {
         throw ConfigurationError.databricksAuthenticationSetupFailed(
-          e.baseMessage,
+          e.message,
           { cause: e },
         );
       }
@@ -226,20 +228,32 @@ export class ServiceContext {
       return process.env.DATABRICKS_WORKSPACE_ID;
     }
 
-    const response = (await client.apiClient.request({
+    const response = await client.request({
       path: "/api/2.0/preview/scim/v2/Me",
       method: "GET",
-      headers: new Headers(),
-      raw: false,
-      query: {},
-      responseHeaders: ["x-databricks-org-id"],
-    })) as { "x-databricks-org-id": string };
+    });
+    await response.body?.cancel();
+    const workspaceId = response.headers.get("x-databricks-org-id");
 
-    if (!response["x-databricks-org-id"]) {
+    if (!workspaceId) {
       throw ConfigurationError.resourceNotFound("Workspace ID");
     }
 
-    return response["x-databricks-org-id"];
+    return workspaceId;
+  }
+
+  /**
+   * Resolve the host locally (env or profile, no network). Never fails startup:
+   * without a host, createCallerContext throws missingEnvVar instead.
+   */
+  private static async resolveHost(
+    client: WorkspaceClient,
+  ): Promise<string | undefined> {
+    try {
+      return await client.getHost();
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -248,6 +262,7 @@ export class ServiceContext {
   static reset(): void {
     ServiceContext.instance = null;
     ServiceContext.initPromise = null;
+    ServiceContext.resolvedHost = undefined;
     WarehouseResource.reset();
   }
 }

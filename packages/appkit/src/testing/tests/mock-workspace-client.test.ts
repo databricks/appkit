@@ -21,11 +21,10 @@ describe("createMockWorkspaceClient", () => {
     // Never-crash is the headline claim, so all nine are asserted, not sampled.
     test.each([
       ["files", "listDirectory", undefined],
-      ["genie", "getMessage", undefined],
+      ["genie", "genieGetConversationMessage", undefined],
       ["jobs", "getRun", undefined],
-      ["servingEndpoints", "get", undefined],
-      ["warehouses", "get", { state: "RUNNING" }],
-      ["warehouses", "start", undefined],
+      ["warehouses", "getWarehouse", { state: "RUNNING" }],
+      ["warehouses", "startWarehouse", undefined],
       ["statementExecution", "executeStatement", SUCCEEDED],
       ["currentUser", "me", TEST_USER],
     ])("%s.%s resolves its default", async (service, method, expected) => {
@@ -34,37 +33,13 @@ describe("createMockWorkspaceClient", () => {
       await expect(svc(client, service)[method]({})).resolves.toEqual(expected);
     });
 
-    test("config and apiClient are reachable, and not mocks where it matters", () => {
+    test("the auth seam is reachable: host is a real string, request a Response", async () => {
       const client = mk();
-      // Both read directly by production code — a Promise or mock here breaks it.
-      expect(typeof client.config.host).toBe("string");
-      expect(client.config.host).toBeTruthy();
-      expect(typeof client.apiClient.userAgent()).toBe("string");
-    });
-
-    test("a seeded userAgent stays synchronous, not a Promise", async () => {
-      // Resolving it would put "[object Promise]" into a Headers value.
-      const client = mk({ responses: { "apiClient.userAgent": "custom/9" } });
-      expect(client.apiClient.userAgent()).toBe("custom/9");
-      const headers = new Headers();
-      headers.set("user-agent", client.apiClient.userAgent());
-      expect(headers.get("user-agent")).toBe("custom/9");
-      // `request` is genuinely async, so its seeds still resolve.
-      await expect(
-        mk({ responses: { "apiClient.request": { ok: 1 } } }).apiClient.request(
-          {} as never,
-        ),
-      ).resolves.toEqual({ ok: 1 });
-    });
-
-    test("apiClient.request is depth-2 and destructurable", async () => {
-      await expect(mk().apiClient.request({} as never)).resolves.toEqual({});
-      const client = mk({
-        responses: { "apiClient.request": { results: [] } },
-      });
-      await expect(client.apiClient.request({} as never)).resolves.toEqual({
-        results: [],
-      });
+      const host = await client.getHost();
+      expect(typeof host).toBe("string");
+      expect(host).toBeTruthy();
+      const res = await client.request({ method: "GET", path: "/x" });
+      await expect(res.json()).resolves.toEqual({});
     });
   });
 
@@ -105,50 +80,33 @@ describe("createMockWorkspaceClient", () => {
       ).resolves.toBeUndefined();
     });
 
-    test("the config option overrides defaults and adds members", () => {
-      const authenticate = vi.fn();
-      const client = mk({
-        config: { host: "https://custom.example.com", authenticate },
-      });
-      expect(client.config.host).toBe("https://custom.example.com");
-      expect(client.config.authenticate).toBe(authenticate);
+    test("the config option seeds the host", async () => {
+      const client = mk({ config: { host: "https://custom.example.com" } });
+      await expect(client.getHost()).resolves.toBe(
+        "https://custom.example.com",
+      );
     });
 
-    test('a "config.host" response stays a raw string, not a mock', () => {
-      expect(
-        mk({ responses: { "config.host": "https://a.b" } }).config.host,
-      ).toBe("https://a.b");
+    test('a "config.host" response seeds the host as a raw string', async () => {
+      await expect(
+        mk({ responses: { "config.host": "https://a.b" } }).getHost(),
+      ).resolves.toBe("https://a.b");
     });
 
-    test("config.authenticate stamps a header; ensureResolved resolves", async () => {
+    test("authenticate stamps a header", async () => {
       const client = mk();
       const headers = new Headers();
       // Asserting only "was called" would pass against a mock that does nothing.
-      await client.config.authenticate(headers);
+      await client.authenticate(headers);
       expect(headers.get("Authorization")).toBe("Bearer test-token");
-      await expect(client.config.ensureResolved()).resolves.toBeUndefined();
-    });
-
-    test("an unknown member of a seeded namespace still hits the floor", () => {
-      expect(
-        typeof (mk().config as never as Record<string, unknown>).nope,
-      ).toBe("function");
     });
   });
 
   describe("memoization (call assertions depend on it)", () => {
-    test("methods, namespaces, and the legacy view share one identity", () => {
+    test("methods and namespaces share one identity", () => {
       const client = mk();
       expect(client.jobs.getRun).toBe(client.jobs.getRun);
       expect(client.jobs).toBe(client.jobs);
-      expect(client.toLegacyWorkspaceClient().jobs.getRun).toBe(
-        client.jobs.getRun,
-      );
-    });
-
-    test("un-faceted legacy services also work", async () => {
-      const legacy = mk().toLegacyWorkspaceClient();
-      await expect(svc(legacy, "clusters").list({})).resolves.toBeUndefined();
     });
   });
 
@@ -164,9 +122,8 @@ describe("createMockWorkspaceClient", () => {
       // ownKeys stays default, so a service inspects as {} instead of minting a
       // mock per probed property.
       expect(inspect(client.jobs)).toBe("{}");
-      expect(inspect(client.toLegacyWorkspaceClient())).toBe("{}");
-      expect(inspect(client)).toContain("https://test.databricks.com");
-      expect(() => JSON.stringify(client.config)).not.toThrow();
+      expect(() => inspect(client)).not.toThrow();
+      expect(() => JSON.stringify(client)).not.toThrow();
       expect(() => expect(client.jobs).toEqual({})).not.toThrow();
 
       const log = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -228,14 +185,9 @@ describe("createMockWorkspaceClient", () => {
       expect(getRun).toHaveBeenCalledWith({ run_id: 7 });
     });
 
-    test("resolves seeded members and rejects non-function paths", () => {
+    test("resolves seam members and rejects non-clients", () => {
       const client = mk();
-      expect(getMock(client, "apiClient.request")).toBe(
-        client.apiClient.request,
-      );
-      expect(() => getMock(client, "config.host")).toThrow(
-        /not a mocked function/,
-      );
+      expect(getMock(client, "request")).toBe(client.request);
       expect(() => getMock({} as never, "jobs.getRun")).toThrow(
         /not a createMockWorkspaceClient/,
       );
@@ -248,11 +200,13 @@ describe("createMockWorkspaceClient", () => {
       await expect(
         client.statementExecution.executeStatement({} as never),
       ).resolves.toEqual(SUCCEEDED);
-      await expect(client.warehouses.get({} as never)).resolves.toEqual({
+      await expect(
+        client.warehouses.getWarehouse({} as never),
+      ).resolves.toEqual({
         state: "RUNNING",
       });
       await expect(
-        client.warehouses.start({} as never),
+        client.warehouses.startWarehouse({} as never),
       ).resolves.toBeUndefined();
     });
 
@@ -294,10 +248,8 @@ describe("createMockWorkspaceClient", () => {
       // @ts-expect-error - `getMessagez` is not a genie method
       void client.genie.getMessagez;
 
-      // `host` is `string | undefined` in the SDK, so the honest claim is that it
-      // narrows to a string — not that it is non-optional.
-      const host = client.config.host;
-      expect(typeof host).toBe("string");
+      const host: Promise<string> = client.getHost();
+      void host;
 
       const getRun = getMock(client, "jobs.getRun");
       getRun.mockResolvedValue({ state: "TERMINATED" });

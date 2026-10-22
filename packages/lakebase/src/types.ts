@@ -1,4 +1,3 @@
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
 import type { PoolConfig } from "pg";
 
 /**
@@ -55,7 +54,7 @@ export interface LakebasePoolConfig extends PoolConfig {
    *
    * Note: If password is provided, OAuth auth is not used
    */
-  workspaceClient?: WorkspaceClient;
+  workspaceClient?: LakebaseWorkspaceClient;
 
   /**
    * Endpoint resource path for OAuth token generation.
@@ -209,3 +208,72 @@ export interface GenerateDatabaseCredentialRequest {
    */
   claims?: RequestedClaims[];
 }
+
+/** A raw REST call against the workspace host. */
+export interface LakebaseWorkspaceRequest {
+  method: string;
+  /** Path on the workspace host, e.g. `/api/2.0/postgres/credentials`. */
+  path: string;
+  headers?: Headers;
+  body?: string;
+}
+
+/**
+ * Client exposing an authenticated raw `request` (the AppKit workspace client).
+ * Must throw on a non-2xx response.
+ */
+export interface RequestCapableWorkspaceClient {
+  request(req: LakebaseWorkspaceRequest): Promise<Response>;
+  /** Typed Lakebase Postgres client; used instead of raw requests when present. */
+  postgres?: LakebasePostgresClient;
+}
+
+/**
+ * The subset of the modular `@databricks/sdk-postgres` `PostgresClient` lakebase
+ * uses (the AppKit workspace client's `postgres`). Its model is camelCase.
+ */
+export interface LakebasePostgresClient {
+  generateDatabaseCredential(
+    req: {
+      endpoint?: string;
+      claims?: {
+        permissionSet?: string;
+        resources?: {
+          resourceName?: { $case: "tableName"; tableName: string };
+        }[];
+      }[];
+    },
+    options?: { signal?: AbortSignal },
+  ): Promise<{ token?: string; expireTime?: { toString(): string } }>;
+  getEndpoint(
+    req: { name: string },
+    options?: { signal?: AbortSignal },
+  ): Promise<unknown>;
+}
+
+/** The subset of the legacy `@databricks/sdk-experimental` `WorkspaceClient` lakebase uses. */
+export interface LegacyWorkspaceClientLike {
+  currentUser: { me(): Promise<{ userName?: string }> };
+  apiClient: {
+    request(
+      options: {
+        path: string;
+        method: string;
+        headers: Headers;
+        raw: boolean;
+        payload?: unknown;
+      },
+      /** The legacy SDK's cancellation `Context` (optional). */
+      context?: unknown,
+    ): Promise<unknown>;
+  };
+}
+
+/**
+ * Workspace client accepted by lakebase: a legacy `@databricks/sdk-experimental`
+ * `WorkspaceClient`, or anything with an authenticated `request` (the AppKit
+ * modular workspace client). Structural, so lakebase depends on neither SDK's client.
+ */
+export type LakebaseWorkspaceClient =
+  | RequestCapableWorkspaceClient
+  | LegacyWorkspaceClientLike;

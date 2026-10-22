@@ -12,8 +12,6 @@ import type { WorkspaceClient } from "../workspace-client";
 // .oxlintrc.json), so a local alias keeps the intent readable.
 type Any = any;
 
-type LegacyClient = ReturnType<WorkspaceClient["toLegacyWorkspaceClient"]>;
-
 /** Options for {@link createMockWorkspaceClient}. */
 export interface CreateMockWorkspaceClientOptions {
   /**
@@ -31,8 +29,8 @@ export interface CreateMockWorkspaceClientOptions {
    */
   strict?: boolean;
 
-  /** Seed `config`; `host` must stay a real string. */
-  config?: Partial<WorkspaceClient["config"]>;
+  /** Seed the workspace host `getHost()` resolves; must be a real string. */
+  config?: { host?: string };
 
   /** Apply the canned defaults (SQL succeeds, warehouse RUNNING). Default true. */
   defaults?: boolean;
@@ -43,8 +41,9 @@ export type MockWorkspaceClient = WorkspaceClient;
 /**
  * Applied beneath caller-supplied `responses`.
  *
- * `statementExecution.executeStatement`, `warehouses.get` and `warehouses.start`
- * must stay byte-identical to the old `fixtures.ts` values — suites reach them
+ * `statementExecution.executeStatement`, `warehouses.getWarehouse` and
+ * `warehouses.startWarehouse` must stay byte-identical to the old `fixtures.ts`
+ * values — suites reach them
  * implicitly through `mockServiceContext`. `currentUser.me` is
  * required: `ServiceContext.createContext` reads `.id`, so `createApp({ client })`
  * cannot boot without it.
@@ -54,22 +53,31 @@ const DEFAULT_RESPONSES: Record<string, Any> = {
     status: { state: "SUCCEEDED" },
     result: { data: [] },
   },
-  "warehouses.get": { state: "RUNNING" },
-  "warehouses.start": undefined,
+  "warehouses.getWarehouse": { state: "RUNNING" },
+  "warehouses.startWarehouse": undefined,
   "currentUser.me": {
     id: "test-service-user",
     userName: "test-service-user",
   },
 };
 
-/** Generically proxied; `config`/`apiClient` are seeded below instead. */
+/** Generically proxied service accessors. */
 const FACADE_SERVICES = [
   "files",
   "warehouses",
   "genie",
+  "database",
+  "apps",
   "jobs",
+  "experiments",
+  "vectorSearch",
+  "tables",
+  "postgres",
+  "volumes",
+  "functions",
+  "connections",
   "statementExecution",
-  "servingEndpoints",
+  "modelServing",
   "currentUser",
 ] as const;
 
@@ -87,9 +95,6 @@ const PASSTHROUGH_DENY: ReadonlySet<string> = new Set([
   "$$typeof",
   "asymmetricMatch",
 ]);
-
-/** `apiClient` members read synchronously; a seeded value must not be resolved. */
-const SYNC_API_CLIENT_MEMBERS: ReadonlySet<string> = new Set(["userAgent"]);
 
 /** Distinguishes "no passthrough rule applied" from a rule answering `undefined`. */
 const NOT_PASSTHROUGH = Symbol("not-passthrough");
@@ -188,95 +193,36 @@ export function createMockWorkspaceClient(
     return proxy;
   }
 
-  /** Pull `"config.*"` / `"apiClient.*"` entries out so they seed real values. */
-  function seededOverrides(namespace: string): Record<string, Any> {
-    const prefix = `${namespace}.`;
-    const out: Record<string, Any> = {};
-    for (const [key, value] of Object.entries(merged)) {
-      if (key.startsWith(prefix)) out[key.slice(prefix.length)] = value;
-    }
-    return out;
-  }
+  // `host` is read as a string, so it cannot be a mock. A `"config.host"`
+  // response seeds it too.
+  const host: string =
+    (merged["config.host"] as string | undefined) ??
+    config.host ??
+    "https://test.databricks.com";
 
-  // `host` is read as a string and throws if falsy, so it cannot be a mock.
-  const configTarget: Record<string, Any> = {
-    host: "https://test.databricks.com",
-    authenticate: vi.fn((headers?: Headers) => {
-      headers?.set?.("Authorization", "Bearer test-token");
-    }),
-    ensureResolved: vi.fn().mockResolvedValue(undefined),
-    ...config,
-    ...seededOverrides("config"),
+  // Modular auth seam. Seed via `responses: { request: ... }` (a `Response`, or
+  // a function returning one); `request` defaults to a fresh `{}` JSON body.
+  const seamDefaults: Record<string, (...args: Any[]) => Any> = {
+    getHost: async () => host,
+    authenticate: async (headers: Headers) => {
+      headers.set("Authorization", "Bearer test-token");
+    },
+    request: async () => new Response("{}"),
   };
-
-  // userAgent() must be synchronous (a Promise stringifies to "[object Promise]"
-  // inside a Headers value); request resolves {} so destructuring works.
-  const apiClientTarget: Record<string, Any> = {
-    userAgent: vi.fn().mockReturnValue("appkit-test/1.0"),
-    request: vi.fn().mockResolvedValue({}),
-  };
-  for (const [key, value] of Object.entries(seededOverrides("apiClient"))) {
-    const fn = typeof value === "function" ? vi.fn(value) : vi.fn();
-    if (typeof value !== "function") {
-      // Match the member's own shape. `userAgent()` is read straight into a
-      // Headers value, so resolving a seed would put "[object Promise]" there —
-      // the failure the synchronous default exists to avoid. Seed a function to
-      // decide for yourself.
-      if (SYNC_API_CLIENT_MEMBERS.has(key)) fn.mockReturnValue(value);
-      else fn.mockResolvedValue(value);
-    }
-    apiClientTarget[key] = fn;
-    fns.set(`apiClient.${key}`, fn);
-  }
-  for (const key of ["userAgent", "request"]) {
-    if (!fns.has(`apiClient.${key}`)) {
-      fns.set(`apiClient.${key}`, apiClientTarget[key] as Mock);
-    }
-  }
-  for (const [key, value] of Object.entries(configTarget)) {
-    if (typeof value === "function" && !fns.has(`config.${key}`)) {
-      fns.set(`config.${key}`, value as Mock);
-    }
-  }
-
-  const configProxy = new Proxy(configTarget, {
-    get: neverCrashGet("config", mint),
-  });
-  const apiClientProxy = new Proxy(apiClientTarget, {
-    get: neverCrashGet("apiClient", mint),
-  });
-
-  /** Memoized; routes facade names onto the same objects, others onto the floor. */
-  let legacy: LegacyClient | undefined;
-  function toLegacyWorkspaceClient(): LegacyClient {
-    legacy ??= new Proxy(
-      {},
-      {
-        get: (target: Any, prop: Any): Any => {
-          // Same passthrough rules as `neverCrashGet` — shared, not copied, so a
-          // key added to PASSTHROUGH_DENY cannot cover one trap and miss this
-          // one (miss `then` here and `await client` hangs again).
-          const passthrough = passthroughFor(target, prop);
-          if (passthrough !== NOT_PASSTHROUGH) return passthrough;
-          if (prop === "config") return configProxy;
-          if (prop === "apiClient") return apiClientProxy;
-          if (prop === "toLegacyWorkspaceClient") {
-            return toLegacyWorkspaceClient;
-          }
-          return service(String(prop));
-        },
-      },
-    ) as LegacyClient;
-    return legacy;
-  }
+  const seam: Pick<WorkspaceClient, "getHost" | "authenticate" | "request"> =
+    Object.fromEntries(
+      Object.entries(seamDefaults).map(([key, impl]) => {
+        const fn = key in merged ? mint(key) : vi.fn(impl);
+        fns.set(key, fn);
+        return [key, fn];
+      }),
+    ) as Any;
 
   const client: WorkspaceClient = {
+    ...seam,
     ...(Object.fromEntries(
       FACADE_SERVICES.map((name) => [name, service(name)]),
     ) as Pick<WorkspaceClient, (typeof FACADE_SERVICES)[number]>),
-    config: configProxy as WorkspaceClient["config"],
-    apiClient: apiClientProxy as WorkspaceClient["apiClient"],
-    toLegacyWorkspaceClient,
   };
 
   clientFns.set(client, fns);
@@ -288,7 +234,7 @@ export function createMockWorkspaceClient(
  * so `expect(client.jobs.getRun).toHaveBeenCalled()` does not typecheck.
  *
  * Minting is idempotent, so this can be called before the code under test runs.
- * Throws for a non-function member such as `"config.host"`.
+ * Throws for a path that is not a mocked function.
  */
 export function getMock(client: MockWorkspaceClient, path: string): Mock {
   const fns = clientFns.get(client);
@@ -312,7 +258,7 @@ export function getMock(client: MockWorkspaceClient, path: string): Mock {
   if (typeof resolved !== "function") {
     throw new Error(
       `getMock: "${path}" is not a mocked function (got ${typeof resolved}). ` +
-        "Members seeded with a real value, such as config.host, have no mock.",
+        "Only methods have a mock.",
     );
   }
   return resolved as Mock;

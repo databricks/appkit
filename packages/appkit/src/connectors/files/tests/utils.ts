@@ -20,3 +20,14 @@ export function streamFromChunks(chunks: string[]): ReadableStream<Uint8Array> {
     },
   });
 }
+
+// Builds the HEAD response the connector's metadata() reads headers from.
+export function headResponse(
+  headers: Record<string, string | number | undefined>,
+): Response {
+  const h = new Headers();
+  for (const [key, value] of Object.entries(headers)) {
+    if (value !== undefined) h.set(key, String(value));
+  }
+  return new Response(null, { headers: h });
+}

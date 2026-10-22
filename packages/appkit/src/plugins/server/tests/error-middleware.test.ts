@@ -1,3 +1,4 @@
+import { ModularApiError } from "shared/workspace-client";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
@@ -38,6 +39,21 @@ describe("errorHandlerMiddleware", () => {
   afterEach(() => {
     process.env.NODE_ENV = originalNodeEnv;
     vi.clearAllMocks();
+  });
+
+  test("maps a modular SDK ApiError (httpStatusCode) to its status", () => {
+    const res = makeRes();
+    const error = ModularApiError.fromHttpError(
+      404,
+      undefined,
+      new TextEncoder().encode(
+        JSON.stringify({ error_code: "NOT_FOUND", message: "No such space" }),
+      ),
+    );
+
+    errorHandlerMiddleware(error, makeReq(), res, vi.fn());
+
+    expect(res.status).toHaveBeenCalledWith(404);
   });
 
   test("maps AppKitError to its statusCode with its message", () => {

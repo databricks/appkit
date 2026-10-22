@@ -1,17 +1,17 @@
 import { coerce } from "semver";
 
-import {
-  name as productName,
-  version as productVersion,
-} from "../../package.json";
+import { version as productVersion } from "../../package.json";
 import type { ClientOptions } from "../workspace-client";
 
 const normalizedVersion = (coerce(productVersion)?.version ??
   productVersion) as ClientOptions["productVersion"];
 
+/** The product name AppKit stamps on outbound requests (not the npm package name). */
+const productName = "databricks-appkit";
+
 /**
  * SDK client options that stamp every `apiClient.request()` with an AppKit
- * User-Agent (`@databricks/appkit/<version>`), so outbound Databricks traffic
+ * User-Agent (`databricks-appkit/<version>`), so outbound Databricks traffic
  * is attributable to AppKit. Use this for every `WorkspaceClient` AppKit
  * constructs at runtime.
  */

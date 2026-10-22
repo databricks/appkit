@@ -15,9 +15,7 @@ const mocks = vi.hoisted(() => {
     request,
     client,
     createPool: vi.fn(),
-    createWorkspaceClient: vi.fn(() => ({
-      toLegacyWorkspaceClient: () => client,
-    })),
+    createWorkspaceClient: vi.fn(() => client),
   };
 });
 
@@ -57,7 +55,7 @@ describe("AppKit Lakebase connector initialization", () => {
     expect(await initializeLakebasePool()).toBe(pool);
     expect(mocks.me).toHaveBeenCalledOnce();
     expect(mocks.createWorkspaceClient).toHaveBeenCalledWith({
-      clientOptions: expect.objectContaining({ product: "@databricks/appkit" }),
+      clientOptions: expect.objectContaining({ product: "databricks-appkit" }),
     });
     expect(mocks.createPool).toHaveBeenCalledWith({
       user: "local-user@example.test",
@@ -90,7 +88,7 @@ describe("AppKit Lakebase connector initialization", () => {
     };
     vi.mocked(ServiceContext.isInitialized).mockReturnValue(true);
     vi.spyOn(ServiceContext, "get").mockReturnValue({
-      client: { toLegacyWorkspaceClient: () => legacy },
+      client: legacy,
     } as unknown as ReturnType<typeof ServiceContext.get>);
     await initializeLakebasePool();
     expect(poolConfig()).toMatchObject({
@@ -125,7 +123,7 @@ describe("AppKit Lakebase connector initialization", () => {
     const requestClient = { currentUser: { me: requestLookup } };
     await runInUserContext(
       {
-        client: { toLegacyWorkspaceClient: () => requestClient },
+        client: requestClient,
         userId: "request-user-id",
         userEmail: "request-user@example.test",
         workspaceId: Promise.resolve("workspace"),

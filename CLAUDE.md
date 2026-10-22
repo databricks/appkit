@@ -416,7 +416,7 @@ This project uses conventional commits (enforced by commitlint):
 ## Important Context
 
 ### Key Dependencies
-- `@databricks/sdk-experimental` v0.16.0 - Databricks services SDK
+- Modular `@databricks/sdk-*` packages - Databricks services SDK (isolated in `packages/shared/src/workspace-client/`)
 - `express` - HTTP server
 - `zod` - Runtime validation
 - `OpenTelemetry` - Observability (traces, metrics, logs)

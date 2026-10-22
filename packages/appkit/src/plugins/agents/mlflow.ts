@@ -227,7 +227,7 @@ async function resolveUcLocation(
     const experiment = await client.getExperiment(experimentId);
     if (!experiment) return undefined;
     const { ucLocationFromExperimentTags } =
-      await import("@mlflow/core/dist/core/destination");
+      await import("@mlflow/core/dist/core/destination.js");
     return ucLocationFromExperimentTags(experiment.tags) ?? undefined;
   } catch (err) {
     logger.warn(
@@ -272,14 +272,14 @@ async function buildMlflowSpanProcessor(
   let processor: SpanProcessor;
   if (ucLoc) {
     const { DatabricksUCTableSpanExporter, DatabricksUCTableSpanProcessor } =
-      await import("@mlflow/core/dist/exporters/uc_table");
+      await import("@mlflow/core/dist/exporters/uc_table.js");
     processor = new DatabricksUCTableSpanProcessor(
       new DatabricksUCTableSpanExporter(client),
       ucLoc,
     );
   } else {
     const { MlflowSpanExporter, MlflowSpanProcessor } =
-      await import("@mlflow/core/dist/exporters/mlflow");
+      await import("@mlflow/core/dist/exporters/mlflow.js");
     processor = new MlflowSpanProcessor(new MlflowSpanExporter(client));
   }
   return {
@@ -346,8 +346,10 @@ export async function initAgentTracing(): Promise<void> {
   const id = experimentId();
   if (!id) return;
 
+  let coreLoaded = false;
   try {
     mlflow = await import("@mlflow/core");
+    coreLoaded = true;
     const host = normalizedDatabricksHost();
     initConfig = {
       trackingUri: process.env.MLFLOW_TRACKING_URI?.trim() || "databricks",
@@ -385,7 +387,9 @@ export async function initAgentTracing(): Promise<void> {
       logger.info("MLflow agent tracing enabled (experiment %s)", id);
     }
   } catch (err) {
-    if (isModuleNotFound(err)) {
+    // Only the bare package being absent means "not installed"; a failed deep
+    // import is a real error and must surface as one.
+    if (!coreLoaded && isModuleNotFound(err)) {
       logger.warn(
         "MLflow agent tracing requires the optional `@mlflow/core` package. " +
           "Install it to enable tracing: npm i @mlflow/core",

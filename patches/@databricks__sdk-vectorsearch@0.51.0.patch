@@ -1,0 +1,67 @@
+diff --git a/dist/v1/model.d.ts b/dist/v1/model.d.ts
+index aeb9a49c9dd947b7275b391d09b9b5594282cb1c..00a7dad9c3086458d2a262e2e0502ee17c31aa89 100644
+--- a/dist/v1/model.d.ts
++++ b/dist/v1/model.d.ts
+@@ -465,6 +465,8 @@ interface QueryVectorIndexRequest {
+    * `TOP` and `BUCKETS` are case-insensitive. A column may appear at most once.
+    */
+   facets?: string[] | undefined;
++  /** Undocumented: `1` makes the response include `debug_info` timings. */
++  debugLevel?: number | undefined;
+ }
+ interface QueryVectorIndexResponse {
+   /** Metadata about the result set. */
+@@ -479,6 +481,8 @@ interface QueryVectorIndexResponse {
+   nextPageToken?: string | undefined;
+   /** Facet aggregation rows returned by a query. */
+   facetResult?: FacetResultData | undefined;
++  /** Undocumented: query timings (`response_time`, `latency_ms`, ...) when `debugLevel` is set. */
++  debugInfo?: Record<string, unknown> | undefined;
+ }
+ interface RerankerConfig {
+   /**
+diff --git a/dist/v1/model.js b/dist/v1/model.js
+index 3cafbc0454e697f5b4f72d6adbc5df23ca9b430d..94bf38e9bf96b326e2f3e359ee3d9a197b24154c 100644
+--- a/dist/v1/model.js
++++ b/dist/v1/model.js
+@@ -4,6 +4,7 @@ import { z } from "zod";
+ const jsonValueSchema = z.lazy(() => z.union([
+ 	z.null(),
+ 	z.number(),
++	z.bigint(),
+ 	z.string(),
+ 	z.boolean(),
+ 	z.record(z.string(), jsonValueSchema),
+@@ -288,13 +289,15 @@ const unmarshalPatchEndpointBudgetPolicyResponseSchema = z.object({
+ const unmarshalQueryVectorIndexResponseSchema = z.object({
+ 	manifest: z.lazy(() => unmarshalResultManifestSchema).optional(),
+ 	result: z.lazy(() => unmarshalResultDataSchema).optional(),
+-	next_page_token: z.string().optional(),
+-	facet_result: z.lazy(() => unmarshalFacetResultDataSchema).optional()
++	next_page_token: z.string().nullish(),
++	facet_result: z.lazy(() => unmarshalFacetResultDataSchema).optional(),
++	debug_info: z.record(z.string(), z.unknown()).optional()
+ }).transform((d) => ({
+ 	manifest: d.manifest,
+ 	result: d.result,
+-	nextPageToken: d.next_page_token,
+-	facetResult: d.facet_result
++	nextPageToken: d.next_page_token ?? void 0,
++	facetResult: d.facet_result,
++	debugInfo: d.debug_info
+ }));
+ const unmarshalResultDataSchema = z.object({
+ 	row_count: z.number().optional(),
+@@ -561,9 +564,11 @@ const marshalQueryVectorIndexRequestSchema = z.object({
+ 	reranker: z.lazy(() => marshalRerankerConfigSchema).optional(),
+ 	queryColumns: z.array(z.string()).optional(),
+ 	sortColumns: z.array(z.string()).optional(),
+-	facets: z.array(z.string()).optional()
++	facets: z.array(z.string()).optional(),
++	debugLevel: z.number().optional()
+ }).transform((d) => ({
+ 	name: d.name,
++	debug_level: d.debugLevel,
+ 	num_results: d.numResults,
+ 	columns: d.columns,
+ 	filters_json: d.filtersJson,

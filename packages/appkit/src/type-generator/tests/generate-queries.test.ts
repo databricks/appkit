@@ -34,7 +34,10 @@ vi.mock("../../workspace-client", async (importOriginal) => {
       mocks.createWorkspaceClient(...args);
       return {
         statementExecution: { executeStatement: mocks.executeStatement },
-        warehouses: { get: mocks.getWarehouse, start: mocks.startWarehouse },
+        warehouses: {
+          getWarehouse: mocks.getWarehouse,
+          startWarehouse: mocks.startWarehouse,
+        },
       };
     },
   };
@@ -87,15 +90,15 @@ const lastSavedQueries = () =>
 
 function succeededResult(columns: [string, string, string | null][]) {
   return {
-    statement_id: "stmt-1",
+    statementId: "stmt-1",
     status: { state: "SUCCEEDED" },
-    result: { data_array: columns },
+    result: { dataArray: columns },
   };
 }
 
 /**
  * Build a SUCCEEDED DESCRIBE QUERY response whose rows arrive only as a base64
- * Arrow IPC `attachment` (no `data_array`) — the ARROW_STREAM/INLINE wire shape
+ * Arrow IPC `attachment` (no `dataArray`) — the ARROW_STREAM/INLINE wire shape
  * the fetcher now requests. The describeOne path pipes this through
  * normalizeResultRows, which decodes the attachment so convertToQueryType can
  * read the columns. Each [name, type, comment] triple becomes one DESCRIBE row.
@@ -113,10 +116,10 @@ async function succeededArrowAttachmentResult(
     "base64",
   );
   return {
-    statement_id: "stmt-arrow",
+    statementId: "stmt-arrow",
     status: { state: "SUCCEEDED" },
     manifest: { format: "ARROW_STREAM" },
-    // No data_array — rows live in the attachment, like a real INLINE Arrow
+    // No dataArray — rows live in the attachment, like a real INLINE Arrow
     // response. This is the condition the silent-degrade bug left unread.
     result: { attachment },
   };
@@ -181,7 +184,7 @@ describe("generateQueriesFromDescribe", () => {
 
   test("ARROW attachment path — decodes Arrow rows into a real query schema", async () => {
     // The warehouse answers ARROW_STREAM/INLINE: columns arrive only as a
-    // base64 Arrow IPC attachment with data_array undefined. describeOne pipes
+    // base64 Arrow IPC attachment with dataArray undefined. describeOne pipes
     // this through normalizeResultRows before convertToQueryType, so the schema
     // resolves to real columns instead of the degraded `result: unknown`.
     mocks.readdir.mockResolvedValue(["users.sql"]);
@@ -227,8 +230,8 @@ describe("generateQueriesFromDescribe", () => {
 
     expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
     expect(mocks.executeStatement.mock.calls[0][0]).toMatchObject({
-      warehouse_id: "wh-123",
-      wait_timeout: "30s",
+      warehouseId: "wh-123",
+      waitTimeout: "30s",
       format: "JSON_ARRAY",
       disposition: "INLINE",
     });
@@ -238,7 +241,7 @@ describe("generateQueriesFromDescribe", () => {
     mocks.readdir.mockResolvedValue(["bad_table.sql"]);
     mocks.readFile.mockResolvedValue("SELECT * FROM bad_table");
     mocks.executeStatement.mockResolvedValue({
-      statement_id: "stmt-2",
+      statementId: "stmt-2",
       status: {
         state: "FAILED",
         error: { message: "Table or view not found: bad_table" },
@@ -258,7 +261,7 @@ describe("generateQueriesFromDescribe", () => {
     mocks.readdir.mockResolvedValue(["query.sql"]);
     mocks.readFile.mockResolvedValue("SELECT 1");
     mocks.executeStatement.mockResolvedValue({
-      statement_id: "stmt-3",
+      statementId: "stmt-3",
       status: { state: "FAILED" },
     });
 
@@ -280,7 +283,7 @@ describe("generateQueriesFromDescribe", () => {
     mocks.executeStatement
       .mockResolvedValueOnce(succeededResult([["id", "INT", null]]))
       .mockResolvedValueOnce({
-        statement_id: "stmt-fail",
+        statementId: "stmt-fail",
         status: {
           state: "FAILED",
           error: { message: "Table not found" },
@@ -312,7 +315,7 @@ describe("generateQueriesFromDescribe", () => {
     mocks.executeStatement
       .mockRejectedValueOnce(new Error("Connection refused"))
       .mockResolvedValueOnce({
-        statement_id: "stmt-fail-2",
+        statementId: "stmt-fail-2",
         status: { state: "FAILED", error: { message: "Table not found" } },
       });
 
@@ -492,7 +495,7 @@ describe("generateQueriesFromDescribe", () => {
       .mockResolvedValueOnce("SELECT * FROM whatever");
     mocks.executeStatement
       .mockResolvedValueOnce({
-        statement_id: "stmt-syntax",
+        statementId: "stmt-syntax",
         status: {
           state: "FAILED",
           error: { message: "Table not found" },
@@ -649,7 +652,7 @@ describe("generateQueriesFromDescribe", () => {
     // state with no result rows. Must degrade like a transient outage, not be
     // misreported as EMPTY (which would discard a good cached type).
     mocks.executeStatement.mockResolvedValue({
-      statement_id: "stmt-1",
+      statementId: "stmt-1",
       status: { state: "PENDING" },
     });
 
@@ -684,7 +687,7 @@ describe("generateQueriesFromDescribe", () => {
     mocks.executeStatement
       .mockResolvedValueOnce(succeededResult([["id", "INT", null]]))
       .mockResolvedValueOnce({
-        statement_id: "stmt-pending",
+        statementId: "stmt-pending",
         status: { state: "RUNNING" },
       });
 
@@ -711,7 +714,7 @@ describe("generateQueriesFromDescribe", () => {
     mocks.readdir.mockResolvedValue(["broken.sql"]);
     mocks.readFile.mockResolvedValue("SELECT * FROM missing");
     mocks.executeStatement.mockResolvedValue({
-      statement_id: "stmt",
+      statementId: "stmt",
       status: {
         state: "FAILED",
         error: { message: "Table or view not found: missing" },

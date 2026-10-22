@@ -14,6 +14,14 @@ on:
         description: "AppKit branch/ref to sync docs from"
         type: string
         default: "main"
+      runner-group:
+        description: "Runner group for the build job"
+        type: string
+        default: "databricks-ghec-public-repos-runner-group-small"
+      runner-label:
+        description: "Runner label for the build job"
+        type: string
+        default: "linux-ubuntu-latest-public-2core-8gb"
 
 permissions:
   contents: read
@@ -23,8 +31,8 @@ jobs:
   build:
     name: Build DevHub
     runs-on:
-      group: databricks-protected-runner-group
-      labels: linux-ubuntu-latest
+      group: ${{ inputs.runner-group }}
+      labels: ${{ inputs.runner-label }}
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

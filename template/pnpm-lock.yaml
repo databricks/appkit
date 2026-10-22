@@ -4,28 +4,16 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  vite: npm:rolldown-vite@7.1.14
-  '@opentelemetry/core': 2.8.0
-  systeminformation: 5.31.7
-  fast-uri: 3.1.0
-  socks: 2.8.7
-  bare-path: 3.1.1
-  bare-url: 2.5.2
-
 importers:
 
   .:
     dependencies:
       '@databricks/appkit':
-        specifier: 0.88.0
-        version: 0.88.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.0))(@types/node@24.6.0)(@types/pg@8.15.6)(esbuild@0.25.12)(tsx@4.20.6)(vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@24.6.0)(rolldown-vite@7.1.14(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.6.0)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.2)))
+        specifier: 0.89.0
+        version: 0.89.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.0))(@types/node@24.6.0)(@types/pg@8.15.6)(esbuild@0.25.12)(tsx@4.20.6)(vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@24.6.0)(rolldown-vite@7.1.14(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.6.0)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.2)))
       '@databricks/appkit-ui':
-        specifier: 0.88.0
-        version: 0.88.0(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
-      '@databricks/sdk-experimental':
-        specifier: 0.17.0
-        version: 0.17.0
+        specifier: 0.89.0
+        version: 0.89.0(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       clsx:
         specifier: 2.1.1
         version: 2.1.1
@@ -316,15 +304,19 @@ packages:
   '@clack/prompts@1.0.1':
     resolution: {integrity: sha512-/42G73JkuYdyWZ6m8d/CJtBrGl1Hegyc7Fy78m5Ob+jF85TOUmLR5XLce/U3LxYAw0kJ8CT5aI99RIvPHcGp/Q==}
 
-  '@databricks/appkit-ui@0.88.0':
-    resolution: {integrity: sha512-bMKBLnbeeF+7FJiU/AUk1ottLJ6lqQPUis8uabdjZnObXuDs6K6sxpioEtLrVhSKOdlSpDnMN1dp1n9Kev132Q==}
+  '@databricks/appkit-ui@0.89.0':
+    resolution: {integrity: sha512-YbgZNI4Gd8mJ5qKnCh/lLEgGMEoBpucOBxPq3+bhOcGaNQpz6BoyBW9j7teaZegrrC5uKRwcQYtRzbZyEyYzfA==}
     hasBin: true
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
+    bundledDependencies:
+      - '@databricks/sdk-genie'
+      - '@databricks/sdk-statementexecution'
+      - '@databricks/sdk-vectorsearch'
 
-  '@databricks/appkit@0.88.0':
-    resolution: {integrity: sha512-KUVA8sLXsZQW3X1XAat4xe+a0lk8IPzhUSmL6jW249oSKBcwPmMY66mJ/ZXDmb0zENgLb9UYHFYBPUuEHOZfFQ==}
+  '@databricks/appkit@0.89.0':
+    resolution: {integrity: sha512-lGOuXPUMRJgdk+a/QEM3ON2m399UdXNyPp27ESH3Q5P6JLUndl0gdnPFNMpUZb5pMefpTFO8R7Ca5Z6iiiKP1w==}
     hasBin: true
     peerDependencies:
       '@mlflow/core': 0.4.0
@@ -337,13 +329,77 @@ packages:
         optional: true
       vitest:
         optional: true
+    bundledDependencies:
+      - '@databricks/sdk-genie'
+      - '@databricks/sdk-statementexecution'
+      - '@databricks/sdk-vectorsearch'
 
-  '@databricks/lakebase@0.6.0':
-    resolution: {integrity: sha512-U/yh2boNoDSf23CQH/AenJFL/06OoBn+mpsUO/XX12trxFb59U6UzaxDtQY+YTLGEdu1DEpXFO+cYQ/ptDm1Gg==}
+  '@databricks/lakebase@0.7.0':
+    resolution: {integrity: sha512-yARF56RIFmF7EzYDVYe01F5lkkvKMPvaOCF+r4e4BOqt8NgDqA0s/q3eNVlvm+ogaIukOBTCUyrUV21eeM+MUA==}
 
-  '@databricks/sdk-experimental@0.17.0':
-    resolution: {integrity: sha512-dOJIt4F2nBk6HKObnv7Xbmy/qLYTy2835qhXSuW0Qw1QAXui9plmCet1KqG3yeQcMTyncWGbnhjGdQi8GEGQSA==}
-    engines: {node: '>=22.0', npm: '>=10.0.0'}
+  '@databricks/sdk-apps@0.54.0':
+    resolution: {integrity: sha512-7cz5Smp/OXfwLn7jGKs0yQjOy1dMbOuPz6l6WoiTnVakw5RClagnLp56hePo2D6HlXMcFRMzTNe5BbW89dgveg==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-auth@0.51.0':
+    resolution: {integrity: sha512-CswN+io9XB7rrcHo9BG/2qIdRCUMb8gFjiZmqVDG2qRmyhzY7Wv1tvwzA+U8uBplmdzAcdhuxMvHQ7vKGFWYqQ==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-core@0.51.0':
+    resolution: {integrity: sha512-XzsdLcC5vXB+z5P68IlZ4emnXyp2frvY+aJnIwlpc2i3F/ZCR53a8HDrq7ruZPQG/FgGUR75MSFhku0nnYOysw==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-database@0.51.0':
+    resolution: {integrity: sha512-iL7z4BCv+Qv76cHRImtteB36YNTPEdfnND/wispE3A5tGAuDnUxO7cNOSl4KwOvoW434OLaeEndGi1ZgICzE8w==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-experiments@0.52.0':
+    resolution: {integrity: sha512-RVpS4fMtfTKI/7WdyeZIdLdy7lBV3liO/W/dLH+zNwga7REbp581zAxZNaomCYJG/y7SrqrtMo77CVDDKH4AKg==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-files@0.52.0':
+    resolution: {integrity: sha512-H3/uAkkl7EI+60/q1FRqtKrG7UdJfWKLug4/87q+P7OXJMF3J8kgECIg1LfU2Ih2Qj42LNhqdjos7LJSC68gyw==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-jobs@0.57.0':
+    resolution: {integrity: sha512-LUBLNRhJq0OtUUU6+2T/zRzZMEd4UL0lVm7qTxLIfuDPDNDPy/EHGs3rQ1cXt1Fv0t3Rik7QT/SueZixSsH/Bg==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-modelserving@0.53.0':
+    resolution: {integrity: sha512-MDUmAZ/ajNQZFGyFj8MSvPgBiBK/NsKVQ9QaVjiz6Op5Eik/eJlg3jr+xoSbKDLlR/5ulq/Q2uP5JJA6t3vJTg==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-options@0.51.0':
+    resolution: {integrity: sha512-p5uBh64Y1onnvwlEwfRsmKmGRI23Y4Ly8fZiCgNUwVDe4Z9d0ctI0mo1v4gnDqlmBaBml3TZfqn5BJBROCXsEw==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-postgres@0.52.0':
+    resolution: {integrity: sha512-QW+H5Oc3ehfwuYJRcV424lly+msjdir5RqK/4/a7BbDpKtugMgAxLMJl2ojw48B3e4xAqh3JsUT21vmHeVPtGQ==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-scim@0.51.0':
+    resolution: {integrity: sha512-WSTpuID4gRoTxVApyxujW+MsI5ANvmn8/DqPK6fXqxCkSINLEbtR+GTk/th8xnADtJekKNIWzeORFblXd3idcg==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-uc-connections@0.52.0':
+    resolution: {integrity: sha512-1kdWnXUSsjGWiQBVVrmiONDB+DohE+uMxgBwIg8p6A8d+p/kkcoR4KHDpj9QhJJ6/ae3Iy0vNFE4pIbA+pxlGw==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-uc-functions@0.51.0':
+    resolution: {integrity: sha512-L5Qq3lB8OIiEOW4h8s9EJQ82VeBFiPnA0F5S2Fhqpd8L8bpx3rjG/e88ZYDtDg3bg4xunOdMQS1VWRxSF9IMxA==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-uc-tables@0.52.0':
+    resolution: {integrity: sha512-Dlqu3+O1krk6ogBX/uJGUDn1xMdt0gVMvrpmf16XkPelmgzwrbdWWtU2LU/zlcCBrb3XvhPPUpxVVHmyNS8Pjg==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-uc-volumes@0.51.0':
+    resolution: {integrity: sha512-Vmk+epraPslz+2pP90XOaZN3wxaoz1UY0mgFnvgUJ/AJHbB5Ei1OTQhtL+Mn5JTVkIaLT6LmJD/xmOqAtaRGLw==}
+    engines: {node: '>=22.0.0'}
+
+  '@databricks/sdk-warehouses@0.53.0':
+    resolution: {integrity: sha512-+NlLn/HP3+5YUxTKlp0+zwsbAGaU2GHl8C+8JlWk04VLmBZhJg/PJnr4WlNrQVTAzqH01dy4DmK7MfqyOetHRg==}
+    engines: {node: '>=22.0.0'}
 
   '@date-fns/tz@1.5.0':
     resolution: {integrity: sha512-lwYN/vDPeNRULcepoE/LO2Pgx+7/RV+S9ARfbc9lr2DtGkOD7pAiruHvbR1RX3Qyf6ja47EWJDMsNK5vK08DJg==}
@@ -618,6 +674,10 @@ packages:
   '@js-sdsl/ordered-map@4.4.2':
     resolution: {integrity: sha512-iUKgm52T8HOE/makSxjqoWhe95ZJA1/G1sYsGev2JDKUSS14KAgg1LHb+Ba+IPow0xflbnSkOsZcO08C7w1gYw==}
 
+  '@js-temporal/polyfill@0.5.1':
+    resolution: {integrity: sha512-hloP58zRVCRSpgDxmqCWJNlizAlUgJFqG2ypq79DCvyv9tHjRYMDOcPFjzfl/A1/YxDvRCZz8wvZvmapQnKwFQ==}
+    engines: {node: '>=12'}
+
   '@napi-rs/wasm-runtime@1.2.4':
     resolution: {integrity: sha512-AJxoUD2/15ESHbvpcyjU274nsAPLuOtPHCk0vKJM5pj//Fg/B1FXNWjPnXTT9PymCYYiHo4zPj0ZomXBKhoy7g==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=23.5.0}
@@ -638,7 +698,7 @@ packages:
     engines: {node: ^18.19.0 || >=20.6.0}
     peerDependencies:
       '@opentelemetry/api': ^1.4.1
-      '@opentelemetry/core': 2.8.0
+      '@opentelemetry/core': ^2.0.0
 
   '@opentelemetry/configuration@0.219.0':
     resolution: {integrity: sha512-wXZUYv4ngu43nA4WEhuXNacm46LW+17LRM8nKyIhBzroRA24PBYjMnakwzR/w777nFUB5xlgsYTTeuXxumZM1Q==}
@@ -2598,9 +2658,6 @@ packages:
   balanced-match@1.0.2:
     resolution: {integrity: sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw==}
 
-  base64-js@1.5.1:
-    resolution: {integrity: sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA==}
-
   baseline-browser-mapping@2.11.24:
     resolution: {integrity: sha512-hYrgxie335U08WqICoGqKRzV1HFXv6zdxwJE4ekCb80CM9a0SVVsN4QPwT67RraRo+9h8IATk6uxHJw7QSkdOg==}
     engines: {node: '>=6.0.0'}
@@ -2626,9 +2683,6 @@ packages:
     resolution: {integrity: sha512-3GSvyjvDI4Dur1Meg2BekJquu5uF+9R9a1+5M1Mde192eZoXbeXjzgOsgqPS2V8D5wrrip0gR5Hf/GhWQ9ZzaA==}
     engines: {node: ^6 || ^7 || ^8 || ^9 || ^10 || ^11 || ^12 || >=13.7}
     hasBin: true
-
-  buffer-equal-constant-time@1.0.1:
-    resolution: {integrity: sha512-zRpUiDwd/xk6ADqPMATG8vc9VPrkck7T07OIx0gnjmJAnHnTVXNQG3vfvWNuiZIkwu9KrKdA1iJKfsfTVxE6NA==}
 
   bytes@3.1.2:
     resolution: {integrity: sha512-/Nf7TyzTx6S3yRJObOAV7956r8cr2+Oj8AC5dt8wSP3BQAoeX58NoHyCU8P8zGkNXStjTSi6fzO6F0pBdcYbEg==}
@@ -2904,9 +2958,6 @@ packages:
   eastasianwidth@0.2.0:
     resolution: {integrity: sha512-I88TYZWc9XiYHRQ4/3c5rjjfgkjhLyW2luGIheGERbNQ6OY7yTybanSpDXZa8y7VUP9YmDcYa+eyq4ca7iLqWA==}
 
-  ecdsa-sig-formatter@1.0.11:
-    resolution: {integrity: sha512-nagl3RYrbNv6kQkeJIpt6NJZy8twLB/2vtz6yN9Z4vRKHN4/QZJIEbqohALSgwKdnksuY3k5Addp5lg8sVoVcQ==}
-
   echarts-for-react@3.0.5:
     resolution: {integrity: sha512-YpEI5Ty7O/2nvCfQ7ybNa+S90DwE8KYZWacGvJW4luUqywP7qStQ+pxDlYOmr4jGDu10mhEkiAuMKcUlT4W5vg==}
     peerDependencies:
@@ -3141,14 +3192,6 @@ packages:
     resolution: {integrity: sha512-YGGyuEdVIjqxkxVH1pUTMY/XtmmsApXrCVv5EU25iX6inEPbV+VakJfLealkBtJN69AQmh1eGOdCl9Sm1UP6XQ==}
     engines: {node: '>=18'}
 
-  gaxios@7.3.1:
-    resolution: {integrity: sha512-kB3rzJV7d9juLZh8/56QTXCwQfxyhdOMdyYk1HdQKFtF8TJTDTZQJtixWIwXdE9Jji91mC41DUNpjleo4L4eAQ==}
-    engines: {node: '>=18'}
-
-  gcp-metadata@8.1.2:
-    resolution: {integrity: sha512-zV/5HKTfCeKWnxG0Dmrw51hEWFGfcF2xiXqcA3+J90WDuP0SvoiSO5ORvcBsifmx/FoIjgQN3oNOGaQ5PhLFkg==}
-    engines: {node: '>=18'}
-
   gcp-metadata@8.1.4:
     resolution: {integrity: sha512-iJ9KMsiu+xKtNRX0PmGLSaIU3bUBAyzWTyqKemKPzNPsmmsBCQYmlNg+brEbES7IHSXtdVwzBPzx1vz3FAaipw==}
     engines: {node: '>=18'}
@@ -3191,10 +3234,6 @@ packages:
 
   globals@14.0.0:
     resolution: {integrity: sha512-oahGvuMGQlPw/ivIYBjVSrWAfWLBeku5tpPE2fOPLi+WHffIWbuh2tCjhyQhTBPMf5E9jDEH4FOmTYgYwbKwtQ==}
-    engines: {node: '>=18'}
-
-  google-auth-library@10.9.1:
-    resolution: {integrity: sha512-i1ydyHrqcIxXkWh/uBmVkzCvIuq5yiK2ATndIe5XxKholrG/MTYP9xGYka4sQhrbIAgGjL2B6NOE7rFaiF3fXw==}
     engines: {node: '>=18'}
 
   google-logging-utils@1.1.3:
@@ -3264,10 +3303,6 @@ packages:
   inherits@2.0.4:
     resolution: {integrity: sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ==}
 
-  ini@6.0.0:
-    resolution: {integrity: sha512-IBTdIkzZNOpqm7q3dRqJvMaldXjDHWkEDfrwGEQTs5eaQMWV+djAhR+wahyNNMAa+qpbDUhBMVt4ZKNwpPm7xQ==}
-    engines: {node: ^20.17.0 || >=22.9.0}
-
   input-otp@1.4.2:
     resolution: {integrity: sha512-l3jWwYNvrEa6NTCt7BECfCm48GvwuZzkoeG3gBL2w4CHeOXW3eKFmf9UNYkNfYc3mxMrthMnxjIE07MT0zLBQA==}
     peerDependencies:
@@ -3315,6 +3350,9 @@ packages:
     resolution: {integrity: sha512-SFNOvSJ+Dgf/9An904Yx+CgSlIPCkIpao4qo51lpee25TIRejdH3rhR4EZMGoNx3/TP3O+wzWuiTFl4sqbltzA==}
     hasBin: true
 
+  jsbi@4.3.2:
+    resolution: {integrity: sha512-9fqMSQbhJykSeii05nxKl4m6Eqn2P6rOlYiS+C5Dr/HPIU/7yZxu5qzbs40tgaFORiw2Amd0mirjxatXYMkIew==}
+
   jsesc@3.1.0:
     resolution: {integrity: sha512-/sM3dO2FOzXjKQhJuo0Q173wf2KOo8t4I8vHy6lF9poUp7bKT0/NHE8fPX23PwfhnykfqnC2xRxOnVw5XuGIaA==}
     engines: {node: '>=6'}
@@ -3340,12 +3378,6 @@ packages:
     resolution: {integrity: sha512-XmOWe7eyHYH14cLdVPoyg+GOH3rYX++KpzrylJwSW98t3Nk+U8XOl8FWKOgwtzdb8lXGf6zYwDUzeHMWfxasyg==}
     engines: {node: '>=6'}
     hasBin: true
-
-  jwa@2.0.1:
-    resolution: {integrity: sha512-hRF04fqJIP8Abbkq5NKGN0Bbr3JxlQ+qhZufXVr0DvujKy93ZCbXZMHDL4EOtodSbCWxOqR8MS1tXA5hwqCXDg==}
-
-  jws@4.0.1:
-    resolution: {integrity: sha512-EKI/M/yqPncGUUh44xz0PxSidXFr/+r0pA70+gIYhjv+et7yxM+s29Y+VGDkovRofQem0fs7Uvf4+YmAdyRduA==}
 
   keyv@4.5.4:
     resolution: {integrity: sha512-oxVHkHR/EJf2CNXnWxRLW6mg7JyCCUcG0DtEGmL2ctUo1PNTin1PUil+r/+4r5MpVgC/fn1kjsx7mjSujKqIpw==}
@@ -3869,9 +3901,6 @@ packages:
   react@19.2.4:
     resolution: {integrity: sha512-9nfp2hYpCwOjAN+8TZFGhtWEwgvWHXqESH8qT89AT/lWklpLON22Lc8pEtnpsZz7VmawabSU0gCjnj8aC0euHQ==}
     engines: {node: '>=0.10.0'}
-
-  reflect-metadata@0.2.2:
-    resolution: {integrity: sha512-urBwgfrvVP/eAyXx4hluJivBKzuEbSQs9rKWCrCkbSxNv8mxPcUZKeuoF3Uy4mJl3Lwprp6yy5/39VWigZ4K6Q==}
 
   require-directory@2.1.1:
     resolution: {integrity: sha512-fGxEI7+wsG9xrvdjsrlmL22OMTTiHRwAMroiEeMgq8gzoLC/PQr7RsRDSTLUg/bZAZtF+TVIkHc6/4RIKrui+Q==}
@@ -4589,11 +4618,27 @@ snapshots:
       picocolors: 1.1.1
       sisteransi: 1.0.5
 
-  '@databricks/appkit-ui@0.88.0(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
+  '@databricks/appkit-ui@0.89.0(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
     dependencies:
       '@ast-grep/napi': 0.37.0
       '@clack/prompts': 1.0.1
-      '@databricks/sdk-experimental': 0.17.0
+      '@databricks/sdk-apps': 0.54.0
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-database': 0.51.0
+      '@databricks/sdk-experiments': 0.52.0
+      '@databricks/sdk-files': 0.52.0
+      '@databricks/sdk-jobs': 0.57.0
+      '@databricks/sdk-modelserving': 0.53.0
+      '@databricks/sdk-options': 0.51.0
+      '@databricks/sdk-postgres': 0.52.0
+      '@databricks/sdk-scim': 0.51.0
+      '@databricks/sdk-uc-connections': 0.52.0
+      '@databricks/sdk-uc-functions': 0.51.0
+      '@databricks/sdk-uc-tables': 0.52.0
+      '@databricks/sdk-uc-volumes': 0.51.0
+      '@databricks/sdk-warehouses': 0.53.0
+      '@js-temporal/polyfill': 0.5.1
       '@radix-ui/react-accordion': 1.2.12(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@radix-ui/react-alert-dialog': 1.1.15(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@radix-ui/react-aspect-ratio': 1.1.8(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -4634,6 +4679,7 @@ snapshots:
       embla-carousel-react: 8.6.0(react@19.2.4)
       input-otp: 1.4.2(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       js-yaml: 4.3.1
+      json-bigint: 1.0.0
       lucide-react: 0.554.0(react@19.2.4)
       marked: 17.0.3
       next-themes: 0.4.6(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -4653,14 +4699,29 @@ snapshots:
       - '@75lb/nature'
       - '@types/react'
       - '@types/react-dom'
-      - supports-color
 
-  '@databricks/appkit@0.88.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.0))(@types/node@24.6.0)(@types/pg@8.15.6)(esbuild@0.25.12)(tsx@4.20.6)(vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@24.6.0)(rolldown-vite@7.1.14(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.6.0)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.2)))':
+  '@databricks/appkit@0.89.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.0))(@types/node@24.6.0)(@types/pg@8.15.6)(esbuild@0.25.12)(tsx@4.20.6)(vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@24.6.0)(rolldown-vite@7.1.14(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.6.0)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.2)))':
     dependencies:
       '@ast-grep/napi': 0.37.0
       '@clack/prompts': 1.0.1
-      '@databricks/lakebase': 0.6.0
-      '@databricks/sdk-experimental': 0.17.0
+      '@databricks/lakebase': 0.7.0
+      '@databricks/sdk-apps': 0.54.0
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-database': 0.51.0
+      '@databricks/sdk-experiments': 0.52.0
+      '@databricks/sdk-files': 0.52.0
+      '@databricks/sdk-jobs': 0.57.0
+      '@databricks/sdk-modelserving': 0.53.0
+      '@databricks/sdk-options': 0.51.0
+      '@databricks/sdk-postgres': 0.52.0
+      '@databricks/sdk-scim': 0.51.0
+      '@databricks/sdk-uc-connections': 0.52.0
+      '@databricks/sdk-uc-functions': 0.51.0
+      '@databricks/sdk-uc-tables': 0.52.0
+      '@databricks/sdk-uc-volumes': 0.51.0
+      '@databricks/sdk-warehouses': 0.53.0
+      '@js-temporal/polyfill': 0.5.1
       '@opentelemetry/api': 1.9.0
       '@opentelemetry/api-logs': 0.219.0
       '@opentelemetry/auto-instrumentations-node': 0.77.0(@opentelemetry/api@1.9.0)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.0))
@@ -4686,6 +4747,7 @@ snapshots:
       get-port: 7.2.0
       jiti: 2.6.1
       js-yaml: 4.3.1
+      json-bigint: 1.0.0
       magic-string: 0.30.21
       obug: 2.1.1
       pg: 8.18.0
@@ -4743,23 +4805,146 @@ snapshots:
       - tsx
       - utf-8-validate
 
-  '@databricks/lakebase@0.6.0':
+  '@databricks/lakebase@0.7.0':
     dependencies:
-      '@databricks/sdk-experimental': 0.17.0
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
       '@opentelemetry/api': 1.9.0
       pg: 8.18.0
     transitivePeerDependencies:
       - pg-native
-      - supports-color
 
-  '@databricks/sdk-experimental@0.17.0':
+  '@databricks/sdk-apps@0.54.0':
     dependencies:
-      google-auth-library: 10.9.1
-      ini: 6.0.0
-      reflect-metadata: 0.2.2
-      semver: 7.8.5
-    transitivePeerDependencies:
-      - supports-color
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
+  '@databricks/sdk-auth@0.51.0':
+    dependencies:
+      '@databricks/sdk-core': 0.51.0
+      zod: 4.3.6
+
+  '@databricks/sdk-core@0.51.0':
+    dependencies:
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
+  '@databricks/sdk-database@0.51.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
+  '@databricks/sdk-experiments@0.52.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
+  '@databricks/sdk-files@0.52.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
+  '@databricks/sdk-jobs@0.57.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
+  '@databricks/sdk-modelserving@0.53.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
+  '@databricks/sdk-options@0.51.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+
+  '@databricks/sdk-postgres@0.52.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
+  '@databricks/sdk-scim@0.51.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
+  '@databricks/sdk-uc-connections@0.52.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
+  '@databricks/sdk-uc-functions@0.51.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
+  '@databricks/sdk-uc-tables@0.52.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
+  '@databricks/sdk-uc-volumes@0.51.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
+
+  '@databricks/sdk-warehouses@0.53.0':
+    dependencies:
+      '@databricks/sdk-auth': 0.51.0
+      '@databricks/sdk-core': 0.51.0
+      '@databricks/sdk-options': 0.51.0
+      '@js-temporal/polyfill': 0.5.1
+      json-bigint: 1.0.0
+      zod: 4.3.6
 
   '@date-fns/tz@1.5.0': {}
 
@@ -4977,6 +5162,10 @@ snapshots:
       '@jridgewell/sourcemap-codec': 1.6.0
 
   '@js-sdsl/ordered-map@4.4.2': {}
+
+  '@js-temporal/polyfill@0.5.1':
+    dependencies:
+      jsbi: 4.3.2
 
   '@napi-rs/wasm-runtime@1.2.4(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)':
     dependencies:
@@ -7002,8 +7191,6 @@ snapshots:
 
   balanced-match@1.0.2: {}
 
-  base64-js@1.5.1: {}
-
   baseline-browser-mapping@2.11.24: {}
 
   bignumber.js@9.3.1: {}
@@ -7043,8 +7230,6 @@ snapshots:
       electron-to-chromium: 1.5.430
       node-releases: 2.0.55
       update-browserslist-db: 1.3.3(browserslist@4.29.0)
-
-  buffer-equal-constant-time@1.0.1: {}
 
   bytes@3.1.2: {}
 
@@ -7194,10 +7379,6 @@ snapshots:
       gopd: 1.2.0
 
   eastasianwidth@0.2.0: {}
-
-  ecdsa-sig-formatter@1.0.11:
-    dependencies:
-      safe-buffer: 5.2.1
 
   echarts-for-react@3.0.5(echarts@6.0.0)(react@19.2.4):
     dependencies:
@@ -7490,22 +7671,6 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  gaxios@7.3.1:
-    dependencies:
-      extend: 3.0.2
-      https-proxy-agent: 7.0.6
-      node-fetch: 3.3.2
-    transitivePeerDependencies:
-      - supports-color
-
-  gcp-metadata@8.1.2:
-    dependencies:
-      gaxios: 7.3.1
-      google-logging-utils: 1.1.3
-      json-bigint: 1.0.0
-    transitivePeerDependencies:
-      - supports-color
-
   gcp-metadata@8.1.4:
     dependencies:
       gaxios: 7.1.3
@@ -7558,17 +7723,6 @@ snapshots:
       path-scurry: 1.11.1
 
   globals@14.0.0: {}
-
-  google-auth-library@10.9.1:
-    dependencies:
-      base64-js: 1.5.1
-      ecdsa-sig-formatter: 1.0.11
-      gaxios: 7.3.1
-      gcp-metadata: 8.1.2
-      google-logging-utils: 1.1.3
-      jws: 4.0.1
-    transitivePeerDependencies:
-      - supports-color
 
   google-logging-utils@1.1.3: {}
 
@@ -7630,8 +7784,6 @@ snapshots:
 
   inherits@2.0.4: {}
 
-  ini@6.0.0: {}
-
   input-otp@1.4.2(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
     dependencies:
       react: 19.2.4
@@ -7669,6 +7821,8 @@ snapshots:
     dependencies:
       argparse: 2.0.1
 
+  jsbi@4.3.2: {}
+
   jsesc@3.1.0: {}
 
   json-bigint@1.0.0:
@@ -7684,17 +7838,6 @@ snapshots:
   json-stable-stringify-without-jsonify@1.0.1: {}
 
   json5@2.2.3: {}
-
-  jwa@2.0.1:
-    dependencies:
-      buffer-equal-constant-time: 1.0.1
-      ecdsa-sig-formatter: 1.0.11
-      safe-buffer: 5.2.1
-
-  jws@4.0.1:
-    dependencies:
-      jwa: 2.0.1
-      safe-buffer: 5.2.1
 
   keyv@4.5.4:
     dependencies:
@@ -8130,8 +8273,6 @@ snapshots:
       '@types/react': 19.2.2
 
   react@19.2.4: {}
-
-  reflect-metadata@0.2.2: {}
 
   require-directory@2.1.1: {}
 

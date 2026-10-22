@@ -1,8 +1,14 @@
 import type { BasePluginConfig } from "shared";
 import type { z } from "zod";
 
+import type {
+  JobBaseRun,
+  JobDetails,
+  JobRun,
+  JobRunNowResponse,
+  JobRunOutput,
+} from "../../connectors/jobs";
 import type { ExecutionResult } from "../../plugin";
-import type { jobs } from "../../workspace-client";
 
 /** Supported task types for job parameter mapping. */
 export type TaskType =
@@ -27,7 +33,7 @@ export interface JobConfig {
 export interface JobRunStatus {
   status: string | undefined;
   timestamp: number;
-  run: jobs.Run;
+  run: JobRun;
 }
 
 /** User-facing API for a single configured job. */
@@ -35,26 +41,26 @@ export interface JobAPI {
   /** Trigger the configured job with validated params. Returns the run response. */
   runNow(
     params?: Record<string, unknown>,
-  ): Promise<ExecutionResult<jobs.RunNowResponse>>;
+  ): Promise<ExecutionResult<JobRunNowResponse>>;
   /** Trigger and poll until completion, yielding status updates. */
   runAndWait(
     params?: Record<string, unknown>,
     signal?: AbortSignal,
   ): AsyncGenerator<JobRunStatus, void, unknown>;
   /** Get the most recent run for this job. */
-  lastRun(): Promise<ExecutionResult<jobs.BaseRun | undefined>>;
+  lastRun(): Promise<ExecutionResult<JobBaseRun | undefined>>;
   /** List runs for this job. */
   listRuns(options?: {
     limit?: number;
-  }): Promise<ExecutionResult<jobs.BaseRun[]>>;
+  }): Promise<ExecutionResult<JobBaseRun[]>>;
   /** Get a specific run by ID. */
-  getRun(runId: number): Promise<ExecutionResult<jobs.Run>>;
+  getRun(runId: number): Promise<ExecutionResult<JobRun>>;
   /** Get output of a specific run. */
-  getRunOutput(runId: number): Promise<ExecutionResult<jobs.RunOutput>>;
+  getRunOutput(runId: number): Promise<ExecutionResult<JobRunOutput>>;
   /** Cancel a specific run. */
   cancelRun(runId: number): Promise<ExecutionResult<void>>;
   /** Get the job definition. */
-  getJob(): Promise<ExecutionResult<jobs.Job>>;
+  getJob(): Promise<ExecutionResult<JobDetails>>;
 }
 
 /** Configuration for the Jobs plugin. */
@@ -74,7 +80,7 @@ export interface IJobsConfig extends BasePluginConfig {
  * @example
  * ```ts
  * // Trigger a configured job
- * const { run_id } = await appkit.jobs("etl").runNow();
+ * const { runId } = await appkit.jobs("etl").runNow();
  *
  * // Trigger and poll until completion
  * for await (const status of appkit.jobs("etl").runAndWait()) {

@@ -56,20 +56,20 @@ describe("classifySqlType", () => {
 
 describe("transformGenieData", () => {
   function makeResponse(
-    columns: Array<{ name: string; type_name: string }>,
+    columns: Array<{ name: string; typeName: string }>,
     dataArray: (string | null)[][],
   ) {
     return {
       manifest: { schema: { columns } },
-      result: { data_array: dataArray },
+      result: { dataArray: dataArray },
     };
   }
 
   test("transforms basic numeric and string data", () => {
     const data = makeResponse(
       [
-        { name: "region", type_name: "STRING" },
-        { name: "sales", type_name: "DECIMAL" },
+        { name: "region", typeName: "STRING" },
+        { name: "sales", typeName: "DECIMAL" },
       ],
       [
         ["North", "1000.50"],
@@ -99,8 +99,8 @@ describe("transformGenieData", () => {
   test("handles date columns as strings", () => {
     const data = makeResponse(
       [
-        { name: "day", type_name: "DATE" },
-        { name: "revenue", type_name: "INT" },
+        { name: "day", typeName: "DATE" },
+        { name: "revenue", typeName: "INT" },
       ],
       [["2024-01-15", "500"]],
     );
@@ -113,8 +113,8 @@ describe("transformGenieData", () => {
   test("handles null values", () => {
     const data = makeResponse(
       [
-        { name: "name", type_name: "STRING" },
-        { name: "value", type_name: "INT" },
+        { name: "name", typeName: "STRING" },
+        { name: "value", typeName: "INT" },
       ],
       [
         [null, "10"],
@@ -132,8 +132,8 @@ describe("transformGenieData", () => {
   test("handles non-numeric strings in numeric columns", () => {
     const data = makeResponse(
       [
-        { name: "name", type_name: "STRING" },
-        { name: "value", type_name: "INT" },
+        { name: "name", typeName: "STRING" },
+        { name: "value", typeName: "INT" },
       ],
       [["a", "not_a_number"]],
     );
@@ -142,8 +142,8 @@ describe("transformGenieData", () => {
     expect(result?.rows[0].value).toBeNull();
   });
 
-  test("returns null for empty data_array", () => {
-    const data = makeResponse([{ name: "a", type_name: "STRING" }], []);
+  test("returns null for empty dataArray", () => {
+    const data = makeResponse([{ name: "a", typeName: "STRING" }], []);
     expect(transformGenieData(data)).toBeNull();
   });
 
@@ -151,9 +151,18 @@ describe("transformGenieData", () => {
     expect(
       transformGenieData({
         manifest: { schema: { columns: [] } },
-        result: { data_array: [["x"]] },
+        result: { dataArray: [["x"]] },
       }),
     ).toBeNull();
+  });
+
+  test("accepts the legacy snake_case shape", () => {
+    const result = transformGenieData({
+      manifest: { schema: { columns: [{ name: "n", type_name: "INT" }] } },
+      result: { data_array: [["42"]] },
+    });
+    expect(result?.rows).toEqual([{ n: 42 }]);
+    expect(result?.columns[0]).toMatchObject({ typeName: "INT" });
   });
 
   test("returns null for null/undefined input", () => {
@@ -164,8 +173,8 @@ describe("transformGenieData", () => {
   test("handles rows shorter than columns (missing cells)", () => {
     const data = makeResponse(
       [
-        { name: "a", type_name: "STRING" },
-        { name: "b", type_name: "INT" },
+        { name: "a", typeName: "STRING" },
+        { name: "b", typeName: "INT" },
       ],
       [["hello"]],
     );

@@ -9,6 +9,7 @@ import type { PluginClientConfigs, PluginPhase } from "shared";
 import { camelToKebab } from "shared";
 
 import { AppKitError, ServerError } from "../../errors";
+import { httpStatusOf } from "../../errors/http-status";
 import { TelemetryReporter } from "../../internal-telemetry";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
@@ -563,24 +564,6 @@ export function requestMetricsMiddleware(
 }
 
 /**
- * Narrow an unknown thrown value to an Error that carries a numeric
- * `statusCode` property in the HTTP error range (e.g. `ApiError` from
- * `@databricks/sdk-experimental`).
- */
-function hasHttpStatusCode(
-  error: unknown,
-): error is Error & { statusCode: number } {
-  if (!(error instanceof Error) || !("statusCode" in error)) return false;
-  const statusCode = error.statusCode;
-  return (
-    typeof statusCode === "number" &&
-    Number.isInteger(statusCode) &&
-    statusCode >= 400 &&
-    statusCode <= 599
-  );
-}
-
-/**
  * Terminal Express error-handling middleware.
  *
  * Converts errors forwarded via `next(err)` (including async handler
@@ -602,9 +585,13 @@ export function errorHandlerMiddleware(
   res: express.Response,
   next: express.NextFunction,
 ) {
-  const httpError =
-    err instanceof AppKitError || hasHttpStatusCode(err) ? err : null;
-  const statusCode = httpError ? httpError.statusCode : 500;
+  const httpStatus = httpStatusOf(err);
+  const statusCode =
+    err instanceof AppKitError
+      ? err.statusCode
+      : httpStatus !== undefined && httpStatus >= 400
+        ? httpStatus
+        : 500;
   const isClientError = statusCode < 500;
 
   if (isClientError) {

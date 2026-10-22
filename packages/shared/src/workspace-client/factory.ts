@@ -2,7 +2,7 @@
  * Public factory for constructing a wrapper instance.
  */
 import { AppKitWorkspaceClient } from "./client";
-import type { WorkspaceClientOptions } from "./legacy";
+import type { WorkspaceClientOptions } from "./options";
 import type { WorkspaceClient } from "./types";
 
 /**

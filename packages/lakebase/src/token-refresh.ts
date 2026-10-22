@@ -1,9 +1,11 @@
-import type { WorkspaceClient } from "@databricks/sdk-experimental";
-
 import { getWorkspaceClient } from "./config";
 import { generateDatabaseCredential } from "./credentials";
 import { type DriverTelemetry, SpanStatusCode } from "./telemetry";
-import type { LakebasePoolConfig, Logger } from "./types";
+import type {
+  LakebasePoolConfig,
+  LakebaseWorkspaceClient,
+  Logger,
+} from "./types";
 
 // 2-minute buffer before token expiration to prevent race conditions
 // Lakebase tokens expire after 1 hour, so we refresh when ~58 minutes remain
@@ -18,7 +20,7 @@ export interface TokenRefreshDeps {
 
 /** Fetch a fresh OAuth token from Databricks */
 async function refreshToken(
-  workspaceClient: WorkspaceClient,
+  workspaceClient: LakebaseWorkspaceClient,
   endpoint: string,
 ): Promise<{ token: string; expiresAt: number }> {
   const credential = await generateDatabaseCredential(workspaceClient, {
@@ -43,7 +45,7 @@ export function createTokenRefreshCallback(
 ): () => Promise<string> {
   let cachedToken: string | undefined;
   let tokenExpiresAt = 0;
-  let workspaceClient: WorkspaceClient | null = null;
+  let workspaceClient: LakebaseWorkspaceClient | null = null;
   let refreshPromise: Promise<string> | null = null;
 
   return async (): Promise<string> => {

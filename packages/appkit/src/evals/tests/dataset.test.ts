@@ -45,7 +45,7 @@ describe("readEvalDataset", () => {
 
     // SELECT targets the table; no LIMIT when unset.
     const [, input] = executeStatement.mock.calls[0];
-    expect(input.warehouse_id).toBe("wh1");
+    expect(input.warehouseId).toBe("wh1");
     expect(input.statement).toBe(
       "SELECT inputs, expectations FROM main.default.eval_ds",
     );

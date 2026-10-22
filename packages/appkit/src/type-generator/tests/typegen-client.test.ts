@@ -86,9 +86,11 @@ describe("createTypegenWorkspaceClient with the real factory", () => {
       actual.createWorkspaceClient,
     );
 
-    const { config } = createTypegenWorkspaceClient();
-    expect(config.authType).toBe("pat");
-    expect(config.host).toBe(DEV_HOST);
-    expect(config.token).toBe(DEV_TOKEN);
+    // The dev token is what gets sent, not the SP env credentials.
+    const client = createTypegenWorkspaceClient();
+    const headers = new Headers();
+    await client.authenticate(headers);
+    expect(headers.get("Authorization")).toBe(`Bearer ${DEV_TOKEN}`);
+    expect(await client.getHost()).toBe(DEV_HOST);
   });
 });

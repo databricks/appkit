@@ -26,6 +26,8 @@ export function isUnauthorized(error: unknown): boolean {
     const value = current as {
       status?: unknown;
       statusCode?: unknown;
+      // Modular SDK (sdk-core) ApiError.
+      httpStatusCode?: unknown;
       response?: { status?: unknown };
       cause?: unknown;
     };
@@ -33,6 +35,7 @@ export function isUnauthorized(error: unknown): boolean {
       !(current instanceof AppKitError) &&
       (value.status === 401 ||
         value.statusCode === 401 ||
+        value.httpStatusCode === 401 ||
         value.response?.status === 401)
     )
       return true;

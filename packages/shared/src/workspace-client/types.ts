@@ -1,72 +1,82 @@
 /**
- * The wrapper facade type and the SDK type-namespace re-exports used across
- * AppKit.
- *
- * Every service accessor is currently typed against the legacy SDK and
- * delegated through `toLegacyWorkspaceClient()` — this PR introduces the seam
- * only, it does not migrate any service to the modular SDK. Migrating a service
- * later means changing that accessor's type here + its getter in `client.ts`
- * and updating the one connector that consumes it.
- *
- * Type-namespace re-exports (`files`, `jobs`, `serving`, `sql`) point at
- * `@databricks/sdk-experimental` so existing AppKit call-site shapes stay
- * stable. They move to the modular `@databricks/sdk-<service>` model exports
- * as each service migrates.
+ * The wrapper facade type and the modular SDK type re-exports used across
+ * AppKit. Every service accessor is a modular `@databricks/sdk-*` client
+ * (built in `modular.ts`); raw REST calls use the inherited `request()` seam.
  */
-import type { LegacyWorkspaceClient } from "./legacy";
+import type {
+  StatementExecutionClient,
+  WarehousesClient,
+  WorkspaceAuth,
+  ScimClient,
+  AppsClient,
+  GenieClient,
+  DatabaseClient,
+  JobsClient,
+  ModelServingClient,
+  ExperimentsClient,
+  FilesClient,
+  TablesClient,
+  VolumesClient,
+  FunctionsClient,
+  ConnectionsClient,
+  VectorSearchClient,
+  PostgresClient,
+} from "./modular";
 
-// SDK type namespaces, re-exported so AppKit modules import them from the
-// wrapper rather than the SDK directly.
-export type { files, jobs, serving, sql } from "@databricks/sdk-experimental";
+// Modular SDK client + model types (warehouses, statementExecution, genie, jobs, files).
+export type * from "./modular";
 
 /**
  * AppKit's workspace client facade. Mirrors the multi-client shape of the
  * modular Databricks SDK: each service is its own accessor, so services can be
  * migrated one at a time behind this stable interface.
  *
- * Accessors are legacy-typed for now (delegated to the underlying legacy SDK
- * client); see the module docblock.
  */
-export interface WorkspaceClient {
-  /** UC Volumes / Files API. */
-  readonly files: LegacyWorkspaceClient["files"];
+export interface WorkspaceClient extends WorkspaceAuth {
+  /** UC Volumes / Files API (modular SDK). */
+  readonly files: FilesClient;
 
-  /** SQL Warehouses. */
-  readonly warehouses: LegacyWorkspaceClient["warehouses"];
+  /** SQL Warehouses (modular SDK). */
+  readonly warehouses: WarehousesClient;
 
-  /** Genie / dashboards. */
-  readonly genie: LegacyWorkspaceClient["genie"];
+  /** Genie (modular SDK). */
+  readonly genie: GenieClient;
 
-  /** Jobs. */
-  readonly jobs: LegacyWorkspaceClient["jobs"];
+  /** Lakebase provisioned database instances + credentials (modular SDK). */
+  readonly database: DatabaseClient;
 
-  /** Statement Execution. */
-  readonly statementExecution: LegacyWorkspaceClient["statementExecution"];
+  /** Databricks Apps (modular SDK). */
+  readonly apps: AppsClient;
 
-  /** Serving Endpoints. */
-  readonly servingEndpoints: LegacyWorkspaceClient["servingEndpoints"];
+  /** Jobs (modular SDK, Jobs API 2.2). */
+  readonly jobs: JobsClient;
 
-  /** Current user. */
-  readonly currentUser: LegacyWorkspaceClient["currentUser"];
+  /** MLflow Experiments (modular SDK). */
+  readonly experiments: ExperimentsClient;
 
-  /**
-   * SDK `Config` — exposes `host` and `authenticate(headers)`. Used by the
-   * files-upload path and agents auth-header stamping, which bypass the typed
-   * services.
-   */
-  readonly config: LegacyWorkspaceClient["config"];
+  /** Vector Search (modular SDK; index metadata only, queries use `request()`). */
+  readonly vectorSearch: VectorSearchClient;
 
-  /**
-   * Low-level HTTP transport (`apiClient.request(...)`). Used for endpoints
-   * without a typed service method: SCIM header probe, warehouse listing,
-   * serving SSE streaming, vector search, internal telemetry.
-   */
-  readonly apiClient: LegacyWorkspaceClient["apiClient"];
+  /** Unity Catalog Tables (modular SDK). */
+  readonly tables: TablesClient;
+  /** Lakebase Postgres: autoscaling projects, branches, endpoints (modular SDK). */
+  readonly postgres: PostgresClient;
 
-  /**
-   * Returns the underlying legacy `@databricks/sdk-experimental`
-   * `WorkspaceClient`, for handoff to code still typed against the old SDK
-   * (`@databricks/lakebase`). Transitional.
-   */
-  toLegacyWorkspaceClient(): LegacyWorkspaceClient;
+  /** Unity Catalog Volumes (modular SDK). */
+  readonly volumes: VolumesClient;
+
+  /** Unity Catalog Functions (modular SDK). */
+  readonly functions: FunctionsClient;
+
+  /** Unity Catalog Connections (modular SDK). */
+  readonly connections: ConnectionsClient;
+
+  /** Statement Execution (modular SDK). */
+  readonly statementExecution: StatementExecutionClient;
+
+  /** Serving endpoints (modular SDK). */
+  readonly modelServing: ModelServingClient;
+
+  /** Current user (modular SDK SCIM client; `me({})` returns the caller). */
+  readonly currentUser: ScimClient;
 }

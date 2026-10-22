@@ -8,7 +8,8 @@
 
 import {
   createWorkspaceClient,
-  loadConfigFile,
+  resolveProfile,
+  type WorkspaceClient,
 } from "../../../workspace-client";
 
 /**
@@ -41,14 +42,12 @@ function isModuleNotFound(err: unknown): boolean {
 }
 
 /** Constructs a workspace client via the SDK's unified-auth chain. An explicit
- * `profile` is passed through `Config.profile` rather than mutating
- * `process.env`, so it doesn't leak beyond this call. */
+ * `profile` is passed as a client option rather than mutating `process.env`, so
+ * it doesn't leak beyond this call. */
 export async function getServiceClient(
   profile?: string,
 ): Promise<ServiceClientHandle> {
-  const client = createWorkspaceClient(
-    profile ? { profile } : {},
-  ).toLegacyWorkspaceClient();
+  const client = createWorkspaceClient(profile ? { profile } : {});
   return { client };
 }
 
@@ -63,10 +62,8 @@ export async function getProfileHost(
   profile: string,
 ): Promise<string | undefined> {
   try {
-    const { iniFile } = await loadConfigFile(
-      process.env.DATABRICKS_CONFIG_FILE,
-    );
-    const host = iniFile?.[profile]?.host;
+    // `disableEnv`: only the file's value counts; `DATABRICKS_HOST` already won.
+    const { host } = await resolveProfile({ profile, disableEnv: true });
     return typeof host === "string" && host.length > 0 ? host : undefined;
   } catch {
     return undefined;
@@ -114,8 +111,9 @@ export async function getLakebasePool(
   // that dumps the raw SDK ApiError (stack + full response blob) to stderr on a
   // failed token fetch. doctor classifies and prints that failure itself, so the
   // library's dump is just noise on top of our clean one-line report.
+  // Lakebase takes the facade as is: it uses `request` and the typed `postgres`.
   const pool = appkit.createLakebasePool({
-    workspaceClient: client,
+    workspaceClient: client as WorkspaceClient,
     logger: { error: false },
   });
   return pool as unknown as LakebasePoolHandle;

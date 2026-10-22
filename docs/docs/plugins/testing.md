@@ -66,7 +66,8 @@ const app = await createTestApp({
   responses: {
     "jobs.getRun": { state: "TERMINATED", result_state: "SUCCESS" },
     "statementExecution.executeStatement": { status: { state: "SUCCEEDED" } },
-    "apiClient.request": { results: [] },
+    // Raw REST calls through the request() seam answer with a Response.
+    request: () => Response.json({ results: [] }),
   },
 });
 ```
@@ -207,7 +208,8 @@ const app = await createTestApp({
   responses: {
     "jobs.getRun": { state: "TERMINATED", result_state: "SUCCESS" },
     "statementExecution.executeStatement": { status: { state: "SUCCEEDED" } },
-    "apiClient.request": { results: [] },
+    // Raw REST calls through the request() seam answer with a Response.
+    request: () => Response.json({ results: [] }),
   },
 });
 ```
@@ -332,7 +334,7 @@ Instantiate the plugin **class** directly (`new MyAgentPlugin(...)`). The `analy
 const mock = createTestPluginContext({}, {
   responses: {
     "jobs.getRun": { state: "TERMINATED" },
-    "servingEndpoints.query": (args, signal) => runFakeQuery(args),
+    "jobs.listRuns": (args) => runFakeListRuns(args),
   },
   env: { MY_VAR: "test-value" },
   strict: true,
@@ -343,7 +345,7 @@ await mock.attach(plugin);
 ```
 
 `options` is:
-- `responses` — seed the mock workspace client with responses keyed by dotted path (`"jobs.getRun"`, `"genie.getMessage"`). A value can be static or a function of call arguments and the abort signal.
+- `responses` — seed the mock workspace client with responses keyed by dotted path (`"jobs.getRun"`, `"genie.genieGetConversationMessage"`). A value can be static or a function of call arguments and the abort signal.
 - `env` — set environment variables scoped to the test; they are restored on plugin detach.
 - `strict` — throw if a handler calls an undeclared workspace-client path (instead of silently resolving `undefined`). The built-in defaults still count as declared.
 
@@ -502,7 +504,7 @@ The kit uses both words deliberately: a **mock** records calls so you can assert
 
 ## Mocking Databricks services
 
-Every core plugin's real work goes through `getWorkspaceClient()`. `createMockWorkspaceClient()` fakes that whole surface, so a plugin touching `jobs`, `genie`, `servingEndpoints`, or `files` is testable without hand-building a nested client:
+Every core plugin's real work goes through `getWorkspaceClient()`. `createMockWorkspaceClient()` fakes that whole surface, so a plugin touching `jobs`, `genie`, `modelServing`, or `files` is testable without hand-building a nested client:
 
 ```ts
 import { createMockWorkspaceClient, getMock } from "@databricks/appkit/testing";
@@ -513,7 +515,7 @@ const client = createMockWorkspaceClient({
 });
 
 await client.jobs.getRun({ run_id: 1 });        // → { state: "TERMINATED" }
-await client.genie.getMessage({ id: "m-1" });   // → undefined, does not throw
+await client.genie.genieGetConversationMessage({ messageId: "m-1" }); // → undefined, does not throw
 ```
 
 `createTestApp` installs one of these for you, so reach for it directly only when you're driving a plugin through `createTestPluginContext` or `mockServiceContext`.
@@ -521,8 +523,8 @@ await client.genie.getMessage({ id: "m-1" });   // → undefined, does not throw
 How it works, and what to expect:
 
 - The **facade is typed**, so `client.jbos` is a compile error. AppKit owns the interface, so it's a closed set, not an open-ended chase of the SDK.
-- Each **service** is a proxy that mints a memoized mock per method. `client.jobs.getRun === client.jobs.getRun`, so call assertions are stable, and `toLegacyWorkspaceClient()` shares the same functions — one `responses` entry covers both views.
-- `config.host` is a real **string** (not a mock), because AppKit builds URLs from it. `apiClient.userAgent()` is synchronous for the same reason, and `apiClient.request` resolves `{}` so destructuring its result doesn't throw.
+- Each **service** is a proxy that mints a memoized mock per method. `client.jobs.getRun === client.jobs.getRun`, so call assertions are stable.
+- `getHost()` resolves a real **string** (seed it with the `config: { host }` option or a `"config.host"` response), because AppKit builds URLs from it. `authenticate(headers)` stamps a test `Authorization` header, and `request(...)` resolves a `Response` with a `{}` JSON body unless you seed `request`.
 - Sensible defaults are built in: SQL statements succeed, warehouses report `RUNNING`, and `currentUser.me()` returns a service user. Pass `defaults: false` to script everything yourself.
 
 :::caution Undeclared methods return undefined

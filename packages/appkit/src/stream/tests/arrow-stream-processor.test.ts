@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import type { sql } from "../../workspace-client";
 import { ArrowStreamProcessor } from "../arrow-stream-processor";
 
 /** A ReadableStream that emits the given pieces in order, then closes. */
@@ -15,10 +14,10 @@ function streamOf(...pieces: Uint8Array[]): ReadableStream<Uint8Array> {
 
 function mockChunks(count: number) {
   return Array.from({ length: count }, (_, i) => ({
-    chunk_index: i,
-    external_link: `https://example.com/chunk-${i}`,
-    row_offset: i * 100,
-    row_count: 100,
+    chunkIndex: i,
+    externalLink: `https://example.com/chunk-${i}`,
+    rowOffset: BigInt(i * 100),
+    rowCount: 100n,
   }));
 }
 
@@ -166,7 +165,7 @@ describe("ArrowStreamProcessor.streamChunks", () => {
   });
 
   test("throws immediately when a chunk has no external_link", async () => {
-    const chunks = [{ chunk_index: 0 }] as any;
+    const chunks = [{ chunkIndex: 0 }] as any;
     await expect(drain(processor.streamChunks(chunks))).rejects.toThrow(
       /External link missing/,
     );
@@ -218,8 +217,8 @@ describe("ArrowStreamProcessor.streamChunks", () => {
     globalThis.fetch = fetchMock;
 
     const refresh = vi.fn(async (chunkIndex: number) => ({
-      chunk_index: chunkIndex,
-      external_link: "https://example.com/fresh-link",
+      chunkIndex,
+      externalLink: "https://example.com/fresh-link",
     }));
 
     const p = new ArrowStreamProcessor({ timeout: 5000, retries: 3 });

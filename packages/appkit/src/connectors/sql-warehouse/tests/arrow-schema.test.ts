@@ -428,11 +428,11 @@ describe("parseDatabricksType — error / robustness", () => {
 describe("buildEmptyArrowIPCBase64", () => {
   test("produces a decodable empty Arrow Table with the right schema", () => {
     const columns = [
-      { name: "user_id", type_text: "BIGINT" },
-      { name: "name", type_text: "STRING" },
-      { name: "created_at", type_text: "TIMESTAMP" },
-      { name: "balance", type_text: "DECIMAL(10,2)" },
-      { name: "active", type_text: "BOOLEAN" },
+      { name: "user_id", typeText: "BIGINT" },
+      { name: "name", typeText: "STRING" },
+      { name: "created_at", typeText: "TIMESTAMP" },
+      { name: "balance", typeText: "DECIMAL(10,2)" },
+      { name: "active", typeText: "BOOLEAN" },
     ];
     const b64 = buildEmptyArrowIPCBase64(columns);
     const buf = Buffer.from(b64, "base64");
@@ -463,9 +463,9 @@ describe("buildEmptyArrowIPCBase64", () => {
 
   test("round-trips nested types end-to-end", () => {
     const columns = [
-      { name: "tags", type_text: "ARRAY<STRING>" },
-      { name: "meta", type_text: "STRUCT<source:STRING, version:INT>" },
-      { name: "counts", type_text: "MAP<STRING, BIGINT>" },
+      { name: "tags", typeText: "ARRAY<STRING>" },
+      { name: "meta", typeText: "STRUCT<source:STRING, version:INT>" },
+      { name: "counts", typeText: "MAP<STRING, BIGINT>" },
     ];
     const buf = Buffer.from(buildEmptyArrowIPCBase64(columns), "base64");
     const table = tableFromIPC(buf);
@@ -476,8 +476,8 @@ describe("buildEmptyArrowIPCBase64", () => {
     expect(table.schema.fields[2]?.type).toBeInstanceOf(Map_);
   });
 
-  test("falls back from type_text to type_name when type_text missing", () => {
-    const columns = [{ name: "id", type_name: "BIGINT" }];
+  test("falls back from typeText to typeName when typeText missing", () => {
+    const columns = [{ name: "id", typeName: "BIGINT" }];
     const buf = Buffer.from(buildEmptyArrowIPCBase64(columns), "base64");
     const table = tableFromIPC(buf);
     expect(
@@ -487,8 +487,8 @@ describe("buildEmptyArrowIPCBase64", () => {
 
   test("unknown type degrades to Utf8 without throwing", () => {
     const columns = [
-      { name: "id", type_text: "BIGINT" },
-      { name: "weird", type_text: "FUTURE_TYPE_NOT_YET_SUPPORTED" },
+      { name: "id", typeText: "BIGINT" },
+      { name: "weird", typeText: "FUTURE_TYPE_NOT_YET_SUPPORTED" },
     ];
     const buf = Buffer.from(buildEmptyArrowIPCBase64(columns), "base64");
     const table = tableFromIPC(buf);
@@ -499,7 +499,7 @@ describe("buildEmptyArrowIPCBase64", () => {
   });
 
   test("missing column name gets a synthesized placeholder", () => {
-    const columns = [{ type_text: "STRING" }, { name: "", type_text: "INT" }];
+    const columns = [{ typeText: "STRING" }, { name: "", typeText: "INT" }];
     const buf = Buffer.from(buildEmptyArrowIPCBase64(columns), "base64");
     const table = tableFromIPC(buf);
     expect(table.schema.fields[0]?.name).toBe("column_0");
