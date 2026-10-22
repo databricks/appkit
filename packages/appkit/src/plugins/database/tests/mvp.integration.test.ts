@@ -7,7 +7,6 @@ import type { DataPath, QuerySpec, Row } from "../../../database/runtime";
 import { defineSchema, fk, id, text } from "../../../database/schema-builder";
 import type { ITelemetry } from "../../../telemetry";
 import type { DatabaseExports } from "../entity-types";
-import type { EntityHooks } from "../types";
 
 const mocks = vi.hoisted(() => ({
   initializeLakebasePool: vi.fn(),
@@ -109,7 +108,7 @@ function fakeResponse() {
   };
 }
 
-async function mount(hooks?: Record<string, EntityHooks>) {
+async function mount() {
   const database = recordingDataPath();
   const end = vi.fn(async () => undefined);
   mocks.initializeLakebasePool.mockResolvedValue({ end });
@@ -119,7 +118,6 @@ async function mount(hooks?: Record<string, EntityHooks>) {
   const plugin = new DatabasePlugin({
     schema,
     api: { writes: { tables: ["boards", "notes"] } },
-    hooks,
   });
   (plugin as unknown as { telemetry: ITelemetry }).telemetry =
     createMockTelemetry();
@@ -242,12 +240,8 @@ describe("the assembled MVP", () => {
     expect(response.sent.body).not.toContain("retention_note");
   });
 
-  test("shapes the response without the private column", async () => {
-    const { list, detail } = await mount({
-      boards: {
-        serialize: (row, { operation }) => ({ ...row, read_as: operation }),
-      },
-    });
+  test("projects the public row and drops the private column", async () => {
+    const { list, detail } = await mount();
 
     const page = await list();
     const one = await detail("7");
@@ -258,13 +252,16 @@ describe("the assembled MVP", () => {
           id: 7,
           title: "Q3 review",
           notes: [{ id: 1, board_id: 7, body: "looks off" }],
-          read_as: "list",
         },
       ],
       limit: DEFAULT_LIMIT,
       offset: 0,
     });
-    expect(one.json().read_as).toBe("detail");
+    expect(one.json()).toEqual({
+      id: 7,
+      title: "Q3 review",
+      notes: [{ id: 1, board_id: 7, body: "looks off" }],
+    });
     expect(page.sent.body).not.toContain("retention_note");
     expect(one.sent.body).not.toContain("retention_note");
   });
