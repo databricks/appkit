@@ -322,6 +322,7 @@ The frontend uses `rolldown-vite@7.1.14`, a performance-optimized Vite fork.
 The oxc (VoidZero) toolchain is used instead of ESLint/Prettier for faster performance:
 - `oxlint` for linting (config in `.oxlintrc.json`)
   - Root scripts pass `--disable-nested-config`: `template/.oxlintrc.json` belongs to scaffolded apps and must not apply to the raw template
+  - The template smoke test lints one fixture per `template/.oxlintrc.json` rule (`tools/template-lint-fixtures.ts`); add a fixture when enabling a rule
 - `oxfmt` for formatting + import sorting (config in `.oxfmtrc.json`)
 - Lint-staged integration via husky
 - Note: oxc does not lint/format CSS

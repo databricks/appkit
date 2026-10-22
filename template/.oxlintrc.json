@@ -3,6 +3,8 @@
   "plugins": ["typescript", "react"],
   // React Compiler rules run through eslint-plugin-react-hooks. The alias is required because
   // oxlint reserves the `react-hooks` name for its native rules-of-hooks and exhaustive-deps.
+  // JS plugins are alpha and outside semver, so oxlint is pinned exactly. The template smoke test
+  // (tools/template-lint-fixtures.ts) checks every rule still reports; run it on each oxlint upgrade.
   "jsPlugins": [{ "name": "react-hooks-js", "specifier": "eslint-plugin-react-hooks" }],
   // Only the rules listed below are enabled.
   "categories": {
