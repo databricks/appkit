@@ -9,10 +9,17 @@
  */
 declare module "@databricks/appkit/type-generator" {
   export const DATABASE_TYPES_FILE: "database.d.ts";
+  export const DATABASE_OPERATIONS_TYPES_FILE: "database-operations.d.ts";
 
   export function generateDatabaseTypes(options: {
     schemaFile: string;
     outFile: string;
+  }): Promise<void>;
+
+  export function generateDatabaseOperations(options: {
+    appRoot: string;
+    outFile: string;
+    strict?: boolean;
   }): Promise<void>;
 
   export function generateFromEntryPoint(options: {

@@ -17,6 +17,7 @@ import {
 // created in a hoisted block too (plain top-level consts would be in the TDZ when
 // the hoisted factory runs).
 const {
+  generateDatabaseOperations,
   generateDatabaseTypes,
   generateFromEntryPoint,
   generateServingTypes,
@@ -32,6 +33,7 @@ const {
   const lockPathOf = (root: string) =>
     nodePath.join(root, "node_modules", ".databricks", "appkit", "worker.lock");
   return {
+    generateDatabaseOperations: vi.fn(async () => {}),
     generateDatabaseTypes: vi.fn(async () => {}),
     generateFromEntryPoint: vi.fn(async () => {}),
     generateServingTypes: vi.fn(async () => {}),
@@ -51,7 +53,9 @@ const {
 // command's `await import("@databricks/appkit/type-generator")` resolves to spies
 // and never touches a warehouse.
 vi.mock("@databricks/appkit/type-generator", () => ({
+  DATABASE_OPERATIONS_TYPES_FILE: "database-operations.d.ts",
   DATABASE_TYPES_FILE: "database.d.ts",
+  generateDatabaseOperations,
   generateDatabaseTypes,
   generateFromEntryPoint,
   generateServingTypes,
@@ -190,6 +194,25 @@ describe("generate-types foreground spawn orchestration", () => {
       outFile: path.join(path.dirname(outFile), "database.d.ts"),
     });
     expect(generateFromEntryPoint).not.toHaveBeenCalled();
+  });
+
+  test("generates the database operations registry and contracts, strictly in production", async () => {
+    delete process.env.DATABRICKS_WAREHOUSE_ID;
+    const outFile = path.join(tmpRoot, "shared/appkit-types/analytics.d.ts");
+    const operations = {
+      appRoot: tmpRoot,
+      outFile: path.join(path.dirname(outFile), "database-operations.d.ts"),
+    };
+    vi.stubEnv("NODE_ENV", "development");
+    await runCli([tmpRoot, outFile]);
+    vi.stubEnv("NODE_ENV", "production");
+    await runCli([tmpRoot, outFile]);
+    vi.unstubAllEnvs();
+
+    expect(generateDatabaseOperations.mock.calls).toEqual([
+      [{ ...operations, strict: false }],
+      [{ ...operations, strict: true }],
+    ]);
   });
 
   test("lock already held (fresh): does NOT spawn, foreground still resolves", async () => {
