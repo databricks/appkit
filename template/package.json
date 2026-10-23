@@ -63,9 +63,9 @@
     "oxlint-tsgolint": "7.0.2003",
     "prettier": "3.6.2",
     "tailwindcss": "4.0.14",
-    "tsdown": "0.20.3",
+    "tsdown": "0.23.1",
     "tsx": "4.20.6",
-    "typescript": "5.9.3",
+    "typescript": "7.0.2",
     "vite": "npm:rolldown-vite@7.1.14",
     "vitest": "4.1.9"
   },
