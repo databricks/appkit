@@ -1,28 +1,7 @@
-import {
-  DatabasePluginError,
-  invalidDatabaseInput,
-} from "../../../database/errors";
-import type { IdValue, Row, ScalarValue } from "../../../database/runtime";
+import { invalidDatabaseInput } from "../../../database/errors";
+import type { Row, ScalarValue } from "../../../database/runtime";
 import type { CompiledColumn, JsonValue } from "./codecs";
 import { boundedJson, type CrudTable, isPlainObject } from "./contract";
-
-/**
- * Decode a path identifier against the declared key type. A keyless table gets
- * no `/:id` route, so arriving here without a key is a wiring fault, not input.
- */
-export function decodeId(table: CrudTable, raw: string): IdValue {
-  const { primaryKey } = table;
-  if (!primaryKey) throw new DatabasePluginError("INTERNAL", "read");
-  const value = primaryKey.decode(raw);
-  if (
-    typeof value !== "string" &&
-    typeof value !== "number" &&
-    typeof value !== "bigint"
-  ) {
-    throw invalidDatabaseInput(["id"], "Not a valid identifier");
-  }
-  return value;
-}
 
 /** Map one body value onto its column; `undefined` when it does not fit. */
 function decodeWriteValue(
@@ -67,12 +46,12 @@ function decodeBody(
   return values;
 }
 
-/** Decode the body of `POST /:table`, which may carry a caller-chosen key. */
+/** Decode a create body, which may carry a caller-chosen key. */
 export function decodeCreateBody(table: CrudTable, raw: unknown): Row {
   return decodeBody(table, table.creatable, raw);
 }
 
-/** Decode the body of `PATCH /:table/:id`, which may not carry a key or stamp. */
+/** Decode an update body, which may not carry a key or stamp. */
 export function decodeUpdateBody(table: CrudTable, raw: unknown): Row {
   return decodeBody(table, table.updatable, raw);
 }

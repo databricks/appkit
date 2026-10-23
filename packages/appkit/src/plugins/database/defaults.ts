@@ -26,30 +26,15 @@ export const IDLE_IN_TRANSACTION_TIMEOUT_MS = 30_000;
 /** Deadline for one explicit transaction callback (ms). */
 export const TRANSACTION_TIMEOUT_MS = 30_000;
 
-// Generated-read limits. The wire caps a typed caller shares with HTTP live in
-// `database/contract`; these bound only what an untrusted request may ask for.
-
-// Request decoding: rejected before any database work is scheduled.
-/** Max encoded size of a generated read query string. */
+// Operation request limits, enforced before any database work is scheduled.
+/** Max encoded size of one operation's GET query string. */
 export const MAX_QUERY_BYTES = 8 * 1024;
 /** Max UTF-8 size of one operation request body. */
 export const MAX_OPERATION_BODY_BYTES = 1024 * 1024;
-/** Max nesting depth of `and`/`or` groups in one generated filter. */
-export const MAX_WHERE_DEPTH = 5;
-/** Max column conditions across one generated filter. */
-export const MAX_WHERE_CONDITIONS = 50;
-/** Max members in one `and`/`or` group. */
-export const MAX_GROUP_ITEMS = 20;
-/** Max columns one generated `order` may name. */
-export const MAX_ORDER_FIELDS = 10;
-/** Max accepted generated `offset`. */
-export const MAX_OFFSET = 10_000;
-/** Max rows one generated read may materialize across its include tree. */
-export const MAX_MATERIALIZED_NODES = 10_000;
 
 /** Max nesting depth of one bounded JSON value. */
 export const MAX_SERIALIZED_DEPTH = 32;
 /** Max node count of one bounded JSON value. */
 export const MAX_SERIALIZED_NODES = 10_000;
-/** Max UTF-8 byte length of one generated read response body. */
+/** Max UTF-8 byte length of one operation response body. */
 export const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;

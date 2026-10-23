@@ -1,9 +1,43 @@
+import { database } from "@databricks/appkit/beta";
 import { createTestApp } from "@databricks/appkit/testing";
-import { describe, expect, test, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 
+import { schema } from "../config/database/schema";
+import { databaseRoutes } from "./database/routes.gen";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
+import {
+  type FakeWorkspace,
+  fakeWorkspace,
+  type MemoryDatabase,
+  memoryDatabase,
+} from "./testing/database-edges";
+
+// The database plugin opens two external edges at setup: a Lakebase pool and
+// the Drizzle data path over it. Both are replaced by the in-memory database
+// the running test installs; nothing else in the plugin is faked.
+const edges = vi.hoisted(() => ({
+  database: undefined as MemoryDatabase | undefined,
+}));
+vi.mock(
+  "../../../packages/appkit/src/connectors/lakebase/index.ts",
+  async (importOriginal) => ({
+    ...(await importOriginal<Record<string, unknown>>()),
+    initializeLakebasePool: async () => ({ end: async () => undefined }),
+  }),
+);
+vi.mock(
+  "../../../packages/appkit/src/database/runtime/engine/drizzle-data-path.ts",
+  async (importOriginal) => ({
+    ...(await importOriginal<Record<string, unknown>>()),
+    createDrizzleDb: () => ({}),
+    createDrizzleDataPath: () => {
+      if (!edges.database) throw new Error("No in-memory database installed");
+      return edges.database.dataPath;
+    },
+  }),
+);
 
 /**
  * Smoke tests for the playground's own server plugins.
@@ -147,5 +181,180 @@ describe("dev-playground server plugins", () => {
     expect((await app.get("/api/lakebase-examples/raw/health")).status).toBe(
       404,
     );
+  });
+});
+
+describe("dev-playground database operations", () => {
+  // Two workspace users, told apart only by the token the Apps proxy forwards.
+  const ada = {
+    token: "token-ada",
+    id: "ada-1001",
+    userName: "ada@example.com",
+  };
+  const bo = { token: "token-bo", id: "bo-2002", userName: "bo@example.com" };
+  let workspace: FakeWorkspace;
+
+  beforeAll(async () => {
+    workspace = await fakeWorkspace({
+      [ada.token]: { id: ada.id, userName: ada.userName },
+      [bo.token]: { id: bo.id, userName: bo.userName },
+    });
+  });
+  afterAll(() => workspace.close());
+
+  /** The `id` of a row an operation answered with. */
+  async function idOf(response: Response): Promise<number> {
+    const row: unknown = await response.json();
+    if (
+      typeof row !== "object" ||
+      row === null ||
+      !("id" in row) ||
+      typeof row.id !== "number"
+    ) {
+      throw new Error(`Expected a row with an id, got ${JSON.stringify(row)}`);
+    }
+    return row.id;
+  }
+
+  /** Boot the real plugin with the playground's registry over a fresh database. */
+  async function bootDatabase() {
+    const memory = memoryDatabase(schema);
+    edges.database = memory;
+    const app = await createTestApp({
+      plugins: [database({ routes: databaseRoutes })],
+      env: {
+        DATABRICKS_APP_NAME: "playground-smoke",
+        DATABRICKS_HOST: workspace.host,
+        DATABRICKS_CONFIG_FILE: workspace.configFile,
+        // The manifest's Lakebase resource; the faked pool never connects.
+        LAKEBASE_ENDPOINT: "projects/smoke/branches/main/endpoints/primary",
+        PGHOST: "lakebase.smoke.invalid",
+        PGDATABASE: "playground",
+        PGPORT: "5432",
+        PGSSLMODE: "require",
+      },
+    });
+    const path = (name: string) => `/api/database/operations/${name}`;
+    // The Apps proxy forwards the signed-in user's token in this header.
+    const as = (token?: string): { headers: Record<string, string> } => ({
+      headers: token ? { "x-forwarded-access-token": token } : {},
+    });
+    return {
+      app,
+      memory,
+      read: (token: string | undefined, name: string, input: unknown) =>
+        app.get(
+          `${path(name)}?input=${encodeURIComponent(JSON.stringify(input))}`,
+          as(token),
+        ),
+      post: (token: string, name: string, body: unknown) =>
+        app.post(path(name), { ...as(token), body }),
+      patch: (token: string, name: string, body: unknown) =>
+        app.patch(path(name), { ...as(token), body }),
+      remove: (token: string, name: string, body: unknown) =>
+        app.delete(path(name), { ...as(token), body }),
+    };
+  }
+
+  test("answers a signed-in caller and refuses an anonymous one", async () => {
+    const { app, read } = await bootDatabase();
+    await using _app = app;
+
+    expect((await read(undefined, "boards.list", {})).status).toBe(401);
+    const signedIn = await read(ada.token, "boards.list", {});
+    expect(signedIn.status).toBe(200);
+    await expect(signedIn.json()).resolves.toEqual([]);
+  });
+
+  test("writes a note and its created event together, authored by the caller", async () => {
+    const { app, memory, read, post } = await bootDatabase();
+    await using _app = app;
+    const boardId = await idOf(
+      await post(ada.token, "boards.create", { title: "Launch review" }),
+    );
+
+    const created = await post(ada.token, "notes.create", {
+      board_id: boardId,
+      body: "Ship it",
+    });
+
+    expect(created.status).toBe(201);
+    const note: unknown = await created.json();
+    expect(note).toMatchObject({ author: ada.id, body: "Ship it" });
+    expect(note).not.toHaveProperty("author_email");
+    const [stored] = memory.rows("notes");
+    expect(stored).toMatchObject({
+      author: ada.id,
+      author_email: ada.userName,
+    });
+    expect(memory.rows("note_events")).toEqual([
+      expect.objectContaining({ note_id: stored?.id, action: "created" }),
+    ]);
+    const listed = await read(bo.token, "notes.list", { board_id: boardId });
+    await expect(listed.json()).resolves.toEqual([
+      expect.objectContaining({
+        id: stored?.id,
+        note_events: [expect.objectContaining({ action: "created" })],
+      }),
+    ]);
+  });
+
+  test("keeps neither the note nor its event when the event write fails", async () => {
+    const { app, memory, post } = await bootDatabase();
+    await using _app = app;
+    const boardId = await idOf(
+      await post(ada.token, "boards.create", { title: "Launch review" }),
+    );
+    memory.failNextInsert("note_events");
+
+    const failed = await post(ada.token, "notes.create", {
+      board_id: boardId,
+      body: "Lost",
+    });
+
+    expect(failed.status).toBe(500);
+    expect(memory.rows("notes")).toEqual([]);
+    expect(memory.rows("note_events")).toEqual([]);
+  });
+
+  test("lets only a note's author edit or delete it", async () => {
+    const { app, memory, post, patch, remove } = await bootDatabase();
+    await using _app = app;
+    const boardId = await idOf(
+      await post(ada.token, "boards.create", { title: "Launch review" }),
+    );
+    const noteId = await idOf(
+      await post(ada.token, "notes.create", {
+        board_id: boardId,
+        body: "Mine",
+      }),
+    );
+
+    const edit = { id: noteId, body: "Taken over" };
+    expect((await patch(bo.token, "notes.update", edit)).status).toBe(403);
+    expect(
+      (await remove(bo.token, "notes.delete", { id: noteId })).status,
+    ).toBe(403);
+    expect(memory.rows("notes")).toEqual([
+      expect.objectContaining({ body: "Mine" }),
+    ]);
+    expect(memory.rows("note_events").map((event) => event.action)).toEqual([
+      "created",
+    ]);
+
+    const edited = await patch(ada.token, "notes.update", {
+      id: noteId,
+      body: "Still mine",
+    });
+    expect(edited.status).toBe(200);
+    expect(memory.rows("note_events").map((event) => event.action)).toEqual([
+      "created",
+      "edited",
+    ]);
+    expect(
+      (await remove(ada.token, "notes.delete", { id: noteId })).status,
+    ).toBe(204);
+    expect(memory.rows("notes")).toEqual([]);
+    expect(memory.rows("note_events")).toEqual([]);
   });
 });

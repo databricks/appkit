@@ -5,10 +5,6 @@ import {
 } from "shared";
 
 import { getClientConfig, getPluginClientConfig } from "../config";
-import {
-  type DatabaseApi as DatabaseEntityApi,
-  databaseApi as databaseEntityApi,
-} from "./entity-client";
 import { DatabaseApiError, invalidDatabaseInput } from "./errors";
 import {
   acceptDatabaseReply,
@@ -31,11 +27,8 @@ export interface DatabaseRequestOptions {
   readonly signal?: AbortSignal;
 }
 
-/**
- * Typed calls to the operations `DatabasePlugin` publishes, by name. The entity
- * calls remain until the plugin serves operations instead of entity routes.
- */
-export interface DatabaseApi extends DatabaseEntityApi {
+/** Typed calls to the operations `DatabasePlugin` publishes, by name. */
+export interface DatabaseApi {
   /**
    * Call one operation with its declared method and resolve with its JSON
    * answer, or `undefined` when it answers without a body. The name, input,
@@ -399,7 +392,6 @@ async function send(
  * methods come from the server's boot payload.
  */
 export const databaseApi: DatabaseApi = {
-  ...databaseEntityApi,
   async execute<N extends DatabaseOperationName>(
     name: N,
     input: DatabaseOperationInput<N>,

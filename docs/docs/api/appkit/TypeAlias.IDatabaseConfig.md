@@ -2,7 +2,7 @@
 
 ```ts
 type IDatabaseConfig<TSchema> = {
-  api?: DatabaseApiConfig<TSchema>;
+  routes?: DatabaseRoutes | false;
   schema?: TSchema;
 };
 ```
@@ -17,26 +17,21 @@ Configuration for one schema-bound DatabasePlugin instance.
 
 ## Properties
 
-### api?
+### routes?
 
 ```ts
-readonly optional api: DatabaseApiConfig<TSchema>;
+readonly optional routes: DatabaseRoutes | false;
 ```
 
-Generated HTTP CRUD is enabled for all tables by default, using the app's
-service principal. Every admitted caller receives the enabled operations;
-no per-user or per-row authorization is applied. This plugin does not
-support OBO. Use custom routes for application-specific authorization.
+The generated registry of named operations: `database({ routes: databaseRoutes })`.
+Setup loads its schema and every module it lists, then serves each
+authorized operation at `/api/database/operations/:name` with its
+declared method. An operation without `authorize` is skipped with a
+warning. A malformed or duplicate operation, or a module that fails to
+load, fails setup.
 
-Set `false` to disable routes, `{ writes: false }` for reads only, or
-`{ tables: ["notes"] }` to expose only selected tables. To disable delete,
-use `{ writes: { operations: ["create", "update"] } }`.
-
-#### Default Value
-
-```ts
-true
-```
+Absent or `false` serves no database endpoint over HTTP; `appkit.database`
+stays available to server code either way.
 
 ***
 
@@ -46,6 +41,8 @@ true
 readonly optional schema: TSchema;
 ```
 
-Explicit schema override. When omitted, setup loads the named `schema`
-export from `config/database/schema.ts` under the application's working
-directory. Missing or invalid declarations fail setup before pool creation.
+Explicit schema override. Without `routes`, setup otherwise loads the
+named `schema` export from `config/database/schema.ts` under the
+application's working directory. With `routes`, setup uses the schema the
+registry loads, and a different `schema` here fails setup. Missing or
+invalid declarations fail setup before pool creation.

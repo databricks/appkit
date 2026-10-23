@@ -123,9 +123,6 @@ export type {
 export * from "./plugins/beta-exports.generated";
 export { database } from "./plugins/database";
 export type {
-  DatabaseApiConfig,
-  DatabaseApiWriteOperation,
-  DatabaseApiWritesConfig,
   DatabaseExports,
   IDatabaseConfig,
   TransactionClient,

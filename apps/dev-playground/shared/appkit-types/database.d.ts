@@ -50,13 +50,6 @@ interface GeneratedDatabaseRegistry {
         "slug"?: string;
         "title"?: string;
       };
-      filters: DatabaseLogicalFilter<{
-        "id"?: number | { eq?: number; neq?: number; in?: readonly (number)[]; gt?: number; gte?: number; lt?: number; lte?: number; };
-        "slug"?: string | { eq?: string; neq?: string; in?: readonly (string)[]; like?: string; ilike?: string; };
-        "title"?: string | { eq?: string; neq?: string; in?: readonly (string)[]; like?: string; ilike?: string; };
-        "created_at"?: string | { eq?: string; neq?: string; in?: readonly (string)[]; gt?: string; gte?: string; lt?: string; lte?: string; };
-      }>;
-      orderable: "id" | "slug" | "title" | "created_at";
       key: "id";
     };
   };
@@ -115,14 +108,6 @@ interface GeneratedDatabaseRegistry {
         "author"?: string;
         "body"?: string;
       };
-      filters: DatabaseLogicalFilter<{
-        "id"?: number | { eq?: number; neq?: number; in?: readonly (number)[]; gt?: number; gte?: number; lt?: number; lte?: number; };
-        "board_id"?: number | { eq?: number; neq?: number; in?: readonly (number)[]; gt?: number; gte?: number; lt?: number; lte?: number; };
-        "author"?: string | { eq?: string; neq?: string; in?: readonly (string)[]; like?: string; ilike?: string; };
-        "body"?: string | { eq?: string; neq?: string; in?: readonly (string)[]; like?: string; ilike?: string; };
-        "created_at"?: string | { eq?: string; neq?: string; in?: readonly (string)[]; gt?: string; gte?: string; lt?: string; lte?: string; };
-      }>;
-      orderable: "id" | "board_id" | "author" | "body" | "created_at";
       key: "id";
     };
   };
@@ -169,13 +154,6 @@ interface GeneratedDatabaseRegistry {
         "note_id"?: number;
         "action"?: string;
       };
-      filters: DatabaseLogicalFilter<{
-        "id"?: number | { eq?: number; neq?: number; in?: readonly (number)[]; gt?: number; gte?: number; lt?: number; lte?: number; };
-        "note_id"?: number | { eq?: number; neq?: number; in?: readonly (number)[]; gt?: number; gte?: number; lt?: number; lte?: number; };
-        "action"?: string | { eq?: string; neq?: string; in?: readonly (string)[]; like?: string; ilike?: string; };
-        "created_at"?: string | { eq?: string; neq?: string; in?: readonly (string)[]; gt?: string; gte?: string; lt?: string; lte?: string; };
-      }>;
-      orderable: "id" | "note_id" | "action" | "created_at";
       key: "id";
     };
   };
@@ -183,8 +161,4 @@ interface GeneratedDatabaseRegistry {
 
 declare module "@databricks/appkit" {
   interface DatabaseRegistry extends GeneratedDatabaseRegistry {}
-}
-
-declare global {
-  interface DatabricksAppKitDatabaseRegistry extends GeneratedDatabaseRegistry {}
 }
