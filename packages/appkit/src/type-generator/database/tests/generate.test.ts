@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -13,7 +14,12 @@ const roots: string[] = [];
 const appkitRoot = path.resolve(import.meta.dirname, "../../../..");
 const sourceRoot = path.join(appkitRoot, "src");
 const builder = path.join(sourceRoot, "database/schema-builder/index.ts");
-const uiRoot = path.resolve(appkitRoot, "../appkit-ui/src/js");
+// One @types/node copy, so source modules and Express agree on Node's types.
+const nodeTypes = path.dirname(
+  path.dirname(
+    createRequire(import.meta.url).resolve("@types/node/package.json"),
+  ),
+);
 
 afterEach(async () =>
   Promise.all(
@@ -123,7 +129,7 @@ describe("generateDatabaseTypes", () => {
     expect(output).toContain("filters: DatabaseLogicalFilter<{}>;");
   });
 
-  test("renders HTTP api facets from the route capabilities", async () => {
+  test("renders the HTTP facets default operation contracts read", async () => {
     const options = await files(completeSchema);
     await generateDatabaseTypes(options);
     const output = await fs.readFile(options.outFile, "utf8");
@@ -141,10 +147,10 @@ describe("generateDatabaseTypes", () => {
     expect(users).toContain(
       'update: {\n        "name"?: string;\n        "nickname"?: string | null;\n      };',
     );
-    expect(users).toContain(
-      'orderable: "slug" | "name" | "nickname" | "created_at";',
-    );
     expect(users).toContain('key: "slug";');
+    // Default contracts neither filter nor order, so no such facet ships.
+    expect(users).not.toContain("filters:");
+    expect(users).not.toContain("orderable:");
 
     // Server identities are never inputs, and a random default is no update.
     const posts = api("posts");
@@ -152,19 +158,12 @@ describe("generateDatabaseTypes", () => {
     expect(posts).toContain('"external_id"?: string;');
     expect(posts).not.toContain('update: {\n        "id"');
     expect(
-      posts.slice(posts.indexOf("update:"), posts.indexOf("filters:")),
+      posts.slice(posts.indexOf("update:"), posts.indexOf("key:")),
     ).not.toContain('"external_id"');
-    // HTTP filters have no bare-array shorthand and no JSON columns.
-    expect(posts).toContain(
-      '"status"?: "draft" | "live" | { eq?: "draft" | "live"; neq?: "draft" | "live"; in?: readonly ("draft" | "live")[]; };',
-    );
-    expect(posts.slice(posts.indexOf("filters:"))).not.toContain('"payload"');
     expect(posts).toContain('key: "id";');
 
-    expect(api("events")).toContain('orderable: "message";');
     expect(api("events")).toContain("key: never;");
-    expect(api("blobs")).toContain("filters: DatabaseLogicalFilter<{}>;");
-    expect(api("blobs")).toContain("orderable: never;");
+    expect(api("blobs")).toContain("key: never;");
   });
 
   test("treats boolean and JSON primary keys as keyless only over HTTP", async () => {
@@ -179,22 +178,17 @@ describe("generateDatabaseTypes", () => {
     await compileConsumer(
       options,
       `
-      import { databaseApi, type DatabaseKeyedEntity } from "@databricks/appkit-ui/js/beta";
       import type { DatabaseRegistry } from "@databricks/appkit";
-      const trustedKey: DatabaseRegistry["flags"]["hasPrimaryKey"] = true;
-      // @ts-expect-error a boolean key cannot address an HTTP path
-      const keyed: DatabaseKeyedEntity = "flags";
-      // @ts-expect-error JSON keys have no detail route either
-      await databaseApi.get("documents", "x");
-      // @ts-expect-error an HTTP-keyless list needs an explicit order
-      await databaseApi.list("flags");
-      await databaseApi.list("flags", { order: { key: "asc" } });
-      await databaseApi.list("documents", { order: { label: "asc" } });
-      await databaseApi.create("flags", { key: true });
-      await databaseApi.create("documents", { key: { code: "a" } });
-      void [trustedKey, keyed];
+      type Equal<A, B> =
+        (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+      type Expect<T extends true> = T;
+      // Trusted server code keeps the key; the HTTP facet has none to default to.
+      export type Keys = [
+        Expect<Equal<DatabaseRegistry["flags"]["hasPrimaryKey"], true>>,
+        Expect<Equal<DatabaseRegistry["flags"]["api"]["key"], never>>,
+        Expect<Equal<DatabaseRegistry["documents"]["api"]["key"], never>>,
+      ];
     `,
-      { ui: true },
     );
   }, 30_000);
 
@@ -211,9 +205,8 @@ describe("generateDatabaseTypes", () => {
     expect(output).toContain(
       'declare module "@databricks/appkit" {\n  interface DatabaseRegistry extends GeneratedDatabaseRegistry {}\n}',
     );
-    expect(output).toContain(
-      "declare global {\n  interface DatabricksAppKitDatabaseRegistry extends GeneratedDatabaseRegistry {}\n}",
-    );
+    expect(output).not.toContain("declare global");
+    expect(output).not.toContain("DatabricksAppKitDatabaseRegistry");
   });
 
   test("accepts named valid and explicitly empty schemas", async () => {
@@ -332,13 +325,12 @@ describe("generateDatabaseTypes", () => {
         import { database, type DatabaseExports, type IDatabaseConfig } from "@databricks/appkit/beta";
         database();
         database({});
-        const defaults: IDatabaseConfig = { api: { writes: false } };
-        database(defaults);
-        database({
-          api: { tables: ["posts"], writes: { operations: ["create"] } },
-        });
-        // @ts-expect-error default API restrictions use generated table names
-        database({ api: { tables: ["missing"] } });
+        const disabled: IDatabaseConfig = { routes: false };
+        database(disabled);
+        declare const routes: Exclude<IDatabaseConfig["routes"], false | undefined>;
+        database({ routes });
+        // @ts-expect-error automatic table routes were removed
+        database({ api: { writes: false } });
         // @ts-expect-error lifecycle hooks were removed
         database({ hooks: { posts: {} } });
         declare const db: DatabaseExports;
@@ -378,168 +370,13 @@ describe("generateDatabaseTypes", () => {
       { skipLibCheck: false, isolated: true },
     );
   }, 30_000);
-
-  test("compiles a browser consumer bound to the same generated entries", async () => {
-    const options = await files(completeSchema);
-    await generateDatabaseTypes(options);
-    await compileConsumer(
-      options,
-      `
-        import { type DatabaseExports } from "@databricks/appkit/beta";
-        import {
-          databaseApi,
-          DatabaseApiError,
-          type DatabaseEntity,
-          type DatabaseListRow,
-        } from "@databricks/appkit-ui/js/beta";
-
-        // The server entities and the browser entities are one registry.
-        declare const db: DatabaseExports;
-        const server: keyof DatabaseExports = "users";
-        const entity: DatabaseEntity = "users";
-        void [db, server, entity];
-        // @ts-expect-error browser entities are generated table names
-        const missing: DatabaseEntity = "missing";
-        void missing;
-
-        async function reads() {
-          const users = await databaseApi.list("users", {
-            where: { name: { ilike: "%ada%" }, or: [{ nickname: { is: null } }] },
-            order: { created_at: "desc" },
-            include: { posts: { limit: 2, select: ["title", "total"] } },
-          });
-          const title: string | undefined = users.items[0]?.posts[0]?.title;
-          // A bigint travels as its decimal string.
-          const total: string | undefined = users.items[0]?.posts[0]?.total;
-          // @ts-expect-error private columns are absent from public rows
-          users.items[0]?.secret;
-          // @ts-expect-error unselected relation columns are absent
-          users.items[0]?.posts[0]?.score;
-
-          const posts = await databaseApi.list("posts", {
-            select: ["id", "title"],
-            include: { users: { include: { posts: { limit: 1 } } } },
-          });
-          const owner: { slug: string; name: string } | null | undefined =
-            posts.items[0]?.users;
-          const nested: number | undefined = posts.items[0]?.users?.posts[0]?.id;
-          // @ts-expect-error unselected columns are absent
-          posts.items[0]?.score;
-          void [title, total, owner, nested];
-
-          type Picked = DatabaseListRow<"posts", { select: readonly ["id"] }>;
-          const picked: Picked = { id: 1 };
-          void picked;
-
-          await databaseApi.list("posts", { where: { total: { gt: "9007199254740993" } } });
-          await databaseApi.list("events", { order: { message: "asc" } });
-          const params: import("@databricks/appkit-ui/js/beta").DatabaseListParams<"posts"> = { select: ["id"] };
-          const dynamic = await databaseApi.list("posts", params);
-          // @ts-expect-error a broad optional selection may omit title
-          const unsafeTitle: string = dynamic.items[0].title;
-          void unsafeTitle;
-
-          const columns: ("id" | "title")[] = ["id"];
-          const selected = await databaseApi.list("posts", { select: columns });
-          const maybeTitle: string | undefined = selected.items[0].title;
-          // @ts-expect-error an array does not guarantee every possible column is selected
-          const definiteTitle: string = selected.items[0].title;
-          // @ts-expect-error columns outside the array's element type remain absent
-          selected.items[0].score;
-          const record = await databaseApi.get("posts", 1, { select: columns });
-          // @ts-expect-error detail projection follows the same dynamic selection rule
-          const definiteId: number = record.id;
-          const included = await databaseApi.list("users", {
-            include: { posts: { select: columns } },
-          });
-          // @ts-expect-error included rows also have optional dynamically selected columns
-          const includedTitle: string = included.items[0].posts[0].title;
-          void [maybeTitle, definiteTitle, definiteId, includedTitle];
-        }
-
-        async function rejected() {
-          // @ts-expect-error private columns are not HTTP filters, even beside a valid one
-          await databaseApi.list("users", { where: { name: "Ada", secret: "token" } });
-          // @ts-expect-error private columns are not selectable
-          await databaseApi.list("users", { select: ["slug", "secret"] });
-          // @ts-expect-error private columns cannot order a list
-          await databaseApi.list("users", { order: { name: "asc", secret: "asc" } });
-          // @ts-expect-error JSON columns are not queryable
-          await databaseApi.list("posts", { where: { payload: { eq: 1 } } });
-          // @ts-expect-error HTTP filters have no bare-array shorthand
-          await databaseApi.list("posts", { where: { status: ["draft"] } });
-          // @ts-expect-error unknown operators are rejected inside an operator object
-          await databaseApi.list("posts", { where: { score: { gte: 1, near: 2 } } });
-          // @ts-expect-error a to-one include takes no limit
-          await databaseApi.list("posts", { include: { users: { limit: 1 } } });
-          // @ts-expect-error includes stop at two relation edges
-          await databaseApi.list("users", { include: { posts: { include: { users: { include: { posts: true } } } } } });
-          // @ts-expect-error an include filter checks the target's public facets
-          await databaseApi.list("posts", { include: { users: { where: { name: "Ada", secret: "x" } } } });
-          // @ts-expect-error generated routes decode includes as true or options, never false
-          await databaseApi.list("users", { include: { posts: false } });
-          // @ts-expect-error list params are the generated route's parameters only
-          await databaseApi.list("users", { limit: 1, includeTotal: true });
-          // @ts-expect-error keyless lists require an explicit order
-          await databaseApi.list("events");
-          // @ts-expect-error an empty order is not a usable keyless sort
-          await databaseApi.list("events", { order: {} });
-          // @ts-expect-error a keyless table without sortable columns cannot list
-          await databaseApi.list("blobs", { order: { payload: "asc" } });
-          const filter: { name?: string; secret?: string } = { name: "Ada", secret: "token" };
-          // @ts-expect-error optional private fields remain forbidden in filters
-          await databaseApi.list("users", { where: filter });
-        }
-
-        async function writes() {
-          const post = await databaseApi.create("posts", {
-            user_slug: "ada",
-            title: "Hi",
-            total: "9007199254740993",
-            active: true,
-            status: "draft",
-            payload: { tags: ["a"] },
-          });
-          const total: string = post.total;
-          await databaseApi.update("posts", post.id, { score: null, status: "live" });
-          await databaseApi.update("users", "ada", { nickname: "ada" });
-          await databaseApi.remove("users", "ada");
-          await databaseApi.create("events", { message: "keyless tables accept creates" });
-          // @ts-expect-error private columns are not HTTP inputs
-          await databaseApi.create("users", { slug: "ada", name: "Ada", secret: "token" });
-          const values: { slug: string; name: string; secret?: string } = { slug: "ada", name: "Ada", secret: "token" };
-          // @ts-expect-error an optional private field is still forbidden when spread
-          await databaseApi.create("users", values);
-          // @ts-expect-error a generated key is not an HTTP input
-          await databaseApi.create("posts", { id: 1, user_slug: "ada", title: "Hi", total: 1, active: true, status: "draft" });
-          // @ts-expect-error default-stamped columns are not updatable
-          await databaseApi.update("users", "ada", { created_at: "2026-01-01" });
-          // @ts-expect-error random-default columns are not updatable
-          await databaseApi.update("posts", 1, { external_id: "00000000-0000-0000-0000-000000000000" });
-          // @ts-expect-error keyless entities have no update route
-          await databaseApi.update("events", "x", { message: "y" });
-          void total;
-        }
-
-        function failed(error: unknown) {
-          if (error instanceof DatabaseApiError && error.code === "NOT_EXPOSED") {
-            const status: number | null = error.status;
-            return status;
-          }
-          return error instanceof DatabaseApiError ? error.details[0]?.message : undefined;
-        }
-        void [reads, rejected, writes, failed];
-      `,
-      { ui: true },
-    );
-  }, 30_000);
 });
 
 /** Type-check `source` against the generated declaration, as an app would. */
 async function compileConsumer(
   options: { root: string; outFile: string },
   source: string,
-  { ui = false, skipLibCheck = true, isolated = false } = {},
+  { skipLibCheck = true, isolated = false } = {},
 ): Promise<void> {
   const consumer = path.join(options.root, "consumer.ts");
   const tsconfig = path.join(options.root, "tsconfig.json");
@@ -556,7 +393,9 @@ async function compileConsumer(
         esModuleInterop: true,
         resolveJsonModule: true,
         skipLibCheck,
-        ...(isolated ? { types: [] } : {}),
+        ...(isolated
+          ? { types: [] }
+          : { lib: ["ES2022"], types: ["node"], typeRoots: [nodeTypes] }),
         baseUrl: options.root,
         paths: {
           "@databricks/appkit": [
@@ -567,11 +406,6 @@ async function compileConsumer(
           "@databricks/appkit/beta": [
             path.join(sourceRoot, "plugins/database/index.ts"),
           ],
-          ...(ui
-            ? {
-                "@databricks/appkit-ui/js/beta": [path.join(uiRoot, "beta.ts")],
-              }
-            : {}),
           shared: [path.resolve(appkitRoot, "../shared/src/index.ts")],
           // CI runs unit tests before build, including imports of shared subpaths.
           "shared/*": [path.resolve(appkitRoot, "../shared/src/*")],

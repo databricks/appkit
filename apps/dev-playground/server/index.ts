@@ -14,6 +14,7 @@ import {
 } from "@databricks/appkit";
 import { agents, aiSearch, database } from "@databricks/appkit/beta";
 
+import { databaseRoutes } from "./database/routes.gen";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
@@ -70,16 +71,10 @@ createApp({
     ...(process.env.LAKEBASE_ENDPOINT ? [lakebase()] : []),
     lakebaseExamples(),
     // Setup queries the database before publishing anything, so the plugin
-    // only joins the app once an instance is actually configured.
+    // only joins the app once an instance is actually configured. It serves
+    // the named operations in server/database/routes/ over HTTP.
     ...(process.env.LAKEBASE_ENDPOINT
-      ? [
-          // The schema is loaded from config/database/schema.ts.
-          database({
-            // Reads are generated for all three tables. Only boards and notes
-            // accept HTTP writes; note_events is exposed read-only.
-            api: { writes: { tables: ["boards", "notes"] } },
-          }),
-        ]
+      ? [database({ routes: databaseRoutes })]
       : []),
     files({
       volumes: {

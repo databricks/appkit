@@ -49,24 +49,11 @@ const sessions = tables.get("sessions") as NonNullable<
 >;
 
 describe("compileCrudTables", () => {
-  it("allowlists public columns and excludes unfilterable kinds", () => {
+  it("allowlists public columns and keeps private ones server-side", () => {
     expect([...users.selectable]).toEqual(["id", "name", "profile"]);
-    expect([...users.queryable]).toEqual(["id", "name"]);
     expect(users.columns.has("token")).toBe(true);
     expect(users.primaryKey?.meta.columnName).toBe("id");
-  });
-
-  it("wires relations only between exposed tables", () => {
-    expect(users.relations.get("notes")).toMatchObject({
-      cardinality: "toMany",
-      target: notes,
-    });
-    expect(notes.relations.get("users")).toMatchObject({
-      cardinality: "toOne",
-      target: users,
-    });
-    const isolated = compileCrudTables({ notes: schema.$tables.notes });
-    expect(isolated.get("notes")?.relations.size).toBe(0);
+    expect([...notes.selectable]).toEqual(["id", "authorId", "body"]);
   });
 
   it("treats a private primary key as no key over HTTP", () => {
@@ -99,32 +86,6 @@ describe("write allowlists", () => {
     expect([...invites.updatable]).toEqual(["email", "label"]);
     expect([...sessions.creatable]).toEqual(["label"]);
     expect([...sessions.updatable]).toEqual(["label"]);
-  });
-});
-
-describe("projectPublicRow", () => {
-  it("drops private columns at every level and encodes relations", () => {
-    const projected = users.projectPublicRow({
-      id: 1,
-      name: "Ada",
-      token: "secret",
-      profile: { theme: "dark" },
-      notes: [{ id: 2, body: "hello", draft: "hidden" }],
-      unknown: "ignored",
-    });
-    expect(projected).toEqual({
-      id: 1,
-      name: "Ada",
-      profile: { theme: "dark" },
-      notes: [{ id: 2, body: "hello" }],
-    });
-  });
-
-  it("represents an absent to-one relation as null", () => {
-    expect(notes.projectPublicRow({ id: 1, users: null })).toEqual({
-      id: 1,
-      users: null,
-    });
   });
 });
 

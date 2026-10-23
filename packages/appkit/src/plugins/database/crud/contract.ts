@@ -1,37 +1,21 @@
 import { DatabasePluginError } from "../../../database/errors";
-import type { Row } from "../../../database/runtime";
 import type { AppKitTable } from "../../../database/schema-builder";
 import { isPlainObject as hasPlainObjectPrototype } from "../../../utils/is-plain-object";
 import { MAX_SERIALIZED_DEPTH, MAX_SERIALIZED_NODES } from "../defaults";
 import { columnHttpCapabilities } from "./capabilities";
 import { type CompiledColumn, compileColumn, type JsonValue } from "./codecs";
 
-/** One relation edge wired to the contract of its target table. */
-export interface CrudRelation {
-  readonly cardinality: "toOne" | "toMany";
-  readonly target: CrudTable;
-}
-
-/** Private HTTP contract compiled once for one exposed table. */
+/** Private HTTP contract compiled once for one table. */
 export interface CrudTable {
-  readonly name: string;
   readonly primaryKey?: CompiledColumn;
   readonly columns: ReadonlyMap<string, CompiledColumn>;
-  /** Public columns a request may project. */
+  /** Public columns: every column that is not private. */
   readonly selectable: ReadonlySet<string>;
-  /** Public columns a request may filter or order by. */
-  readonly queryable: ReadonlySet<string>;
   /** Public columns a create body may set, including a caller-chosen key. */
   readonly creatable: ReadonlySet<string>;
   /** Public columns an update body may set; a key or a stamp is never one. */
   readonly updatable: ReadonlySet<string>;
-  readonly relations: ReadonlyMap<string, CrudRelation>;
-  projectPublicRow(row: Row): JsonValue;
 }
-
-type MutableCrudTable = Omit<CrudTable, "relations"> & {
-  readonly relations: Map<string, CrudRelation>;
-};
 
 interface SanitizeState {
   nodes: number;
@@ -114,35 +98,10 @@ export function boundedJson(value: unknown): JsonValue {
   return sanitizeJson(value, 0, { nodes: 0, ancestors: new Set() });
 }
 
-/** Project an included row through its own table; absent to-one reads null. */
-function projectRelation(target: CrudTable, value: unknown): JsonValue {
-  if (value === null || value === undefined) return null;
-  return Array.isArray(value)
-    ? value.map((row) => target.projectPublicRow(row as Row))
-    : target.projectPublicRow(value as Row);
-}
-
-/** Build the public JSON for one driver row, dropping anything uncontracted. */
-function projectRow(table: CrudTable, row: Row): JsonValue {
-  const out: Record<string, JsonValue> = {};
-  for (const [key, value] of Object.entries(row)) {
-    const column = table.columns.get(key);
-    if (column) {
-      // Whatever the driver returned, only public contracted columns ship.
-      if (!column.meta.isPrivate) out[key] = column.encode(value);
-      continue;
-    }
-    const relation = table.relations.get(key);
-    if (relation) out[key] = projectRelation(relation.target, value);
-  }
-  return out;
-}
-
 /** Compile one table's allowlists and codecs from its finalized metadata. */
-function compileTable(table: AppKitTable): MutableCrudTable {
+function compileTable(table: AppKitTable): CrudTable {
   const columns = new Map<string, CompiledColumn>();
   const selectable = new Set<string>();
-  const queryable = new Set<string>();
   const creatable = new Set<string>();
   const updatable = new Set<string>();
   let primaryKey: CompiledColumn | undefined;
@@ -154,47 +113,20 @@ function compileTable(table: AppKitTable): MutableCrudTable {
     const can = columnHttpCapabilities(meta);
     if (can.publicKey) primaryKey = column;
     if (can.selectable) selectable.add(meta.columnName);
-    if (can.queryable) queryable.add(meta.columnName);
     if (can.creatable) creatable.add(meta.columnName);
     if (can.updatable) updatable.add(meta.columnName);
   }
 
-  const compiled: MutableCrudTable = {
-    name: table.$name,
-    primaryKey,
-    columns,
-    selectable,
-    queryable,
-    creatable,
-    updatable,
-    relations: new Map(),
-    projectPublicRow: (row) => projectRow(compiled, row),
-  };
-  return compiled;
+  return { primaryKey, columns, selectable, creatable, updatable };
 }
 
-/**
- * Compile the HTTP contract for every exposed table and wire the relations
- * they share. A relation whose target is not exposed stays unreachable, so
- * enabling one table never widens another table's public surface.
- */
+/** Compile the HTTP contract of every table, keyed by table name. */
 export function compileCrudTables(
   tables: Record<string, AppKitTable>,
 ): Map<string, CrudTable> {
-  const compiled = new Map<string, MutableCrudTable>();
-  for (const table of Object.values(tables)) {
-    compiled.set(table.$name, compileTable(table));
-  }
-  for (const table of Object.values(tables)) {
-    const entry = compiled.get(table.$name);
-    for (const relation of table.$relations) {
-      const target = compiled.get(relation.targetTable);
-      if (!entry || !target) continue;
-      entry.relations.set(relation.name, {
-        cardinality: relation.cardinality,
-        target,
-      });
-    }
-  }
-  return compiled as Map<string, CrudTable>;
+  return new Map(
+    Object.values(tables).map(
+      (table) => [table.$name, compileTable(table)] as const,
+    ),
+  );
 }

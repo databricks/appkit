@@ -9,12 +9,10 @@ import {
   columnHttpCapabilities,
 } from "../../plugins/database/crud/capabilities";
 
-/** Render-ready HTTP facets, derived from the predicates the routes compile. */
+/** Render-ready HTTP facets, from the predicates the operation runtime compiles. */
 interface ApiEntry {
   readonly insert: string;
   readonly update: string;
-  readonly filters: string;
-  readonly orderable: string;
   readonly key: string;
 }
 
@@ -102,14 +100,10 @@ function updateType(columns: ColumnMeta[], indent: string): string {
 }
 
 /**
- * Reuse the canonical operator matrix when rendering `where()` types. A
- * trusted `where()` also takes a bare array as `in`; the HTTP decoder does not.
+ * Reuse the canonical operator matrix when rendering `where()` types. A bare
+ * array is shorthand for `in`.
  */
-function filtersType(
-  columns: ColumnMeta[],
-  indent: string,
-  arrayShorthand: boolean,
-): string {
+function filtersType(columns: ColumnMeta[], indent: string): string {
   const direct = objectFacet(
     columns.flatMap((column) => {
       const operators = filterOperatorsForKind(column.kind);
@@ -120,9 +114,8 @@ function filtersType(
           `${operator}?: ${operator === "in" ? `readonly (${value})[]` : value};`,
       );
       if (!column.notNull) fields.push("is?: null;");
-      const shorthand = arrayShorthand ? ` | readonly (${value})[]` : "";
       return [
-        `${indent}  ${JSON.stringify(column.columnName)}?: ${value}${shorthand} | { ${fields.join(" ")} };`,
+        `${indent}  ${JSON.stringify(column.columnName)}?: ${value} | readonly (${value})[] | { ${fields.join(" ")} };`,
       ];
     }),
     indent,
@@ -141,7 +134,7 @@ function includesType(table: AppKitTable): string {
   );
 }
 
-/** What the generated routes accept, from the predicates `compileTable` uses. */
+/** What a default operation contract accepts, from the runtime's own predicates. */
 function apiEntry(table: AppKitTable): ApiEntry {
   const columns = Object.values(table.$columns).map((meta) => ({
     meta,
@@ -153,8 +146,6 @@ function apiEntry(table: AppKitTable): ApiEntry {
   return {
     insert: insertType(columnsThat("creatable"), API),
     update: updateType(columnsThat("updatable"), API),
-    filters: filtersType(columnsThat("queryable"), API, false),
-    orderable: literalUnion(names(columnsThat("queryable"))),
     key: literalUnion(names(columnsThat("publicKey"))),
   };
 }
@@ -175,7 +166,7 @@ export function walkSchema(schema: Schema): RegistryEntry[] {
         columns.filter((c) => !c.serverGenerated && !c.primaryKey),
         TRUSTED,
       ),
-      filters: filtersType(columns, TRUSTED, true),
+      filters: filtersType(columns, TRUSTED),
       includes: includesType(table),
       hasPrimaryKey: columns.some((column) => column.primaryKey),
       api: apiEntry(table),

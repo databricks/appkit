@@ -1,8 +1,4 @@
-import {
-  type DatabaseErrorCategory,
-  type DatabaseErrorDetail,
-  DatabaseQueryEncodingError,
-} from "shared";
+import type { DatabaseErrorCategory, DatabaseErrorDetail } from "shared";
 
 /**
  * A server category, or a client-side outcome: `NOT_EXPOSED` for an operation
@@ -55,28 +51,5 @@ export function invalidDatabaseInput(
 ): DatabaseApiError {
   return new DatabaseApiError("INVALID_REQUEST", null, message, [
     { path: ["input"], message },
-  ]);
-}
-
-/** Do not echo a caller's invalid query values into the client-facing error. */
-export function invalidDatabaseQuery(error?: unknown): DatabaseApiError {
-  if (error instanceof DatabaseQueryEncodingError) {
-    return new DatabaseApiError("INVALID_REQUEST", null, error.message, [
-      { path: [error.parameter], message: error.message },
-    ]);
-  }
-  return new DatabaseApiError(
-    "INVALID_REQUEST",
-    null,
-    "Database query contains an unsupported value",
-  );
-}
-
-/** Local write failures name the body, never the values it would have sent. */
-export function invalidDatabaseWrite(
-  message = "Database write contains an unsupported value",
-): DatabaseApiError {
-  return new DatabaseApiError("INVALID_REQUEST", null, message, [
-    { path: ["body"], message },
   ]);
 }
