@@ -20,7 +20,7 @@ export interface RegisterResult {
   reason?: string;
 }
 
-function findServerFile(serverRoot: string): string | null {
+export function findServerFile(serverRoot: string): string | null {
   for (const candidate of SERVER_FILE_CANDIDATES) {
     const p = path.join(serverRoot, candidate);
     if (fs.existsSync(p)) return p;
@@ -87,15 +87,21 @@ export function registerPluginInServer(
   serverRoot: string,
   importPath: string,
   exportName: string,
+  /** Call arguments, e.g. `{ auth: "on-behalf-of-user" }` (CLI-built, never registry data). */
+  callArgs = "",
 ): RegisterResult {
   // exportName and importPath are interpolated into the user's server source.
   // Registry items are untrusted, so refuse anything that isn't a plain JS
   // identifier / clean relative module path — prevents code injection via a
-  // crafted export name or import path.
+  // crafted export name or import path. Plugins declared by an npm package
+  // (AppKit's or another) import from a plain package specifier.
   if (!JS_IDENTIFIER.test(exportName)) {
     return { status: "skipped", reason: "invalid plugin export name" };
   }
-  if (!/^[.][./A-Za-z0-9_-]*$/.test(importPath)) {
+  if (
+    !/^[.][./A-Za-z0-9_-]*$/.test(importPath) &&
+    !/^(@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*(\/[\w.-]+)*$/i.test(importPath)
+  ) {
     return { status: "skipped", reason: "invalid plugin import path" };
   }
 
@@ -124,7 +130,7 @@ export function registerPluginInServer(
   const edits = [];
 
   // toPlugin exports are factories, registered as a call: `hello()`.
-  const newElem = `${exportName}()`;
+  const newElem = `${exportName}(${callArgs})`;
 
   // Insert before the first element, matching its indentation so the array
   // formatting is preserved (or inline for a single-line array).

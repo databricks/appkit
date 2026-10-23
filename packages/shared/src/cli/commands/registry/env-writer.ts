@@ -46,13 +46,13 @@ const MANUAL = "__manual__";
 const PICKER_LIMIT = 25;
 
 /** Reads a `.env`-style file into a map; empty when the file is absent. */
-function readEnvFile(file: string): Record<string, string> {
+export function readEnvFile(file: string): Record<string, string> {
   if (!fs.existsSync(file)) return {};
   return parseEnv(fs.readFileSync(file, "utf-8"));
 }
 
 /** Appends text to a file, creating it (with a trailing newline) if needed. */
-function appendToFile(file: string, text: string): void {
+export function appendToFile(file: string, text: string): void {
   if (text === "") return;
   if (fs.existsSync(file)) {
     const existing = fs.readFileSync(file, "utf-8");
