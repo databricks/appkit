@@ -10,7 +10,8 @@ const logger = createLogger("server:dev-obo");
 const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const loopbackPeers = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
-function isLocalRequest(req: Request): boolean {
+/** A same-origin request to this loopback server, judged from the socket and browser metadata. */
+export function isLocalRequest(req: Request): boolean {
   // Check the socket, not Express's proxy-aware IP or forwarded headers.
   if (!loopbackPeers.has(req.socket.remoteAddress ?? "")) return false;
   try {
