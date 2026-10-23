@@ -62,7 +62,6 @@ describe("columnHttpCapabilities", () => {
     expect(columnHttpCapabilities(schema.$tables.users.$columns.token)).toEqual(
       {
         selectable: false,
-        queryable: false,
         creatable: false,
         updatable: false,
         publicKey: false,
@@ -96,7 +95,6 @@ describe("columnHttpCapabilities", () => {
   it("separates generated identities, caller keys, and stamps", () => {
     const { users, invites, sessions } = schema.$tables;
     expect(columnHttpCapabilities(users.$columns.id)).toMatchObject({
-      queryable: true,
       creatable: false,
       publicKey: true,
     });
@@ -119,7 +117,6 @@ describe("columnHttpCapabilities", () => {
     });
     expect(columnHttpCapabilities(users.$columns.profile)).toMatchObject({
       selectable: true,
-      queryable: false,
       updatable: true,
     });
   });
@@ -138,8 +135,6 @@ describe("HTTP capability parity", () => {
 
       expect(facetKeys(api.insert)).toEqual([...table.creatable]);
       expect(facetKeys(api.update)).toEqual([...table.updatable]);
-      expect(facetKeys(api.filters)).toEqual([...table.queryable]);
-      expect(unionMembers(api.orderable)).toEqual([...table.queryable]);
       expect(unionMembers(api.key)).toEqual(
         table.primaryKey ? [table.primaryKey.meta.columnName] : [],
       );
@@ -155,6 +150,5 @@ describe("HTTP capability parity", () => {
       Object.values(entries.get("audits")?.api ?? {}).join("\n"),
     ).not.toContain('"id"');
     expect(entries.get("audits")?.api.key).toBe("never");
-    expect(entries.get("blobs")?.api.orderable).toBe("never");
   });
 });

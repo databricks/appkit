@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 import type { IDatabaseConfig } from "@databricks/appkit/beta";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -54,7 +57,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("inline playground database registration", () => {
+describe("playground database registration", () => {
   test("declares three tables in the conventional schema file", () => {
     expect(Object.keys(schema.$tables)).toEqual([
       "boards",
@@ -63,18 +66,31 @@ describe("inline playground database registration", () => {
     ]);
   });
 
-  test("leaves schema discovery to config/database/schema.ts", () => {
-    expect(databaseConfig.schema).toBeUndefined();
+  test("serves the generated operations registry and configures nothing else", async () => {
+    // Imported after loadApp so it is the module instance index.ts received.
+    const { databaseRoutes } = await import("./database/routes.gen");
+    expect(databaseConfig).toEqual({ routes: databaseRoutes });
+    expect(databaseConfig.routes).toBe(databaseRoutes);
   });
 
-  test("enables reads for all tables and HTTP writes only for boards and notes", () => {
-    expect(databaseConfig.api).toEqual({
-      writes: { tables: ["boards", "notes"] },
-    });
-  });
+  test("lists every routes module and loads the playground schema", async () => {
+    const { databaseRoutes } = await import("./database/routes.gen");
+    const routesDir = path.join(import.meta.dirname, "database", "routes");
+    // The generator's rule: direct *.ts children, not tests, declarations, or output.
+    const onDisk = fs
+      .readdirSync(routesDir)
+      .filter(
+        (file) => file.endsWith(".ts") && !/\.(?:test|d|gen)\.ts$/.test(file),
+      )
+      .map((file) => `server/database/routes/${file}`)
+      .sort();
 
-  test("does not register a removed lifecycle hooks config", () => {
-    expect(databaseConfig).not.toHaveProperty("hooks");
+    // A stale registry would serve a different set than the files declare.
+    expect(databaseRoutes.modules.map((entry) => entry.file).sort()).toEqual(
+      onDisk,
+    );
+    const { schema: served } = await databaseRoutes.schema();
+    expect(Object.keys(served.$tables)).toEqual(Object.keys(schema.$tables));
   });
 
   test("does not register the database when Lakebase is not configured", async () => {
@@ -84,7 +100,7 @@ describe("inline playground database registration", () => {
     );
   });
 
-  test("leaves all board and database HTTP routes to the generated API", async () => {
+  test("adds no Express route beside the operations for boards or the database", async () => {
     const get = vi.fn();
     const post = vi.fn();
     await appConfig.onPluginsReady({
