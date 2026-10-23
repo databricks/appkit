@@ -4,6 +4,9 @@
   "main": "dist/server.js",
   "type": "module",
   "packageManager": "pnpm@11.0.8",
+  "engines": {
+    "node": ">=22.23.4"
+  },
   "scripts": {
     "start": "NODE_ENV=production node --env-file-if-exists=./.env ./dist/server.js",
     "dev": "NODE_ENV=development tsx watch --tsconfig ./tsconfig.server.json --env-file-if-exists=./.env ./server/server.ts",
@@ -49,7 +52,7 @@
     "@tailwindcss/postcss": "4.1.17",
     "@tailwindcss/vite": "4.1.17",
     "@types/express": "5.0.5",
-    "@types/node": "24.6.0",
+    "@types/node": "22.20.5",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
     "@vitejs/plugin-react": "5.0.4",
