@@ -12,6 +12,8 @@ export type {
   UserScopedApp,
   BasePluginConfig,
   CacheConfig,
+  DatabaseOperationContract,
+  DatabricksAppKitDatabaseOperations,
   IAppRouter,
   PluginData,
   StreamExecutionSettings,
