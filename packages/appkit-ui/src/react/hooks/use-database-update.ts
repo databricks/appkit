@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import type { ExactDatabaseParams } from "shared";
 
-import { updateDatabaseRow } from "@/js/database/client";
+import { updateDatabaseRow } from "@/js/database/entity-client";
 import type { DatabaseApiError } from "@/js/database/errors";
 import type {
   DatabaseId,
