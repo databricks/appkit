@@ -4,7 +4,6 @@
 
 import {
   type BasePluginConfig,
-  CacheManager,
   type Counter,
   type Histogram,
   Plugin,
@@ -32,7 +31,6 @@ class TelemetryExamples extends Plugin {
 
   constructor(config: BasePluginConfig) {
     super(config);
-    this.cache = new CacheManager({ enabled: true, ttl: 60 }, this.telemetry);
 
     const meter = this.telemetry.getMeter({ name: "custom-telemetry-example" });
     this.requestCounter = meter.createCounter("app.requests.total", {
