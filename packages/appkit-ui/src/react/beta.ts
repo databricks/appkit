@@ -17,10 +17,10 @@ export {
   useAiSearchQuery,
 } from "./hooks/use-ai-search-query";
 
-// Database read and write hooks. Track the `database` plugin, which ships at
-// beta from '@databricks/appkit/beta'. The client and the registry binding live
-// in '@databricks/appkit-ui/js/beta'; the types the hooks mention are
-// re-exported.
+// Database hooks: the entity read and write hooks, and the operation query and
+// mutation hooks. Track the `database` plugin, which ships at beta from
+// '@databricks/appkit/beta'. The client and the registry binding live in
+// '@databricks/appkit-ui/js/beta'; the types the hooks mention are re-exported.
 export {
   DatabaseApiError,
   type DatabaseApiErrorCode,
@@ -32,6 +32,11 @@ export {
   type DatabaseListPage,
   type DatabaseListParams,
   type DatabaseListRow,
+  type DatabaseMutationName,
+  type DatabaseOperationInput,
+  type DatabaseOperationName,
+  type DatabaseOperationOutput,
+  type DatabaseQueryName,
   type DatabaseRecordParams,
   type DatabaseRecordRow,
   type DatabaseRow,
@@ -62,6 +67,16 @@ export {
   type UseDatabaseRecordResult,
   useDatabaseRecord,
 } from "./hooks/use-database-record";
+export {
+  type DatabaseMutationOutcome,
+  type UseDatabaseMutationResult,
+  useDatabaseMutation,
+} from "./hooks/use-database-mutation";
+export {
+  type UseDatabaseQueryOptions,
+  type UseDatabaseQueryResult,
+  useDatabaseQuery,
+} from "./hooks/use-database-query";
 export {
   type UseDatabaseUpdateOptions,
   type UseDatabaseUpdateResult,

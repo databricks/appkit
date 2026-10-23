@@ -12,474 +12,246 @@ const packageRoot =
 // exceed Vitest's 5s default on CI's 2-core runners.
 vi.setConfig({ testTimeout: 30_000 });
 
+const PROBE = path.join(packageRoot, "__type-tests__", "database.ts");
+
+/**
+ * Compile `source` as the only consumer in its own program, so a fixture's
+ * global augmentation never reaches another probe or the package itself.
+ * Returns every diagnostic as `line TScode message`.
+ */
 function compileTypeProbe(source: string): string[] {
-  const configPath = path.join(packageRoot, "tsconfig.json");
-  const config = ts.readConfigFile(configPath, ts.sys.readFile);
+  const config = ts.readConfigFile(
+    path.join(packageRoot, "tsconfig.json"),
+    ts.sys.readFile,
+  );
   const parsed = ts.parseJsonConfigFileContent(
     config.config,
     ts.sys,
     packageRoot,
   );
-  const filename = path.join(packageRoot, "__type-tests__", "database.ts");
   const host = ts.createCompilerHost(parsed.options);
   const getSourceFile = host.getSourceFile.bind(host);
+  host.fileExists = (file) => file === PROBE || ts.sys.fileExists(file);
+  host.readFile = (file) => (file === PROBE ? source : ts.sys.readFile(file));
+  host.getSourceFile = (file, language, onError, shouldCreate) =>
+    file === PROBE
+      ? ts.createSourceFile(file, source, language, true, ts.ScriptKind.TS)
+      : getSourceFile(file, language, onError, shouldCreate);
 
-  host.fileExists = (candidate) =>
-    candidate === filename || ts.sys.fileExists(candidate);
-  host.readFile = (candidate) =>
-    candidate === filename ? source : ts.sys.readFile(candidate);
-  host.getSourceFile = (candidate, languageVersion, onError, shouldCreate) =>
-    candidate === filename
-      ? ts.createSourceFile(
-          candidate,
-          source,
-          languageVersion,
-          true,
-          ts.ScriptKind.TS,
-        )
-      : getSourceFile(candidate, languageVersion, onError, shouldCreate);
-
-  const program = ts.createProgram([filename], parsed.options, host);
-  return ts
-    .getPreEmitDiagnostics(program)
-    .map((diagnostic) =>
-      ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
-    );
+  const program = ts.createProgram([PROBE], parsed.options, host);
+  return ts.getPreEmitDiagnostics(program).map((diagnostic) => {
+    const where =
+      diagnostic.file?.fileName === PROBE
+        ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start ?? 0)
+            .line + 1
+        : (diagnostic.file?.fileName ?? "global");
+    return `${where} TS${diagnostic.code} ${ts.flattenDiagnosticMessageText(diagnostic.messageText, " ")}`;
+  });
 }
 
-// Entries as `appkit generate-types` renders them (trusted facets omitted: the
-// browser reads only `publicRow`, `includes`, and `api`), bound the same way.
-const REGISTRY = `
-  type Filter<T> = T & { and?: readonly Filter<T>[]; or?: readonly Filter<T>[] };
-  type Text = string | { eq?: string; neq?: string; in?: readonly (string)[]; like?: string; ilike?: string; };
-  type Int = number | { eq?: number; neq?: number; in?: readonly (number)[]; gt?: number; gte?: number; lt?: number; lte?: number; };
-  type Big = bigint | { eq?: bigint; neq?: bigint; in?: readonly (bigint)[]; gt?: bigint; gte?: bigint; lt?: bigint; lte?: bigint; };
+const DIRECTIVE = /\/\/ @ts-expect-error (TS\d+) /g;
 
-  interface Fixture {
-    "users": {
-      publicRow: { "slug": string; "name": string };
-      includes: { "posts": { to: "posts"; many: true } };
-      api: {
-        insert: { "slug": string; "name": string };
-        update: { "name"?: string };
-        filters: Filter<{ "slug"?: Text; "name"?: Text }>;
-        orderable: "slug" | "name";
-        key: "slug";
-      };
-    };
-    "posts": {
-      publicRow: { "id": number; "user_slug": string; "title": string; "total": bigint; "payload": unknown | null };
-      includes: {
-        "users": { to: "users"; many: false };
-        "comments": { to: "comments"; many: true };
-      };
-      api: {
-        insert: { "user_slug": string; "title": string; "total": bigint; "payload"?: unknown | null };
-        update: { "title"?: string; "total"?: bigint; "payload"?: unknown | null };
-        filters: Filter<{ "id"?: Int; "user_slug"?: Text; "title"?: Text; "total"?: Big }>;
-        orderable: "id" | "user_slug" | "title" | "total";
-        key: "id";
-      };
-    };
-    "comments": {
-      publicRow: { "id": number; "post_id": number; "body": string };
-      includes: { "posts": { to: "posts"; many: false } };
-      api: {
-        insert: { "post_id": number; "body": string };
-        update: { "body"?: string };
-        filters: Filter<{ "id"?: Int; "post_id"?: Int; "body"?: Text }>;
-        orderable: "id" | "post_id" | "body";
-        key: "id";
-      };
-    };
-    "ledger": {
-      publicRow: { "seq": bigint; "note": string };
-      includes: {};
-      api: {
-        insert: { "seq": bigint; "note": string };
-        update: { "note"?: string };
-        filters: Filter<{ "seq"?: Big; "note"?: Text }>;
-        orderable: "seq" | "note";
-        key: "seq";
-      };
-    };
-    "sessions": {
-      publicRow: { "user_slug": string };
-      includes: { "users": { to: "users"; many: false } };
-      api: {
-        insert: { "user_slug": string };
-        update: { "user_slug"?: string };
-        filters: Filter<{ "user_slug"?: Text }>;
-        orderable: "user_slug";
-        key: never;
-      };
-    };
-    "events": {
-      publicRow: { "message": string };
-      includes: {};
-      api: {
-        insert: { "message": string };
-        update: { "message"?: string };
-        filters: Filter<{ "message"?: Text }>;
-        orderable: "message";
-        key: never;
-      };
-    };
-  }
+/** The `line TScode` each directive promises for the line after it. */
+function expectedProbes(source: string): string[] {
+  return source.split("\n").flatMap((text, index) => {
+    const match = /\/\/ @ts-expect-error (TS\d+) /.exec(text);
+    return match ? [`${index + 2} ${match[1]}`] : [];
+  });
+}
 
-  declare module "@databricks/appkit-ui/js/beta" {
-    interface DatabaseRegistry extends Fixture {}
+/**
+ * Each probe must fail for the reason its directive names: with the
+ * directives disabled, every probe line reports exactly its own code.
+ */
+function expectEachProbeRejected(source: string): void {
+  expect(compileTypeProbe(source)).toEqual([]);
+  const raw = compileTypeProbe(source.replace(DIRECTIVE, "// probe $1 "));
+  expect(
+    raw
+      .map((finding) => finding.split(" ").slice(0, 2).join(" "))
+      .sort((a, b) => Number(a.split(" ")[0]) - Number(b.split(" ")[0])),
+  ).toEqual(expectedProbes(source));
+}
+
+// Entries as generation renders them into the global registry.
+const GENERATED = `
+  declare global {
+    interface DatabricksAppKitDatabaseOperations {
+      "notes.get": {
+        method: "GET";
+        input: { id: number };
+        output: { id: number; body: string; total: string };
+      };
+      "notes.search": {
+        method: "GET";
+        input: { board_id: number; text?: string };
+        output: { id: number; body: string }[];
+      };
+      "notes.find": {
+        method: "GET";
+        input: { id: number };
+        output: { id: number; body: string } | null;
+      };
+      "notes.create": {
+        method: "POST";
+        input: { board_id: number; body: string; total?: string | number };
+        output: { id: number; body: string; total: string };
+      };
+      "notes.update": {
+        method: "PATCH";
+        input: { id: number; changes: { body?: string } };
+        output: { id: number; body: string; total: string };
+      };
+      "notes.replace": {
+        method: "PUT";
+        input: { id: number; values: { body: string } };
+        output: { id: number; body: string; total: string };
+      };
+      "notes.delete": {
+        method: "DELETE";
+        input: { id: number };
+        output: void;
+      };
+    }
   }
 `;
 
-test("read hooks type entities, params, and rows from the generated registry", () => {
+const IMPORTS = `
+  import { databaseApi } from "@databricks/appkit-ui/js/beta";
+  import {
+    type DatabaseApiError,
+    type DatabaseMutationName,
+    type DatabaseMutationOutcome,
+    type DatabaseOperationInput,
+    type DatabaseOperationName,
+    type DatabaseOperationOutput,
+    type DatabaseQueryName,
+    useDatabaseMutation,
+    useDatabaseQuery,
+  } from "@databricks/appkit-ui/react/beta";
+`;
+
+test("names, inputs, and answers come from the generated operations", () => {
   const diagnostics = compileTypeProbe(`
-    import { databaseApi } from "@databricks/appkit-ui/js/beta";
-    import {
-      type DatabaseEntity,
-      type DatabaseKeyedEntity,
-      useDatabaseList,
-      useDatabaseRecord,
-    } from "@databricks/appkit-ui/react/beta";
+    ${IMPORTS}
+    ${GENERATED}
 
-    ${REGISTRY}
+    type Equal<A, B> =
+      (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+    type Expect<T extends true> = T;
+    type Note = { id: number; body: string; total: string };
 
-    const keyed: DatabaseKeyedEntity[] = ["users", "posts", "comments", "ledger"];
-    const listable: DatabaseEntity[] = ["sessions", "events"];
-    void [keyed, listable];
+    export type Names = [
+      Expect<Equal<DatabaseOperationName, "notes.get" | "notes.search" | "notes.find" | "notes.create" | "notes.update" | "notes.replace" | "notes.delete">>,
+      Expect<Equal<DatabaseQueryName, "notes.get" | "notes.search" | "notes.find">>,
+      Expect<Equal<DatabaseMutationName, "notes.create" | "notes.update" | "notes.replace" | "notes.delete">>,
+      Expect<Equal<DatabaseOperationInput<"notes.update">, { id: number; changes: { body?: string } }>>,
+      Expect<Equal<DatabaseOperationOutput<"notes.delete">, void>>,
+    ];
 
-    export function Lists() {
-      const users = useDatabaseList("users", {
-        where: { name: { ilike: "%ada%" } },
-        include: { posts: { limit: 2, select: ["title", "total"] } },
-      });
-      const title: string | undefined = users.data?.items[0]?.posts[0]?.title;
-      // A bigint travels as its decimal string.
-      const total: string | undefined = users.data?.items[0]?.posts[0]?.total;
-      // @ts-expect-error unselected relation columns are absent
-      users.data?.items[0]?.posts[0]?.user_slug;
-      const failed: "NOT_EXPOSED" | "NOT_FOUND" | undefined =
-        users.error?.code === "NOT_EXPOSED" || users.error?.code === "NOT_FOUND"
-          ? users.error.code
-          : undefined;
-      users.refetch();
-
-      const posts = useDatabaseList("posts", { include: { users: true, comments: { limit: 3 } } });
-      const owner: { slug: string; name: string } | null | undefined = posts.data?.items[0]?.users;
-      const bodies: string[] | undefined = posts.data?.items[0]?.comments.map((c) => c.body);
-      const nested = useDatabaseList("users", { include: { posts: { include: { comments: { limit: 1 } } } } });
-      const deep: number | undefined = nested.data?.items[0]?.posts[0]?.comments[0]?.id;
-      const gated = useDatabaseList("posts", { where: { id: 1 } }, { enabled: false });
-      const gatedTitle: string | undefined = gated.data?.items[0]?.title;
-      useDatabaseList("sessions", { order: { user_slug: "asc" } });
-      // @ts-expect-error a keyless list needs an explicit order
-      useDatabaseList("sessions");
-      // @ts-expect-error keyless lists cannot sort by zero columns
-      useDatabaseList("sessions", { order: {} });
-      useDatabaseList("posts", { where: { total: { gt: "9007199254740993" } } });
-      void [title, total, failed, owner, bodies, deep, gatedTitle];
+    export function Reads(selected: number | undefined) {
+      const note = useDatabaseQuery("notes.get", { id: 1 });
+      const loading: boolean = note.isLoading;
+      const error: DatabaseApiError | null = note.error;
+      note.refetch();
+      const found = useDatabaseQuery("notes.find", { id: 1 });
+      const search = useDatabaseQuery(
+        "notes.search",
+        { board_id: selected ?? 0 },
+        { enabled: selected !== undefined },
+      );
+      const bodies: string[] | undefined = search.data?.map((row) => row.body);
+      void [loading, error, bodies];
+      return [
+        true as Expect<Equal<typeof note.data, Note | undefined>>,
+        // An explicit nullable answer keeps null apart from "not yet".
+        true as Expect<Equal<typeof found.data, { id: number; body: string } | null | undefined>>,
+      ];
     }
 
-    export function DynamicSelections() {
-      const columns: ("id" | "title")[] = ["id"];
-      const list = useDatabaseList("posts", { select: columns });
-      const record = useDatabaseRecord("posts", 7, { select: columns });
-      if (list.data && record.data) {
-        const maybeTitle: string | undefined = list.data.items[0].title;
-        // @ts-expect-error a dynamic array does not guarantee every possible column
-        const listTitle: string = list.data.items[0].title;
-        // @ts-expect-error the record follows the same dynamic projection rule
-        const recordId: number = record.data.id;
-        void [maybeTitle, listTitle, recordId];
+    export async function Writes() {
+      const create = useDatabaseMutation("notes.create");
+      const outcome = await create.mutate({ board_id: 1, body: "hi", total: "9007199254740993" });
+      if (outcome.error === null) {
+        const created: Note = outcome.data;
+        void created;
+      } else {
+        const code: string = outcome.error.code;
+        const nothing: undefined = outcome.data;
+        void [code, nothing];
       }
+      const removed = await useDatabaseMutation("notes.delete").mutate({ id: 1 });
+      await useDatabaseMutation("notes.update").mutate({ id: 1, changes: {} });
+      await useDatabaseMutation("notes.replace").mutate({ id: 1, values: { body: "x" } });
+      create.reset();
+      return [
+        true as Expect<Equal<typeof create.data, Note | undefined>>,
+        true as Expect<Equal<typeof create.isLoading, boolean>>,
+        true as Expect<Equal<typeof removed, DatabaseMutationOutcome<void>>>,
+      ];
     }
 
-    export function RejectedLists() {
-      // @ts-expect-error entities are generated table names
-      useDatabaseList("missing");
-      // @ts-expect-error private columns are absent from public rows
-      useDatabaseList("users").data?.items[0]?.secret;
-      // @ts-expect-error private columns are not HTTP filters, even beside a valid one
-      useDatabaseList("users", { where: { name: "Ada", secret: "token" } });
-      // @ts-expect-error private columns are not selectable
-      useDatabaseList("users", { select: ["slug", "secret"] });
-      // @ts-expect-error JSON columns are not queryable
-      useDatabaseList("posts", { where: { payload: { eq: 1 } } });
-      // @ts-expect-error a to-one relation is one row, not an array
-      useDatabaseList("posts", { include: { users: true } }).data?.items[0]?.users?.length;
-      // @ts-expect-error a to-one include takes no limit
-      useDatabaseList("posts", { include: { users: { limit: 1 } } });
-      // @ts-expect-error includes stop at two relation edges
-      useDatabaseList("users", { include: { posts: { include: { comments: { include: { posts: true } } } } } });
-      // @ts-expect-error list params are the generated route's parameters only
-      useDatabaseList("users", { limit: 1, includeTotal: true });
-    }
-
-    export function Records(boardId: number | undefined) {
-      const post = useDatabaseRecord("posts", 7, { include: { comments: { limit: 20 } } });
-      const body: string | undefined = post.data?.comments[0]?.body;
-      const title: string | undefined = post.data?.title;
-      const user = useDatabaseRecord("users", "ada", { select: ["name"] });
-      const name: string | undefined = user.data?.name;
-      // A null or undefined id waits without a request.
-      useDatabaseRecord("posts", null);
-      useDatabaseRecord("posts", boardId);
-      // A bigint key is addressed by its decimal string, a safe integer, or a bigint.
-      const seq: string | undefined = useDatabaseRecord("ledger", "9007199254740993").data?.seq;
-      useDatabaseRecord("ledger", 10);
-      useDatabaseRecord("ledger", 10n);
-      void [body, title, name, seq];
-    }
-
-    export function RejectedRecords() {
-      // @ts-expect-error keyless entities have no detail route
-      useDatabaseRecord("events", "x");
-      // @ts-expect-error a private key is not addressable over HTTP
-      useDatabaseRecord("sessions", "token");
-      // @ts-expect-error the id has the public key's type
-      useDatabaseRecord("posts", "7");
-      // @ts-expect-error record params are select and include only
-      useDatabaseRecord("posts", 7, { where: { id: 7 } });
-      // @ts-expect-error private columns are not selectable on a record
-      useDatabaseRecord("users", "ada", { select: ["secret"] });
-      // @ts-expect-error unselected columns are absent
-      useDatabaseRecord("users", "ada", { select: ["name"] }).data?.slug;
-    }
-
-    export async function client() {
-      const post = await databaseApi.get("posts", 7, { select: ["id", "title"] });
-      const title: string = post.title;
-      // @ts-expect-error unselected columns are absent
-      post.total;
-      // @ts-expect-error keyless entities have no detail route
-      await databaseApi.get("events", "x");
-      // @ts-expect-error record params are the generated route's parameters only
-      await databaseApi.get("posts", 7, { select: ["id"], limit: 1 });
-      void title;
+    export async function Client(signal: AbortSignal) {
+      const note = await databaseApi.execute("notes.get", { id: 1 }, { signal });
+      const removed = await databaseApi.execute("notes.delete", { id: 1 });
+      const created = await databaseApi.execute("notes.create", { board_id: 1, body: "x" });
+      return [
+        true as Expect<Equal<typeof note, Note>>,
+        true as Expect<Equal<typeof removed, void>>,
+        true as Expect<Equal<typeof created, Note>>,
+      ];
     }
   `);
 
   expect(diagnostics).toEqual([]);
 });
 
-test("read rows come only from the registry: no shape, serialized<T>(), or row type argument", () => {
-  const diagnostics = compileTypeProbe(`
-    import { useDatabaseList, useDatabaseRecord } from "@databricks/appkit-ui/react/beta";
-
-    ${REGISTRY}
-
-    interface PostCard { id: number; headline: string }
-
-    export function Controls() {
-      // The probes below differ from these calls only in what was removed.
-      useDatabaseList<"posts", {}>("posts", {});
-      useDatabaseRecord<"posts", {}>("posts", 7);
-      useDatabaseList("posts", {}, { enabled: false });
-      useDatabaseRecord("posts", 7, {}, { enabled: false });
-    }
-
-    export function Removed() {
-      // @ts-expect-error a list takes no caller-chosen row type
-      useDatabaseList<"posts", {}, PostCard>("posts", {});
-      // @ts-expect-error a record takes no caller-chosen row type
-      useDatabaseRecord<"posts", {}, PostCard>("posts", 7);
-      // @ts-expect-error a list takes no shape option
-      useDatabaseList("posts", {}, { shape: (row: unknown) => row as PostCard });
-      // @ts-expect-error a record takes no shape option
-      useDatabaseRecord("posts", 7, {}, { shape: (row: unknown) => row as PostCard });
-    }
-
-    // @ts-expect-error serialized<T>() is not exported
-    export type Serialized = typeof import("@databricks/appkit-ui/react/beta").serialized;
-    // @ts-expect-error DatabaseShape is not exported
-    export type Shape = import("@databricks/appkit-ui/react/beta").DatabaseShape<PostCard>;
-    // @ts-expect-error DatabaseRowShape is not exported
-    export type RowShape = import("@databricks/appkit-ui/react/beta").DatabaseRowShape<PostCard>;
-  `);
-
-  expect(diagnostics).toEqual([]);
+test("each misuse fails with its own diagnostic", () => {
+  expectEachProbeRejected(`${IMPORTS}
+${GENERATED}
+export async function Rejected() {
+  // @ts-expect-error TS2345 a write is not a query, so it never runs on mount
+  useDatabaseQuery("notes.create", { board_id: 1, body: "x" });
+  // @ts-expect-error TS2345 a read is not a mutation
+  useDatabaseMutation("notes.get");
+  // @ts-expect-error TS2345 names come from the generated registry
+  useDatabaseQuery("notes.missing", { id: 1 });
+  // @ts-expect-error TS2322 the input keeps its JSON types
+  useDatabaseQuery("notes.get", { id: "1" });
+  // @ts-expect-error TS2353 an undeclared input field is refused
+  useDatabaseQuery("notes.get", { id: 1, secret: true });
+  // @ts-expect-error TS2554 the input is required
+  useDatabaseQuery("notes.get");
+  // @ts-expect-error TS2353 query options are enabled only
+  useDatabaseQuery("notes.get", { id: 1 }, { keepPreviousData: true });
+  // @ts-expect-error TS2532 data is undefined until it arrives
+  useDatabaseQuery("notes.get", { id: 1 }).data.body;
+  // @ts-expect-error TS2345 required write fields stay required
+  useDatabaseMutation("notes.create").mutate({ board_id: 1 });
+  // @ts-expect-error TS2353 an undeclared write field is refused
+  useDatabaseMutation("notes.create").mutate({ board_id: 1, body: "x", id: 9 });
+  // @ts-expect-error TS2554 a mutation takes its input only through mutate
+  useDatabaseMutation("notes.create", { board_id: 1, body: "x" });
+  const outcome = await useDatabaseMutation("notes.create").mutate({ board_id: 1, body: "x" });
+  // @ts-expect-error TS18048 the answer exists only once the outcome is narrowed
+  outcome.data.id;
+  // @ts-expect-error TS2339 a delete answers no body
+  (await databaseApi.execute("notes.delete", { id: 1 })).id;
+  // @ts-expect-error TS2345 the client takes generated names only
+  await databaseApi.execute("notes.missing", {});
+}
+`);
 });
 
-test("read hooks take null params and keepPreviousData", () => {
-  const diagnostics = compileTypeProbe(`
-    import {
-      type UseDatabaseListResult,
-      type UseDatabaseRecordResult,
-      useDatabaseList,
-      useDatabaseRecord,
-    } from "@databricks/appkit-ui/react/beta";
-
-    ${REGISTRY}
-
-    export function Dependent(userSlug: string | undefined, offset: number) {
-      // Null params hold the read; the non-null branch keeps its exact type.
-      const posts = useDatabaseList(
-        "posts",
-        userSlug === undefined ? null : { where: { user_slug: userSlug }, limit: 20, offset },
-        { keepPreviousData: true },
-      );
-      const title: string | undefined = posts.data?.items[0]?.title;
-      const typed: UseDatabaseListResult<{ id: number; user_slug: string; title: string; total: string; payload: unknown }> = posts;
-      // @ts-expect-error the non-null branch is still checked exactly
-      useDatabaseList("posts", userSlug ? { where: { secret: userSlug } } : null);
-      const post: UseDatabaseRecordResult<{ title: string }> = useDatabaseRecord(
-        "posts",
-        7,
-        { select: ["title"] },
-        { keepPreviousData: true },
-      );
-      void [title, typed, post];
-    }
-  `);
-
-  expect(diagnostics).toEqual([]);
-});
-
-test("write hooks type values, ids, and rows from the generated registry", () => {
-  const diagnostics = compileTypeProbe(`
-    import { databaseApi } from "@databricks/appkit-ui/js/beta";
-    import {
-      type DatabaseInsert,
-      type DatabaseRow,
-      useDatabaseCreate,
-      useDatabaseDelete,
-      useDatabaseUpdate,
-    } from "@databricks/appkit-ui/react/beta";
-
-    ${REGISTRY}
-
-    export function Writes(existing: DatabaseRow<"posts">) {
-      const posts = useDatabaseCreate("posts");
-      // A bigint input travels as a decimal string or a safe integer.
-      posts.create({ user_slug: "ada", title: "Hi", total: "9007199254740993" });
-      posts.create({ user_slug: "ada", title: "Hi", total: 1, payload: { tags: ["a"], n: 1 } });
-      const created: Promise<DatabaseRow<"posts"> | null> = posts.create({ user_slug: "ada", title: "Hi", total: 1 });
-      // The answered row carries a bigint as its decimal string.
-      const total: string | undefined = posts.data?.total;
-      const values: DatabaseInsert<"posts"> = { user_slug: "ada", title: "Hi", total: "1" };
-      posts.create(values);
-      useDatabaseCreate("events").create({ message: "keyless tables accept creates" });
-      useDatabaseCreate("sessions").create({ user_slug: "ada" });
-      useDatabaseCreate("posts", { invalidate: ["posts", "users"] });
-      useDatabaseCreate("posts", { invalidate: false });
-      useDatabaseCreate("posts", {
-        onSuccess: (row, values) => {
-          const id: number = row.id;
-          const title: string = values.title;
-          void [id, title];
-        },
-        onError: (error, values) => {
-          const code: string = error.code;
-          void [code, values.user_slug];
-        },
-      });
-      useDatabaseUpdate("posts", {
-        onSuccess: (row, id, values) => {
-          const title: string = row.title;
-          const key: number = id;
-          const next: string | undefined = values.title;
-          void [title, key, next];
-        },
-      });
-      useDatabaseDelete("ledger", {
-        onSuccess: (id) => {
-          const seq: string | number | bigint = id;
-          void seq;
-        },
-        onError: (error, id) => void [error.status, id],
-      });
-
-      const edit = useDatabaseUpdate("posts");
-      const updated: Promise<DatabaseRow<"posts"> | null> = edit.update(7, { title: "New", total: "2" });
-      edit.update(7, { payload: null });
-      useDatabaseUpdate("ledger").update("9007199254740993", { note: "x" });
-      useDatabaseUpdate("ledger").update(10n, { note: "x" });
-      useDatabaseUpdate("users").update("ada", { name: "Ada" });
-
-      const removal = useDatabaseDelete("posts");
-      const removed: Promise<boolean> = removal.remove(7);
-      const loading: boolean = removal.loading;
-      void [created, total, updated, removed, loading, existing];
-    }
-
-    export function RejectedWrites(existing: DatabaseRow<"posts">) {
-      const posts = useDatabaseCreate("posts");
-      // @ts-expect-error entities are generated table names
-      useDatabaseCreate("missing");
-      // @ts-expect-error a field the public insert lacks is refused, even beside valid ones
-      posts.create({ user_slug: "ada", title: "Hi", total: 1, secret: "token" });
-      // @ts-expect-error a generated key is not an HTTP input
-      posts.create({ id: 1, user_slug: "ada", title: "Hi", total: 1 });
-      // @ts-expect-error a spread cannot carry a read-only field along
-      posts.create({ ...existing, title: "Copy" });
-      // @ts-expect-error required insert fields stay required
-      posts.create({ title: "Hi" });
-      // @ts-expect-error values keep their column types
-      posts.create({ user_slug: "ada", title: 1, total: 1 });
-      // @ts-expect-error invalidation names generated tables
-      useDatabaseCreate("posts", { invalidate: ["missing"] });
-      // @ts-expect-error a create answers the public row, which has no private column
-      useDatabaseCreate("users", { onSuccess: (row) => row.secret });
-      // @ts-expect-error a delete reports the id, not a row
-      useDatabaseDelete("posts", { onSuccess: (id) => id.title });
-
-      // @ts-expect-error keyless entities have no update route
-      useDatabaseUpdate("events");
-      // @ts-expect-error a private key is not addressable over HTTP
-      useDatabaseUpdate("sessions");
-      // @ts-expect-error the id has the public key's type
-      useDatabaseUpdate("posts").update("7", { title: "x" });
-      // @ts-expect-error keys are not updatable
-      useDatabaseUpdate("posts").update(7, { id: 8 });
-      // @ts-expect-error insert-only fields are not updatable
-      useDatabaseUpdate("users").update("ada", { slug: "grace" });
-
-      // @ts-expect-error keyless entities have no delete route
-      useDatabaseDelete("events");
-      // @ts-expect-error the id has the public key's type
-      useDatabaseDelete("posts").remove("7");
-      // @ts-expect-error a delete answers no row
-      useDatabaseDelete("posts").data;
-    }
-
-    export async function client() {
-      const post = await databaseApi.create("posts", { user_slug: "ada", title: "Hi", total: "1" });
-      const id: number = post.id;
-      const total: string = post.total;
-      await databaseApi.update("posts", 7, { title: "New" });
-      const removed: void = await databaseApi.remove("posts", 7);
-      // @ts-expect-error a field the public insert lacks is refused
-      await databaseApi.create("users", { slug: "ada", name: "Ada", secret: "token" });
-      // @ts-expect-error keyless entities have no update route
-      await databaseApi.update("events", "x", { message: "y" });
-      // @ts-expect-error keyless entities have no delete route
-      await databaseApi.remove("events", "x");
-      // @ts-expect-error update values are the public update facet only
-      await databaseApi.update("posts", 7, { title: "New", user_slug: "grace" });
-      void [id, total, removed];
-    }
-  `);
-
-  expect(diagnostics).toEqual([]);
-});
-
-test("no entity exists before typegen binds the registry", () => {
-  const diagnostics = compileTypeProbe(`
-    import {
-      useDatabaseCreate,
-      useDatabaseList,
-      useDatabaseRecord,
-    } from "@databricks/appkit-ui/react/beta";
-
-    export function Unbound() {
-      // @ts-expect-error the empty registry binds no entity
-      useDatabaseList("notes");
-      // @ts-expect-error the empty registry binds no keyed entity
-      useDatabaseRecord("notes", 1);
-      // @ts-expect-error the empty registry binds no entity to write
-      useDatabaseCreate("notes");
-    }
-  `);
-
-  expect(diagnostics).toEqual([]);
+test("no operation exists before generation fills the registry", () => {
+  expectEachProbeRejected(`${IMPORTS}
+export async function Unbound() {
+  // @ts-expect-error TS2345 the empty registry declares no query
+  useDatabaseQuery("notes.get", { id: 1 });
+  // @ts-expect-error TS2345 the empty registry declares no mutation
+  useDatabaseMutation("notes.create");
+  // @ts-expect-error TS2345 the empty registry declares no operation
+  await databaseApi.execute("notes.get", { id: 1 });
+}
+`);
 });
