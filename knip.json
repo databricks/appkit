@@ -1,5 +1,6 @@
 {
-  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignoreExportsUsedInFile": { "interface": true, "type": true },
   "ignoreWorkspaces": [
     "packages/shared",
     "packages/lakebase",
@@ -37,8 +38,8 @@
       "ignoreDependencies": ["tailwindcss", "tw-animate-css"]
     }
   },
-  "ignoreDependencies": ["react-docgen-typescript"],
   "ignore": [
+    "**/dist/**",
     "**/*.generated.ts",
     "**/*.example.tsx",
     "**/*.css",
