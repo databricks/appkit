@@ -340,7 +340,7 @@ describe("projection and response limits", () => {
     );
     expect(response.sent.status).toBe(413);
     expect(response.json()).toEqual({
-      error: "Database response is too large",
+      error: "Database payload is too large",
     });
     expect(MAX_RESPONSE_BYTES).toBeLessThan(6 * wide.length);
   });
@@ -364,7 +364,7 @@ describe("projection and response limits", () => {
     );
     expect(response.sent.status).toBe(413);
     expect(response.json()).toEqual({
-      error: "Database response is too large",
+      error: "Database payload is too large",
     });
     expect(touchedSentinel).toBe(false);
   });

@@ -3,6 +3,35 @@ import { ExpressInstrumentation } from "@opentelemetry/instrumentation-express";
 import { HttpInstrumentation } from "@opentelemetry/instrumentation-http";
 
 import { shouldIgnoreRequest } from "../utils/path-exclusions";
+import { routedPath } from "../utils/routed-path";
+
+/** Named database operations carry their GET input in the query string. */
+const OPERATIONS_MOUNT = "/api/database/operations";
+
+/**
+ * Keep an operation request's server span to its path, under either HTTP
+ * semantic convention. Express routes case-insensitively and serves the mount
+ * itself, so the match does too. Returns the path, or undefined for any other
+ * request.
+ */
+function redactOperationQuery(span: any, request: any): string | undefined {
+  const original: unknown = request.originalUrl;
+  if (typeof original !== "string") return undefined;
+  const path = routedPath(original);
+  const lower = path.toLowerCase();
+  if (lower !== OPERATIONS_MOUNT && !lower.startsWith(`${OPERATIONS_MOUNT}/`)) {
+    return undefined;
+  }
+  const attributes = span.attributes ?? {};
+  for (const key of ["http.url", "http.target", "url.full"]) {
+    const value = attributes[key];
+    if (typeof value === "string") span.setAttribute(key, value.split("?")[0]);
+  }
+  if (typeof attributes["url.query"] === "string") {
+    span.setAttribute("url.query", "REDACTED");
+  }
+  return path;
+}
 
 /**
  * Registry of pre-configured instrumentations for common use cases.
@@ -18,8 +47,11 @@ export const instrumentations: Record<string, Instrumentation> = {
 
     applyCustomAttributesOnSpan(span: any, request: any) {
       let spanName: string | null = null;
+      const operationPath = redactOperationQuery(span, request);
 
-      if (request.route) {
+      if (operationPath) {
+        spanName = `${request.method} ${operationPath}`;
+      } else if (request.route) {
         const baseUrl = request.baseUrl || "";
         const url = request.url?.split("?")[0] || "";
         const fullPath = baseUrl + url;
