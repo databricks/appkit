@@ -13,6 +13,7 @@ export const SENTINEL = {
   email: "sentinel.person@example.com",
   input: "input-sentinel-41",
   row: "row-sentinel-secret",
+  privateColumn: "private-column-sentinel-5c",
   error: "exception-sentinel-boom",
   reason: "reason-sentinel-denied",
 };
@@ -25,14 +26,19 @@ export const stringify = (value: unknown) =>
   );
 
 /**
- * The external database edge: an in-memory DataPath over `tables` that stages
- * a transaction and opens the span a pg instrumentation would, with the SQL
- * text, the row values, and the raw driver exception on it. Inserting the
- * value `"explode"` fails like a constraint violation.
+ * A FAKE of the external database edge, not PostgreSQL: an in-memory DataPath
+ * over `tables`. A transaction works on a private copy of every table and
+ * replaces the committed rows only when its callback resolves, so commit and
+ * rollback are observable; there is no isolation between concurrent
+ * transactions and no constraint checking. Each call opens the span a pg
+ * instrumentation would, with the SQL text, the row values, and the raw
+ * driver exception on it. Inserting the value `"explode"`, or any row into a
+ * table passed to `refuseInserts`, fails like a constraint violation.
  */
 export function memoryDatabase(tables: readonly string[]) {
   const committed: Store = Object.fromEntries(tables.map((name) => [name, []]));
   const log: string[] = [];
+  const refused = new Set<string>();
   let nextId = 1;
   const lower = <T>(statement: string, run: () => T): T => {
     const span = trace
@@ -57,7 +63,10 @@ export function memoryDatabase(tables: readonly string[]) {
     count: async (table) => store[table.$name].length,
     insert: async (table, values) =>
       lower(`insert ${stringify(values)}`, () => {
-        if (Object.values(values).includes("explode")) {
+        if (
+          refused.has(table.$name) ||
+          Object.values(values).includes("explode")
+        ) {
           throw new Error(`duplicate key value ${SENTINEL.error}`);
         }
         const row = { id: nextId++, ...values };
@@ -101,7 +110,12 @@ export function memoryDatabase(tables: readonly string[]) {
       }
     },
   });
-  return { path: build(committed), committed, log };
+  return {
+    path: build(committed),
+    committed,
+    log,
+    refuseInserts: (table: string) => void refused.add(table),
+  };
 }
 
 /** The external identity edge: a workspace that answers SCIM `Me` per bearer token. */
@@ -159,12 +173,19 @@ export interface Reply {
 }
 
 /**
- * Raw HTTP, so tests control Host, Origin, and fetch metadata exactly. The
- * harness's own client is untraced: in production the browser is the client.
+ * Raw HTTP, so tests control Host, Origin, fetch metadata, and the request
+ * target exactly. `absoluteForm` sends the whole URL as the target, as a
+ * client talking to a proxy does. The harness's own client is untraced: in
+ * production the browser is the client.
  */
 export function send(
   url: string,
-  options: { method?: string; headers?: Record<string, string>; body?: string },
+  options: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+    absoluteForm?: boolean;
+  },
 ): Promise<Reply> {
   const headers = { ...options.headers };
   if (options.body !== undefined) {
@@ -174,9 +195,17 @@ export function send(
     suppressTracing(context.active()),
     () =>
       new Promise<Reply>((resolve, reject) => {
+        const target = new URL(url);
         const req = http.request(
-          url,
-          { method: options.method ?? "GET", headers },
+          {
+            host: target.hostname,
+            port: target.port,
+            path: options.absoluteForm
+              ? target.href
+              : target.pathname + target.search,
+            method: options.method ?? "GET",
+            headers,
+          },
           (res) => {
             let body = "";
             res.setEncoding("utf8");

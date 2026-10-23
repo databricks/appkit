@@ -239,8 +239,49 @@ export async function Rejected() {
   (await databaseApi.execute("notes.delete", { id: 1 })).id;
   // @ts-expect-error TS2345 the client takes generated names only
   await databaseApi.execute("notes.missing", {});
+  // @ts-expect-error TS2339 the entity CRUD client is gone
+  await databaseApi.list("notes");
 }
 `);
+});
+
+test("removed entity CRUD hooks, types, and serializer shapes are not exported", () => {
+  const removedHooks = [
+    "useDatabaseList",
+    "useDatabaseRecord",
+    "useDatabaseCreate",
+    "useDatabaseUpdate",
+    "useDatabaseDelete",
+    "invalidateDatabaseReads",
+    "serialized",
+    "DatabaseShape",
+    "DatabaseRowShape",
+    "UseDatabaseReadResult",
+    "UseDatabaseWriteState",
+    "DatabaseInvalidation",
+    "DatabaseEntity",
+    "DatabaseKeyedEntity",
+    "DatabaseListPage",
+    "DatabaseRow",
+  ];
+  const removedClient = [
+    "DatabaseRegistry",
+    "DatabaseListParams",
+    "DatabaseInsert",
+    "DatabaseUpdate",
+  ];
+  expectEachProbeRejected(
+    [
+      ...removedHooks.map(
+        (name) =>
+          `// @ts-expect-error TS2694 ${name} is removed\nexport type Removed_${name} = import("@databricks/appkit-ui/react/beta").${name};`,
+      ),
+      ...removedClient.map(
+        (name) =>
+          `// @ts-expect-error TS2694 ${name} is removed\nexport type Client_${name} = import("@databricks/appkit-ui/js/beta").${name};`,
+      ),
+    ].join("\n"),
+  );
 });
 
 test("no operation exists before generation fills the registry", () => {

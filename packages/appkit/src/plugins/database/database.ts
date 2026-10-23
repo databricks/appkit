@@ -2,33 +2,96 @@ import type express from "express";
 import pc from "picocolors";
 import type { BasePluginConfig, PluginConstructor } from "shared";
 
+import { ServiceContext } from "../../context/service-context";
 import {
   DatabasePluginError,
   databaseSetupFailed,
 } from "../../database/errors";
 import type { Schema } from "../../database/schema-builder";
 import { assertFinalizedSchema } from "../../database/schema-builder/define-schema";
+import { createLogger } from "../../logging/logger";
 import { Plugin } from "../../plugin";
 import type { PluginManifest } from "../../registry";
 import { assertDatabaseConfig } from "./config";
-import { compileCrudTables, type CrudTable } from "./crud/contract";
-import { type CrudExposure, resolveCrudExposure } from "./crud/exposure";
-import { routeOutcome } from "./crud/response";
-import {
-  type CrudEntity,
-  type CrudOperation,
-  type CrudRouteDeps,
-  createCreateHandler,
-  createDeleteHandler,
-  createDetailHandler,
-  createListHandler,
-  createUpdateHandler,
-} from "./crud/routes";
 import type { DatabaseExports } from "./entity-types";
 import { createDatabaseState, type DatabaseState } from "./lifecycle";
 import { loadDefaultDatabaseSchema } from "./load-schema";
 import manifest from "./manifest.json";
+import { createActorResolver, selectActorBoundary } from "./operation-actor";
+import { validateOperationMetadata } from "./operation-metadata";
+import {
+  createOperationHandler,
+  OPERATIONS_PATH,
+  operationPath,
+} from "./operation-runtime";
+import type {
+  DatabaseRoutes,
+  LocatedDeclaration,
+  OperationAppKit,
+  OperationMethod,
+} from "./operations";
 import type { DefaultDatabaseSchema, IDatabaseConfig } from "./types";
+
+const logger = createLogger("database");
+
+/** The named operations one setup admitted, and the handler that serves them. */
+interface ServedOperations {
+  /** Declared method by operation name, in registry order. */
+  readonly methods: ReadonlyMap<string, OperationMethod>;
+  readonly handler: express.RequestHandler;
+}
+
+/**
+ * The workspace this app is configured for, by the rule
+ * `ServiceContext.createCallerContext` applies: `DATABRICKS_HOST`, or in
+ * development the host the service client resolved. Never a request header.
+ */
+async function workspaceHost(): Promise<string | undefined> {
+  const configured = process.env.DATABRICKS_HOST;
+  if (configured) return configured;
+  if (
+    process.env.NODE_ENV !== "development" ||
+    !ServiceContext.isInitialized()
+  ) {
+    return undefined;
+  }
+  return ServiceContext.get()
+    .client.getHost()
+    .catch(() => undefined);
+}
+
+/** `appkit.database` as AppKit core builds it: this plugin's guarded exports. */
+function serviceDatabase(
+  api: Readonly<Record<string, unknown>>,
+): DatabaseExports {
+  const db = api.database;
+  if (typeof db !== "object" || db === null) {
+    throw new DatabasePluginError("INTERNAL", "read");
+  }
+  return db as DatabaseExports;
+}
+
+/**
+ * Every sibling's service export, read lazily the way `appkit.<name>` reads
+ * it, so one plugin's export never runs for a request that does not use it.
+ * `database` is pinned to the request's `db`.
+ */
+function operationAppKit(
+  api: Readonly<Record<string, unknown>>,
+  db: DatabaseExports,
+): OperationAppKit {
+  const appkit: Record<string, unknown> = Object.create(null);
+  for (const name of Object.keys(api)) {
+    if (name === "database") continue;
+    Object.defineProperty(appkit, name, {
+      enumerable: true,
+      get: () => api[name],
+    });
+  }
+  Object.defineProperty(appkit, "database", { enumerable: true, value: db });
+  // Each entry is the exports() result PluginMap types for that plugin.
+  return Object.freeze(appkit) as OperationAppKit;
+}
 
 /** Schema-driven database plugin */
 export class DatabasePlugin<
@@ -38,19 +101,17 @@ export class DatabasePlugin<
   static manifest = manifest as PluginManifest<"database">;
   declare protected config: IDatabaseConfig<TSchema>;
   private state: DatabaseState | null = null;
+  private served: ServedOperations | undefined;
   private setupPromise: Promise<void> | null = null;
   private draining = false;
   private shutdownPromise: Promise<void> | null = null;
-  private exposure: CrudExposure = { tables: [], writes: new Map() };
-  private resolvedSchema: Schema | null = null;
-  private crudTables: Map<string, CrudTable> | null = null;
 
   constructor(config: IDatabaseConfig<TSchema> = {}) {
     assertDatabaseConfig(config);
     super({ schema: config.schema });
     this.config = {
       schema: config.schema,
-      api: config.api,
+      routes: config.routes,
     };
   }
 
@@ -59,8 +120,10 @@ export class DatabasePlugin<
     if (this.draining || this.state) throw databaseSetupFailed();
     if (!this.setupPromise) {
       const attempt = (async () => {
-        const schema =
-          this.config.schema === undefined
+        const routes = this.config.routes || undefined;
+        const schema = routes
+          ? await this.routesSchema(routes)
+          : this.config.schema === undefined
             ? await loadDefaultDatabaseSchema()
             : this.config.schema;
         try {
@@ -70,11 +133,11 @@ export class DatabasePlugin<
             "schema must be a finalized AppKit schema created with defineSchema().",
           );
         }
+        // Every declaration is checked before the pool exists.
+        const served = routes
+          ? await this.serveRoutes(schema, routes)
+          : undefined;
         if (this.draining) throw databaseSetupFailed();
-        const exposure = resolveCrudExposure(
-          this.config.api,
-          Object.keys(schema.$tables),
-        );
         const candidate = await createDatabaseState(
           schema,
           (operation, options) => this.execute(operation, options),
@@ -85,93 +148,115 @@ export class DatabasePlugin<
           await candidate.pool.end().catch(() => undefined);
           throw databaseSetupFailed();
         }
-        this.resolvedSchema = schema;
-        this.exposure = exposure;
         this.state = candidate;
-        this.printTables(schema);
+        this.served = served;
+        this.printSummary(schema);
       })();
       this.setupPromise = attempt;
     }
     return this.setupPromise;
   }
 
-  /** The HTTP contract of every exposed table, compiled once after setup. */
-  private exposedTables(): Map<string, CrudTable> {
-    if (this.crudTables) return this.crudTables;
-    const schema = this.resolvedSchema;
-    if (!schema) throw databaseSetupFailed();
-    this.crudTables = compileCrudTables(
-      Object.fromEntries(
-        this.exposure.tables.map((name) => [name, schema.$tables[name]]),
-      ),
-    );
-    return this.crudTables;
+  /** The registry's schema; an explicit `schema` must be that same object. */
+  private async routesSchema(routes: DatabaseRoutes): Promise<Schema> {
+    let schema: Schema;
+    try {
+      ({ schema } = await routes.schema());
+    } catch {
+      // Import errors can carry credentials, row values, or application internals.
+      throw databaseSetupFailed(
+        "Could not load the schema of the database routes registry. Check the schema module and its imports.",
+      );
+    }
+    if (this.config.schema !== undefined && this.config.schema !== schema) {
+      throw databaseSetupFailed(
+        "database({ schema }) is not the schema the routes registry loads. Omit schema, or pass that same schema.",
+      );
+    }
+    return schema;
   }
 
-  /** Register generated CRUD, subject to the configured table and write restrictions. */
-  injectRoutes(router: express.Router): void {
-    if (this.exposure.tables.length === 0) return;
-    const tables = this.exposedTables();
-    // Every exposed name is a declared table, so its export is an entity client.
-    const entities = () =>
-      this.exports() as unknown as Record<string, CrudEntity>;
+  /**
+   * Load each routes module in listed order and admit its operations. A
+   * declaration without authorization is skipped with a warning; anything
+   * malformed or duplicated fails setup.
+   */
+  private async serveRoutes(
+    schema: Schema,
+    routes: DatabaseRoutes,
+  ): Promise<ServedOperations | undefined> {
+    const located: LocatedDeclaration[] = [];
+    for (const { file, load } of routes.modules) {
+      let exported: [string, unknown][];
+      try {
+        exported = Object.entries(await load());
+      } catch {
+        throw databaseSetupFailed(
+          `Could not load the database routes module ${JSON.stringify(file)}. Check the module and its imports.`,
+        );
+      }
+      for (const [exportName, value] of exported) {
+        located.push({ file, exportName, value });
+      }
+    }
+    const { operations, skipped, errors } = validateOperationMetadata(
+      located,
+      new Set(Object.keys(schema.$tables)),
+    );
+    if (errors.length > 0) {
+      throw databaseSetupFailed(
+        ["invalid database operations:", ...errors.map((e) => e.message)].join(
+          "\n  ",
+        ),
+      );
+    }
+    for (const issue of skipped) logger.warn("%s", issue.message);
+    if (operations.length === 0) return undefined;
 
-    for (const table of tables.values()) {
-      const deps: CrudRouteDeps = {
-        table,
-        entity: () => entities()[table.name],
-        runRouteSpan: (operation, route, run) =>
-          this.runRouteSpan(table.name, operation, route, run),
-      };
-      if (table.primaryKey || table.queryable.size > 0) {
-        this.route(router, {
-          name: `${table.name}.list`,
-          method: "get",
-          path: `/${table.name}`,
-          handler: createListHandler(deps),
-        });
-      }
-      const writes = this.exposure.writes.get(table.name);
-      if (writes?.has("create")) {
-        this.route(router, {
-          name: `${table.name}.create`,
-          method: "post",
-          path: `/${table.name}`,
-          handler: createCreateHandler(deps),
-        });
-      }
-      // Addressing one row needs a public key.
-      if (!table.primaryKey) continue;
-      this.route(router, {
-        name: `${table.name}.detail`,
-        method: "get",
-        path: `/${table.name}/:id`,
-        handler: createDetailHandler(deps),
-      });
-      if (writes?.has("update")) {
-        this.route(router, {
-          name: `${table.name}.update`,
-          method: "patch",
-          path: `/${table.name}/:id`,
-          handler: createUpdateHandler(deps),
-        });
-      }
-      if (writes?.has("delete")) {
-        this.route(router, {
-          name: `${table.name}.delete`,
-          method: "delete",
-          path: `/${table.name}/:id`,
-          handler: createDeleteHandler(deps),
-        });
-      }
+    const boundary = selectActorBoundary(await workspaceHost());
+    if (boundary.kind === "unsupported") {
+      logger.warn(
+        "No caller identity can be verified in this deployment, so every database operation answers 401",
+      );
+    }
+    return {
+      methods: new Map(
+        operations.map(({ name, method }) => [name, method] as const),
+      ),
+      handler: createOperationHandler({
+        schema,
+        operations,
+        resolveActor: createActorResolver(boundary),
+        services: () => {
+          const api = this.context?.getServiceApi();
+          // Draining, or outside AppKit core: an admitted request fails closed.
+          if (!api || this.draining) {
+            throw new DatabasePluginError("INTERNAL", "read");
+          }
+          const db = serviceDatabase(api);
+          return { db, appkit: operationAppKit(api, db) };
+        },
+        telemetry: this.telemetry,
+      }),
+    };
+  }
+
+  /** Serve the admitted operations; without any, register nothing. */
+  injectRoutes(router: express.Router): void {
+    const served = this.served;
+    if (!served) return;
+    // The handler reads a body only after it has authenticated the caller.
+    this.skipBodyParsingUnder(OPERATIONS_PATH);
+    router.use(OPERATIONS_PATH, served.handler);
+    for (const name of served.methods.keys()) {
+      this.registerEndpoint(name, `/api/database${operationPath(name)}`);
     }
   }
 
-  /** Name every declared table once at boot, beside what reaches it over HTTP. */
-  private printTables(schema: Schema): void {
+  /** Name every declared table, and every operation HTTP serves, once at boot. */
+  private printSummary(schema: Schema): void {
     const names = Object.keys(schema.$tables).sort();
     if (names.length === 0) return;
-    const exposed = new Set(this.exposure.tables);
     const separator = pc.dim("─".repeat(60));
     const rows = names.map((name) => {
       const table = schema.$tables[name];
@@ -181,12 +266,11 @@ export class DatabasePlugin<
         name,
         columns: `${columns} ${columns === 1 ? "column" : "columns"}`,
         relations: `${relations} ${relations === 1 ? "relation" : "relations"}`,
-        serverOnly: !exposed.has(name),
       };
     });
     const nameWidth = Math.max(...rows.map((r) => r.name.length));
     const columnsWidth = Math.max(...rows.map((r) => r.columns.length));
-    const relationsWidth = Math.max(...rows.map((r) => r.relations.length));
+    const operations = [...(this.served?.methods ?? [])];
 
     console.log("");
     console.log(`  ${pc.bold("Tables")} ${pc.dim(`(${names.length})`)}`);
@@ -194,39 +278,30 @@ export class DatabasePlugin<
     for (const row of rows) {
       const name = pc.bold(row.name.padEnd(nameWidth));
       const columns = pc.dim(row.columns.padEnd(columnsWidth));
-      const line = row.serverOnly
-        ? `${pc.dim(row.relations.padEnd(relationsWidth))}   ${pc.yellow("server-only")}`
-        : pc.dim(row.relations);
-      console.log(`  ${name}   ${columns}   ${line}`);
+      console.log(`  ${name}   ${columns}   ${pc.dim(row.relations)}`);
+    }
+    if (operations.length > 0) {
+      console.log(`  ${separator}`);
+      console.log(
+        `  ${pc.bold("Operations")} ${pc.dim(`(${operations.length})`)}`,
+      );
+      console.log(`  ${separator}`);
+      for (const [name, method] of operations) {
+        console.log(`  ${pc.dim(method.padEnd(6))}   ${pc.bold(name)}`);
+      }
     }
     console.log(`  ${separator}`);
     console.log("");
   }
 
   /**
-   * Publish `{ relations: { table: { relation: targetTable } } }` so the React
-   * clients can tell which reads a write affects: a `boards` read that includes
-   * `notes` shows notes rows. Only edges between exposed tables exist, and
-   * they are the names `include` already accepts, so this reveals nothing the
-   * routes and the generated types do not.
+   * Publish `{ operations: { [name]: method } }` for every served operation.
+   * The browser client pairs each method with the endpoint its name
+   * registered, and sends nothing for a name absent from both.
    */
   clientConfig(): Record<string, unknown> {
-    if (!this.resolvedSchema || this.exposure.tables.length === 0) return {};
-    // Built as own entries, so no table or relation name reaches a prototype.
-    const relations = Object.fromEntries(
-      [...this.exposedTables().values()]
-        .filter((table) => table.relations.size > 0)
-        .map((table) => [
-          table.name,
-          Object.fromEntries(
-            [...table.relations].map(([name, edge]) => [
-              name,
-              edge.target.name,
-            ]),
-          ),
-        ]),
-    );
-    return Object.keys(relations).length > 0 ? { relations } : {};
+    const served = this.served;
+    return served ? { operations: Object.fromEntries(served.methods) } : {};
   }
 
   /** Return the typed database API only while the plugin is active. */
@@ -259,36 +334,6 @@ export class DatabasePlugin<
     })();
     return this.shutdownPromise;
   }
-
-  /** Trace one generated route with allowlisted, low-cardinality attributes. */
-  private runRouteSpan(
-    table: string,
-    operation: CrudOperation,
-    route: string,
-    run: () => Promise<void>,
-  ): Promise<void> {
-    return this.telemetry.startActiveSpan(
-      "database.crud.route",
-      {
-        attributes: {
-          table_name: table,
-          operation,
-          "http.route": `/api/${this.name}${route}`,
-        },
-      },
-      async (span) => {
-        try {
-          await run();
-          span.setAttribute("outcome", "success");
-        } catch (error) {
-          span.setAttribute("outcome", routeOutcome(error));
-          throw error;
-        } finally {
-          span.end();
-        }
-      },
-    );
-  }
 }
 
 type DatabaseRegistration<TSchema extends Schema> = {
@@ -307,9 +352,11 @@ export function database<TSchema extends Schema>(
   config: IDatabaseConfig<TSchema> & { readonly schema: TSchema };
 };
 /**
- * Register the database plugin with opinionated defaults and full HTTP CRUD.
- * By default, setup loads the named `schema` export from the application's
- * `config/database/schema.ts`. Registration itself performs no file or database I/O.
+ * Register the database plugin. Pass `routes: databaseRoutes` to serve the
+ * generated named operations over HTTP; without it, no database endpoint is
+ * registered. Without `routes` or `schema`, setup loads the named `schema`
+ * export from the application's `config/database/schema.ts`. Registration
+ * itself performs no file or database I/O.
  */
 export function database<TSchema extends Schema = DefaultDatabaseSchema>(
   config?: IDatabaseConfig<TSchema>,
