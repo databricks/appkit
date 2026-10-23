@@ -1,3 +1,4 @@
+import type { DatabaseApiEntry } from "shared";
 import { describe, expectTypeOf, it } from "vitest";
 
 import type { DatabaseRegistryEntry, RegisteredEntity } from "../index";
@@ -55,5 +56,8 @@ describe("DatabaseRegistryEntry shape", () => {
     expectTypeOf<
       DatabaseRegistryEntry["hasPrimaryKey"]
     >().toEqualTypeOf<boolean>();
+    expectTypeOf<DatabaseRegistryEntry["api"]>().toEqualTypeOf<
+      DatabaseApiEntry["api"]
+    >();
   });
 });
