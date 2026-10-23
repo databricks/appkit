@@ -66,7 +66,7 @@
     "@release-it/conventional-changelog": "10.0.4",
     "@testing-library/dom": "10.4.1",
     "@testing-library/react": "16.3.0",
-    "@types/node": "24.7.2",
+    "@types/node": "22.20.5",
     "@vitejs/plugin-react": "5.0.4",
     "@vitest/coverage-istanbul": "3.2.4",
     "esbuild": "0.25.10",
