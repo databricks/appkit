@@ -135,6 +135,15 @@ export class AppKit<TPlugins extends InputPluginMap> {
         });
       }
     }
+
+    const serviceApi: Record<string, unknown> = Object.create(null);
+    for (const name of Object.keys(this.#pluginInstances)) {
+      Object.defineProperty(serviceApi, name, {
+        enumerable: true,
+        get: () => this.wrapWithAsUser(this.#pluginInstances[name]),
+      });
+    }
+    this.#context.registerServiceApi(Object.freeze(serviceApi));
   }
 
   private createAndRegisterPlugin<T extends PluginConstructor>(

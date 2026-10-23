@@ -157,11 +157,12 @@ describe("encodeDatabaseRecordQuery", () => {
 describe("databaseErrorCategoryForStatus", () => {
   it("reads every generated status back into its stable category", () => {
     expect(
-      [400, 403, 404, 409, 413, 415, 422, 503].map(
+      [400, 401, 403, 404, 409, 413, 415, 422, 503].map(
         databaseErrorCategoryForStatus,
       ),
     ).toEqual([
       "INVALID_REQUEST",
+      "UNAUTHENTICATED",
       "FORBIDDEN",
       "NOT_FOUND",
       "CONFLICT",
@@ -175,6 +176,5 @@ describe("databaseErrorCategoryForStatus", () => {
   it("treats any other status as INTERNAL", () => {
     expect(databaseErrorCategoryForStatus(500)).toBe("INTERNAL");
     expect(databaseErrorCategoryForStatus(502)).toBe("INTERNAL");
-    expect(databaseErrorCategoryForStatus(401)).toBe("INTERNAL");
   });
 });

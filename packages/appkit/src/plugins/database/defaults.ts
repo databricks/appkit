@@ -32,6 +32,8 @@ export const TRANSACTION_TIMEOUT_MS = 30_000;
 // Request decoding: rejected before any database work is scheduled.
 /** Max encoded size of a generated read query string. */
 export const MAX_QUERY_BYTES = 8 * 1024;
+/** Max UTF-8 size of one operation request body. */
+export const MAX_OPERATION_BODY_BYTES = 1024 * 1024;
 /** Max nesting depth of `and`/`or` groups in one generated filter. */
 export const MAX_WHERE_DEPTH = 5;
 /** Max column conditions across one generated filter. */
