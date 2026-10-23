@@ -132,6 +132,21 @@ async function runGenerateTypes(
       });
       console.log(`Generated database types: ${databaseOutFile}`);
     }
+
+    // Generate the routes registry the server loads and the operation
+    // contracts the UI reads. A production run is strict, as in the Vite plugin.
+    const operationsOutFile = path.join(
+      path.dirname(resolvedOutFile),
+      typeGen.DATABASE_OPERATIONS_TYPES_FILE,
+    );
+    await typeGen.generateDatabaseOperations({
+      appRoot: resolvedRootDir,
+      outFile: operationsOutFile,
+      strict: process.env.NODE_ENV === "production",
+    });
+    if (fs.existsSync(path.join(resolvedRootDir, "server/database/routes"))) {
+      console.log(`Generated database operations: ${operationsOutFile}`);
+    }
   } catch (error) {
     if (
       error instanceof Error &&
