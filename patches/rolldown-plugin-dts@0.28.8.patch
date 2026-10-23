@@ -1,0 +1,13 @@
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 35d0f3433d586855feaeee40f905fe7c5f7a7ba5..a7fc3d26dbf3e3a77fb18b9d443a94dc463a8783 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -322,7 +322,7 @@ function createGenerator({ generator, tsconfig, tsconfigRaw, build, incremental,
+ 	if (generator === "oxc") return new OxcGenerator(oxc, languageContext);
+ 	if (generator === "tsgo") return new TsgoGenerator({
+ 		tsgoPath: tsgo.path,
+-		rootDir: tsconfig ? path.dirname(tsconfig) : cwd,
++		rootDir: tsconfig ? path.resolve(path.dirname(tsconfig), tsconfigRaw.compilerOptions?.rootDir ?? ".") : cwd,
+ 		tsconfig,
+ 		sourcemap,
+ 		languageContext

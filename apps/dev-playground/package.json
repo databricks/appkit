@@ -12,7 +12,7 @@
     "build:server": "tsdown --out-dir build server/index.ts 'server/agents/*/agent.ts'",
     "install": "cd client && npm install && cd ..",
     "preview": "vite preview",
-    "check": "tsc",
+    "check": "tsc --noEmit",
     "typecheck:database": "tsc -p client/tsconfig.database.json --noEmit",
     "clean": "rm -rf build && cd client && rm -rf dist",
     "clean:full": "rm -rf build node_modules && cd client && rm -rf dist node_modules",
@@ -36,9 +36,12 @@
   },
   "devDependencies": {
     "@playwright/test": "1.61.0",
+    "@types/express": "4.17.25",
     "@types/node": "22.20.5",
+    "@types/pg": "8.16.0",
+    "apache-arrow": "21.1.0",
     "dotenv": "16.6.1",
-    "tsdown": "0.20.3",
+    "tsdown": "0.23.1",
     "tsx": "4.20.6",
     "vite": "npm:rolldown-vite@7.1.14"
   },

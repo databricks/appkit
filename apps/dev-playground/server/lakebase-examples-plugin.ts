@@ -4,7 +4,7 @@ import {
   type PluginManifest,
   toPlugin,
 } from "@databricks/appkit";
-import type { IAppRouter } from "shared";
+import type { IAppRouter } from "@databricks/appkit";
 
 import * as drizzleExample from "./lakebase-examples/drizzle-example";
 import * as rawExample from "./lakebase-examples/raw-driver-example";

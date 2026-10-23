@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import ts from "typescript";
+import { type JSONCParseError, parseJSONC } from "confbox/jsonc";
 
 /**
  * Rule-firing fixtures for the template's oxlint config.
@@ -603,14 +603,20 @@ interface OxlintConfig {
   overrides?: { files: string[]; rules?: Record<string, RuleSetting> }[];
 }
 
+/** Parses a JSON-with-comments file such as a tsconfig or `.oxlintrc.json`. */
+export function readJsonc<T>(path: string): T {
+  const errors: JSONCParseError[] = [];
+  const value = parseJSONC<T>(readFileSync(path, "utf-8"), {
+    allowTrailingComma: true,
+    errors,
+  });
+  if (errors.length > 0)
+    throw new Error(`${path}: invalid JSON at offset ${errors[0].offset}`);
+  return value;
+}
+
 export function readOxlintConfig(path: string): OxlintConfig {
-  const { config, error } = ts.parseConfigFileTextToJson(
-    path,
-    readFileSync(path, "utf-8"),
-  );
-  if (error)
-    throw new Error(ts.flattenDiagnosticMessageText(error.messageText, "\n"));
-  return config as OxlintConfig;
+  return readJsonc<OxlintConfig>(path);
 }
 
 /** Every rule the config enables at top level or in any override. */
