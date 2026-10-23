@@ -41,9 +41,11 @@ Create the database plugin. Omit configuration to load
 function database<TSchema>(config?: IDatabaseConfig<TSchema>): DatabaseRegistration<TSchema>;
 ```
 
-Register the database plugin with opinionated defaults and full HTTP CRUD.
-By default, setup loads the named `schema` export from the application's
-`config/database/schema.ts`. Registration itself performs no file or database I/O.
+Register the database plugin. Pass `routes: databaseRoutes` to serve the
+generated named operations over HTTP; without it, no database endpoint is
+registered. Without `routes` or `schema`, setup loads the named `schema`
+export from the application's `config/database/schema.ts`. Registration
+itself performs no file or database I/O.
 
 ### Type Parameters
 
