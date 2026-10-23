@@ -90,6 +90,23 @@ describe("compileColumn encode", () => {
     expect(column("name").encode(undefined)).toBeNull();
   });
 
+  it("answers PostgreSQL timestamp text in a form the decoder accepts back", () => {
+    const createdAt = column("createdAt");
+    const samples: [string, string][] = [
+      ["2024-01-01 10:00:00", "2024-01-01T10:00:00"],
+      ["2024-01-01 10:00:00.123456", "2024-01-01T10:00:00.123456"],
+      ["2024-01-01 10:00:00+00", "2024-01-01T10:00:00+00:00"],
+      ["2024-01-01 10:00:00.5-03", "2024-01-01T10:00:00.5-03:00"],
+      ["2024-01-01 10:00:00+05:30", "2024-01-01T10:00:00+05:30"],
+    ];
+    for (const [text, wire] of samples) {
+      expect(createdAt.encode(text)).toBe(wire);
+      expect(createdAt.decode(createdAt.encode(text))).toBe(wire);
+    }
+    // Text that is not an ISO timestamp is answered as the driver gave it.
+    expect(createdAt.encode("infinity")).toBe("infinity");
+  });
+
   it("fails closed when a driver value contradicts its column", () => {
     expect(() => column("name").encode(7)).toThrow(DatabasePluginError);
     expect(() => column("createdAt").encode(new Date())).toThrow(
