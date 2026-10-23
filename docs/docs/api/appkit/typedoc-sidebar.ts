@@ -849,6 +849,11 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Variable.design",
+          label: "design"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Variable.READ_ACTIONS",
           label: "READ_ACTIONS"
         },
