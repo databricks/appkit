@@ -9,7 +9,7 @@ import { createLogger } from "../logging/logger";
 
 // The category vocabulary is shared with the browser client, which reads the
 // same statuses back into the same categories.
-export type { DatabaseErrorCategory, DatabaseErrorDetail } from "shared";
+export type { DatabaseErrorCategory } from "shared";
 
 const logger = createLogger("database");
 

@@ -16,7 +16,7 @@ export interface DatabaseRegistryEntry {
   includes: Record<string, unknown>;
   /** Literal capability used to omit keyed methods from keyless entities. */
   hasPrimaryKey: boolean;
-  /** What the generated HTTP routes accept: public inputs, filters, order, and key. */
+  /** What default operation contracts accept over HTTP: public inputs and key. */
   api: DatabaseApiEntry["api"];
 }
 

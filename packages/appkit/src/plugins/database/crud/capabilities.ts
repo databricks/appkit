@@ -1,21 +1,18 @@
 import type { ColumnMeta } from "../../../database/schema-builder";
-import { filterOperatorsForKind } from "../../../database/schema-builder/types";
 
 /**
- * What one column may do over the generated HTTP routes. The route compiler
- * and the type generator both read these, so the typed browser surface cannot
- * drift from what the server actually accepts.
+ * What one column may do in a named operation's default HTTP contract. The
+ * operation runtime and the type generator both read these, so the typed
+ * browser surface cannot drift from what the server actually accepts.
  */
 export interface ColumnHttpCapabilities {
-  /** A request may project it; every non-private column. */
+  /** A reply may carry it; every non-private column. */
   readonly selectable: boolean;
-  /** A request may filter or order by it; its kind has an operator matrix. */
-  readonly queryable: boolean;
   /** A create body may set it, including a caller-chosen key. */
   readonly creatable: boolean;
   /** An update body may set it; a key or a stamp is never one. */
   readonly updatable: boolean;
-  /** It can address one row in `/:table/:id`. */
+  /** It can address one row as a default contract's `id`. */
   readonly publicKey: boolean;
 }
 
@@ -40,7 +37,6 @@ export function columnHttpCapabilities(
     !(meta.primaryKey && meta.defaultRandom);
   return {
     selectable,
-    queryable: selectable && filterOperatorsForKind(meta.kind).length > 0,
     creatable,
     // Rewriting a key would move a row out from under every existing reference,
     // and rewriting a database-materialized stamp would rewrite history.
