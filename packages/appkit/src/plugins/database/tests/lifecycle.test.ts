@@ -65,7 +65,7 @@ function fakePath(overrides: Partial<DataPath> = {}): DataPath {
 
 type TestEntity = Pick<
   EntityClient,
-  "create" | "toArray" | "where" | "update" | "delete"
+  "create" | "upsert" | "toArray" | "where" | "update" | "delete"
 >;
 type TestTransaction = {
   notes: TestEntity;
@@ -79,7 +79,6 @@ type TestExports = TestTransaction & {
 // The registry is empty until typegen runs, so entities are reached by name.
 const surface = (state: { exports: unknown }) =>
   state.exports as unknown as TestExports;
-const txSurface = (tx: unknown) => tx as TestTransaction;
 
 function arrange(path = fakePath()) {
   const pool = { end: vi.fn(async () => undefined) };
@@ -263,6 +262,23 @@ describe("createDatabaseState", () => {
       category: "INTERNAL",
       phase: "read",
     });
+
+    const bound = fakePath();
+    const root = fakePath({
+      transaction: vi.fn(async (callback) => callback(bound)),
+    });
+    const boundState = await createDatabaseState(schema, arrange(root).execute);
+    vi.mocked(bound.raw).mockRejectedValueOnce(
+      new DatabasePluginError("INTERNAL", "runtime", "bound secret"),
+    );
+    const caught = await surface(boundState)
+      .transaction(async (tx) => tx.sql`bad`)
+      .catch((error: unknown) => error);
+    expect(caught).toMatchObject({
+      category: "INTERNAL",
+      phase: "transaction",
+    });
+    expect(JSON.stringify(caught)).not.toContain("bound secret");
   });
 
   test("commits, rolls back, binds tx capabilities, and expires them", async () => {
@@ -312,21 +328,18 @@ describe("createDatabaseState", () => {
     await expect(stateTwo.exports.sql`select 1`).resolves.toEqual([]);
   });
 
-  test("runs a hooked mutation in one transaction that hook writes reuse", async () => {
+  test("runs related writes on the one transaction the callback receives", async () => {
     const txPath = fakePath();
     const rootPath = fakePath({
       transaction: vi.fn(async (callback) => callback(txPath)),
     });
     const { execute } = arrange(rootPath);
-    const state = await createDatabaseState(schema, execute, {
-      notes: {
-        afterCreate: async (_row, context) => {
-          await txSurface(context.app.database).tags.create({ label: "audit" });
-        },
-      },
-    });
+    const state = await createDatabaseState(schema, execute);
 
-    await surface(state).notes.create({ body: "hooked" });
+    await surface(state).transaction(async (tx) => {
+      await tx.notes.create({ body: "created" });
+      await tx.tags.create({ label: "audit" });
+    });
 
     expect(rootPath.transaction).toHaveBeenCalledTimes(1);
     expect(rootPath.insert).not.toHaveBeenCalled();
@@ -335,7 +348,7 @@ describe("createDatabaseState", () => {
     expect(txPath.transaction).not.toHaveBeenCalled();
   });
 
-  test("bounds SQL fan-out issued by one hook", async () => {
+  test("bounds SQL fan-out inside one transaction", async () => {
     let rolledBack = false;
     const txPath = fakePath();
     const rootPath = fakePath({
@@ -349,22 +362,143 @@ describe("createDatabaseState", () => {
       }),
     });
     const { execute } = arrange(rootPath);
-    const state = await createDatabaseState(schema, execute, {
-      notes: {
-        beforeCreate: async (_values, context) => {
-          for (let index = 0; index < MAX_TRANSACTION_OPERATIONS; index++) {
-            await context.app.database.sql`select ${index}`;
-          }
-        },
-      },
-    });
+    const state = await createDatabaseState(schema, execute);
 
     await expect(
-      surface(state).notes.create({ body: "hooked" }),
-    ).rejects.toMatchObject({ category: "INTERNAL", phase: "write" });
+      surface(state).transaction(async (tx) => {
+        for (let index = 0; index <= MAX_TRANSACTION_OPERATIONS; index++) {
+          await tx.sql`select ${index}`;
+        }
+      }),
+    ).rejects.toMatchObject({ category: "INTERNAL", phase: "transaction" });
     expect(rolledBack).toBe(true);
-    expect(txPath.raw).toHaveBeenCalledTimes(MAX_TRANSACTION_OPERATIONS - 1);
+    expect(txPath.raw).toHaveBeenCalledTimes(MAX_TRANSACTION_OPERATIONS);
     expect(txPath.insert).not.toHaveBeenCalled();
+  });
+
+  test("admits exactly 100 mixed writes and rolls back the 101st", async () => {
+    let rolledBack = false;
+    const txPath = fakePath();
+    const rootPath = fakePath({
+      transaction: vi.fn(async (callback) => {
+        try {
+          return await callback(txPath);
+        } catch (error) {
+          rolledBack = true;
+          throw error;
+        }
+      }),
+    });
+    const { execute } = arrange(rootPath);
+    const state = await createDatabaseState(schema, execute);
+    const exports = surface(state);
+
+    const overflow = exports.transaction(async (tx) => {
+      for (let index = 0; index < 40; index++) {
+        await tx.sql`select ${index}`;
+      }
+      for (let index = 0; index < 30; index++) {
+        await tx.notes.create({ body: `bound-${index}` });
+      }
+      for (let index = 0; index < 30; index++) {
+        await exports.notes.create({ body: `joined-${index}` });
+      }
+      await exports.notes.create({ body: "one-past-the-budget" });
+    });
+    const [settled] = await Promise.allSettled([overflow]);
+
+    expect(settled.status).toBe("rejected");
+    expect(
+      settled.status === "rejected" ? settled.reason : undefined,
+    ).toMatchObject({ category: "INTERNAL", phase: "transaction" });
+    expect(rolledBack).toBe(true);
+    expect(txPath.raw).toHaveBeenCalledTimes(40);
+    expect(txPath.insert).toHaveBeenCalledTimes(60);
+    expect(rootPath.insert).not.toHaveBeenCalled();
+    expect(rootPath.transaction).toHaveBeenCalledTimes(1);
+  });
+
+  test("lets a nested transaction see the same client without a new budget", async () => {
+    const txPath = fakePath();
+    const rootPath = fakePath({
+      transaction: vi.fn(async (callback) => callback(txPath)),
+    });
+    const { execute } = arrange(rootPath);
+    const state = await createDatabaseState(schema, execute);
+    const exports = surface(state);
+
+    await exports.transaction(async (outer) => {
+      for (let index = 0; index < MAX_TRANSACTION_OPERATIONS - 1; index++) {
+        await outer.sql`select ${index}`;
+      }
+      await exports.transaction(async (inner) => {
+        expect(inner).toBe(outer);
+        expect(inner.notes).toBe(outer.notes);
+        await inner.notes.create({ body: "last-admitted" });
+      });
+      await expect(
+        exports.transaction(async (inner) => {
+          await inner.notes.create({ body: "past-the-shared-budget" });
+        }),
+      ).rejects.toMatchObject({
+        category: "INTERNAL",
+        phase: "transaction",
+      });
+    });
+
+    expect(rootPath.transaction).toHaveBeenCalledTimes(1);
+    expect(txPath.transaction).not.toHaveBeenCalled();
+    expect(txPath.raw).toHaveBeenCalledTimes(MAX_TRANSACTION_OPERATIONS - 1);
+    expect(txPath.insert).toHaveBeenCalledTimes(1);
+  });
+
+  test("continues after a predicate misses and commits the later write", async () => {
+    const txPath = fakePath({
+      update: vi.fn(async (_table, id, values) =>
+        id === 999 ? null : { id, ...values },
+      ),
+      delete: vi.fn(async (_table, id) => id !== 999),
+    });
+    const rootPath = fakePath({
+      transaction: vi.fn(async (callback) => callback(txPath)),
+    });
+    const { execute } = arrange(rootPath);
+    const state = await createDatabaseState(schema, execute);
+    const exports = surface(state);
+    const scoped = exports.notes.where({ body: { eq: "missing" } });
+
+    await expect(
+      exports.transaction(async (tx) => {
+        const missed = tx.notes.where({ body: { eq: "missing" } });
+        await expect(
+          missed.update(999, { body: "absent" }),
+        ).resolves.toBeNull();
+        await expect(missed.delete(999)).resolves.toBe(false);
+        await expect(
+          scoped.update(999, { body: "absent" }),
+        ).resolves.toBeNull();
+        await expect(scoped.delete(999)).resolves.toBe(false);
+        return tx.notes.create({ body: "kept" });
+      }),
+    ).resolves.toMatchObject({ id: 1, body: "kept" });
+
+    expect(rootPath.transaction).toHaveBeenCalledTimes(1);
+    expect(txPath.insert).toHaveBeenCalledTimes(1);
+    expect(txPath.update).toHaveBeenNthCalledWith(
+      1,
+      schema.$tables.notes,
+      999,
+      { body: "absent" },
+      { body: { eq: "missing" } },
+    );
+    expect(txPath.delete).toHaveBeenNthCalledWith(
+      1,
+      schema.$tables.notes,
+      999,
+      {
+        body: { eq: "missing" },
+      },
+    );
   });
 
   test("rolls back and closes a transaction when its wall-clock deadline expires", async () => {
@@ -386,31 +520,25 @@ describe("createDatabaseState", () => {
         }),
       });
       const { execute } = arrange(rootPath);
-      const state = await createDatabaseState(schema, execute, {
-        notes: {
-          beforeCreate: async (_values, context) => {
-            started.resolve(undefined);
-            await resume.promise;
-            try {
-              await txSurface(context.app.database).tags.create({
-                label: "late",
-              });
-            } finally {
-              finished.resolve(undefined);
-            }
-          },
-        },
-      });
+      const state = await createDatabaseState(schema, execute);
 
       const failure = surface(state)
-        .notes.create({ body: "hooked" })
+        .transaction(async (tx) => {
+          started.resolve(undefined);
+          await resume.promise;
+          try {
+            await tx.tags.create({ label: "late" });
+          } finally {
+            finished.resolve(undefined);
+          }
+        })
         .catch((error) => error);
       await started.promise;
       await vi.advanceTimersByTimeAsync(TRANSACTION_TIMEOUT_MS);
 
       await expect(failure).resolves.toMatchObject({
         category: "TRANSIENT",
-        phase: "write",
+        phase: "transaction",
       });
       expect(rolledBack).toBe(true);
       resume.resolve(undefined);
@@ -421,18 +549,16 @@ describe("createDatabaseState", () => {
     }
   });
 
-  test("keeps an unhooked mutation off the transaction path", async () => {
+  test("keeps a root mutation off the transaction path", async () => {
     const rootPath = fakePath();
     const { execute } = arrange(rootPath);
-    const state = await createDatabaseState(schema, execute, {
-      notes: { serialize: (row) => row },
-    });
+    const state = await createDatabaseState(schema, execute);
     await surface(state).notes.create({ body: "direct" });
     expect(rootPath.transaction).not.toHaveBeenCalled();
     expect(rootPath.insert).toHaveBeenCalledTimes(1);
   });
 
-  test("makes an unhooked root mutation join an open transaction", async () => {
+  test("makes a root mutation join an open transaction", async () => {
     const txPath = fakePath();
     const rootPath = fakePath({
       transaction: vi.fn(async (callback) => callback(txPath)),
@@ -453,26 +579,17 @@ describe("createDatabaseState", () => {
   });
 
   test.each([
-    ["hooked root", "automatic", true],
-    ["root joining a transaction", "root", false],
-    ["hooked root joining a transaction", "root", true],
-    ["transaction client", "bound", false],
-    ["hooked transaction client", "bound", true],
+    ["root joining a transaction", "root"],
+    ["transaction client", "bound"],
   ] as const)(
     "preserves keyed mutation predicates for a %s",
-    async (_name, mode, hooked) => {
+    async (_name, mode) => {
       const txPath = fakePath();
       const rootPath = fakePath({
         transaction: vi.fn(async (callback) => callback(txPath)),
       });
       const { execute } = arrange(rootPath);
-      const beforeUpdate = vi.fn();
-      const beforeDelete = vi.fn();
-      const state = await createDatabaseState(
-        schema,
-        execute,
-        hooked ? { notes: { beforeUpdate, beforeDelete } } : undefined,
-      );
+      const state = await createDatabaseState(schema, execute);
       const exports = surface(state);
       const predicate = {
         and: [{ body: { eq: "original" } }, { id: { gt: 0 } }],
@@ -485,21 +602,17 @@ describe("createDatabaseState", () => {
         await scoped.delete(1);
       };
 
-      if (mode === "automatic") {
-        await mutate(exports.notes);
-      } else {
-        await exports.transaction(async (tx) => {
-          await mutate(mode === "root" ? exports.notes : tx.notes);
-          // A scoped operation must not change the shared transaction client.
-          await tx.notes.update(2, { body: "unfiltered" });
-          expect(txPath.update).toHaveBeenLastCalledWith(
-            schema.$tables.notes,
-            2,
-            { body: "unfiltered" },
-            undefined,
-          );
-        });
-      }
+      await exports.transaction(async (tx) => {
+        await mutate(mode === "root" ? exports.notes : tx.notes);
+        // A scoped operation must not change the shared transaction client.
+        await tx.notes.update(2, { body: "unfiltered" });
+        expect(txPath.update).toHaveBeenLastCalledWith(
+          schema.$tables.notes,
+          2,
+          { body: "unfiltered" },
+          undefined,
+        );
+      });
 
       expect(txPath.update).toHaveBeenNthCalledWith(
         1,
@@ -515,18 +628,12 @@ describe("createDatabaseState", () => {
       );
       expect(rootPath.update).not.toHaveBeenCalled();
       expect(rootPath.delete).not.toHaveBeenCalled();
-      expect(rootPath.transaction).toHaveBeenCalledTimes(
-        mode === "automatic" ? 2 : 1,
-      );
+      expect(rootPath.transaction).toHaveBeenCalledTimes(1);
       expect(txPath.transaction).not.toHaveBeenCalled();
-      expect(beforeUpdate).toHaveBeenCalledTimes(
-        hooked ? (mode === "automatic" ? 1 : 2) : 0,
-      );
-      expect(beforeDelete).toHaveBeenCalledTimes(hooked ? 1 : 0);
     },
   );
 
-  test("rolls the hook's related write back with the primary mutation", async () => {
+  test("rolls a related write back with the primary mutation", async () => {
     let rolledBack = false;
     const txPath = fakePath({
       insert: vi.fn(async (table, values) => {
@@ -546,20 +653,17 @@ describe("createDatabaseState", () => {
       }),
     });
     const { execute } = arrange(rootPath);
-    const state = await createDatabaseState(schema, execute, {
-      notes: {
-        afterCreate: async (_row, context) => {
-          await txSurface(context.app.database).tags.create({ label: "audit" });
-        },
-      },
-    });
+    const state = await createDatabaseState(schema, execute);
 
     const error = await surface(state)
-      .notes.create({ body: "hooked" })
+      .transaction(async (tx) => {
+        await tx.notes.create({ body: "created" });
+        await tx.tags.create({ label: "audit" });
+      })
       .catch((caught) => caught);
 
     expect(rolledBack).toBe(true);
-    expect(error).toMatchObject({ category: "INTERNAL", phase: "write" });
+    expect(error).toMatchObject({ category: "INTERNAL", phase: "transaction" });
     expect(error.message).not.toContain("audit trail is full");
   });
 
@@ -575,16 +679,15 @@ describe("createDatabaseState", () => {
         transaction: vi.fn(async (callback) => callback(fakePath())),
       }),
     );
-    const stateTwo = await createDatabaseState(schema, second.execute, {
-      notes: { afterCreate: vi.fn() },
-    });
+    const stateTwo = await createDatabaseState(schema, second.execute);
 
     await surface(stateOne).transaction(async () => {
       await surface(stateTwo).notes.create({ body: "independent" });
     });
 
-    // The second instance opened its own transaction instead of joining.
-    expect(second.path.transaction).toHaveBeenCalledTimes(1);
+    // A root write stays on its own pool instead of joining another instance.
+    expect(second.path.transaction).not.toHaveBeenCalled();
+    expect(second.path.insert).toHaveBeenCalledTimes(1);
     expect(first.path.insert).not.toHaveBeenCalled();
   });
 });
