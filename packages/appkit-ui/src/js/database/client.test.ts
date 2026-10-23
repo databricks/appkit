@@ -1,679 +1,635 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
-import { _resetConfigCache } from "../config";
 import { databaseApi as typedApi, type DatabaseRequestOptions } from "./client";
 import { DatabaseApiError } from "./errors";
+import {
+  flush,
+  mockDatabaseFetch,
+  operationPath,
+  publishBoot,
+  publishOperations,
+  reply,
+  resetDatabaseTestEnvironment,
+} from "./test-utils";
 
-// This package has no generated registry, so every entity name is `never`
-// here. The typed surface is compiled against a real schema in the appkit
-// type-generator tests; these cover the runtime transport.
+// This package has no generated registry, so every operation name is `never`
+// here. The typed surface is compiled in use-database.types.test.ts; these
+// tests drive the runtime through a string-typed view.
 const databaseApi = typedApi as unknown as {
-  list(
-    entity: string,
-    params?: object,
-    init?: DatabaseRequestOptions,
-  ): Promise<{ items: unknown[]; limit: number; offset: number }>;
-  get(
-    entity: string,
-    id: string | number | bigint,
-    params?: object,
-    init?: DatabaseRequestOptions,
-  ): Promise<Record<string, unknown>>;
-  create(
-    entity: string,
-    values: object,
-    init?: DatabaseRequestOptions,
-  ): Promise<Record<string, unknown>>;
-  update(
-    entity: string,
-    id: string | number | bigint,
-    values: object,
-    init?: DatabaseRequestOptions,
-  ): Promise<Record<string, unknown>>;
-  remove(
-    entity: string,
-    id: string | number | bigint,
-    init?: DatabaseRequestOptions,
-  ): Promise<void>;
+  execute(
+    name: string,
+    input: unknown,
+    options?: DatabaseRequestOptions,
+  ): Promise<unknown>;
 };
 
-const PAGE = { items: [{ id: 1, body: "hi" }], limit: 5, offset: 0 };
-
-function publish(database: Record<string, string> | undefined): void {
-  window.__appkit__ = {
-    appName: "test",
-    queries: {},
-    endpoints: database ? { database } : {},
-    plugins: {},
-  };
-}
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
+const OPERATIONS = {
+  "notes.get": "GET",
+  "notes.create": "POST",
+  "notes.update": "PATCH",
+  "notes.replace": "PUT",
+  "notes.delete": "DELETE",
+};
 
 async function rejection(promise: Promise<unknown>): Promise<unknown> {
   return promise.then(
     () => {
-      throw new Error("expected the request to fail");
+      throw new Error("expected the call to fail");
     },
     (error: unknown) => error,
   );
 }
 
-describe("databaseApi.list", () => {
-  let fetchMock: ReturnType<typeof vi.fn>;
+let server: ReturnType<typeof mockDatabaseFetch>;
 
-  beforeEach(() => {
-    fetchMock = vi.fn(async () => json(PAGE));
-    vi.stubGlobal("fetch", fetchMock);
-    publish({
-      "notes.list": "/api/database/notes",
-      "notes.detail": "/api/database/notes/:id",
-    });
-  });
+beforeEach(() => {
+  server = mockDatabaseFetch();
+  publishOperations(OPERATIONS);
+});
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    delete window.__appkit__;
-    _resetConfigCache();
-  });
+afterEach(resetDatabaseTestEnvironment);
 
-  test("refuses an unpublished operation locally without sending a request", async () => {
-    const error = await rejection(databaseApi.list("boards"));
+describe("resolving an operation", () => {
+  test("refuses a name the server did not publish without sending a request", async () => {
+    const error = await rejection(databaseApi.execute("boards.get", { id: 1 }));
 
     expect(error).toBeInstanceOf(DatabaseApiError);
     expect(error).toMatchObject({
-      name: "DatabaseApiError",
       code: "NOT_EXPOSED",
       status: null,
       details: [],
-      message: 'Database operation "boards.list" is not exposed',
+      message: 'Database operation "boards.get" is not exposed',
     });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  test("refuses every operation when the plugin published no routes", async () => {
-    _resetConfigCache();
-    publish(undefined);
-
-    await expect(databaseApi.list("notes")).rejects.toMatchObject({
-      code: "NOT_EXPOSED",
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  test("calls the published route with the encoded query", async () => {
-    const page = await databaseApi.list("notes", {
-      where: { board_id: 7 },
-      order: { created_at: "desc" },
-      limit: 5,
-    });
-
-    expect(page).toEqual(PAGE);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const [path, query] = url.split("?");
-    expect(path).toBe("/api/database/notes");
-    expect(Object.fromEntries(new URLSearchParams(query))).toEqual({
-      where: '{"board_id":7}',
-      order: '{"created_at":"desc"}',
-      limit: "5",
-    });
-    expect(init.method).toBe("GET");
-    expect(new Headers(init.headers).get("Accept")).toBe("application/json");
-  });
-
-  test("sends no query string when there are no params", async () => {
-    await databaseApi.list("notes");
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/database/notes");
-  });
-
-  test("rejects an incomplete filter locally without widening the request", async () => {
-    await expect(
-      databaseApi.list("notes", { where: { board_id: undefined } }),
-    ).rejects.toMatchObject({
-      code: "INVALID_REQUEST",
-      status: null,
-      message: "Database query contains an unsupported value",
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  test("explains an empty filter locally without broadening the read", async () => {
-    await expect(
-      databaseApi.list("notes", { where: {} }),
-    ).rejects.toMatchObject({
-      code: "INVALID_REQUEST",
-      status: null,
-      message: "Filter cannot be empty; omit where to list all rows",
-      details: [
-        {
-          path: ["where"],
-          message: "Filter cannot be empty; omit where to list all rows",
-        },
-      ],
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  test.each([NaN, Infinity, -Infinity])(
-    "rejects non-finite filter %s before JSON can turn it into null",
-    async (value) => {
-      await expect(
-        databaseApi.list("notes", { where: { rank: { is: value } } }),
-      ).rejects.toMatchObject({
-        code: "INVALID_REQUEST",
-        status: null,
-        message: "Database query numbers must be finite",
-        details: [
-          { path: ["where"], message: "Database query numbers must be finite" },
-        ],
-      });
-      expect(fetchMock).not.toHaveBeenCalled();
-    },
-  );
-
-  test("uses the route path the server published, not a local convention", async () => {
-    _resetConfigCache();
-    publish({ "notes.list": "/custom/base/notes" });
-
-    await databaseApi.list("notes", { limit: 1 });
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/custom/base/notes?limit=1");
-  });
-
-  test("decodes a failure envelope into its stable category and details", async () => {
-    fetchMock.mockResolvedValueOnce(
-      json(
-        {
-          error: "Invalid database request",
-          details: [
-            { path: ["where"], message: "Names an unknown column" },
-            { path: "where", message: "not a detail" },
-            { message: "no path" },
-          ],
-        },
-        400,
-      ),
-    );
-
-    const error = await rejection(databaseApi.list("notes"));
-
-    expect(error).toBeInstanceOf(DatabaseApiError);
-    expect(error).toMatchObject({
-      code: "INVALID_REQUEST",
-      status: 400,
-      message: "Invalid database request",
-      details: [{ path: ["where"], message: "Names an unknown column" }],
-    });
+    expect(server.fetchMock).not.toHaveBeenCalled();
   });
 
   test.each([
+    [
+      "a legacy CRUD route without operation metadata",
+      { endpoints: { "notes.list": "/api/database/notes" } },
+      "notes.list",
+    ],
+    [
+      "a method without an endpoint",
+      { operations: { "notes.get": "GET" } },
+      "notes.get",
+    ],
+    [
+      "an unknown method",
+      {
+        endpoints: { "notes.get": operationPath("notes.get") },
+        operations: { "notes.get": "get" },
+      },
+      "notes.get",
+    ],
+    [
+      "a cross-origin endpoint",
+      {
+        endpoints: { "notes.get": "https://elsewhere.example/notes" },
+        operations: { "notes.get": "GET" },
+      },
+      "notes.get",
+    ],
+    [
+      "a protocol-relative endpoint",
+      {
+        endpoints: { "notes.get": "//elsewhere.example/notes" },
+        operations: { "notes.get": "GET" },
+      },
+      "notes.get",
+    ],
+    [
+      "an endpoint a backslash turns protocol-relative",
+      {
+        endpoints: { "notes.get": "/\\elsewhere.example/notes" },
+        operations: { "notes.get": "GET" },
+      },
+      "notes.get",
+    ],
+  ])(
+    "refuses %s with NOT_EXPOSED and no request",
+    async (_case, boot, name) => {
+      publishBoot(boot);
+
+      await expect(databaseApi.execute(name, { id: 1 })).rejects.toMatchObject({
+        code: "NOT_EXPOSED",
+      });
+      expect(server.fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each(["toString", "constructor", "__proto__", "hasOwnProperty"])(
+    "never resolves %s through a prototype",
+    async (name) => {
+      await expect(databaseApi.execute(name, {})).rejects.toMatchObject({
+        code: "NOT_EXPOSED",
+      });
+      expect(server.fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  test("calls the URL the server published, not a local convention", async () => {
+    publishBoot({
+      endpoints: { "notes.get": "/custom/base/read-note" },
+      operations: { "notes.get": "GET" },
+    });
+
+    const pending = databaseApi.execute("notes.get", { id: 7 });
+    server.request(0).respond({ id: 7 });
+    await pending;
+
+    expect(server.request(0).url).toBe(
+      `/custom/base/read-note?input=${encodeURIComponent('{"id":7}')}`,
+    );
+  });
+});
+
+describe("sending input", () => {
+  test("a GET carries its input as one JSON query value and no body", async () => {
+    const pending = databaseApi.execute("notes.get", {
+      id: 9007199254740993n,
+      filter: { tags: ["a b", "c&d"] },
+    });
+    const request = server.request(0);
+    request.respond({ id: "9007199254740993", body: "hi" });
+
+    await expect(pending).resolves.toEqual({
+      id: "9007199254740993",
+      body: "hi",
+    });
+    const url = new URL(request.url, "http://localhost");
+    expect(url.pathname).toBe(operationPath("notes.get"));
+    expect([...url.searchParams.keys()]).toEqual(["input"]);
+    expect(request.input).toEqual({
+      id: "9007199254740993",
+      filter: { tags: ["a b", "c&d"] },
+    });
+    expect(request.method).toBe("GET");
+    expect(request.body).toBeUndefined();
+    expect(request.cache).toBe("no-store");
+    expect(request.headers.get("Accept")).toBe("application/json");
+    expect(request.headers.get("Content-Type")).toBeNull();
+  });
+
+  test.each([
+    ["notes.create", "POST"],
+    ["notes.update", "PATCH"],
+    ["notes.replace", "PUT"],
+    ["notes.delete", "DELETE"],
+  ])("%s sends its declared %s with a JSON body", async (name, method) => {
+    const pending = databaseApi.execute(name, { id: 7, total: 10n });
+    const request = server.request(0);
+    request.respond({ id: 7 });
+    await pending;
+
+    expect(request.url).toBe(operationPath(name));
+    expect(request.method).toBe(method);
+    expect(request.headers.get("Content-Type")).toBe("application/json");
+    expect(request.headers.get("Accept")).toBe("application/json");
+    expect(request.body).toBe('{"id":7,"total":"10"}');
+  });
+
+  test.each([NaN, Infinity, -Infinity])(
+    "refuses the non-finite number %s before JSON turns it into null",
+    async (value) => {
+      for (const name of ["notes.get", "notes.update"]) {
+        await expect(
+          databaseApi.execute(name, { id: 7, changes: { rank: [value] } }),
+        ).rejects.toMatchObject({
+          code: "INVALID_REQUEST",
+          status: null,
+          details: [{ path: ["input"] }],
+          message:
+            "Database input numbers must be finite; use null explicitly to clear a value",
+        });
+      }
+      expect(server.fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  test("refuses input with no JSON form without echoing it", async () => {
+    const cyclic: Record<string, unknown> = { secret: "sentinel-value" };
+    cyclic.self = cyclic;
+    const throwing = {
+      toJSON() {
+        throw new Error("sentinel-value");
+      },
+    };
+
+    for (const input of [undefined, cyclic, throwing, () => 1]) {
+      const error = await rejection(databaseApi.execute("notes.create", input));
+      expect(error).toMatchObject({ code: "INVALID_REQUEST", status: null });
+      expect(JSON.stringify(error)).not.toContain("sentinel-value");
+      expect((error as Error).message).not.toContain("sentinel-value");
+    }
+    expect(server.fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("decoding replies", () => {
+  test("a 204 resolves undefined without reading a body", async () => {
+    const response = reply(undefined, { status: 204 });
+    const pending = databaseApi.execute("notes.delete", { id: 7 });
+    server.request(0).respondWith(response);
+
+    await expect(pending).resolves.toBeUndefined();
+    expect(response.bodyUsed).toBe(false);
+  });
+
+  test("an explicit JSON answer, null included, is the result", async () => {
+    const deleted = databaseApi.execute("notes.delete", { id: 7 });
+    server.request(0).respond({ deleted: 1 });
+    await expect(deleted).resolves.toEqual({ deleted: 1 });
+
+    const missing = databaseApi.execute("notes.get", { id: 8 });
+    server.request(1).respond(null);
+    await expect(missing).resolves.toBeNull();
+  });
+
+  test.each([
+    [400, "INVALID_REQUEST"],
+    [401, "UNAUTHENTICATED"],
     [403, "FORBIDDEN"],
     [404, "NOT_FOUND"],
     [409, "CONFLICT"],
     [413, "PAYLOAD_TOO_LARGE"],
+    [415, "UNSUPPORTED_MEDIA_TYPE"],
     [422, "VALIDATION_FAILED"],
     [503, "TRANSIENT"],
     [500, "INTERNAL"],
     [502, "INTERNAL"],
   ])("maps status %i to %s", async (status, code) => {
-    fetchMock.mockResolvedValueOnce(json({ error: "stable" }, status));
-    await expect(databaseApi.list("notes")).rejects.toMatchObject({
+    const pending = databaseApi.execute("notes.get", { id: 7 });
+    server.request(0).respond({ error: "Stable message" }, { status });
+
+    await expect(pending).rejects.toMatchObject({
+      name: "DatabaseApiError",
       code,
       status,
+      message: "Stable message",
     });
   });
 
-  test("keeps the category when a failure body is not JSON", async () => {
-    fetchMock.mockResolvedValueOnce(
-      new Response("<html>Bad gateway</html>", { status: 502 }),
+  test("keeps only bounded details shaped like the server's", async () => {
+    const pending = databaseApi.execute("notes.create", { body: "x" });
+    server.request(0).respond(
+      {
+        error: "Database request failed validation",
+        details: [
+          { path: ["body"], message: "Must be at most 5000 characters" },
+          { path: "body", message: "not a detail" },
+          { path: [1], message: "not a field name" },
+          { message: "no path" },
+          { path: ["body"], message: "x".repeat(501) },
+          ...Array.from({ length: 30 }, (_, index) => ({
+            path: [`field${index}`],
+            message: "Required",
+          })),
+        ],
+      },
+      { status: 422 },
     );
 
-    await expect(databaseApi.list("notes")).rejects.toMatchObject({
+    const error = (await rejection(pending)) as DatabaseApiError;
+    expect(error.code).toBe("VALIDATION_FAILED");
+    expect(error.details[0]).toEqual({
+      path: ["body"],
+      message: "Must be at most 5000 characters",
+    });
+    // Only the first 20 entries are read, and the malformed ones dropped.
+    expect(error.details).toHaveLength(16);
+  });
+
+  test.each([
+    ["is not JSON", new Response("<html>Bad gateway</html>", { status: 502 })],
+    [
+      "has an oversized message",
+      reply({ error: "x".repeat(501) }, { status: 500 }),
+    ],
+    [
+      "exceeds the error body limit",
+      reply(
+        { error: "Stable", padding: "x".repeat(70 * 1024) },
+        { status: 500 },
+      ),
+    ],
+  ])("keeps the category when the failure body %s", async (_case, response) => {
+    const pending = databaseApi.execute("notes.get", { id: 7 });
+    server.request(0).respondWith(response);
+
+    await expect(pending).rejects.toMatchObject({
       code: "INTERNAL",
-      status: 502,
-      message: "Database request failed with status 502",
+      message: `Database request failed with status ${response.status}`,
       details: [],
     });
   });
 
-  test("rejects a success body that is not the list envelope", async () => {
-    fetchMock.mockResolvedValueOnce(json([{ id: 1 }]));
-    await expect(databaseApi.list("notes")).rejects.toMatchObject({
+  test.each([
+    ["notes.get", "INTERNAL", "Database response is not JSON"],
+    [
+      "notes.create",
+      "OUTCOME_UNKNOWN",
+      "Database write may have completed; response is not JSON",
+    ],
+  ])(
+    "%s reports a success body that is not JSON as %s",
+    async (name, code, message) => {
+      const pending = databaseApi.execute(name, { id: 7 });
+      server.request(0).respondWith(
+        new Response("<!doctype html>", {
+          status: 200,
+          headers: { "x-appkit-database-actor": "actor-a" },
+        }),
+      );
+
+      await expect(pending).rejects.toMatchObject({
+        code,
+        status: 200,
+        message,
+      });
+    },
+  );
+
+  test("refuses a success body larger than the response limit", async () => {
+    const declared = databaseApi.execute("notes.get", { id: 7 });
+    server
+      .request(0)
+      .respondWith(
+        reply(
+          { id: 7 },
+          { headers: { "Content-Length": String(17 * 2 ** 20) } },
+        ),
+      );
+    await expect(declared).rejects.toMatchObject({
       code: "INTERNAL",
-      status: 200,
+      message: "Database response is too large",
     });
 
-    fetchMock.mockResolvedValueOnce(
-      new Response("<!doctype html>", { status: 200 }),
+    const streamed = databaseApi.execute("notes.get", { id: 7 });
+    const chunk = new Uint8Array(17 * 2 ** 20).fill(32);
+    server.request(1).respondWith(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(chunk);
+            controller.close();
+          },
+        }),
+        { headers: { "x-appkit-database-actor": "actor-a" } },
+      ),
     );
-    await expect(databaseApi.list("notes")).rejects.toMatchObject({
+    await expect(streamed).rejects.toMatchObject({
       code: "INTERNAL",
-      status: 200,
-      message: "Database response is not JSON",
+      message: "Database response is too large",
     });
   });
 
-  test("reports an unanswered read as TRANSIENT without claiming the server never saw it", async () => {
-    const cause = new TypeError("Failed to fetch");
-    fetchMock.mockRejectedValueOnce(cause);
+  test.each([
+    ["notes.get", "INTERNAL"],
+    ["notes.create", "OUTCOME_UNKNOWN"],
+  ])(
+    "%s never returns a success that does not name its actor",
+    async (name, code) => {
+      for (const actor of [null, "", "x".repeat(257)]) {
+        const index = server.requests.length;
+        const pending = databaseApi.execute(name, { id: 7 });
+        server
+          .request(index)
+          .respond({ id: 7, body: "unattributed" }, { actor });
+        await expect(pending).rejects.toMatchObject({
+          code,
+          message: expect.stringContaining("does not name its actor"),
+        });
+      }
+    },
+  );
 
-    const error = await rejection(databaseApi.list("notes"));
+  test.each([
+    [
+      "notes.get",
+      "TRANSIENT",
+      "Database read failed before receiving a response",
+    ],
+    [
+      "notes.create",
+      "OUTCOME_UNKNOWN",
+      "Database write may have completed; check its result before retrying",
+    ],
+  ])(
+    "%s reports an unanswered request as %s and never retries it",
+    async (name, code, message) => {
+      const cause = new TypeError("Failed to fetch");
+      const pending = databaseApi.execute(name, { id: 7 });
+      server.request(0).fail(cause);
 
-    expect(error).toBeInstanceOf(DatabaseApiError);
-    expect(error).toMatchObject({ code: "TRANSIENT", status: null, cause });
-    expect((error as Error).message).not.toContain("did not reach the server");
+      await expect(pending).rejects.toMatchObject({
+        code,
+        status: null,
+        message,
+        cause,
+      });
+      await flush();
+      expect(server.fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  test("a write the server answered after it ran rejects with OUTCOME_UNKNOWN", async () => {
+    const unknown = {
+      error: "Database write may have completed",
+      outcome: "unknown",
+    };
+    const write = databaseApi.execute("notes.create", { body: "x" });
+    server.request(0).respond(unknown, { status: 500 });
+    const read = databaseApi.execute("notes.get", { id: 1 });
+    server.request(1).respond(unknown, { status: 500 });
+
+    await expect(write).rejects.toMatchObject({
+      code: "OUTCOME_UNKNOWN",
+      status: 500,
+    });
+    // A read changes nothing, so the same envelope stays a plain failure.
+    await expect(read).rejects.toMatchObject({ code: "INTERNAL", status: 500 });
+  });
+
+  test("a failed write is never sent again", async () => {
+    const pending = databaseApi.execute("notes.create", { body: "x" });
+    server.request(0).respond({ error: "Unavailable" }, { status: 503 });
+
+    await expect(pending).rejects.toMatchObject({ code: "TRANSIENT" });
+    await flush();
+    expect(server.fetchMock).toHaveBeenCalledTimes(1);
   });
 
   test("passes the caller's signal and rejects with its abort, not a database error", async () => {
     const controller = new AbortController();
-    fetchMock.mockImplementationOnce(
-      (_url: string, init: RequestInit) =>
-        new Promise((_resolve, reject) => {
-          init.signal?.addEventListener("abort", () =>
-            reject(init.signal?.reason),
-          );
-        }),
-    );
-
-    const pending = databaseApi.list(
-      "notes",
-      {},
+    const pending = databaseApi.execute(
+      "notes.get",
+      { id: 7 },
       { signal: controller.signal },
     );
+    const request = server.request(0);
+    expect(request.signal).toBe(controller.signal);
+
     controller.abort();
+    // The transport ignored the abort; its late answer is still not delivered.
+    request.respond({ id: 7 });
     const error = await rejection(pending);
 
-    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
-      signal: controller.signal,
-    });
     expect(error).not.toBeInstanceOf(DatabaseApiError);
     expect(error).toMatchObject({ name: "AbortError" });
   });
 });
 
-describe("databaseApi.get", () => {
-  let fetchMock: ReturnType<typeof vi.fn>;
-
-  beforeEach(() => {
-    fetchMock = vi.fn(async () => json({ id: 7, title: "Roadmap" }));
-    vi.stubGlobal("fetch", fetchMock);
-    publish({
-      "boards.list": "/api/database/boards",
-      "boards.detail": "/api/database/boards/:id",
-      "events.list": "/api/database/events",
-    });
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    delete window.__appkit__;
-    _resetConfigCache();
-  });
-
-  test("calls the published detail route with the id and the encoded query", async () => {
-    const row = await databaseApi.get("boards", 7, {
-      include: { notes: { limit: 20 } },
-      select: ["id", "title"],
-    });
-
-    expect(row).toEqual({ id: 7, title: "Roadmap" });
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const [path, query] = url.split("?");
-    expect(path).toBe("/api/database/boards/7");
-    expect([...new URLSearchParams(query)]).toEqual([
-      ["select", '["id","title"]'],
-      ["include", '{"notes":{"limit":20}}'],
-    ]);
-    expect(init.method).toBe("GET");
-  });
-
-  test("encodes the id as one path segment", async () => {
-    await databaseApi.get("boards", "a/b c?d");
-    await databaseApi.get("boards", 9007199254740993n);
-
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "/api/database/boards/a%2Fb%20c%3Fd",
-    );
-    expect(fetchMock.mock.calls[1]?.[0]).toBe(
-      "/api/database/boards/9007199254740993",
-    );
-  });
-
-  test.each(["", ".", ".."])(
-    "refuses the id %j, which URL resolution would move off the detail route",
-    async (id) => {
-      // "" and "." resolve to the list route, ".." to the plugin root.
-      const error = await rejection(databaseApi.get("boards", id));
-
-      expect(error).toBeInstanceOf(DatabaseApiError);
-      expect(error).toMatchObject({
-        code: "INVALID_REQUEST",
-        status: null,
-        message: "Database id must be a non-empty path segment",
-      });
-      expect(fetchMock).not.toHaveBeenCalled();
-    },
-  );
-
-  test("keeps an id that only contains dots among other characters", async () => {
-    await databaseApi.get("boards", "...");
-    await databaseApi.get("boards", "v1.2");
-
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      "/api/database/boards/...",
-      "/api/database/boards/v1.2",
-    ]);
-  });
-
-  test("maps a missing row to NOT_FOUND", async () => {
-    fetchMock.mockResolvedValueOnce(
-      json({ error: "Database record not found" }, 404),
-    );
-
-    await expect(databaseApi.get("boards", 404)).rejects.toMatchObject({
-      name: "DatabaseApiError",
-      code: "NOT_FOUND",
-      status: 404,
-      message: "Database record not found",
-    });
-  });
-
-  test("refuses a keyless table locally, since it has no detail route", async () => {
-    const error = await rejection(databaseApi.get("events", 1));
-
-    expect(error).toBeInstanceOf(DatabaseApiError);
-    expect(error).toMatchObject({
-      code: "NOT_EXPOSED",
-      status: null,
-      message: 'Database operation "events.detail" is not exposed',
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  test("rejects a success body that is not one row", async () => {
-    fetchMock.mockResolvedValueOnce(json([{ id: 7 }]));
-
-    await expect(databaseApi.get("boards", 7)).rejects.toMatchObject({
-      code: "INTERNAL",
-      status: 200,
-      message: "Database response has an unexpected shape",
-    });
-  });
-});
-
-describe("databaseApi writes", () => {
-  let fetchMock: ReturnType<typeof vi.fn>;
-
-  beforeEach(() => {
-    fetchMock = vi.fn(async () => json({ id: 7, body: "hi" }, 201));
-    vi.stubGlobal("fetch", fetchMock);
-    publish({
-      "notes.list": "/api/database/notes",
-      "notes.detail": "/api/database/notes/:id",
-      "notes.create": "/api/database/notes",
-      "notes.update": "/api/database/notes/:id",
-      "notes.delete": "/api/database/notes/:id",
-      "ledger.create": "/api/database/ledger",
-      // Read-only: the plugin published reads but no writes.
-      "note_events.list": "/api/database/note_events",
-      "note_events.detail": "/api/database/note_events/:id",
-    });
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    delete window.__appkit__;
-    _resetConfigCache();
-  });
-
-  function sent(index = 0): { url: string; init: RequestInit } {
-    const [url, init] = fetchMock.mock.calls[index] as [string, RequestInit];
-    return { url, init };
+describe("session isolation", () => {
+  /** Settle the session on `actor` with one answered read. */
+  async function signIn(actor: string): Promise<void> {
+    const index = server.requests.length;
+    const pending = databaseApi.execute("notes.get", { id: 0 });
+    server.request(index).respond({ id: 0 }, { actor });
+    await pending;
   }
 
-  test("creates with a JSON body on the published route and returns the row", async () => {
-    const row = await databaseApi.create("notes", {
-      board_id: 7,
-      author: "ada",
-      body: "hi",
-    });
+  test("a late reply for the previous actor is refused once a later reply names another", async () => {
+    await signIn("actor-a");
+    const older = databaseApi.execute("notes.get", { id: 1 });
+    const newer = databaseApi.execute("notes.get", { id: 2 });
 
-    expect(row).toEqual({ id: 7, body: "hi" });
-    const { url, init } = sent();
-    expect(url).toBe("/api/database/notes");
-    expect(init.method).toBe("POST");
-    const headers = new Headers(init.headers);
-    expect(headers.get("Content-Type")).toBe("application/json");
-    expect(headers.get("Accept")).toBe("application/json");
-    expect(JSON.parse(init.body as string)).toEqual({
-      board_id: 7,
-      author: "ada",
-      body: "hi",
-    });
-  });
+    server.request(2).respond({ id: 2, owner: "b" }, { actor: "actor-b" });
+    await expect(newer).resolves.toEqual({ id: 2, owner: "b" });
 
-  test("sends a bigint value as its decimal string, which the server reads back exactly", async () => {
-    await databaseApi.create("ledger", {
-      seq: 9007199254740993n,
-      note: "x",
-    });
-
-    expect(sent().init.body).toBe('{"seq":"9007199254740993","note":"x"}');
-  });
-
-  test.each([NaN, Infinity, -Infinity])(
-    "rejects non-finite write %s rather than clearing a nullable value",
-    async (value) => {
-      for (const write of [
-        () => databaseApi.create("notes", { rank: value }),
-        () => databaseApi.update("notes", 7, { rank: value }),
-        () => databaseApi.update("notes", 7, { payload: { scores: [value] } }),
-      ]) {
-        await expect(write()).rejects.toMatchObject({
-          name: "DatabaseApiError",
-          code: "INVALID_REQUEST",
-          status: null,
-          message:
-            "Database write numbers must be finite; use null explicitly to clear a value",
-          details: [
-            {
-              path: ["body"],
-              message:
-                "Database write numbers must be finite; use null explicitly to clear a value",
-            },
-          ],
-        });
-      }
-      expect(fetchMock).not.toHaveBeenCalled();
-    },
-  );
-
-  test("keeps an explicit null and finite numbers unchanged", async () => {
-    await databaseApi.update("notes", 7, { rank: null, payload: { score: 0 } });
-    expect(sent().init.body).toBe('{"rank":null,"payload":{"score":0}}');
-  });
-
-  test("sanitizes serialization failures before any write is sent", async () => {
-    const values = {
-      toJSON: () => {
-        throw new Error("private serialization detail");
-      },
-    };
-    await expect(databaseApi.create("notes", values)).rejects.toMatchObject({
-      code: "INVALID_REQUEST",
+    server.request(1).respond({ id: 1, owner: "a" }, { actor: "actor-a" });
+    await expect(older).rejects.toMatchObject({
+      code: "SESSION_CHANGED",
       status: null,
-      message: "Database write contains an unsupported value",
+      message: "The session changed before the read answered",
     });
-    expect(fetchMock).not.toHaveBeenCalled();
+
+    // The session stays with the later actor: no flip back.
+    const next = databaseApi.execute("notes.get", { id: 3 });
+    server.request(3).respond({ id: 3 }, { actor: "actor-b" });
+    await expect(next).resolves.toEqual({ id: 3 });
   });
 
-  test("reports an unanswered write as unknown because it may have committed", async () => {
-    const cause = new TypeError("Connection lost after sending the request");
-    fetchMock.mockRejectedValue(cause);
+  test("replies to requests sent before a change was seen cannot flip it back", async () => {
+    await signIn("actor-a");
+    const revealing = databaseApi.execute("notes.get", { id: 1 });
+    const sentLater = databaseApi.execute("notes.get", { id: 2 });
 
-    for (const request of [
-      () =>
-        databaseApi.create("notes", { board_id: 7, author: "ada", body: "hi" }),
-      () => databaseApi.update("notes", 7, { body: "edited" }),
-      () => databaseApi.remove("notes", 7),
-    ]) {
-      await expect(request()).rejects.toMatchObject({
-        code: "OUTCOME_UNKNOWN",
-        status: null,
-        cause,
-        message: expect.stringContaining("may have completed"),
-      });
-    }
+    server.request(1).respond({ id: 1 }, { actor: "actor-b" });
+    await expect(revealing).resolves.toEqual({ id: 1 });
+    // Sent after the revealing request, but before its reply was seen.
+    server.request(2).respond({ id: 2 }, { actor: "actor-a" });
+    await expect(sentLater).rejects.toMatchObject({ code: "SESSION_CHANGED" });
+
+    const next = databaseApi.execute("notes.get", { id: 3 });
+    server.request(3).respond({ id: 3 }, { actor: "actor-b" });
+    await expect(next).resolves.toEqual({ id: 3 });
   });
 
-  test("updates one row with PATCH on its encoded id", async () => {
-    fetchMock.mockResolvedValueOnce(json({ id: 7, body: "edited" }));
+  test("an earlier-sent reply cannot flip the first actor seen back", async () => {
+    const first = databaseApi.execute("notes.get", { id: 1 });
+    const second = databaseApi.execute("notes.get", { id: 2 });
+    const third = databaseApi.execute("notes.get", { id: 3 });
 
-    const row = await databaseApi.update("notes", "a/b", { body: "edited" });
-
-    expect(row).toEqual({ id: 7, body: "edited" });
-    const { url, init } = sent();
-    expect(url).toBe("/api/database/notes/a%2Fb");
-    expect(init.method).toBe("PATCH");
-    expect(new Headers(init.headers).get("Content-Type")).toBe(
-      "application/json",
-    );
-    expect(init.body).toBe('{"body":"edited"}');
+    server.request(1).respond({ id: 2 }, { actor: "actor-b" });
+    await expect(second).resolves.toEqual({ id: 2 });
+    server.request(0).respond({ id: 1 }, { actor: "actor-a" });
+    await expect(first).rejects.toMatchObject({ code: "SESSION_CHANGED" });
+    server.request(2).respond({ id: 3 }, { actor: "actor-b" });
+    await expect(third).resolves.toEqual({ id: 3 });
   });
 
-  test("deletes one row and resolves without reading the empty 204 body", async () => {
-    const response = new Response(null, { status: 204 });
-    const readBody = vi.spyOn(response, "json");
-    fetchMock.mockResolvedValueOnce(response);
+  test("a 401 ends the session, and replies sent before it are refused", async () => {
+    await signIn("actor-a");
+    const before = databaseApi.execute("notes.get", { id: 1 });
+    const write = databaseApi.execute("notes.create", { body: "x" });
+    const expired = databaseApi.execute("notes.get", { id: 2 });
 
-    await expect(databaseApi.remove("notes", 7)).resolves.toBeUndefined();
+    server.request(3).respond({ error: "Sign in again" }, { status: 401 });
+    await expect(expired).rejects.toMatchObject({
+      code: "UNAUTHENTICATED",
+      status: 401,
+    });
 
-    const { url, init } = sent();
-    expect(url).toBe("/api/database/notes/7");
-    expect(init.method).toBe("DELETE");
-    expect(init.body).toBeUndefined();
-    expect(readBody).not.toHaveBeenCalled();
+    server.request(1).respond({ id: 1 }, { actor: "actor-a" });
+    await expect(before).rejects.toMatchObject({ code: "SESSION_CHANGED" });
+    server.request(2).respond({ id: 9 }, { actor: "actor-a" });
+    await expect(write).rejects.toMatchObject({
+      code: "SESSION_CHANGED",
+      message:
+        "The session changed before the write answered; it may have completed",
+    });
+
+    // Signing in again starts the next session from its first reply.
+    const after = databaseApi.execute("notes.get", { id: 3 });
+    server.request(4).respond({ id: 3 }, { actor: "actor-a" });
+    await expect(after).resolves.toEqual({ id: 3 });
   });
 
-  test("keeps the server's validation details on a 422", async () => {
-    fetchMock.mockResolvedValueOnce(
-      json(
-        {
-          error: "Database request failed validation",
-          details: [
-            { path: ["body"], message: "Must be at most 5000 characters" },
-          ],
-        },
-        422,
+  test("a late 401 sent before an authenticated reply does not end the session", async () => {
+    const stale = databaseApi.execute("notes.get", { id: 1 });
+    const signedIn = databaseApi.execute("notes.get", { id: 2 });
+    const inFlight = databaseApi.execute("notes.get", { id: 3 });
+
+    server.request(1).respond({ id: 2 }, { actor: "actor-a" });
+    await signedIn;
+    server.request(0).respond({ error: "Sign in" }, { status: 401 });
+    await expect(stale).rejects.toMatchObject({ code: "SESSION_CHANGED" });
+
+    // Had the 401 opened a new session, this earlier-sent reply would be refused.
+    server.request(2).respond({ id: 3 }, { actor: "actor-a" });
+    await expect(inFlight).resolves.toEqual({ id: 3 });
+  });
+
+  test("a reply without session information is still refused once stale", async () => {
+    await signIn("actor-a");
+    const proxied = databaseApi.execute("notes.get", { id: 1 });
+    const switched = databaseApi.execute("notes.get", { id: 2 });
+
+    server.request(2).respond({ id: 2 }, { actor: "actor-b" });
+    await switched;
+    server.request(1).respondWith(new Response("Bad gateway", { status: 502 }));
+    await expect(proxied).rejects.toMatchObject({ code: "SESSION_CHANGED" });
+  });
+
+  test("an authenticated error reply also moves the session", async () => {
+    await signIn("actor-a");
+    const older = databaseApi.execute("notes.get", { id: 1 });
+    const denied = databaseApi.execute("notes.get", { id: 2 });
+
+    server
+      .request(2)
+      .respond({ error: "Not found" }, { status: 404, actor: "actor-b" });
+    await expect(denied).rejects.toMatchObject({ code: "NOT_FOUND" });
+    server.request(1).respond({ id: 1 }, { actor: "actor-a" });
+    await expect(older).rejects.toMatchObject({ code: "SESSION_CHANGED" });
+  });
+
+  test("a session change while a body is still arriving refuses that body", async () => {
+    await signIn("actor-a");
+    let finish!: () => void;
+    const slow = databaseApi.execute("notes.get", { id: 1 });
+    server.request(1).respondWith(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"id":1,'));
+            finish = () => {
+              controller.enqueue(new TextEncoder().encode('"owner":"a"}'));
+              controller.close();
+            };
+          },
+        }),
+        { headers: { "x-appkit-database-actor": "actor-a" } },
       ),
     );
+    await flush();
 
-    const error = await rejection(
-      databaseApi.create("notes", { board_id: 7, author: "ada", body: "x" }),
-    );
+    const switched = databaseApi.execute("notes.get", { id: 2 });
+    server.request(2).respond({ id: 2 }, { actor: "actor-b" });
+    await switched;
+    finish();
 
-    expect(error).toBeInstanceOf(DatabaseApiError);
-    expect(error).toMatchObject({
-      code: "VALIDATION_FAILED",
-      status: 422,
-      message: "Database request failed validation",
-      details: [{ path: ["body"], message: "Must be at most 5000 characters" }],
-    });
-  });
-
-  test("maps a 415 to UNSUPPORTED_MEDIA_TYPE", async () => {
-    fetchMock.mockResolvedValueOnce(
-      json({ error: "Database request body must be JSON" }, 415),
-    );
-
-    await expect(
-      databaseApi.update("notes", 7, { body: "x" }),
-    ).rejects.toMatchObject({
-      code: "UNSUPPORTED_MEDIA_TYPE",
-      status: 415,
-      message: "Database request body must be JSON",
-    });
-  });
-
-  test("maps a missing row on update or delete to NOT_FOUND", async () => {
-    fetchMock.mockResolvedValue(
-      json({ error: "Database record not found" }, 404),
-    );
-
-    await expect(
-      databaseApi.update("notes", 404, { body: "x" }),
-    ).rejects.toMatchObject({ code: "NOT_FOUND", status: 404 });
-    await expect(databaseApi.remove("notes", 404)).rejects.toMatchObject({
-      code: "NOT_FOUND",
-      status: 404,
-    });
-  });
-
-  test("refuses a write addressed by an id that is not one path segment", async () => {
-    const results = await Promise.all([
-      rejection(databaseApi.update("notes", "..", { body: "x" })),
-      rejection(databaseApi.remove("notes", ".")),
-      rejection(databaseApi.remove("notes", "")),
-    ]);
-
-    expect(results).toMatchObject([
-      { code: "INVALID_REQUEST", status: null },
-      { code: "INVALID_REQUEST", status: null },
-      { code: "INVALID_REQUEST", status: null },
-    ]);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  test("refuses writes the plugin did not publish without sending a request", async () => {
-    const results = await Promise.all([
-      rejection(databaseApi.create("note_events", { note_id: 1 })),
-      rejection(databaseApi.update("note_events", 1, { action: "x" })),
-      rejection(databaseApi.remove("note_events", 1)),
-    ]);
-
-    expect(results.map((error) => error instanceof DatabaseApiError)).toEqual([
-      true,
-      true,
-      true,
-    ]);
-    expect(results).toMatchObject([
-      {
-        code: "NOT_EXPOSED",
-        status: null,
-        message: 'Database operation "note_events.create" is not exposed',
-      },
-      { code: "NOT_EXPOSED", message: expect.stringContaining(".update") },
-      { code: "NOT_EXPOSED", message: expect.stringContaining(".delete") },
-    ]);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  test("reports a successful write with an invalid response as outcome unknown", async () => {
-    fetchMock.mockResolvedValueOnce(json([{ id: 7 }], 201));
-    await expect(
-      databaseApi.create("notes", { board_id: 7, author: "a", body: "b" }),
-    ).rejects.toMatchObject({
-      code: "OUTCOME_UNKNOWN",
-      status: 201,
-      message: expect.stringContaining("may have completed"),
-    });
-
-    fetchMock.mockResolvedValueOnce(json({ id: 7 }, 200));
-    await expect(databaseApi.remove("notes", 7)).rejects.toMatchObject({
-      code: "OUTCOME_UNKNOWN",
-      status: 200,
-    });
-
-    fetchMock.mockResolvedValueOnce(
-      new Response("broken JSON", { status: 200 }),
-    );
-    await expect(
-      databaseApi.update("notes", 7, { body: "edited" }),
-    ).rejects.toMatchObject({ code: "OUTCOME_UNKNOWN", status: 200 });
+    await expect(slow).rejects.toMatchObject({ code: "SESSION_CHANGED" });
   });
 });

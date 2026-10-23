@@ -11,7 +11,7 @@ import {
   type DatabaseOperation,
   type IdLike,
   resolveDatabaseUrl,
-} from "@/js/database/client";
+} from "@/js/database/entity-client";
 import { DatabaseApiError, invalidDatabaseQuery } from "@/js/database/errors";
 
 import {
