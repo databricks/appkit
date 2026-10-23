@@ -1,10 +1,32 @@
-/**
- * AppKit workspace-client wrapper: the single entry point every AppKit module
- * uses to reach a Databricks SDK client. The modular `@databricks/sdk-*`
- * packages are isolated to `shared/workspace-client`.
- */
-
+/** Databricks SDK access stays behind the shared workspace-client wrapper. */
 export { ApiError, createWorkspaceClient, isAuthConfigError } from "shared";
-// Forwards every wrapper type: the facade, its options, and the modular SDK
-// client + model types.
-export type * from "shared/workspace-client";
+export type {
+  BaseRun,
+  CancelRunRequest,
+  ClientOptions,
+  EndpointState,
+  ExecuteStatementRequest,
+  ExternalLink,
+  FilesDirectoryEntry,
+  FilesDownloadResponse,
+  GenieMessage,
+  GetJobRequest,
+  GetJobResponse,
+  GetRunOutputRequest,
+  GetRunOutputResponse,
+  GetRunRequest,
+  GetRunResponse,
+  ListRunsRequest,
+  QueryVectorIndexRequest,
+  QueryVectorIndexResponse,
+  ResultData,
+  RunNowRequest,
+  RunNowResponse,
+  StatementParameter,
+  StatementResponse,
+  StatementStatus,
+  SubmitRunRequest,
+  SubmitRunResponse,
+  WorkspaceClient,
+  WorkspaceClientOptions,
+} from "shared/workspace-client";

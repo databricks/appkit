@@ -130,3 +130,22 @@ export type {
   IDatabaseConfig,
   TransactionClient,
 } from "./plugins/database";
+export type {
+  DatabaseOperationContract,
+  DatabricksAppKitDatabaseOperations,
+} from "shared";
+export {
+  type Actor,
+  type DatabaseRoutes,
+  defineOperation,
+  definePolicy,
+  type OperationContext,
+  type OperationDefinition,
+  type OperationMethod,
+  type OperationWireInput,
+  type OperationWireOutput,
+  type Policy,
+  type PolicyContext,
+  type PolicyDecision,
+  type PolicyDenial,
+} from "./plugins/database/operations";
