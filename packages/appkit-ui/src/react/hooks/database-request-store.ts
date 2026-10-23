@@ -1,5 +1,5 @@
 import { getPluginClientConfig } from "@/js/config";
-import { requestDatabase } from "@/js/database/client";
+import { requestDatabase } from "@/js/database/entity-client";
 import { DatabaseApiError } from "@/js/database/errors";
 import type { DatabaseEntity } from "@/js/database/types";
 
