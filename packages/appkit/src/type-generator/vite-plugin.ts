@@ -6,8 +6,10 @@ import type { Plugin } from "vite";
 import { METRIC_CONFIG_FILE } from "../../../shared/src/schemas/metric-fqn";
 import { createLogger } from "../logging/logger";
 import {
+  DATABASE_OPERATIONS_TYPES_FILE,
   DATABASE_TYPES_FILE,
   DatabaseTypegenError,
+  generateDatabaseOperations,
   generateDatabaseTypes,
 } from "./database";
 import {
@@ -52,7 +54,7 @@ interface AppKitTypesPluginOptions {
    * Folders to watch for changes. Defaults to `config/queries` and
    * `config/metric-views`. When overridden, include a `queries` folder and/or a
    * `metric-views` folder — they are resolved by their trailing path segment.
-   * Database schema sources are watched independently.
+   * Database schema and operation sources are watched independently.
    */
   watchFolders?: string[];
 }
@@ -72,7 +74,9 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
   // `watchFolders` ordering (which used to assume queries was `watchFolders[0]`).
   let queryFolder: string | undefined;
   let metricViewsFolder: string | undefined;
+  let appRoot: string;
   let databaseFolder: string;
+  let routesFolder: string;
 
   // Single-flight state for runGenerate(). `inFlight` is the promise of the
   // currently-running drain (null when idle); `queued` records that a trigger
@@ -126,10 +130,7 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
 
       // Database declarations need no warehouse. Generating them last keeps the
       // query and metric-view outputs independent of a schema failure.
-      await generateDatabaseTypes({
-        schemaFile: path.join(databaseFolder, "schema.ts"),
-        outFile: path.join(path.dirname(outFile), DATABASE_TYPES_FILE),
-      });
+      await generateDatabase();
     } catch (error) {
       // TypegenSyntaxError / TypegenFatalError carry a complete, actionable
       // report in their message. Their stack frames and attached query arrays
@@ -152,6 +153,36 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         logger.error("Error generating types: %O", error);
       }
     }
+  }
+
+  /**
+   * Schema declarations, then operation contracts. Both always run, so a
+   * schema failure also neutralizes the operations; the first failure wins.
+   * A production build is strict: an operation without authorization fails it.
+   */
+  async function generateDatabase(): Promise<void> {
+    const typesDir = path.dirname(outFile);
+    const failures: unknown[] = [];
+    for (const step of [
+      () =>
+        generateDatabaseTypes({
+          schemaFile: path.join(databaseFolder, "schema.ts"),
+          outFile: path.join(typesDir, DATABASE_TYPES_FILE),
+        }),
+      () =>
+        generateDatabaseOperations({
+          appRoot,
+          outFile: path.join(typesDir, DATABASE_OPERATIONS_TYPES_FILE),
+          strict: process.env.NODE_ENV === "production",
+        }),
+    ]) {
+      try {
+        await step();
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    if (failures.length > 0) throw failures[0];
   }
 
   /**
@@ -332,12 +363,16 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
           options?.outFile ?? `shared/${TYPES_DIR}/${ANALYTICS_TYPES_FILE}`,
         ),
       );
-      // A declared schema needs no warehouse, and an already-generated
-      // declaration must still be neutralized after its schema is deleted.
-      const hasDatabase =
-        existsSync(
-          path.join(process.cwd(), "config", "database", "schema.ts"),
-        ) || existsSync(path.join(typesDir, DATABASE_TYPES_FILE));
+      // A declared schema or operation needs no warehouse, and an
+      // already-generated output must still be neutralized after its source
+      // is deleted.
+      const hasDatabase = [
+        path.join(process.cwd(), "config", "database", "schema.ts"),
+        path.join(process.cwd(), "server", "database", "routes"),
+        path.join(process.cwd(), "server", "database", "routes.gen.ts"),
+        path.join(typesDir, DATABASE_TYPES_FILE),
+        path.join(typesDir, DATABASE_OPERATIONS_TYPES_FILE),
+      ].some((file) => existsSync(file));
 
       if (!warehouseId && !hasDatabase) {
         logger.debug("Warehouse ID not found. Skipping type generation.");
@@ -384,7 +419,9 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
         "config",
         "metric-views",
       );
-      databaseFolder = path.join(process.cwd(), "config", "database");
+      appRoot = process.cwd();
+      databaseFolder = path.join(appRoot, "config", "database");
+      routesFolder = path.join(appRoot, "server", "database", "routes");
       watchFolders = options?.watchFolders ?? [
         defaultQueryFolder,
         defaultMetricViewsFolder,
@@ -423,15 +460,18 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
 
     configureServer(server) {
       server.watcher.add(watchFolders);
-      server.watcher.add(databaseFolder);
+      server.watcher.add([databaseFolder, routesFolder]);
 
+      // A route module may import helpers beside it, so any source under
+      // either folder regenerates; `routes.gen.ts` itself sits outside both.
       const isDatabaseSource = (changedFile: string): boolean => {
         const normalizedFile = path.resolve(changedFile);
-        const relative = path.relative(databaseFolder, normalizedFile);
         return (
-          !relative.startsWith("..") &&
-          !path.isAbsolute(relative) &&
-          /\.(?:[cm]?ts|tsx)$/.test(normalizedFile)
+          /\.(?:[cm]?ts|tsx)$/.test(normalizedFile) &&
+          [databaseFolder, routesFolder].some((folder) => {
+            const relative = path.relative(folder, normalizedFile);
+            return !relative.startsWith("..") && !path.isAbsolute(relative);
+          })
         );
       };
 
