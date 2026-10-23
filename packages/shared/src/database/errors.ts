@@ -1,5 +1,6 @@
 /** Stable failure category a generated database route answers with. */
 export type DatabaseErrorCategory =
+  | "UNAUTHENTICATED"
   | "INVALID_REQUEST"
   | "VALIDATION_FAILED"
   | "NOT_FOUND"
@@ -23,6 +24,7 @@ export interface DatabaseErrorDetail {
  */
 const categoryByStatus: Readonly<Record<number, DatabaseErrorCategory>> = {
   400: "INVALID_REQUEST",
+  401: "UNAUTHENTICATED",
   403: "FORBIDDEN",
   404: "NOT_FOUND",
   409: "CONFLICT",
