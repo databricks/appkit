@@ -97,6 +97,12 @@ export const DEFAULT_FIELDS_BY_TYPE: Record<
   app: {
     id: { env: "DATABRICKS_APP_ID", description: "Databricks App ID" },
   },
+  model_service: {
+    name: {
+      env: "DATABRICKS_MODEL_SERVICE_NAME",
+      description: "Unity AI Gateway model service full name",
+    },
+  },
 };
 
 /** Valid resource type values from the schema. */

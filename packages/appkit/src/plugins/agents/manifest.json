@@ -50,6 +50,19 @@
             }
           }
         }
+      },
+      {
+        "type": "model_service",
+        "alias": "Default model service for agents",
+        "resourceKey": "agents-model-service",
+        "description": "Default Unity AI Gateway model service for agents that don't pin their own model",
+        "permission": "EXECUTE",
+        "fields": {
+          "name": {
+            "env": "DATABRICKS_MODEL_SERVICE_NAME",
+            "description": "Default Unity AI Gateway model service full name (catalog.schema.model_service)"
+          }
+        }
       }
     ]
   }
