@@ -22,6 +22,8 @@ import { join } from "node:path";
 
 import { parse as parseYaml } from "yaml";
 
+import { verifyLockVersions } from "./check-template-lock-versions";
+
 const ROOT = join(import.meta.dirname, "..");
 
 const templatePkg = JSON.parse(
@@ -132,6 +134,31 @@ if (astGrepVersion && astGrepLinuxVersion) {
     `@ast-grep/napi missing from devDependencies but ` +
       `optionalDependencies[@ast-grep/napi-linux-x64-gnu]=${astGrepLinuxVersion}. ` +
       `Either add @ast-grep/napi to devDependencies or remove the optional entry.`,
+  );
+}
+
+// Lock parity check: both committed lockfiles must resolve @databricks/appkit
+// and @databricks/appkit-ui to the versions pinned in template/package.json.
+// Guards against one lockfile drifting from package.json (the Phase-1 bug).
+const APPKIT_PACKAGES = ["@databricks/appkit", "@databricks/appkit-ui"];
+const expectedLockVersions: Record<string, string> = {};
+for (const pkg of APPKIT_PACKAGES) {
+  if (templatePkg.dependencies?.[pkg]) {
+    expectedLockVersions[pkg] = templatePkg.dependencies[pkg];
+  }
+}
+const { mismatches } = verifyLockVersions(
+  [
+    join(ROOT, "template/package-lock.json"),
+    join(ROOT, "template/pnpm-lock.yaml"),
+  ],
+  expectedLockVersions,
+);
+for (const m of mismatches) {
+  errors.push(
+    `Lock version drift in ${m.lockfile}: "${m.package}" resolves to ` +
+      `${m.found ?? "<missing>"} but template/package.json pins ${m.expected}. ` +
+      `Regenerate the lockfile so scaffolded apps install the pinned SDK version.`,
   );
 }
 

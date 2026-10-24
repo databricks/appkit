@@ -11,6 +11,8 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { verifyLockVersions } from "./check-template-lock-versions";
+
 const ROOT = process.cwd();
 const version = process.argv[2];
 if (!version) {
@@ -100,6 +102,52 @@ if (pnpmExit !== 0) {
   process.exit(pnpmExit);
 }
 console.log("✓ template/pnpm-lock.yaml updated (pnpm install)");
+
+// 2d. Guard: both regenerated locks must resolve @databricks/* to the just-set
+// version. A stale lock here is the Phase-1 regression — abort, don't commit.
+const templateLocks = [
+  join(ROOT, "template", "package-lock.json"),
+  join(ROOT, "template", "pnpm-lock.yaml"),
+];
+const { ok, mismatches } = verifyLockVersions(templateLocks, {
+  "@databricks/appkit": version,
+  "@databricks/appkit-ui": version,
+});
+if (!ok) {
+  for (const m of mismatches) {
+    console.error(
+      `Lock version mismatch in ${m.lockfile}: "${m.package}" resolves to ` +
+        `${m.found ?? "<missing>"} (expected ${m.expected}).`,
+    );
+  }
+  console.error(
+    "Aborting release: regenerated locks disagree with the version.",
+  );
+  process.exit(1);
+}
+console.log(
+  "✓ both template locks resolve @databricks/* to the published version",
+);
+
+// 2e. Guard: both committed locks must resolve to the PUBLIC npm registry.
+// Fail-closed (no --rewrite): a JFrog/internal URL on this path means the
+// environment is wrong and the release must abort, not silently rewrite.
+for (const lock of ["template/package-lock.json", "template/pnpm-lock.yaml"]) {
+  if (
+    run("pnpm", [
+      "exec",
+      "tsx",
+      "tools/check-template-lock-registry.ts",
+      lock,
+      "--allow-file",
+    ]) !== 0
+  ) {
+    console.error(
+      `Aborting release: ${lock} references a non-public registry.`,
+    );
+    process.exit(1);
+  }
+}
 
 // 3. Git add, commit, tag, push
 const commands: [string, string[]][] = [
