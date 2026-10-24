@@ -10,3 +10,16 @@ export type {
   ReadSerializer,
   ReadSerializerContext,
 } from "./types";
+export {
+  type Actor,
+  type DatabaseRoutes,
+  defineMutation,
+  definePolicy,
+  defineQuery,
+  type Operation,
+  type OperationContext,
+  OperationError,
+  type Policy,
+  type PolicyResult,
+  runOperation,
+} from "./operations";

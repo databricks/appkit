@@ -27,6 +27,7 @@ console.error(error.toJSON()); // Safe for logging, sensitive values redacted
 
 ## Extended by
 
+- [`OperationError`](Class.OperationError.md)
 - [`AuthenticationError`](Class.AuthenticationError.md)
 - [`ConfigurationError`](Class.ConfigurationError.md)
 - [`ConnectionError`](Class.ConnectionError.md)
