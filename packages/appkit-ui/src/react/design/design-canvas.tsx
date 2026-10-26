@@ -4,6 +4,8 @@ import {
   type ComponentType,
   type ReactNode,
   useCallback,
+  useEffect,
+  useRef,
   useState,
 } from "react";
 
@@ -17,7 +19,7 @@ import {
   EmptyTitle,
 } from "../ui/empty";
 import { Kbd } from "../ui/kbd";
-import { DesignPicker } from "./design-picker";
+import { DesignPicker, useAboveModals } from "./design-picker";
 
 /** Props for {@link DesignCanvas}. */
 export interface DesignCanvasProps {
@@ -77,6 +79,21 @@ const CANVAS_BACKDROP = {
 export function DesignCanvas({ modules, builderOrigins }: DesignCanvasProps) {
   const [selecting, setSelecting] = useState(false);
   const onActiveChange = useCallback((v: boolean) => setSelecting(v), []);
+  const headerRef = useRef<HTMLElement>(null);
+  // The header (and its Select toggle) stays clickable over an open dialog,
+  // so a dialog's contents can be selected after opening it.
+  useAboveModals(headerRef);
+
+  // Alt+S toggles selecting from the keyboard, e.g. while a dialog has focus.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey || e.code !== "KeyS" || e.ctrlKey || e.metaKey) return;
+      e.preventDefault();
+      setSelecting((s) => !s);
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, []);
 
   const files = Object.entries(modules)
     .sort(([a], [b]) => a.localeCompare(b))
@@ -96,8 +113,9 @@ export function DesignCanvas({ modules, builderOrigins }: DesignCanvasProps) {
   return (
     <div className="bg-muted/40 text-foreground min-h-screen">
       <header
+        ref={headerRef}
         data-design-chrome
-        className="bg-background/80 sticky top-0 z-10 flex h-14 items-center gap-3 border-b px-6 backdrop-blur"
+        className="bg-background/80 pointer-events-auto sticky top-0 z-[2147483646] flex h-14 items-center gap-3 border-b px-6 backdrop-blur"
       >
         <LayoutTemplate className="text-muted-foreground size-5" />
         <h1 className="text-sm font-semibold">Design canvas</h1>
@@ -108,11 +126,17 @@ export function DesignCanvas({ modules, builderOrigins }: DesignCanvasProps) {
           Pick the parts you want changed and send them to your agent.
         </p>
         <div className="ml-auto flex items-center gap-2">
-          {selecting && (
-            <span className="text-muted-foreground hidden text-xs sm:inline">
-              <Kbd>Esc</Kbd> to stop
-            </span>
-          )}
+          <span className="text-muted-foreground hidden text-xs sm:inline">
+            {selecting ? (
+              <>
+                <Kbd>Esc</Kbd> to stop
+              </>
+            ) : (
+              <>
+                <Kbd>Alt</Kbd> <Kbd>S</Kbd> to select
+              </>
+            )}
+          </span>
           <Button
             size="sm"
             variant={selecting ? "default" : "outline"}

@@ -1,6 +1,7 @@
 import { MousePointerClick, Send, X } from "lucide-react";
 import {
   type CSSProperties,
+  type RefObject,
   useEffect,
   useReducer,
   useRef,
@@ -81,6 +82,37 @@ function Outline({
   );
 }
 
+/**
+ * Keeps design chrome (picker, canvas header) usable while a modal dialog is
+ * open. Modals set `pointer-events: none` on <body>, dismiss on any outside
+ * press and trap focus; the chrome sits outside the dialog, so it must not
+ * count as "outside" and must be able to take focus (e.g. the note box).
+ * Pair it with `pointer-events-auto` and a z-index above the modal overlay.
+ *
+ * @internal
+ */
+export function useAboveModals(ref: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    const stop = (e: Event) => e.stopPropagation();
+    const PRESS = ["pointerdown", "mousedown", "focusin", "touchstart"];
+    for (const t of PRESS) root.addEventListener(t, stop);
+    // Focus traps watch `focusout` on the document and pull focus back when
+    // it leaves the dialog; let it move into the chrome.
+    const onFocusOut = (e: FocusEvent) => {
+      if (e.relatedTarget instanceof Node && root.contains(e.relatedTarget)) {
+        e.stopPropagation();
+      }
+    };
+    window.addEventListener("focusout", onFocusOut, true);
+    return () => {
+      for (const t of PRESS) root.removeEventListener(t, stop);
+      window.removeEventListener("focusout", onFocusOut, true);
+    };
+  }, [ref]);
+}
+
 const HOVER_STYLE: CSSProperties = {
   outline: "2px dashed var(--primary)",
   outlineOffset: 2,
@@ -121,28 +153,7 @@ export function DesignPicker({
     };
   }, []);
 
-  // Modal dialogs set `pointer-events: none` on <body>, dismiss on any outside
-  // press and trap focus. The picker (outside the dialog) must stay usable and
-  // must not count as "outside".
-  useEffect(() => {
-    const root = rootRef.current;
-    if (!root) return;
-    const stop = (e: Event) => e.stopPropagation();
-    const PRESS = ["pointerdown", "mousedown", "focusin", "touchstart"];
-    for (const t of PRESS) root.addEventListener(t, stop);
-    // Focus traps watch `focusout` on the document and pull focus back when
-    // it leaves the dialog; let it move into the picker (e.g. the note box).
-    const onFocusOut = (e: FocusEvent) => {
-      if (e.relatedTarget instanceof Node && root.contains(e.relatedTarget)) {
-        e.stopPropagation();
-      }
-    };
-    window.addEventListener("focusout", onFocusOut, true);
-    return () => {
-      for (const t of PRESS) root.removeEventListener(t, stop);
-      window.removeEventListener("focusout", onFocusOut, true);
-    };
-  }, []);
+  useAboveModals(rootRef);
 
   useEffect(() => {
     if (!active) return;
