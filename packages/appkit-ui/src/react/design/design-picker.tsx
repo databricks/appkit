@@ -186,6 +186,14 @@ export function DesignPicker({
     };
   }, [active, onActiveChange]);
 
+  // Stop selecting once a send leaves nothing selected. An effect, because
+  // updating the canvas's state from inside our own state updater is a
+  // render-phase update React warns about.
+  const sent = status === "sent-builder" || status === "sent-file";
+  useEffect(() => {
+    if (sent && picked.length === 0) onActiveChange(false);
+  }, [sent, picked.length, onActiveChange]);
+
   async function send() {
     setStatus("sending");
     // Picks and the note can change while the request is in flight; only
@@ -231,12 +239,7 @@ export function DesignPicker({
       };
       const posted = postDesignSelection(message, builderOrigins);
 
-      setPicked((prev) => {
-        const remaining = prev.filter((p) => !sending.includes(p));
-        // Idempotent, so safe in an updater that StrictMode may run twice.
-        if (remaining.length === 0) onActiveChange(false);
-        return remaining;
-      });
+      setPicked((prev) => prev.filter((p) => !sending.includes(p)));
       setNote((n) => (n.trim() === (sentNote ?? "") ? "" : n));
       setStatus(posted ? "sent-builder" : "sent-file");
     } catch {

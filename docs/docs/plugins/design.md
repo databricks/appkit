@@ -95,7 +95,7 @@ Screenshots are saved as image files next to it, so an agent can open them direc
 When the app runs inside an app builder (in an iframe, or in a window it opened) and `builderOrigin` is set, each send is also posted to that window (`window.parent`, else `window.opener`) with `window.postMessage`. The message is targeted at exactly the configured origins, so the browser drops it if the window is on any other origin. The file and the routes above work the same either way.
 
 ```ts
-import type { DesignSelectionMessage } from "@databricks/appkit-ui/react/beta";
+import type { DesignSelectionMessage } from "@databricks/appkit-ui/react/design";
 
 // In the app builder:
 window.addEventListener("message", (event) => {
