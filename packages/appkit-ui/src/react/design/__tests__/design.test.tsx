@@ -117,6 +117,16 @@ const okResponse = () =>
 describe("DesignPicker", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  test("Alt+S toggles selecting from the keyboard", () => {
+    renderCanvas();
+    const toggle = screen.getByRole("button", { name: /Select/ });
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.keyDown(document, { code: "KeyS", altKey: true });
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.keyDown(document, { code: "KeyS", altKey: true });
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  });
+
   test("a finished send keeps picks added while it was in flight", async () => {
     let release!: () => void;
     const fetchMock = vi.fn(

@@ -222,6 +222,11 @@ export async function captureElement(
   el: Element,
   maxWidth = 800,
 ): Promise<string | undefined> {
+  // A shape inside an icon (`<path>`, `<circle>`, ...) only renders inside
+  // its <svg>, so capture the whole icon.
+  if (el instanceof SVGElement && !(el instanceof SVGSVGElement)) {
+    el = el.ownerSVGElement ?? el;
+  }
   try {
     const { width, height } = el.getBoundingClientRect();
     if (!width || !height) return undefined;
