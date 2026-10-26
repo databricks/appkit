@@ -41,6 +41,11 @@ type Status = "idle" | "sending" | "sent-builder" | "sent-file" | "error";
 interface Picked {
   el: Element;
   info: DesignElementInfo;
+  /**
+   * Screenshot taken when the element was picked, so it survives the element
+   * leaving the page before the send (a dialog closing, a re-render).
+   */
+  shot: Promise<string | undefined>;
 }
 
 /** Props for {@link DesignPicker}. */
@@ -171,7 +176,10 @@ export function DesignPicker({
       setPicked((prev) =>
         prev.some((p) => p.el === el)
           ? prev.filter((p) => p.el !== el)
-          : [...prev, { el, info: inspectElement(el) }],
+          : [
+              ...prev,
+              { el, info: inspectElement(el), shot: captureElement(el) },
+            ],
       );
     };
     // A pick mustn't act on the page either: e.g. a pointerdown would let an
@@ -181,17 +189,24 @@ export function DesignPicker({
       e.preventDefault();
       e.stopPropagation();
     };
-    const onKey = (e: KeyboardEvent) =>
-      e.key === "Escape" && onActiveChange(false);
+    // Escape only stops selecting: it must not also reach the page, where an
+    // open dialog would close and take the picked elements with it. Window
+    // capture runs before the dialog's own document-level listener.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      onActiveChange(false);
+    };
     const PRESS = ["pointerdown", "mousedown", "pointerup", "mouseup"];
     document.addEventListener("mousemove", onMove, true);
     document.addEventListener("click", onClick, true);
-    document.addEventListener("keydown", onKey, true);
+    window.addEventListener("keydown", onKey, true);
     for (const t of PRESS) window.addEventListener(t, swallow, true);
     return () => {
       document.removeEventListener("mousemove", onMove, true);
       document.removeEventListener("click", onClick, true);
-      document.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("keydown", onKey, true);
       for (const t of PRESS) window.removeEventListener(t, swallow, true);
       setHovered(null);
     };
@@ -213,9 +228,9 @@ export function DesignPicker({
     const sentNote = note.trim() || undefined;
     try {
       const elements = await Promise.all(
-        sending.map(async ({ el, info }) => ({
+        sending.map(async ({ info, shot }) => ({
           ...info,
-          screenshot: await captureElement(el),
+          screenshot: await shot,
         })),
       );
       const res = await fetch(SELECTION_ENDPOINT, {

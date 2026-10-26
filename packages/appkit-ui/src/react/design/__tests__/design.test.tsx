@@ -127,6 +127,21 @@ describe("DesignPicker", () => {
     expect(toggle.getAttribute("aria-pressed")).toBe("false");
   });
 
+  test("Escape stops selecting without reaching the page (e.g. an open dialog)", () => {
+    renderCanvas();
+    const pageEscape = vi.fn();
+    document.addEventListener("keydown", pageEscape, true);
+    try {
+      const toggle = screen.getByRole("button", { name: /Select/ });
+      fireEvent.click(toggle);
+      fireEvent.keyDown(document.body, { key: "Escape" });
+      expect(toggle.getAttribute("aria-pressed")).toBe("false");
+      expect(pageEscape).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener("keydown", pageEscape, true);
+    }
+  });
+
   test("a finished send keeps picks added while it was in flight", async () => {
     let release!: () => void;
     const fetchMock = vi.fn(
