@@ -11,7 +11,7 @@ const canvasModule = (builderOrigins: string[]) => `
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import "@databricks/appkit-ui/styles.css";
-import { DesignCanvas } from "@databricks/appkit-ui/react/beta";
+import { DesignCanvas } from "@databricks/appkit-ui/react/design";
 import.meta.glob("/src/index.css", { eager: true });
 const modules = import.meta.glob("/src/design/**/*.{tsx,jsx}", { eager: true });
 createRoot(document.getElementById("root")).render(
