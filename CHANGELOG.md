@@ -182,6 +182,57 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+# Changelog
+
+## [0.89.0](https://github.com/databricks/appkit/compare/v0.88.1...v0.89.0) (2026-10-19)
+
+* actionable hint when an OBO agent tool lacks its scope ([#634](https://github.com/databricks/appkit/issues/634)) ([d406d8a](https://github.com/databricks/appkit/commit/d406d8ac64a015263fe609f0be9e7508a5db6f6a))
+* drop @databricks/sdk-experimental from @databricks/lakebase ([#642](https://github.com/databricks/appkit/issues/642)) ([43c81cb](https://github.com/databricks/appkit/commit/43c81cb0313685f518516fe10ed4fcea5693bc5a))
+
+### appkit
+
+* **appkit:** identify outbound requests as databricks-appkit ([#676](https://github.com/databricks/appkit/issues/676)) ([6460f6d](https://github.com/databricks/appkit/commit/6460f6dac51759c37e007de5b77a99dbcf058ac9))
+* **appkit:** migrate ai-search connector to modular sdk-vectorsearch/uc-tables ([#640](https://github.com/databricks/appkit/issues/640)) ([aeb69ae](https://github.com/databricks/appkit/commit/aeb69ae174799d2a7f2924f95c21acba7a2cfa99))
+* **appkit:** migrate analytics to the modular @databricks/sdk-* ([#562](https://github.com/databricks/appkit/issues/562)) ([5116815](https://github.com/databricks/appkit/commit/51168151795534e5df0210913d0f45af9c2f82c3))
+* **appkit:** migrate files to modular @databricks/sdk-files ([#638](https://github.com/databricks/appkit/issues/638)) ([f5a8182](https://github.com/databricks/appkit/commit/f5a818215b76e2d0ce6cf88801252a4b2e650e18))
+* **appkit:** migrate jobs to modular @databricks/sdk-jobs ([#647](https://github.com/databricks/appkit/issues/647)) ([4f6d3c7](https://github.com/databricks/appkit/commit/4f6d3c7ba9b9d1257ee5f7aee12c15263bd74073))
+* **appkit:** move serving calls to the workspace client request seam ([#639](https://github.com/databricks/appkit/issues/639)) ([b5c13c2](https://github.com/databricks/appkit/commit/b5c13c21afe4a159bcdcc5d3de0ef8c95ecc19ab))
+* **appkit:** stream agent model calls through the modular request seam ([#641](https://github.com/databricks/appkit/issues/641)) ([d3fc89b](https://github.com/databricks/appkit/commit/d3fc89bb54594036c3e94e7f47d1fc057746773b))
+
+### shared
+
+* **shared:** add a modular Apps client to the workspace client ([#663](https://github.com/databricks/appkit/issues/663)) ([0bf348d](https://github.com/databricks/appkit/commit/0bf348d4c28d90dcf4ca1ba81421935d6fdb7665))
+* **shared:** add a modular auth + raw-request seam to the workspace client ([#644](https://github.com/databricks/appkit/issues/644)) ([68fe0ec](https://github.com/databricks/appkit/commit/68fe0ec8d129f41eedac58166979a4c6d480c614))
+* **shared:** add a modular Database client to the workspace client ([#661](https://github.com/databricks/appkit/issues/661)) ([1052f0e](https://github.com/databricks/appkit/commit/1052f0e2cf236a96ecb6404b6212ad30865224d5))
+* **shared:** add a modular Experiments client to the workspace client ([#662](https://github.com/databricks/appkit/issues/662)) ([e3079c5](https://github.com/databricks/appkit/commit/e3079c5ccad69174eb2bbb75612239d153f6c580))
+* **shared:** add a modular Lakebase Postgres client to the workspace client ([#668](https://github.com/databricks/appkit/issues/668)) ([621e824](https://github.com/databricks/appkit/commit/621e82441b8d84327a71ba7fb961936234530dc9))
+* **shared:** add a modular Model Serving client to the workspace client ([#657](https://github.com/databricks/appkit/issues/657)) ([d2df70d](https://github.com/databricks/appkit/commit/d2df70d4b154278c04b77230a4245d53beca1c88))
+* **shared:** add a modular UC Connections client to the workspace client ([#660](https://github.com/databricks/appkit/issues/660)) ([4ebaade](https://github.com/databricks/appkit/commit/4ebaade9e0ae9ad44a1afe1c04c2533a1e199fe5))
+* **shared:** add a modular UC Functions client to the workspace client ([#659](https://github.com/databricks/appkit/issues/659)) ([9a9db25](https://github.com/databricks/appkit/commit/9a9db25a13c3d6a94625ba5b4863609387f7b9dd))
+* **shared:** add a modular UC Volumes client to the workspace client ([#658](https://github.com/databricks/appkit/issues/658)) ([4860756](https://github.com/databricks/appkit/commit/4860756804f571fd5dfad374bc88826b7d771a9c))
+* **shared:** migrate currentUser to the modular @databricks/sdk-scim client ([#645](https://github.com/databricks/appkit/issues/645)) ([b7a9b2b](https://github.com/databricks/appkit/commit/b7a9b2bb4b9b816ba32469b4e8b29f568059d2be))
+* **shared:** migrate genie to modular @databricks/sdk-genie ([#646](https://github.com/databricks/appkit/issues/646)) ([915e16f](https://github.com/databricks/appkit/commit/915e16fc00e467138640b2c9b7546780ae2a1212))
+* **shared:** migrate the appkit CLI off the legacy workspace client ([#643](https://github.com/databricks/appkit/issues/643)) ([aa8e894](https://github.com/databricks/appkit/commit/aa8e894cb81d9b483755f408070295f928777ed9))
+
+
+## [0.88.1](https://github.com/databricks/appkit/compare/v0.88.0...v0.88.1) (2026-10-15)
+
+### appkit-ui
+
+* **appkit-ui:** stop DataTable render loop when transform is set ([#671](https://github.com/databricks/appkit/issues/671)) ([789b55a](https://github.com/databricks/appkit/commit/789b55a47c645469065a74847039bcc45353b7ab))
+
+
+## [0.88.0](https://github.com/databricks/appkit/compare/v0.87.0...v0.88.0) (2026-10-12)
+
+### appkit
+
+* **appkit:** let typegen use APPKIT_DEV_HOST / APPKIT_DEV_TOKEN credentials ([#651](https://github.com/databricks/appkit/issues/651)) ([2557074](https://github.com/databricks/appkit/commit/25570744d3c44db08689cfe94e2196b81c00bf1e))
+
+
 ## [0.87.0](https://github.com/databricks/appkit/compare/v0.86.0...v0.87.0) (2026-10-07)
 
 ### appkit-ui

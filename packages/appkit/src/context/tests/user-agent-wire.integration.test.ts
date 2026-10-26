@@ -29,7 +29,6 @@ describe("User-Agent attribution (wire)", () => {
     createWorkspaceClient({
       host,
       token: "test-token",
-      authType: "pat",
       clientOptions: getClientOptions(),
     });
 
@@ -61,20 +60,17 @@ describe("User-Agent attribution (wire)", () => {
     capturedUserAgents = [];
   });
 
-  test("SDK apiClient.request() stamps the AppKit User-Agent on the wire", async () => {
-    await newClient().apiClient.request({
+  test("request() stamps the AppKit User-Agent on the wire", async () => {
+    await newClient().request({
       path: "/api/2.0/preview/scim/v2/Me",
       method: "GET",
-      headers: new Headers(),
-      raw: false,
     });
 
     expect(capturedUserAgents).toHaveLength(1);
-    const ua = capturedUserAgents[0];
-    // AppKit product first, and the real SDK segments after it — proving this
-    // is the SDK-composed User-Agent, not a value a mock stubbed in.
-    expect(ua).toMatch(/^@databricks\/appkit\/\d+\.\d+\.\d+ /);
-    expect(ua).toContain("databricks-sdk-js/");
+    // A real server received it, so this is the transport's User-Agent, not a
+    // mocked value. The raw seam sends AppKit's product segment only; typed
+    // modular clients append the SDK's own client-info after it.
+    expect(capturedUserAgents[0]).toMatch(/^databricks-appkit\/\d+\.\d+\.\d+/);
   });
 
   test("raw-fetch upload path stamps the AppKit User-Agent on the wire", async () => {
@@ -86,20 +82,16 @@ describe("User-Agent attribution (wire)", () => {
     );
 
     expect(capturedUserAgents).toHaveLength(1);
-    expect(capturedUserAgents[0]).toMatch(
-      /^@databricks\/appkit\/\d+\.\d+\.\d+/,
-    );
+    expect(capturedUserAgents[0]).toMatch(/^databricks-appkit\/\d+\.\d+\.\d+/);
   });
 
   test("dev mode adds the mode/dev User-Agent segment", async () => {
     const prev = process.env.NODE_ENV;
     process.env.NODE_ENV = "development";
     try {
-      await newClient().apiClient.request({
+      await newClient().request({
         path: "/api/2.0/preview/scim/v2/Me",
         method: "GET",
-        headers: new Headers(),
-        raw: false,
       });
     } finally {
       process.env.NODE_ENV = prev;

@@ -2,7 +2,22 @@ import { AsyncLocalStorage } from "node:async_hooks";
 
 import { ConfigurationError, InitializationError } from "../errors";
 import type { ResourceEntry } from "../registry/types";
-import type { sql, WorkspaceClient } from "../workspace-client";
+import type { WorkspaceClient } from "../workspace-client";
+
+/** Warehouse lifecycle states, as in the raw `/api/2.0/sql/warehouses` body. */
+type WarehouseState =
+  | "RUNNING"
+  | "STOPPED"
+  | "STARTING"
+  | "STOPPING"
+  | "DELETED"
+  | "DELETING";
+
+/** The fields read from one raw (snake_case) warehouse list entry. */
+interface RawWarehouse {
+  id?: string;
+  state?: WarehouseState;
+}
 
 /** The SQL warehouse selected for the app lifecycle, separate from identity. */
 export interface WarehouseBinding {
@@ -78,15 +93,15 @@ async function discoverWarehouseId(client: WorkspaceClient): Promise<string> {
     process.env.DATABRICKS_APPS_AGENTIC_MODE === "1";
 
   if (process.env.NODE_ENV === "development" && !agenticMode) {
-    const response = (await client.apiClient.request({
-      path: "/api/2.0/sql/warehouses",
-      method: "GET",
-      headers: new Headers(),
-      raw: false,
-      query: { skip_cannot_use: "true" },
-    })) as { warehouses: sql.EndpointInfo[] };
+    const response = (await (
+      await client.request({
+        path: "/api/2.0/sql/warehouses",
+        method: "GET",
+        query: { skip_cannot_use: "true" },
+      })
+    ).json()) as { warehouses?: RawWarehouse[] };
 
-    const priorities: Record<sql.State, number> = {
+    const priorities: Record<WarehouseState, number> = {
       RUNNING: 0,
       STOPPED: 1,
       STARTING: 2,
@@ -97,7 +112,8 @@ async function discoverWarehouseId(client: WorkspaceClient): Promise<string> {
 
     const warehouses = (response.warehouses || []).sort((a, b) => {
       return (
-        priorities[a.state as sql.State] - priorities[b.state as sql.State]
+        priorities[a.state as WarehouseState] -
+        priorities[b.state as WarehouseState]
       );
     });
 

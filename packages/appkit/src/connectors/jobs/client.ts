@@ -9,14 +9,43 @@ import {
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
-import {
-  Context,
-  type jobs,
-  type WorkspaceClient,
+import { isPlainObject } from "../../utils/is-plain-object";
+import type {
+  CancelRunRequest,
+  GetJobRequest,
+  GetRunOutputRequest,
+  GetRunRequest,
+  ListRunsRequest,
+  RunNowRequest,
+  SubmitRunRequest,
+  WorkspaceClient,
 } from "../../workspace-client";
-import type { JobsConnectorConfig } from "./types";
+import type {
+  JobBaseRun,
+  JobDetails,
+  JobRun,
+  JobRunNowResponse,
+  JobRunOutput,
+  JobsConnectorConfig,
+  JobSubmitRunResponse,
+  Numeric,
+} from "./types";
 
 const logger = createLogger("connectors:jobs");
+
+/**
+ * The modular SDK types int64s as `bigint`, which `JSON.stringify` rejects, and
+ * every jobs response ends up in HTTP JSON, SSE or the cache. `Number()` loses
+ * precision past 2^53, as the legacy SDK's plain `JSON.parse` did.
+ */
+function toNumbers<T>(value: T): Numeric<T> {
+  if (typeof value === "bigint") return Number(value) as Numeric<T>;
+  if (Array.isArray(value)) return value.map(toNumbers) as Numeric<T>;
+  if (!isPlainObject(value)) return value as Numeric<T>;
+  return Object.fromEntries(
+    Object.entries(value).map(([k, v]) => [k, toNumbers(v)]),
+  ) as Numeric<T>;
+}
 
 export class JobsConnector {
   private readonly name = "jobs";
@@ -51,73 +80,69 @@ export class JobsConnector {
 
   async submitRun(
     workspaceClient: WorkspaceClient,
-    request: jobs.SubmitRun,
+    request: SubmitRunRequest,
     signal?: AbortSignal,
-  ): Promise<jobs.SubmitRunResponse> {
+  ): Promise<JobSubmitRunResponse> {
     return this._callApi("submit", async () => {
-      return workspaceClient.jobs.submit(request, this._createContext(signal));
+      const waiter = await workspaceClient.jobs.submitRun(request, { signal });
+      return { runId: Number(waiter.runId) };
     });
   }
 
   async runNow(
     workspaceClient: WorkspaceClient,
-    request: jobs.RunNow,
+    request: RunNowRequest,
     signal?: AbortSignal,
-  ): Promise<jobs.RunNowResponse> {
+  ): Promise<JobRunNowResponse> {
     return this._callApi("runNow", async () => {
-      return workspaceClient.jobs.runNow(request, this._createContext(signal));
+      const waiter = await workspaceClient.jobs.runNow(request, { signal });
+      return { runId: Number(waiter.runId) };
     });
   }
 
   async getRun(
     workspaceClient: WorkspaceClient,
-    request: jobs.GetRunRequest,
+    request: GetRunRequest,
     signal?: AbortSignal,
-  ): Promise<jobs.Run> {
-    return this._callApi("getRun", async () => {
-      return workspaceClient.jobs.getRun(request, this._createContext(signal));
-    });
+  ): Promise<JobRun> {
+    return this._callApi("getRun", async () =>
+      toNumbers(await workspaceClient.jobs.getRun(request, { signal })),
+    );
   }
 
   async getRunOutput(
     workspaceClient: WorkspaceClient,
-    request: jobs.GetRunOutputRequest,
+    request: GetRunOutputRequest,
     signal?: AbortSignal,
-  ): Promise<jobs.RunOutput> {
-    return this._callApi("getRunOutput", async () => {
-      return workspaceClient.jobs.getRunOutput(
-        request,
-        this._createContext(signal),
-      );
-    });
+  ): Promise<JobRunOutput> {
+    return this._callApi("getRunOutput", async () =>
+      toNumbers(await workspaceClient.jobs.getRunOutput(request, { signal })),
+    );
   }
 
   async cancelRun(
     workspaceClient: WorkspaceClient,
-    request: jobs.CancelRun,
+    request: CancelRunRequest,
     signal?: AbortSignal,
   ): Promise<void> {
     await this._callApi("cancelRun", async () => {
-      return workspaceClient.jobs.cancelRun(
-        request,
-        this._createContext(signal),
-      );
+      await workspaceClient.jobs.cancelRun(request, { signal });
     });
   }
 
   async listRuns(
     workspaceClient: WorkspaceClient,
-    request: jobs.ListRunsRequest,
+    request: ListRunsRequest,
     signal?: AbortSignal,
-  ): Promise<jobs.BaseRun[]> {
+  ): Promise<JobBaseRun[]> {
     return this._callApi("listRuns", async () => {
-      const runs: jobs.BaseRun[] = [];
+      const runs: JobBaseRun[] = [];
       const limit = Math.max(1, Math.min(request.limit ?? 100, 100));
-      for await (const run of workspaceClient.jobs.listRuns(
+      for await (const run of workspaceClient.jobs.listRunsIter(
         { ...request, limit },
-        this._createContext(signal),
+        { signal },
       )) {
-        runs.push(run);
+        runs.push(toNumbers(run));
         if (runs.length >= limit) break;
       }
       return runs;
@@ -126,12 +151,12 @@ export class JobsConnector {
 
   async getJob(
     workspaceClient: WorkspaceClient,
-    request: jobs.GetJobRequest,
+    request: GetJobRequest,
     signal?: AbortSignal,
-  ): Promise<jobs.Job> {
-    return this._callApi("getJob", async () => {
-      return workspaceClient.jobs.get(request, this._createContext(signal));
-    });
+  ): Promise<JobDetails> {
+    return this._callApi("getJob", async () =>
+      toNumbers(await workspaceClient.jobs.getJob(request, { signal })),
+    );
   }
 
   private async _callApi<T>(
@@ -163,6 +188,17 @@ export class JobsConnector {
           });
           if (error instanceof AppKitError) {
             throw error;
+          }
+          // The modular SDK's ApiError exposes the HTTP status as
+          // `httpStatusCode` (-1 when not an HTTP error); Plugin.execute()
+          // maps on `statusCode`.
+          if (
+            error instanceof Error &&
+            "httpStatusCode" in error &&
+            typeof error.httpStatusCode === "number" &&
+            error.httpStatusCode > 0
+          ) {
+            throw Object.assign(error, { statusCode: error.httpStatusCode });
           }
           // Preserve SDK ApiError (and any error with a numeric statusCode)
           // so Plugin.execute() can map it to the correct HTTP status.
@@ -197,20 +233,5 @@ export class JobsConnector {
       },
       { name: this.name, includePrefix: true },
     );
-  }
-
-  private _createContext(signal?: AbortSignal) {
-    return new Context({
-      cancellationToken: {
-        // Getter — evaluated on every read so SDK code paths that poll
-        // (rather than subscribe) observe cancellation live.
-        get isCancellationRequested() {
-          return signal?.aborted ?? false;
-        },
-        onCancellationRequested: (cb: () => void) => {
-          signal?.addEventListener("abort", cb, { once: true });
-        },
-      },
-    });
   }
 }

@@ -1,9 +1,8 @@
 name: CI
 
 on:
+  # No base-branch filter: stacked PRs (base = the PR below them) get CI too.
   pull_request:
-    branches:
-      - main
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,8 +15,8 @@ permissions:
 jobs:
   detect-changes:
     runs-on:
-      group: databricks-protected-runner-group
-      labels: linux-ubuntu-latest
+      group: databricks-ghec-untrusted-runner-group
+      labels: linux-ubuntu-latest-untrusted-2core-8gb
 
     name: Detect Changes
     outputs:
@@ -38,8 +37,8 @@ jobs:
   lint_and_typecheck:
     name: Lint & Type Check
     runs-on:
-      group: databricks-protected-runner-group
-      labels: linux-ubuntu-latest
+      group: databricks-ghec-untrusted-runner-group
+      labels: linux-ubuntu-latest-untrusted-2core-8gb
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -48,7 +47,7 @@ jobs:
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: 24
+          node-version-file: .nvmrc
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -116,8 +115,8 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.appkit == 'true'
     runs-on:
-      group: databricks-protected-runner-group
-      labels: linux-ubuntu-latest
+      group: databricks-ghec-untrusted-runner-group
+      labels: linux-ubuntu-latest-untrusted-2core-8gb
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -126,7 +125,7 @@ jobs:
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: 24
+          node-version-file: .nvmrc
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -138,8 +137,8 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.appkit == 'true'
     runs-on:
-      group: databricks-protected-runner-group
-      labels: linux-ubuntu-latest
+      group: databricks-ghec-untrusted-runner-group
+      labels: linux-ubuntu-latest-untrusted-2core-8gb
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -148,7 +147,7 @@ jobs:
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: 24
+          node-version-file: .nvmrc
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -172,8 +171,8 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.appkit == 'true'
     runs-on:
-      group: databricks-protected-runner-group
-      labels: linux-ubuntu-latest
+      group: databricks-ghec-untrusted-runner-group
+      labels: linux-ubuntu-latest-untrusted-2core-8gb
     permissions:
       contents: read
       id-token: write
@@ -185,7 +184,7 @@ jobs:
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: 24
+          node-version-file: .nvmrc
           cache: 'pnpm'
       - name: Install tooling dependencies
         run: pnpm install --frozen-lockfile
@@ -197,8 +196,8 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.appkit == 'true'
     runs-on:
-      group: databricks-protected-runner-group
-      labels: linux-ubuntu-latest
+      group: databricks-ghec-untrusted-runner-group
+      labels: linux-ubuntu-latest-untrusted-2core-8gb
     permissions:
       contents: read
       id-token: write
@@ -210,7 +209,7 @@ jobs:
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: 24
+          node-version-file: .nvmrc
           cache: 'pnpm'
       - name: Install tooling dependencies
         run: pnpm install --frozen-lockfile
@@ -222,8 +221,8 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.appkit == 'true'
     runs-on:
-      group: databricks-protected-runner-group
-      labels: linux-ubuntu-latest
+      group: databricks-ghec-untrusted-runner-group
+      labels: linux-ubuntu-latest-untrusted-2core-8gb
     # Job-level permissions REPLACE (not merge with) the top-level set, so all
     # three must be listed: pull-requests: write for the sticky comment step,
     # and id-token: write which setup-jfrog-npm needs for its OIDC token.
@@ -239,7 +238,7 @@ jobs:
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: 24
+          node-version-file: .nvmrc
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -258,6 +257,12 @@ jobs:
 
       - name: Build SDK tarballs
         run: pnpm pack:prerelease
+
+      # pnpm-patched dependencies are shipped inside the tarballs via
+      # bundledDependencies (tools/bundle-patched-deps.ts). Install each tarball
+      # with npm and pnpm and fail if a consumer would resolve an unpatched copy.
+      - name: Verify bundled patched dependencies
+        run: pnpm exec tsx tools/verify-bundled-patches.ts packages/appkit packages/appkit-ui
 
       - name: Prepare template artifact
         run: pnpm exec tsx tools/prepare-template-artifact.ts
@@ -367,8 +372,8 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.docs == 'true'
     runs-on:
-      group: databricks-protected-runner-group
-      labels: linux-ubuntu-latest
+      group: databricks-ghec-untrusted-runner-group
+      labels: linux-ubuntu-latest-untrusted-2core-8gb
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -377,7 +382,7 @@ jobs:
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: 24
+          node-version-file: .nvmrc
           cache: 'pnpm'
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -412,3 +417,6 @@ jobs:
     with:
       appkit-remote: ${{ github.event.pull_request.head.repo.clone_url || format('https://github.com/{0}.git', github.repository) }}
       appkit-ref: ${{ github.head_ref || github.ref_name }}
+      # PR refs can't match the public-repos allow-list (main only).
+      runner-group: databricks-ghec-untrusted-runner-group
+      runner-label: linux-ubuntu-latest-untrusted-2core-8gb

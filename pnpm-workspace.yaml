@@ -18,3 +18,7 @@ allowBuilds:
   core-js-pure: false
   esbuild: true
   protobufjs: false
+patchedDependencies:
+  '@databricks/sdk-genie@0.54.0': patches/@databricks__sdk-genie@0.54.0.patch
+  '@databricks/sdk-statementexecution@0.52.0': patches/@databricks__sdk-statementexecution@0.52.0.patch
+  '@databricks/sdk-vectorsearch@0.51.0': patches/@databricks__sdk-vectorsearch@0.51.0.patch

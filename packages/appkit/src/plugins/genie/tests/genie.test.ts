@@ -19,68 +19,73 @@ import type { IGenieConfig } from "../types";
 useTestCache();
 
 function createMockGenieService() {
-  const getMessageAttachmentQueryResult = vi.fn();
-
-  const createWaiter = (
+  const genieGetMessageAttachmentQueryResult = vi.fn();
+  // Messages the start/create stubs "created"; the poll serves them back.
+  const messages = new Map<string, any>();
+  const register = (
     conversationId: string,
     messageId: string,
     attachments: any[] = [],
     status = "COMPLETED",
-  ) => ({
-    wait: vi.fn().mockImplementation(async ({ onProgress }: any) => {
-      if (onProgress) {
-        await onProgress({ status: "ASKING_AI" });
-        await onProgress({ status: "EXECUTING_QUERY" });
-      }
-      return {
-        message_id: messageId,
-        conversation_id: conversationId,
-        space_id: "test-space-id",
-        content: "Here are your results",
-        status,
-        attachments,
-        error: undefined,
-      };
-    }),
-  });
+  ) => {
+    messages.set(messageId, {
+      messageId,
+      conversationId,
+      spaceId: "test-space-id",
+      content: "Here are your results",
+      status,
+      attachments,
+      error: undefined,
+    });
+    return { conversationId, messageId };
+  };
 
-  const startConversation = vi.fn().mockImplementation(async () => ({
-    conversation_id: "new-conv-id",
-    message_id: "new-msg-id",
-    ...createWaiter("new-conv-id", "new-msg-id", [
-      {
-        attachment_id: "att-1",
-        query: {
-          title: "Top Customers",
-          description: "Query for top customers",
-          query: "SELECT * FROM customers",
-          statement_id: "stmt-1",
-        },
-      },
-    ]),
-  }));
+  const genieGetConversationMessage = vi
+    .fn()
+    .mockImplementation(async ({ messageId }: any) => messages.get(messageId));
 
-  const createMessage = vi.fn().mockImplementation(async () =>
-    createWaiter("existing-conv-id", "followup-msg-id", [
+  const genieStartConversation = vi.fn().mockImplementation(async () =>
+    register("new-conv-id", "new-msg-id", [
       {
-        attachment_id: "att-2",
-        query: {
-          title: "Follow-up Query",
-          query: "SELECT * FROM orders",
-          statement_id: "stmt-2",
+        attachmentId: "att-1",
+        attachment: {
+          $case: "query",
+          query: {
+            title: "Top Customers",
+            description: "Query for top customers",
+            query: "SELECT * FROM customers",
+            statementId: "stmt-1",
+          },
         },
       },
     ]),
   );
 
-  const listConversationMessages = vi.fn();
+  const genieCreateConversationMessage = vi.fn().mockImplementation(async () =>
+    register("existing-conv-id", "followup-msg-id", [
+      {
+        attachmentId: "att-2",
+        attachment: {
+          $case: "query",
+          query: {
+            title: "Follow-up Query",
+            query: "SELECT * FROM orders",
+            statementId: "stmt-2",
+          },
+        },
+      },
+    ]),
+  );
+
+  const genieListConversationMessages = vi.fn();
 
   return {
-    startConversation,
-    createMessage,
-    getMessageAttachmentQueryResult,
-    listConversationMessages,
-    createWaiter,
+    genieStartConversation,
+    genieCreateConversationMessage,
+    genieGetConversationMessage,
+    genieGetMessageAttachmentQueryResult,
+    genieListConversationMessages,
+    register,
   };
 }
 
@@ -102,11 +107,11 @@ describe("Genie Plugin", () => {
 
     mockGenieService = createMockGenieService();
 
-    mockGenieService.getMessageAttachmentQueryResult.mockResolvedValue({
-      statement_response: {
+    mockGenieService.genieGetMessageAttachmentQueryResult.mockResolvedValue({
+      statementResponse: {
         status: { state: "SUCCEEDED" },
         result: {
-          data_array: [
+          dataArray: [
             ["Acme Corp", "1000000"],
             ["Globex", "500000"],
           ],
@@ -114,8 +119,8 @@ describe("Genie Plugin", () => {
         manifest: {
           schema: {
             columns: [
-              { name: "customer", type_name: "STRING" },
-              { name: "revenue", type_name: "DECIMAL" },
+              { name: "customer", typeName: "STRING" },
+              { name: "revenue", typeName: "DECIMAL" },
             ],
           },
         },
@@ -238,9 +243,9 @@ describe("Genie Plugin", () => {
       await handler(mockReq, mockRes);
 
       expect(mockRes.status).not.toHaveBeenCalledWith(404);
-      expect(mockGenieService.startConversation).toHaveBeenCalledWith(
+      expect(mockGenieService.genieStartConversation).toHaveBeenCalledWith(
         expect.objectContaining({
-          space_id: "test-space-id",
+          spaceId: "test-space-id",
           content: "What are my top customers?",
         }),
       );
@@ -291,12 +296,16 @@ describe("Genie Plugin", () => {
         },
       });
       const mockRes = createMockResponse();
+      // One non-terminal poll before COMPLETED (costs one ~1s backoff sleep).
+      mockGenieService.genieGetConversationMessage.mockResolvedValueOnce({
+        status: "ASKING_AI",
+      });
 
       await handler(mockReq, mockRes);
 
-      expect(mockGenieService.startConversation).toHaveBeenCalledWith(
+      expect(mockGenieService.genieStartConversation).toHaveBeenCalledWith(
         expect.objectContaining({
-          space_id: "test-space-id",
+          spaceId: "test-space-id",
           content: "What are my top customers?",
         }),
       );
@@ -357,15 +366,17 @@ describe("Genie Plugin", () => {
 
       await handler(mockReq, mockRes);
 
-      expect(mockGenieService.createMessage).toHaveBeenCalledWith(
+      expect(
+        mockGenieService.genieCreateConversationMessage,
+      ).toHaveBeenCalledWith(
         expect.objectContaining({
-          space_id: "test-space-id",
-          conversation_id: "existing-conv-id",
+          spaceId: "test-space-id",
+          conversationId: "existing-conv-id",
           content: "Show me more details",
         }),
       );
 
-      expect(mockGenieService.startConversation).not.toHaveBeenCalled();
+      expect(mockGenieService.genieStartConversation).not.toHaveBeenCalled();
 
       const writeCalls = mockRes.write.mock.calls.map((call: any[]) => call[0]);
       const allWritten = writeCalls.join("");
@@ -379,51 +390,46 @@ describe("Genie Plugin", () => {
   describe("multiple attachments", () => {
     test("should yield query_result for each query attachment", async () => {
       // Override startConversation to return multiple query attachments
-      mockGenieService.startConversation.mockImplementation(async () => ({
-        conversation_id: "multi-conv-id",
-        message_id: "multi-msg-id",
-        wait: vi.fn().mockImplementation(async ({ onProgress }: any) => {
-          if (onProgress) {
-            await onProgress({ status: "ASKING_AI" });
-          }
-          return {
-            message_id: "multi-msg-id",
-            conversation_id: "multi-conv-id",
-            space_id: "test-space-id",
-            content: "Here are two queries",
-            status: "COMPLETED",
-            attachments: [
-              {
-                attachment_id: "att-q1",
-                query: {
-                  title: "Query 1",
-                  query: "SELECT 1",
-                  statement_id: "stmt-q1",
-                },
+      mockGenieService.genieStartConversation.mockImplementation(async () =>
+        mockGenieService.register("multi-conv-id", "multi-msg-id", [
+          {
+            attachmentId: "att-q1",
+            attachment: {
+              $case: "query",
+              query: {
+                title: "Query 1",
+                query: "SELECT 1",
+                statementId: "stmt-q1",
               },
-              {
-                attachment_id: "att-q2",
-                query: {
-                  title: "Query 2",
-                  query: "SELECT 2",
-                  statement_id: "stmt-q2",
-                },
+            },
+          },
+          {
+            attachmentId: "att-q2",
+            attachment: {
+              $case: "query",
+              query: {
+                title: "Query 2",
+                query: "SELECT 2",
+                statementId: "stmt-q2",
               },
-              {
-                attachment_id: "att-text",
-                text: { content: "Some explanation" },
-              },
-            ],
-          };
-        }),
-      }));
+            },
+          },
+          {
+            attachmentId: "att-text",
+            attachment: {
+              $case: "text",
+              text: { content: "Some explanation" },
+            },
+          },
+        ]),
+      );
 
-      mockGenieService.getMessageAttachmentQueryResult
+      mockGenieService.genieGetMessageAttachmentQueryResult
         .mockResolvedValueOnce({
-          statement_response: { result: { data: [["row1"]] } },
+          statementResponse: { result: { data: [["row1"]] } },
         })
         .mockResolvedValueOnce({
-          statement_response: { result: { data: [["row2"]] } },
+          statementResponse: { result: { data: [["row2"]] } },
         });
 
       const plugin = new GeniePlugin(config);
@@ -446,18 +452,18 @@ describe("Genie Plugin", () => {
 
       // getMessageAttachmentQueryResult should be called twice (once per query attachment)
       expect(
-        mockGenieService.getMessageAttachmentQueryResult,
+        mockGenieService.genieGetMessageAttachmentQueryResult,
       ).toHaveBeenCalledTimes(2);
 
       expect(
-        mockGenieService.getMessageAttachmentQueryResult,
+        mockGenieService.genieGetMessageAttachmentQueryResult,
       ).toHaveBeenCalledWith(
-        expect.objectContaining({ attachment_id: "att-q1" }),
+        expect.objectContaining({ attachmentId: "att-q1" }),
       );
       expect(
-        mockGenieService.getMessageAttachmentQueryResult,
+        mockGenieService.genieGetMessageAttachmentQueryResult,
       ).toHaveBeenCalledWith(
-        expect.objectContaining({ attachment_id: "att-q2" }),
+        expect.objectContaining({ attachmentId: "att-q2" }),
       );
 
       const writeCalls = mockRes.write.mock.calls.map((call: any[]) => call[0]);
@@ -473,7 +479,7 @@ describe("Genie Plugin", () => {
 
   describe("error handling", () => {
     test("should yield error event on SDK failure", async () => {
-      mockGenieService.startConversation.mockRejectedValue(
+      mockGenieService.genieStartConversation.mockRejectedValue(
         new Error("Genie service unavailable"),
       );
 
@@ -519,9 +525,9 @@ describe("Genie Plugin", () => {
     }
 
     function mockMessages(messages: any[]) {
-      mockGenieService.listConversationMessages.mockResolvedValue({
+      mockGenieService.genieListConversationMessages.mockResolvedValue({
         messages,
-        next_page_token: undefined,
+        nextPageToken: undefined,
       });
     }
 
@@ -551,26 +557,29 @@ describe("Genie Plugin", () => {
     test("should stream message_result events for each message", async () => {
       mockMessages([
         {
-          message_id: "msg-1",
-          conversation_id: "conv-123",
-          space_id: "test-space-id",
+          messageId: "msg-1",
+          conversationId: "conv-123",
+          spaceId: "test-space-id",
           content: "What are the top customers?",
           status: "COMPLETED",
           attachments: [],
         },
         {
-          message_id: "msg-2",
-          conversation_id: "conv-123",
-          space_id: "test-space-id",
+          messageId: "msg-2",
+          conversationId: "conv-123",
+          spaceId: "test-space-id",
           content: "Here are the results",
           status: "COMPLETED",
           attachments: [
             {
-              attachment_id: "att-1",
-              query: {
-                title: "Top Customers",
-                query: "SELECT * FROM customers",
-                statement_id: "stmt-1",
+              attachmentId: "att-1",
+              attachment: {
+                $case: "query",
+                query: {
+                  title: "Top Customers",
+                  query: "SELECT * FROM customers",
+                  statementId: "stmt-1",
+                },
               },
             },
           ],
@@ -591,11 +600,13 @@ describe("Genie Plugin", () => {
 
       await handler(mockReq, mockRes);
 
-      expect(mockGenieService.listConversationMessages).toHaveBeenCalledWith(
+      expect(
+        mockGenieService.genieListConversationMessages,
+      ).toHaveBeenCalledWith(
         expect.objectContaining({
-          space_id: "test-space-id",
-          conversation_id: "conv-123",
-          page_size: genieConnectorDefaults.initialPageSize,
+          spaceId: "test-space-id",
+          conversationId: "conv-123",
+          pageSize: genieConnectorDefaults.initialPageSize,
         }),
       );
 
@@ -621,18 +632,21 @@ describe("Genie Plugin", () => {
     test("should stream query_result events when includeQueryResults is true (default)", async () => {
       mockMessages([
         {
-          message_id: "msg-1",
-          conversation_id: "conv-123",
-          space_id: "test-space-id",
+          messageId: "msg-1",
+          conversationId: "conv-123",
+          spaceId: "test-space-id",
           content: "Results",
           status: "COMPLETED",
           attachments: [
             {
-              attachment_id: "att-1",
-              query: {
-                title: "Query 1",
-                query: "SELECT 1",
-                statement_id: "stmt-1",
+              attachmentId: "att-1",
+              attachment: {
+                $case: "query",
+                query: {
+                  title: "Query 1",
+                  query: "SELECT 1",
+                  statementId: "stmt-1",
+                },
               },
             },
           ],
@@ -654,13 +668,13 @@ describe("Genie Plugin", () => {
       await handler(mockReq, mockRes);
 
       expect(
-        mockGenieService.getMessageAttachmentQueryResult,
+        mockGenieService.genieGetMessageAttachmentQueryResult,
       ).toHaveBeenCalledWith(
         expect.objectContaining({
-          space_id: "test-space-id",
-          conversation_id: "conv-123",
-          message_id: "msg-1",
-          attachment_id: "att-1",
+          spaceId: "test-space-id",
+          conversationId: "conv-123",
+          messageId: "msg-1",
+          attachmentId: "att-1",
         }),
       );
 
@@ -675,18 +689,21 @@ describe("Genie Plugin", () => {
     test("should NOT stream query_result events when includeQueryResults is false", async () => {
       mockMessages([
         {
-          message_id: "msg-1",
-          conversation_id: "conv-123",
-          space_id: "test-space-id",
+          messageId: "msg-1",
+          conversationId: "conv-123",
+          spaceId: "test-space-id",
           content: "Results",
           status: "COMPLETED",
           attachments: [
             {
-              attachment_id: "att-1",
-              query: {
-                title: "Query 1",
-                query: "SELECT 1",
-                statement_id: "stmt-1",
+              attachmentId: "att-1",
+              attachment: {
+                $case: "query",
+                query: {
+                  title: "Query 1",
+                  query: "SELECT 1",
+                  statementId: "stmt-1",
+                },
               },
             },
           ],
@@ -710,7 +727,7 @@ describe("Genie Plugin", () => {
       await handler(mockReq, mockRes);
 
       expect(
-        mockGenieService.getMessageAttachmentQueryResult,
+        mockGenieService.genieGetMessageAttachmentQueryResult,
       ).not.toHaveBeenCalled();
 
       const writeCalls = mockRes.write.mock.calls.map((call: any[]) => call[0]);
@@ -722,18 +739,18 @@ describe("Genie Plugin", () => {
     });
 
     test("should fetch only one page and emit history_info with nextPageToken", async () => {
-      mockGenieService.listConversationMessages.mockResolvedValueOnce({
+      mockGenieService.genieListConversationMessages.mockResolvedValueOnce({
         messages: [
           {
-            message_id: "msg-1",
-            conversation_id: "conv-123",
-            space_id: "test-space-id",
+            messageId: "msg-1",
+            conversationId: "conv-123",
+            spaceId: "test-space-id",
             content: "Most recent message",
             status: "COMPLETED",
             attachments: [],
           },
         ],
-        next_page_token: "page-2-token",
+        nextPageToken: "page-2-token",
       });
 
       const plugin = new GeniePlugin(config);
@@ -753,15 +770,17 @@ describe("Genie Plugin", () => {
       await handler(mockReq, mockRes);
 
       // Should only fetch one page (lazy loading)
-      expect(mockGenieService.listConversationMessages).toHaveBeenCalledTimes(
-        1,
-      );
+      expect(
+        mockGenieService.genieListConversationMessages,
+      ).toHaveBeenCalledTimes(1);
 
-      expect(mockGenieService.listConversationMessages).toHaveBeenCalledWith(
+      expect(
+        mockGenieService.genieListConversationMessages,
+      ).toHaveBeenCalledWith(
         expect.objectContaining({
-          space_id: "test-space-id",
-          conversation_id: "conv-123",
-          page_size: genieConnectorDefaults.initialPageSize,
+          spaceId: "test-space-id",
+          conversationId: "conv-123",
+          pageSize: genieConnectorDefaults.initialPageSize,
         }),
       );
 
@@ -778,9 +797,9 @@ describe("Genie Plugin", () => {
     test("should emit history_info with null nextPageToken when no more pages", async () => {
       mockMessages([
         {
-          message_id: "msg-1",
-          conversation_id: "conv-123",
-          space_id: "test-space-id",
+          messageId: "msg-1",
+          conversationId: "conv-123",
+          spaceId: "test-space-id",
           content: "Only message",
           status: "COMPLETED",
           attachments: [],
@@ -838,7 +857,7 @@ describe("Genie Plugin", () => {
     });
 
     test("should yield error event on SDK failure", async () => {
-      mockGenieService.listConversationMessages.mockRejectedValue(
+      mockGenieService.genieListConversationMessages.mockRejectedValue(
         new Error("Conversation not found"),
       );
 
@@ -867,35 +886,41 @@ describe("Genie Plugin", () => {
     test("should fetch query results in parallel for multiple attachments across messages", async () => {
       mockMessages([
         {
-          message_id: "msg-1",
-          conversation_id: "conv-123",
-          space_id: "test-space-id",
+          messageId: "msg-1",
+          conversationId: "conv-123",
+          spaceId: "test-space-id",
           content: "First query",
           status: "COMPLETED",
           attachments: [
             {
-              attachment_id: "att-1",
-              query: {
-                title: "Query 1",
-                query: "SELECT 1",
-                statement_id: "stmt-1",
+              attachmentId: "att-1",
+              attachment: {
+                $case: "query",
+                query: {
+                  title: "Query 1",
+                  query: "SELECT 1",
+                  statementId: "stmt-1",
+                },
               },
             },
           ],
         },
         {
-          message_id: "msg-2",
-          conversation_id: "conv-123",
-          space_id: "test-space-id",
+          messageId: "msg-2",
+          conversationId: "conv-123",
+          spaceId: "test-space-id",
           content: "Second query",
           status: "COMPLETED",
           attachments: [
             {
-              attachment_id: "att-2",
-              query: {
-                title: "Query 2",
-                query: "SELECT 2",
-                statement_id: "stmt-2",
+              attachmentId: "att-2",
+              attachment: {
+                $case: "query",
+                query: {
+                  title: "Query 2",
+                  query: "SELECT 2",
+                  statementId: "stmt-2",
+                },
               },
             },
           ],
@@ -917,23 +942,23 @@ describe("Genie Plugin", () => {
       await handler(mockReq, mockRes);
 
       expect(
-        mockGenieService.getMessageAttachmentQueryResult,
+        mockGenieService.genieGetMessageAttachmentQueryResult,
       ).toHaveBeenCalledTimes(2);
 
       expect(
-        mockGenieService.getMessageAttachmentQueryResult,
+        mockGenieService.genieGetMessageAttachmentQueryResult,
       ).toHaveBeenCalledWith(
         expect.objectContaining({
-          message_id: "msg-1",
-          attachment_id: "att-1",
+          messageId: "msg-1",
+          attachmentId: "att-1",
         }),
       );
       expect(
-        mockGenieService.getMessageAttachmentQueryResult,
+        mockGenieService.genieGetMessageAttachmentQueryResult,
       ).toHaveBeenCalledWith(
         expect.objectContaining({
-          message_id: "msg-2",
-          attachment_id: "att-2",
+          messageId: "msg-2",
+          attachmentId: "att-2",
         }),
       );
 
@@ -950,7 +975,7 @@ describe("Genie Plugin", () => {
 
   describe("error classification", () => {
     test("should return user-friendly message for RESOURCE_DOES_NOT_EXIST error", async () => {
-      mockGenieService.startConversation.mockRejectedValue(
+      mockGenieService.genieStartConversation.mockRejectedValue(
         new Error(
           "RESOURCE_DOES_NOT_EXIST: No Genie space found with id test-space-id",
         ),
@@ -984,7 +1009,7 @@ describe("Genie Plugin", () => {
     });
 
     test("should return user-friendly message for FAILED state error (table access denied)", async () => {
-      mockGenieService.startConversation.mockRejectedValue(
+      mockGenieService.genieStartConversation.mockRejectedValue(
         new Error(
           "failed to reach COMPLETED state, got FAILED: [object Object]",
         ),
@@ -1018,7 +1043,7 @@ describe("Genie Plugin", () => {
     });
 
     test("should return user-friendly message for RESOURCE_DOES_NOT_EXIST on getConversation", async () => {
-      mockGenieService.listConversationMessages.mockRejectedValue(
+      mockGenieService.genieListConversationMessages.mockRejectedValue(
         new Error(
           "RESOURCE_DOES_NOT_EXIST: No Genie space found with id test-space-id",
         ),
@@ -1078,9 +1103,9 @@ describe("Genie Plugin", () => {
       await handler(mockReq, mockRes);
 
       expect(mockRes.status).not.toHaveBeenCalledWith(404);
-      expect(mockGenieService.startConversation).toHaveBeenCalledWith(
+      expect(mockGenieService.genieStartConversation).toHaveBeenCalledWith(
         expect.objectContaining({
-          space_id: "env-space-id",
+          spaceId: "env-space-id",
           content: "test question",
         }),
       );
@@ -1162,18 +1187,18 @@ describe("Genie Plugin", () => {
 
   describe("getConversation with pageToken", () => {
     test("should pass pageToken through to streamConversation", async () => {
-      mockGenieService.listConversationMessages.mockResolvedValueOnce({
+      mockGenieService.genieListConversationMessages.mockResolvedValueOnce({
         messages: [
           {
-            message_id: "msg-old-1",
-            conversation_id: "conv-123",
-            space_id: "test-space-id",
+            messageId: "msg-old-1",
+            conversationId: "conv-123",
+            spaceId: "test-space-id",
             content: "Older message",
             status: "COMPLETED",
             attachments: [],
           },
         ],
-        next_page_token: "next-token-abc",
+        nextPageToken: "next-token-abc",
       });
 
       const plugin = new GeniePlugin(config);
@@ -1197,11 +1222,13 @@ describe("Genie Plugin", () => {
 
       await handler(mockReq, mockRes);
 
-      expect(mockGenieService.listConversationMessages).toHaveBeenCalledWith(
+      expect(
+        mockGenieService.genieListConversationMessages,
+      ).toHaveBeenCalledWith(
         expect.objectContaining({
-          space_id: "test-space-id",
-          conversation_id: "conv-123",
-          page_token: "some-page-token",
+          spaceId: "test-space-id",
+          conversationId: "conv-123",
+          pageToken: "some-page-token",
         }),
       );
 
@@ -1215,7 +1242,7 @@ describe("Genie Plugin", () => {
     });
 
     test("should yield error event when paginated request fails", async () => {
-      mockGenieService.listConversationMessages.mockRejectedValue(
+      mockGenieService.genieListConversationMessages.mockRejectedValue(
         new Error("Page token expired"),
       );
 

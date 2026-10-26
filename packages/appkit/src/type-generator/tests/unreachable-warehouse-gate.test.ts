@@ -10,10 +10,10 @@ const mocks = vi.hoisted(() => ({
   executeStatement: vi.fn(),
 }));
 
-// Stub the wrapper, not `@databricks/sdk-experimental` underneath it: the
-// wrapper re-exports SDK values (`ConfigError`, `Context`, `Time`, `TimeUnits`)
-// that a bare SDK factory mock would drop, breaking module init. Spreading
-// `importOriginal` keeps those intact while swapping only the factory.
+// Stub the wrapper, not the SDK underneath it: the wrapper exports runtime
+// values (`ApiError`, `isAuthConfigError`) that a bare factory mock would drop,
+// breaking module init. Spreading `importOriginal` keeps those intact while
+// swapping only the factory.
 vi.mock("../../workspace-client", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../workspace-client")>();
@@ -21,7 +21,7 @@ vi.mock("../../workspace-client", async (importOriginal) => {
     ...actual,
     createWorkspaceClient: () => ({
       statementExecution: { executeStatement: mocks.executeStatement },
-      warehouses: { get: mocks.getWarehouse, start: vi.fn() },
+      warehouses: { getWarehouse: mocks.getWarehouse, startWarehouse: vi.fn() },
     }),
   };
 });
@@ -140,7 +140,7 @@ describe("--wait gate: environmental query failures (real query path)", () => {
   test("non-terminal DESCRIBE + no committed types → crashes instead of silently exiting 0", async () => {
     mocks.getWarehouse.mockResolvedValue({ state: "RUNNING" });
     mocks.executeStatement.mockResolvedValue({
-      statement_id: "stmt-pending",
+      statementId: "stmt-pending",
       status: { state: "PENDING" },
     });
 
@@ -162,7 +162,7 @@ describe("--wait gate: environmental query failures (real query path)", () => {
   test("non-terminal DESCRIBE + committed types → warns unavailable and keeps them", async () => {
     mocks.getWarehouse.mockResolvedValue({ state: "RUNNING" });
     mocks.executeStatement.mockResolvedValue({
-      statement_id: "stmt-pending",
+      statementId: "stmt-pending",
       status: { state: "RUNNING" },
     });
     fs.mkdirSync(path.dirname(outFile), { recursive: true });

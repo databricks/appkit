@@ -1,25 +1,12 @@
 /**
- * AppKit workspace-client wrapper — the single entry point every AppKit module
- * uses to reach a Databricks SDK client. Isolates `@databricks/sdk-experimental`
- * to `./legacy.ts` so services can migrate to the modular SDK incrementally
- * behind a stable facade.
+ * AppKit workspace-client wrapper: the single entry point every AppKit module
+ * uses to reach a Databricks SDK client. The modular `@databricks/sdk-*`
+ * packages are isolated to this directory.
  */
 export { ApiError } from "./errors";
 export { createWorkspaceClient } from "./factory";
-export type {
-  CancellationToken,
-  ClientOptions,
-  GenieMessage,
-  LegacyWorkspaceClient,
-  Waiter,
-  WorkspaceClientOptions,
-} from "./legacy";
-// SDK value + type re-exports so AppKit modules import them from the wrapper.
-export {
-  ConfigError,
-  Context,
-  loadConfigFile,
-  Time,
-  TimeUnits,
-} from "./legacy";
-export type { files, jobs, serving, sql, WorkspaceClient } from "./types";
+export { isAuthConfigError, ModularApiError, resolveProfile } from "./modular";
+export type { ClientOptions, WorkspaceClientOptions } from "./options";
+export type { WorkspaceClient } from "./types";
+// Modular SDK client + model types.
+export type * from "./modular";

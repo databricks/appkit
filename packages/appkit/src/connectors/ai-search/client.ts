@@ -6,11 +6,13 @@ import {
   SpanStatusCode,
   TelemetryManager,
 } from "../../telemetry";
-import type { WorkspaceClient } from "../../workspace-client";
-import { contextFromAbortSignal } from "../context";
+import type {
+  QueryVectorIndexRequest,
+  QueryVectorIndexResponse,
+  WorkspaceClient,
+} from "../../workspace-client";
 import type {
   AiSearchConnectorConfig,
-  UcTableInfo,
   VsIndexInfo,
   VsNextPageParams,
   VsQueryParams,
@@ -18,6 +20,32 @@ import type {
 } from "./types";
 
 const logger = createLogger("connectors:ai-search");
+
+/**
+ * Map the typed (camelCase) response back to the snake_case wire shape the
+ * plugin reads. `debugInfo` relies on the sdk-vectorsearch pnpm patch. Rows
+ * may hold `bigint` (the SDK parses with json-bigint); coerce to `number` so
+ * results stay JSON-serializable, matching legacy `JSON.parse` precision.
+ */
+function toRawResponse(res: QueryVectorIndexResponse): VsRawResponse {
+  return {
+    manifest: {
+      column_count: res.manifest?.columnCount ?? 0,
+      columns: (res.manifest?.columns ?? []).map((c) => ({
+        name: c.name ?? "",
+        type: c.typeText,
+      })),
+    },
+    result: {
+      row_count: res.result?.rowCount ?? 0,
+      data_array: (res.result?.dataArray ?? []).map((row) =>
+        row.map((v) => (typeof v === "bigint" ? Number(v) : v)),
+      ),
+    },
+    next_page_token: res.nextPageToken,
+    debug_info: res.debugInfo as VsRawResponse["debug_info"],
+  };
+}
 
 export class AiSearchConnector {
   private readonly telemetry: TelemetryProvider;
@@ -38,25 +66,25 @@ export class AiSearchConnector {
       throw new Error("Query cancelled before execution");
     }
 
-    const body: Record<string, unknown> = {
+    const hasFilters = !!(
+      params.filters && Object.keys(params.filters).length > 0
+    );
+    const req: QueryVectorIndexRequest = {
+      name: params.indexName,
       columns: params.columns,
-      num_results: params.numResults,
-      query_type: params.queryType.toUpperCase(),
-      debug_level: 1,
-    };
-
-    if (params.queryText) body.query_text = params.queryText;
-    if (params.queryVector) body.query_vector = params.queryVector;
-    if (params.filters && Object.keys(params.filters).length > 0) {
+      numResults: params.numResults,
+      queryType: params.queryType.toUpperCase(),
+      // Makes the response carry `debug_info` timings (queryTimeMs).
+      debugLevel: 1,
+      queryText: params.queryText || undefined,
+      queryVector: params.queryVector,
       // VS silently ignores an object under `filters`; it wants a JSON string.
-      body.filters_json = JSON.stringify(params.filters);
-    }
-    if (params.reranker) {
-      body.reranker = {
+      filtersJson: hasFilters ? JSON.stringify(params.filters) : undefined,
+      reranker: params.reranker && {
         model: "databricks_reranker",
-        parameters: { columns_to_rerank: params.reranker.columnsToRerank },
-      };
-    }
+        parameters: { columnsToRerank: params.reranker.columnsToRerank },
+      },
+    };
 
     logger.debug(
       "Querying VS index %s (type=%s, num_results=%d)",
@@ -74,26 +102,18 @@ export class AiSearchConnector {
           "vs.index_name": params.indexName,
           "vs.query_type": params.queryType,
           "vs.num_results": params.numResults,
-          "vs.has_filters": !!(
-            params.filters && Object.keys(params.filters).length > 0
-          ),
+          "vs.has_filters": hasFilters,
           "vs.has_reranker": !!params.reranker,
         },
       },
       async (span: Span) => {
         const startTime = Date.now();
         try {
-          const response = (await workspaceClient.apiClient.request(
-            {
-              method: "POST",
-              path: `/api/2.0/vector-search/indexes/${params.indexName}/query`,
-              payload: body,
-              headers: new Headers({ "Content-Type": "application/json" }),
-              raw: false,
-              query: {},
-            },
-            contextFromAbortSignal(signal),
-          )) as VsRawResponse;
+          const response = toRawResponse(
+            await workspaceClient.vectorSearch.queryVectorIndex(req, {
+              signal,
+            }),
+          );
 
           const duration = Date.now() - startTime;
           span.setAttribute("vs.result_count", response.result.row_count);
@@ -153,20 +173,16 @@ export class AiSearchConnector {
       },
       async (span: Span) => {
         try {
-          const response = (await workspaceClient.apiClient.request(
-            {
-              method: "POST",
-              path: `/api/2.0/vector-search/indexes/${params.indexName}/query-next-page`,
-              payload: {
-                endpoint_name: params.endpointName,
-                page_token: params.pageToken,
+          const response = toRawResponse(
+            await workspaceClient.vectorSearch.queryVectorIndexNextPage(
+              {
+                name: params.indexName,
+                endpointName: params.endpointName,
+                pageToken: params.pageToken,
               },
-              headers: new Headers({ "Content-Type": "application/json" }),
-              raw: false,
-              query: {},
-            },
-            contextFromAbortSignal(signal),
-          )) as VsRawResponse;
+              { signal },
+            ),
+          );
 
           span.setAttribute("vs.result_count", response.result.row_count);
           span.setStatus({ code: SpanStatusCode.OK });
@@ -193,16 +209,24 @@ export class AiSearchConnector {
     indexName: string,
     signal?: AbortSignal,
   ): Promise<VsIndexInfo> {
-    return (await workspaceClient.apiClient.request(
-      {
-        method: "GET",
-        path: `/api/2.0/vector-search/indexes/${indexName}`,
-        headers: new Headers({ "Content-Type": "application/json" }),
-        raw: false,
-        query: {},
+    const index = await workspaceClient.vectorSearch.getVectorIndex(
+      { name: indexName },
+      { signal },
+    );
+    // Map the camelCase model back to the snake_case `VsIndexInfo` callers read.
+    const spec =
+      index.indexSpec?.$case === "deltaSyncIndexSpec"
+        ? index.indexSpec.deltaSyncIndexSpec
+        : undefined;
+    return {
+      index_type: index.indexType as VsIndexInfo["index_type"],
+      delta_sync_index_spec: spec && {
+        source_table: spec.sourceTable,
+        embedding_vector_columns: spec.embeddingVectorColumns?.map((c) => ({
+          name: c.name ?? "",
+        })),
       },
-      contextFromAbortSignal(signal),
-    )) as VsIndexInfo;
+    };
   }
 
   /**
@@ -214,16 +238,10 @@ export class AiSearchConnector {
     sourceTable: string,
     signal?: AbortSignal,
   ): Promise<string[]> {
-    const table = (await workspaceClient.apiClient.request(
-      {
-        method: "GET",
-        path: `/api/2.1/unity-catalog/tables/${sourceTable}`,
-        headers: new Headers({ "Content-Type": "application/json" }),
-        raw: false,
-        query: {},
-      },
-      contextFromAbortSignal(signal),
-    )) as UcTableInfo;
-    return (table.columns ?? []).map((c) => c.name);
+    const table = await workspaceClient.tables.getTable(
+      { fullNameArg: sourceTable },
+      { signal },
+    );
+    return (table.columns ?? []).flatMap((c) => (c.name ? [c.name] : []));
   }
 }

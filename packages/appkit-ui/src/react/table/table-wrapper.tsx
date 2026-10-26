@@ -29,6 +29,7 @@ import { LoadingSkeleton } from "./loading";
 import type { TableWrapperProps } from "./types";
 
 const CHECKBOX_COLUMN_WIDTH = 40;
+const EMPTY_DATA: never[] = [];
 
 /**
  * Wrapper component for tables with automatic data fetching and state management
@@ -87,11 +88,17 @@ export function TableWrapper<TRaw = any, TProcessed = any>(
 
   const hasData = data && data.length > 0;
 
-  const processedData = hasData
-    ? transformer
-      ? transformer(data)
-      : (data as unknown as TProcessed[])
-    : [];
+  // TanStack resets the page index (and re-renders) whenever `data` changes
+  // identity, so a fresh array per render loops forever.
+  const processedData = useMemo(
+    () =>
+      hasData
+        ? transformer
+          ? transformer(data)
+          : (data as unknown as TProcessed[])
+        : (EMPTY_DATA as TProcessed[]),
+    [hasData, data, transformer],
+  );
 
   const tableColumns = useMemo(() => {
     if (!hasData) return [];

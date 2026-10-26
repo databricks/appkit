@@ -1,0 +1,26 @@
+diff --git a/dist/v1/model.d.ts b/dist/v1/model.d.ts
+index ceb8ef56c1d7e4912851dbdce891623f4e8fc93c..4ff6fa02396a17485630132cf1a5bae4a3ada512 100644
+--- a/dist/v1/model.d.ts
++++ b/dist/v1/model.d.ts
+@@ -1581,7 +1581,7 @@ interface ResultData {
+    * The `JSON_ARRAY` format is an array of arrays of values, where each non-null value is
+    * formatted as a string. Null values are encoded as JSON `null`.
+    */
+-  dataArray?: ListValue[] | undefined;
++  dataArray?: (string | null)[][] | undefined;
+   /** The position within the sequence of result set chunks. */
+   chunkIndex?: number | undefined;
+   /** The starting row offset within the result set. */
+diff --git a/dist/v1/model.js b/dist/v1/model.js
+index 8770051f3102f70625db5758166d7fc1636afcb7..d20c134274fde0ffbf7d67a8346765fa7cba7f76 100644
+--- a/dist/v1/model.js
++++ b/dist/v1/model.js
+@@ -846,7 +846,7 @@ const unmarshalResultSchema = z.object({
+ }));
+ const unmarshalResultDataSchema = z.object({
+ 	external_links: z.array(z.lazy(() => unmarshalExternalLinkSchema)).optional(),
+-	data_array: z.array(z.lazy(() => unmarshalListValueSchema)).optional(),
++	data_array: z.array(z.array(z.string().nullable())).optional(),
+ 	chunk_index: z.number().optional(),
+ 	row_offset: z.union([
+ 		z.number(),

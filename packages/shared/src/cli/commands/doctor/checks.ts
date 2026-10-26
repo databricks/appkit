@@ -24,14 +24,13 @@ export interface AuthOutcome {
 
 interface CurrentUserClient {
   currentUser: {
-    me: () => Promise<{ id?: string; userName?: string }>;
+    me: (req: object) => Promise<{ id?: string; userName?: string }>;
   };
 }
 
-/** Just the resolved config off a WorkspaceClient, read structurally to keep
- * `shared` SDK-free. */
-interface ConfiguredClient {
-  config?: { host?: unknown };
+/** The host resolver off a WorkspaceClient, read structurally. */
+interface HostClient {
+  getHost?: () => Promise<string>;
 }
 
 /**
@@ -39,12 +38,17 @@ interface ConfiguredClient {
  * contacted: `DATABRICKS_HOST` wins the host when set, but a profile supplies it
  * otherwise, so the env var alone can't tell you the workspace in play.
  *
- * Only populated once the SDK has resolved its config, which it does lazily on
- * the first API call — reading it right after construction yields undefined.
+ * Resolved from env + profile only (no network), so it's available even when
+ * the credentials fail. Undefined when resolution itself fails (e.g. a missing
+ * profile, or no host anywhere).
  */
-function resolvedHostOf(client: unknown): string | undefined {
-  const host = (client as ConfiguredClient | undefined)?.config?.host;
-  return typeof host === "string" && host.length > 0 ? host : undefined;
+async function resolvedHostOf(client: unknown): Promise<string | undefined> {
+  try {
+    const host = await (client as HostClient | undefined)?.getHost?.();
+    return typeof host === "string" && host.length > 0 ? host : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Compares hosts ignoring scheme, trailing slash, and case, so
@@ -78,17 +82,6 @@ async function hostProfileConflict(
     `(${profileHost}) point at different workspaces. DATABRICKS_HOST wins the ` +
     `host while the profile still supplies credentials — unset one of them.`
   );
-}
-
-/**
- * Last-resort host recovery for when the client never got built: the SDK's
- * ConfigError appends the resolved config as `host=<url>, profile=…`.
- */
-function hostFromError(message: string): string | undefined {
-  const match = message.match(/host=([^\s,]+)/);
-  // The config list is prose-terminated ("…databricks.com."), so drop trailing
-  // punctuation the capture picked up.
-  return match ? match[1].replace(/[.,]+$/, "") : undefined;
 }
 
 /**
@@ -186,12 +179,10 @@ export async function checkAuth(options: DoctorOptions): Promise<AuthOutcome> {
     // Bound the live call so an unresponsive workspace can't hang the CLI; a
     // timeout throws and is reported as an auth failure below.
     const me = await withTimeout(
-      (client as CurrentUserClient).currentUser.me(),
+      (client as CurrentUserClient).currentUser.me({}),
     );
     const who = me.userName ?? me.id ?? "unknown";
-    // Read only now: the SDK resolves its config lazily on the first call, so
-    // before me() the host is still undefined.
-    const resolvedHost = sanitizeHost(resolvedHostOf(client)) ?? host;
+    const resolvedHost = sanitizeHost(await resolvedHostOf(client)) ?? host;
 
     // Credentials work, but the env/profile split still needs fixing — surface
     // it as a warning rather than letting a green tick imply all is well.
@@ -238,9 +229,8 @@ export async function checkAuth(options: DoctorOptions): Promise<AuthOutcome> {
     const shownProfile =
       profile ?? (sdkProfile ? `${sdkProfile} (resolved)` : undefined);
     // Prefer the host the SDK resolved (covers a profile-supplied host), then
-    // the one embedded in its error, then the raw env var.
-    const shownHost =
-      sanitizeHost(resolvedHostOf(built) ?? hostFromError(raw)) ?? host;
+    // the raw env var.
+    const shownHost = sanitizeHost(await resolvedHostOf(built)) ?? host;
     return {
       result: {
         status: "error",
@@ -281,7 +271,7 @@ function authFailureHint(
     return "Check that the workspace host is correct and reachable (verify DATABRICKS_HOST or the profile's host, and that you're online).";
   }
   if (
-    /has no .* profile configured|profile .* (does not exist|not found)/i.test(
+    /has no .* profile configured|profile .*(does not exist|not found)/i.test(
       message,
     )
   ) {
@@ -289,7 +279,7 @@ function authFailureHint(
   }
   // Expired/failed token, or no credentials resolved: same next action.
   if (
-    /cannot get access token|refresh token|reauthenticate|databricks auth token|token .*expired|cannot configure default credentials|default auth|no .*credentials/i.test(
+    /cannot get access token|refresh token|reauthenticate|databricks auth token|token .*expired|cannot configure default credentials|default auth|no .*credentials|host is required/i.test(
       message,
     )
   ) {

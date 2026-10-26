@@ -63,9 +63,9 @@ function mockDescribeResponse(
   payload: unknown,
 ): DatabricksStatementExecutionResponse {
   return {
-    statement_id: "stmt-mock",
+    statementId: "stmt-mock",
     status: { state: "SUCCEEDED" },
-    result: { data_array: [[JSON.stringify(payload)]] },
+    result: { dataArray: [[JSON.stringify(payload)]] },
   };
 }
 
@@ -232,7 +232,7 @@ describe("syncMetricViewsTypes", () => {
       mode: "blocking",
       suppressDegradedWrite: true,
       metricFetcher: async () => ({
-        statement_id: "stmt-pending",
+        statementId: "stmt-pending",
         status: { state: "PENDING" },
       }),
     });

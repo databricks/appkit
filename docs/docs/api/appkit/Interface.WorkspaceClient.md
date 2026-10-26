@@ -4,115 +4,240 @@ AppKit's workspace client facade. Mirrors the multi-client shape of the
 modular Databricks SDK: each service is its own accessor, so services can be
 migrated one at a time behind this stable interface.
 
-Accessors are legacy-typed for now (delegated to the underlying legacy SDK
-client); see the module docblock.
+## Extends
+
+- `WorkspaceAuth`
 
 ## Properties
 
-### apiClient
+### apps
 
 ```ts
-readonly apiClient: ApiClient;
+readonly apps: AppsClient;
 ```
 
-Low-level HTTP transport (`apiClient.request(...)`). Used for endpoints
-without a typed service method: SCIM header probe, warehouse listing,
-serving SSE streaming, vector search, internal telemetry.
+Databricks Apps (modular SDK).
 
 ***
 
-### config
+### connections
 
 ```ts
-readonly config: Config;
+readonly connections: ConnectionsClient;
 ```
 
-SDK `Config` — exposes `host` and `authenticate(headers)`. Used by the
-files-upload path and agents auth-header stamping, which bypass the typed
-services.
+Unity Catalog Connections (modular SDK).
 
 ***
 
 ### currentUser
 
 ```ts
-readonly currentUser: CurrentUserService;
+readonly currentUser: ScimClient;
 ```
 
-Current user.
+Current user (modular SDK SCIM client; `me({})` returns the caller).
+
+***
+
+### database
+
+```ts
+readonly database: DatabaseClient;
+```
+
+Lakebase provisioned database instances + credentials (modular SDK).
+
+***
+
+### experiments
+
+```ts
+readonly experiments: ExperimentsClient;
+```
+
+MLflow Experiments (modular SDK).
 
 ***
 
 ### files
 
 ```ts
-readonly files: FilesService;
+readonly files: FilesClient;
 ```
 
-UC Volumes / Files API.
+UC Volumes / Files API (modular SDK).
+
+***
+
+### functions
+
+```ts
+readonly functions: FunctionsClient;
+```
+
+Unity Catalog Functions (modular SDK).
 
 ***
 
 ### genie
 
 ```ts
-readonly genie: GenieService;
+readonly genie: GenieClient;
 ```
 
-Genie / dashboards.
+Genie (modular SDK).
 
 ***
 
 ### jobs
 
 ```ts
-readonly jobs: JobsService;
+readonly jobs: JobsClient;
 ```
 
-Jobs.
+Jobs (modular SDK, Jobs API 2.2).
 
 ***
 
-### servingEndpoints
+### modelServing
 
 ```ts
-readonly servingEndpoints: ServingEndpointsService;
+readonly modelServing: ModelServingClient;
 ```
 
-Serving Endpoints.
+Serving endpoints (modular SDK).
+
+***
+
+### postgres
+
+```ts
+readonly postgres: PostgresClient;
+```
+
+Lakebase Postgres: autoscaling projects, branches, endpoints (modular SDK).
 
 ***
 
 ### statementExecution
 
 ```ts
-readonly statementExecution: StatementExecutionService;
+readonly statementExecution: StatementExecutionClient;
 ```
 
-Statement Execution.
+Statement Execution (modular SDK).
+
+***
+
+### tables
+
+```ts
+readonly tables: TablesClient;
+```
+
+Unity Catalog Tables (modular SDK).
+
+***
+
+### vectorSearch
+
+```ts
+readonly vectorSearch: VectorSearchClient;
+```
+
+Vector Search (modular SDK; index metadata only, queries use `request()`).
+
+***
+
+### volumes
+
+```ts
+readonly volumes: VolumesClient;
+```
+
+Unity Catalog Volumes (modular SDK).
 
 ***
 
 ### warehouses
 
 ```ts
-readonly warehouses: WarehousesService;
+readonly warehouses: WarehousesClient;
 ```
 
-SQL Warehouses.
+SQL Warehouses (modular SDK).
 
 ## Methods
 
-### toLegacyWorkspaceClient()
+### authenticate()
 
 ```ts
-toLegacyWorkspaceClient(): WorkspaceClient;
+authenticate(headers: Headers): Promise<void>;
 ```
 
-Returns the underlying legacy `@databricks/sdk-experimental`
-`WorkspaceClient`, for handoff to code still typed against the old SDK
-(`@databricks/lakebase`). Transitional.
+Set the auth header(s) (e.g. `Authorization`) on `headers`.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `headers` | `Headers` |
 
 #### Returns
 
-`WorkspaceClient`
+`Promise`\<`void`\>
+
+#### Inherited from
+
+```ts
+WorkspaceAuth.authenticate
+```
+
+***
+
+### getHost()
+
+```ts
+getHost(): Promise<string>;
+```
+
+Scheme-normalized workspace host, without a trailing slash.
+
+#### Returns
+
+`Promise`\<`string`\>
+
+#### Inherited from
+
+```ts
+WorkspaceAuth.getHost
+```
+
+***
+
+### request()
+
+```ts
+request(req: WorkspaceRequest): Promise<Response>;
+```
+
+Send a request through the modular transport (AppKit User-Agent + auth).
+Returns the raw `Response` (body unread, so it can stream); throws
+[ApiError](Class.ApiError.md) on a non-2xx status.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `req` | `WorkspaceRequest` |
+
+#### Returns
+
+`Promise`\<`Response`\>
+
+#### Inherited from
+
+```ts
+WorkspaceAuth.request
+```

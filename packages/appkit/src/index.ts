@@ -93,6 +93,12 @@ export {
   READ_ACTIONS,
   WRITE_ACTIONS,
 } from "./plugins/files/policy";
+export type {
+  DirectoryEntry,
+  DownloadResponse,
+  FilesDirectoryEntry,
+  FilesDownloadResponse,
+} from "./plugins/files/types";
 export * from "./plugins/ga-exports.generated";
 export type {
   IJobsConfig,

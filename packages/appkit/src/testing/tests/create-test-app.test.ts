@@ -298,13 +298,13 @@ describe("createTestApp", () => {
     });
   });
 
-  test("apiClient.request has zero calls after boot", async () => {
+  test("request has zero calls after boot", async () => {
     await withApp({ plugins: [probe()] }, async (app) => {
       // A canary for two hazards at once: DATABRICKS_WORKSPACE_ID must
       // short-circuit the SCIM probe in getWorkspaceId, and internal telemetry
       // must stay off. If either regresses, request assertions get polluted and
       // this fails loudly.
-      expect(getMock(app.client, "apiClient.request")).toHaveBeenCalledTimes(0);
+      expect(getMock(app.client, "request")).toHaveBeenCalledTimes(0);
     });
   });
 

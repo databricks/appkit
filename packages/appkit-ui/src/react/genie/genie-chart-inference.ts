@@ -5,7 +5,7 @@
  * │  These rules determine what chart type is shown for Genie query    │
  * │  results. Modify thresholds and chart type mappings here.          │
  * │                                                                     │
- * │  Column types are classified from SQL type_name:                   │
+ * │  Column types are classified from SQL typeName:                    │
  * │    DATE: DATE, TIMESTAMP, TIMESTAMP_NTZ                            │
  * │    NUMERIC: DECIMAL, INT, DOUBLE, FLOAT, LONG, etc.               │
  * │    STRING: STRING, VARCHAR, CHAR                                   │

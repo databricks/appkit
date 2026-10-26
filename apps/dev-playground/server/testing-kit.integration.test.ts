@@ -38,22 +38,25 @@ const filesPlugin = () =>
   files({ volumes: { reports: { policy: files.policy.allowAll() } } });
 
 describe("getMock — assert the workspace-client call a route made", () => {
-  test("GET /api/files/reports/metadata calls files.getMetadata", async () => {
+  // Metadata is a raw HEAD (the typed call drops the headers), so seed `request`.
+  test("GET /api/files/reports/metadata issues a HEAD request", async () => {
     await using app = await createTestApp({
       plugins: [filesPlugin()],
       env: FILES_ENV,
       responses: {
-        "files.getMetadata": {
-          "content-length": "42",
-          "content-type": "text/plain",
-        },
+        request: () =>
+          new Response(null, {
+            headers: { "content-length": "42", "content-type": "text/plain" },
+          }),
       },
     });
 
     const res = await app.get("/api/files/reports/metadata?path=report.csv");
 
     expect(res.status).toBe(200);
-    expect(getMock(app.client, "files.getMetadata")).toHaveBeenCalled();
+    expect(getMock(app.client, "request")).toHaveBeenCalledWith(
+      expect.objectContaining({ method: "HEAD" }),
+    );
   });
 });
 
@@ -68,7 +71,7 @@ describe("createMockWorkspaceClient — build the fake client yourself", () => {
     });
     expect(getMock(client, "jobs.getRun")).toHaveBeenCalledWith({ run_id: 1 });
     await expect(
-      client.genie.getMessage({ id: "m-1" }),
+      client.genie.genieGetConversationMessage({ messageId: "m-1" }),
     ).resolves.toBeUndefined();
   });
 });
@@ -90,7 +93,7 @@ describe("createApiError — simulate a typed workspace error", () => {
       plugins: [filesPlugin()],
       env: FILES_ENV,
       responses: {
-        "files.getMetadata": () => {
+        request: () => {
           throw createApiError({
             statusCode: 404,
             message: "No such file",

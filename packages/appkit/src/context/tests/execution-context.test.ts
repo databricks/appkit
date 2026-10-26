@@ -165,7 +165,6 @@ describe("caller execution context", () => {
       expect.objectContaining({
         token: "token",
         host: "https://workspace.example.com",
-        authType: "pat",
       }),
     );
     expect(context.client).toBe(client);

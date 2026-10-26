@@ -9,7 +9,7 @@ import webpack from "webpack";
 
 // appkit is a Node/server package; the docs only reference its API (they never
 // execute the SDK in the browser). Stub every Node built-in for the client
-// bundle so webpack doesn't try to bundle `@databricks/sdk-experimental`'s
+// bundle so webpack doesn't try to bundle the Databricks SDK's
 // Node deps (fs, crypto, stream, …). `fallback` only triggers when a module is
 // unresolvable, so it's a no-op for the Node-target server bundle.
 const nodeBuiltinFallbacks = Object.fromEntries(

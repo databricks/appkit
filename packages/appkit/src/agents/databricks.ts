@@ -10,6 +10,7 @@ import {
   type StreamBody,
   stream as servingStream,
   streamAiGateway,
+  type WorkspaceRequestClientLike,
 } from "../connectors/serving/client";
 import { APPKIT_USER_AGENT, getClientOptions } from "../context/client-options";
 import { createWorkspaceClient } from "../workspace-client";
@@ -149,7 +150,7 @@ interface RawFetchAdapterOptions {
  * Preferred options: caller provides the transport function directly.
  * The `fromServingEndpoint` / `fromModelServing` factories use this to route
  * through `connectors/serving/stream`, which centralises URL encoding, auth
- * via the SDK's `apiClient.request`, and any future retries/telemetry.
+ * via the workspace client's `request()`, and any future retries/telemetry.
  */
 interface StreamBodyAdapterOptions {
   streamBody: StreamBody;
@@ -174,17 +175,19 @@ function isStreamBodyOptions(
 }
 
 /**
- * Duck-typed subset of the Databricks SDK `WorkspaceClient`. Callers of
- * `fromServingEndpoint` and `fromModelServing` pass a real `WorkspaceClient`,
- * but we only need the `apiClient.request` surface — so we declare the minimal
- * interface rather than importing the SDK type directly. This keeps the adapter
- * free of a hard compile-time dependency on `@databricks/sdk-experimental`.
+ * Duck-typed subset of the AppKit workspace client. Callers of
+ * `fromServingEndpoint` and `fromModelServing` pass `createWorkspaceClient()`,
+ * but we only need its raw `request()` seam, so we declare the minimal shape
+ * rather than importing the client type. A legacy SDK client exposing only
+ * `apiClient.request` is still accepted (deprecated).
  */
-export interface WorkspaceClientLike {
-  apiClient: {
-    request(options: Record<string, unknown>): Promise<unknown>;
-  };
-}
+type WorkspaceClientLike =
+  | WorkspaceRequestClientLike
+  | {
+      apiClient: {
+        request(options: Record<string, unknown>): Promise<unknown>;
+      };
+    };
 
 /**
  * A fixed client, or a provider resolved on every model call. A provider lets
@@ -403,7 +406,7 @@ export class DatabricksAdapter implements AgentAdapter {
    * Creates a DatabricksAdapter for a Databricks Model Serving endpoint.
    *
    * Routes through the shared `connectors/serving/stream` helper, which
-   * delegates to the SDK's `apiClient.request({ raw: true })`. That gives the
+   * delegates to the workspace client's raw `request()`. That gives the
    * adapter centralised URL encoding + authentication with the rest of the
    * serving surface — no bespoke `fetch()` + `authenticate()` plumbing.
    */
@@ -423,15 +426,7 @@ export class DatabricksAdapter implements AgentAdapter {
     const resolveClient = clientResolver(workspaceClient);
     const adapter = new DatabricksAdapter({
       streamBody: (body, signal) =>
-        // Cast through the structural shape: the connector types
-        // `workspaceClient` as the SDK's concrete `WorkspaceClient`, but we
-        // only need `apiClient.request`.
-        servingStream(
-          resolveClient() as unknown as Parameters<typeof servingStream>[0],
-          endpointName,
-          body,
-          signal,
-        ),
+        servingStream(resolveClient(), endpointName, body, signal),
       maxSteps,
       maxTokens,
       generationParams,
@@ -481,7 +476,7 @@ export class DatabricksAdapter implements AgentAdapter {
     if (!workspaceClient) {
       workspaceClient = createWorkspaceClient({
         clientOptions: getClientOptions(),
-      }) as unknown as WorkspaceClientLike;
+      });
     }
 
     return DatabricksAdapter.fromServingEndpoint({
@@ -503,7 +498,7 @@ export class DatabricksAdapter implements AgentAdapter {
    * Unlike {@link fromModelServing}, the target model is named in the request
    * body (`model`, e.g. `"system.ai.claude-opus-5-5"`) rather than in the URL:
    * the gateway is a single fixed path that routes by the body's `model`. Auth
-   * and transport reuse the SDK's `apiClient.request`, same as the serving
+   * and transport reuse the workspace client's `request()`, same as the serving
    * path, so no bespoke `fetch()` + token handling. The request/response wire
    * format and tool-calling loop are identical to the serving path.
    *
@@ -546,21 +541,14 @@ export class DatabricksAdapter implements AgentAdapter {
 
     const resolveClient = clientResolver(
       workspaceClient ??
-        (createWorkspaceClient({
+        createWorkspaceClient({
           clientOptions: getClientOptions(),
-        }) as unknown as WorkspaceClientLike),
+        }),
     );
 
     const adapter = new DatabricksAdapter({
       streamBody: (body, signal) =>
-        // Same structural cast as `fromServingEndpoint`: the connector types
-        // the client as the SDK's `WorkspaceClient`, but we only need
-        // `apiClient.request`.
-        streamAiGateway(
-          resolveClient() as unknown as Parameters<typeof streamAiGateway>[0],
-          body,
-          signal,
-        ),
+        streamAiGateway(resolveClient(), body, signal),
       model,
       maxSteps,
       maxTokens,

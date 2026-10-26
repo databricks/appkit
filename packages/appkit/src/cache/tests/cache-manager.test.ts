@@ -55,9 +55,7 @@ vi.mock("../../workspace-client", async (importOriginal) => {
     await importOriginal<typeof import("../../workspace-client")>();
   return {
     ...actual,
-    createWorkspaceClient: vi.fn().mockImplementation(() => ({
-      toLegacyWorkspaceClient: () => ({}),
-    })),
+    createWorkspaceClient: vi.fn().mockImplementation(() => ({})),
   };
 });
 
@@ -993,6 +991,25 @@ describe("CacheManager", () => {
       const fn = vi.fn().mockRejectedValue(apiError);
 
       await expect(cache.getOrExecute(["key"], fn, "user1")).rejects.toThrow(
+        apiError,
+      );
+    });
+
+    test("should re-throw a modular SDK ApiError without wrapping (keeps its status)", async () => {
+      const { ModularApiError } = await import("shared/workspace-client");
+      const cache = await CacheManager.getInstance({
+        storage: createMockStorage(),
+      });
+      const body = new TextEncoder().encode(
+        JSON.stringify({
+          error_code: "INVALID_PARAMETER_VALUE",
+          message: "Run 1 does not exist.",
+        }),
+      );
+      const apiError = ModularApiError.fromHttpError(400, undefined, body);
+      const fn = vi.fn().mockRejectedValue(apiError);
+
+      await expect(cache.getOrExecute(["key"], fn, "user1")).rejects.toBe(
         apiError,
       );
     });
