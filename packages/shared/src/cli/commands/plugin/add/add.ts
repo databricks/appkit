@@ -9,6 +9,7 @@ import { parseDocument } from "yaml";
 import { APP_YAML_FILE } from "../../../deploy-config";
 import { profileFromEnv } from "../../registry/add";
 import {
+  assertBundleApp,
   planHasContent,
   reportConfigWrite,
   validateBundle,
@@ -360,7 +361,7 @@ async function runPluginAdd(name: string, opts: AddOptions): Promise<void> {
     conflicts.splice(conflicts.indexOf(AGENTS_MODEL_ENV), 1);
     console.log(
       pc.dim(
-        `${AGENTS_MODEL_ENV} is already used by another resource; agents gets its model as defaultModel instead.`,
+        `${AGENTS_MODEL_ENV} is already used by another resource; agents gets the endpoint as defaultModel in its registration instead.`,
       ),
     );
   }
@@ -370,7 +371,18 @@ async function runPluginAdd(name: string, opts: AddOptions): Promise<void> {
     );
   }
 
-  if (opts.register !== false) {
+  // Fail before any write rather than leave a partial install.
+  assertBundleApp(cwd);
+
+  if (opts.register === false) {
+    if (config) {
+      // The config carries required settings (auth mode, columns, model).
+      console.log(
+        `${pc.bold("Register it with this config in your createApp call:")}\n` +
+          pc.dim(`  ${plugin.name}(${toSource(config)})`),
+      );
+    }
+  } else {
     await registerInServer(cwd, plugin, config ? toSource(config) : "");
   }
 

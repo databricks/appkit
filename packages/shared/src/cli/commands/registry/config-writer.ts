@@ -93,6 +93,11 @@ function appKey(doc: ReturnType<typeof parseDocument>): string {
   );
 }
 
+/** Throws (see {@link appKey}) when databricks.yml has no single target app. */
+export function assertBundleApp(cwd: string): void {
+  appKey(loadDoc(path.join(cwd, DATABRICKS_YML_FILE)));
+}
+
 /**
  * Additively patches `databricks.yml`: adds bundle `variables`, the app
  * `resources` bindings, and the target-level variable values — each only if
