@@ -7,7 +7,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { createTestApp, type TestApp } from "../../../testing";
 import { server } from "../../server";
 import { design } from "../index";
-import { resolveDesignPage } from "../vite-plugin";
+import { designVitePlugin, resolveDesignPage } from "../vite-plugin";
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "appkit-design-"));
 
@@ -61,6 +61,33 @@ describe("resolveDesignPage", () => {
   test("paths outside /design are left alone", () => {
     for (const p of ["/", "/designer", "/api/design", "/orders"]) {
       expect(resolveDesignPage(root, p)).toBeUndefined();
+    }
+  });
+});
+
+describe("page entry", () => {
+  const load = (file: string) =>
+    (designVitePlugin().load as (id: string) => string | undefined)(
+      `\0virtual:appkit-design-page:${file}`,
+    );
+
+  test("imports only the requested page, so other drafts can't break it", () => {
+    const index = load("index.tsx");
+    expect(index).toContain('import Page from "/src/design/index.tsx"');
+    expect(index).not.toContain("pages/");
+    expect(load("pages/orders.jsx")).toContain(
+      'import Page from "/src/design/pages/orders.jsx"',
+    );
+  });
+
+  test("refuses anything that isn't a design page file", () => {
+    for (const file of [
+      "../main.tsx",
+      "pages/a/b.tsx",
+      "index.ts",
+      "pages/x.css",
+    ]) {
+      expect(load(file)).toBeUndefined();
     }
   });
 });
