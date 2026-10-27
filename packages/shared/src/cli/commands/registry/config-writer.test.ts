@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { parseDocument } from "yaml";
 
 import { buildConfigPlan } from "./config-plan";
-import { writeConfig } from "./config-writer";
+import { assertBundleApp, writeConfig } from "./config-writer";
 import type { ResourceRequirementRow } from "./requirements";
 
 const FIXTURES = path.join(__dirname, "__fixtures__");
@@ -252,5 +252,21 @@ describe("writeConfig — app key", () => {
     expect(Object.keys(apps)).toEqual(["dashboard"]);
     expect(apps.dashboard.user_api_scopes).toEqual(["sql"]);
     expect(apps.dashboard.resources[0].name).toBe("wh");
+  });
+});
+
+describe("assertBundleApp", () => {
+  it("throws for several apps without one named app, before any write", () => {
+    const cwd = makeTempDir();
+    fs.writeFileSync(
+      path.join(cwd, "databricks.yml"),
+      "resources:\n  apps:\n    frontend: {}\n    backend: {}\n",
+    );
+    expect(() => assertBundleApp(cwd)).toThrow("several apps");
+    fs.writeFileSync(
+      path.join(cwd, "databricks.yml"),
+      "resources:\n  apps:\n    dash: {}\n",
+    );
+    expect(() => assertBundleApp(cwd)).not.toThrow();
   });
 });

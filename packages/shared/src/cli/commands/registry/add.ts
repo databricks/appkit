@@ -22,6 +22,7 @@ import {
   planHasContent,
 } from "./config-plan";
 import {
+  assertBundleApp,
   reportConfigWrite,
   validateBundle,
   writeConfig,
@@ -449,6 +450,8 @@ export function partitionVerified(
 
 async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
   const cwd = opts.cwd ? path.resolve(opts.cwd) : process.cwd();
+  // The deploy-config write refuses an ambiguous bundle; check before any file.
+  if (opts.resources !== false) assertBundleApp(cwd);
 
   // Resolve the full graph and fetch the verified index concurrently (two
   // independent round-trips). Item resolution is read-only — nothing is written
