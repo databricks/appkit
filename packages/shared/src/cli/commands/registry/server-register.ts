@@ -36,7 +36,11 @@ export function findServerFile(serverRoot: string): string | null {
 function namedImportsFrom(stmts: SgNode[], module: string): SgNode | null {
   for (const stmt of stmts) {
     const source = stmt.field("source")?.text().slice(1, -1);
-    if (source !== module || /^import\s+type\b/.test(stmt.text())) continue;
+    // `import type` shows as an unnamed `type` token, wherever comments sit.
+    const typeOnly = stmt
+      .children()
+      .some((c) => c.kind() === "type" && !c.isNamed());
+    if (source !== module || typeOnly) continue;
     const named = stmt.find({ rule: { kind: "named_imports" } });
     if (named) return named;
   }
