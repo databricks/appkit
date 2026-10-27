@@ -28,6 +28,21 @@ export function findServerFile(serverRoot: string): string | null {
   return null;
 }
 
+/**
+ * The named-imports node (`{ a, b }`) of a value import from `module`, to
+ * extend with a new name instead of adding a second import line. Type-only
+ * imports are skipped: a value added there would be erased at compile time.
+ */
+function namedImportsFrom(stmts: SgNode[], module: string): SgNode | null {
+  for (const stmt of stmts) {
+    const source = stmt.field("source")?.text().slice(1, -1);
+    if (source !== module || /^import\s+type\b/.test(stmt.text())) continue;
+    const named = stmt.find({ rule: { kind: "named_imports" } });
+    if (named) return named;
+  }
+  return null;
+}
+
 /** The `plugins: [...]` array node inside a createApp call, if present. */
 function findPluginsArray(root: SgNode): SgNode | null {
   for (const pair of root.findAll({ rule: { kind: "pair" } })) {
@@ -159,13 +174,28 @@ export function registerPluginInServer(
     importBindingNames(s).has(exportName),
   );
   const importLine = `import { ${exportName} } from "${importPath}";`;
-  if (!hasBinding && importStmts.length > 0) {
+  const named = hasBinding ? null : namedImportsFrom(importStmts, importPath);
+  if (named) {
+    // Append after the last specifier, matching a multi-line list's layout.
+    const specs = named.findAll({ rule: { kind: "import_specifier" } });
+    const lastSpec = specs[specs.length - 1];
+    if (!lastSpec) {
+      edits.push(named.replace(`{ ${exportName} }`));
+    } else {
+      const startIdx = lastSpec.range().start.index;
+      const lineStart = content.lastIndexOf("\n", startIdx - 1);
+      const indent = content.slice(lineStart + 1, startIdx);
+      const multiline = named.text().includes("\n") && /^[ \t]*$/.test(indent);
+      const sep = multiline ? `,\n${indent}` : ", ";
+      edits.push(lastSpec.replace(`${lastSpec.text()}${sep}${exportName}`));
+    }
+  } else if (!hasBinding && importStmts.length > 0) {
     const last = importStmts[importStmts.length - 1];
     edits.push(last.replace(`${last.text()}\n${importLine}`));
   }
 
   let output = root.commitEdits(edits);
-  if (!hasBinding && importStmts.length === 0) {
+  if (!hasBinding && !named && importStmts.length === 0) {
     output = `${importLine}\n${output}`;
   }
   fs.writeFileSync(serverFile, output);
