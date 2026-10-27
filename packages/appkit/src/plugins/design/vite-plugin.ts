@@ -3,8 +3,9 @@ import path from "node:path";
 
 import type { Plugin } from "vite";
 
-const ENTRY_ID = "virtual:appkit-design-page";
-const ENTRY_URL = `/@id/__x00__${ENTRY_ID}`;
+/** One virtual entry per page: `virtual:appkit-design-page:<file>`. */
+const ENTRY_PREFIX = "virtual:appkit-design-page:";
+const PAGE_FILE = /^(index|pages\/[A-Za-z0-9_-]+)\.(tsx|jsx)$/;
 const DESIGN_ROUTE = /^\/design(?:\/([A-Za-z0-9_-]+))?\/?$/;
 const EXTENSIONS = [".tsx", ".jsx"];
 
@@ -34,29 +35,17 @@ export function resolveDesignPage(
   return null;
 }
 
-// Globs are root-relative (root = the client dir). The page is picked at
-// runtime from the URL; the server already 404s pages that don't exist.
-const ENTRY_MODULE = `
+// Imports only the requested page (root-relative; root = the client dir), so
+// an unfinished draft elsewhere in the folder can't break this one.
+const entryModule = (file: string) => `
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
+import Page from "/src/design/${file}";
 import.meta.glob("/src/index.css", { eager: true });
-// Eager: design pages are few, and a lazy import can race the dev server's
-// first dependency-optimization reload.
-const pages = import.meta.glob(
-  ["/src/design/index.{tsx,jsx}", "/src/design/pages/*.{tsx,jsx}"],
-  { eager: true },
-);
-const name = location.pathname.replace(/^\\/design\\/?/, "").replace(/\\/$/, "");
-const key = Object.keys(pages).find((file) =>
-  name
-    ? file.replace(/^\\/src\\/design\\/pages\\//, "").replace(/\\.[jt]sx$/, "") === name
-    : /^\\/src\\/design\\/index\\.[jt]sx$/.test(file),
-);
-const { default: Page } = pages[key];
 createRoot(document.getElementById("root")).render(createElement(Page));
 `;
 
-const pageHtml = (title: string) => `<!doctype html>
+const pageHtml = (title: string, entryUrl: string) => `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -65,7 +54,7 @@ const pageHtml = (title: string) => `<!doctype html>
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="${ENTRY_URL}"></script>
+    <script type="module" src="${entryUrl}"></script>
   </body>
 </html>
 `;
@@ -83,11 +72,13 @@ export function designVitePlugin(): Plugin {
     apply: "serve",
 
     resolveId(id) {
-      if (id === ENTRY_ID) return `\0${id}`;
+      if (id.startsWith(ENTRY_PREFIX)) return `\0${id}`;
     },
 
     load(id) {
-      if (id === `\0${ENTRY_ID}`) return ENTRY_MODULE;
+      if (!id.startsWith(`\0${ENTRY_PREFIX}`)) return;
+      const file = id.slice(ENTRY_PREFIX.length + 1);
+      if (PAGE_FILE.test(file)) return entryModule(file);
     },
 
     configureServer(server) {
@@ -106,9 +97,13 @@ export function designVitePlugin(): Plugin {
         try {
           const name = path.basename(file, path.extname(file));
           const title = name === "index" ? "Design" : `Design: ${name}`;
+          const rel = path
+            .relative(path.join(server.config.root, "src/design"), file)
+            .split(path.sep)
+            .join("/");
           const html = await server.transformIndexHtml(
             req.url ?? pathname,
-            pageHtml(title),
+            pageHtml(title, `/@id/__x00__${ENTRY_PREFIX}${rel}`),
           );
           res.setHeader("Content-Type", "text/html");
           res.end(html);
