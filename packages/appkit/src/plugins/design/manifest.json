@@ -2,24 +2,10 @@
   "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
   "name": "design",
   "displayName": "Design Plugin",
-  "description": "Dev-only design canvas at /design: renders components from client/src/design, lets you click-select elements in the canvas or the running app and hand them to a coding agent",
+  "description": "Dev-only design pages: /design renders client/src/design/index.tsx and /design/<name> renders client/src/design/pages/<name>.tsx; 404 in production",
   "stability": "beta",
   "resources": {
     "required": [],
     "optional": []
-  },
-  "config": {
-    "schema": {
-      "type": "object",
-      "properties": {
-        "builderOrigin": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Origins of the app builder that embeds the app (e.g. [\"https://builder.example.com\"]; a single string is also accepted). When /design runs inside that window (iframe parent or opener), each send is also posted to it with window.postMessage. '*' is not allowed."
-        }
-      }
-    }
   }
 }

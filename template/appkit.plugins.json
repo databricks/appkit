@@ -199,7 +199,7 @@
     "design": {
       "name": "design",
       "displayName": "Design Plugin",
-      "description": "Dev-only design canvas at /design: renders components from client/src/design, lets you click-select elements in the canvas or the running app and hand them to a coding agent",
+      "description": "Dev-only design pages: /design renders client/src/design/index.tsx and /design/<name> renders client/src/design/pages/<name>.tsx; 404 in production",
       "package": "@databricks/appkit",
       "resources": {
         "required": [],

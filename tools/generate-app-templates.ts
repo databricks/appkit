@@ -125,7 +125,7 @@ const APP_TEMPLATES: AppTemplate[] = [
     name: "ui-only",
     features: ["design"],
     description:
-      "Empty UI-only app (server + dev-only design canvas) for quick PoCs",
+      "Empty UI-only app (server + dev-only design pages) for quick PoCs",
   },
 ];
 
