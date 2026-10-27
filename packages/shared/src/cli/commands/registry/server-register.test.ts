@@ -38,6 +38,55 @@ afterEach(() => {
 });
 
 describe("registerPluginInServer", () => {
+  it("extends an existing import from the same module, idempotently", () => {
+    const dir = makeTempDir();
+    const file = writeServer(dir, "server.ts", "server()");
+    registerPluginInServer(dir, "@databricks/appkit", "analytics");
+    registerPluginInServer(dir, "@databricks/appkit", "analytics");
+    const out = fs.readFileSync(file, "utf-8");
+    expect(out).toContain(
+      `import { createApp, analytics } from "@databricks/appkit";`,
+    );
+    expect(out.match(/@databricks\/appkit"/g)).toHaveLength(1);
+    expect(out.match(/analytics\(\)/g)).toHaveLength(1);
+  });
+
+  it("extends the /beta import and keeps a multi-line list's layout", () => {
+    const dir = makeTempDir();
+    const file = path.join(dir, "server.ts");
+    fs.writeFileSync(
+      file,
+      `import { createApp, server } from "@databricks/appkit";\n` +
+        `import {\n  agents,\n} from "@databricks/appkit/beta";\n\n` +
+        `createApp({ plugins: [server(), agents()] });\n`,
+    );
+    registerPluginInServer(dir, "@databricks/appkit/beta", "aiSearch");
+    const out = fs.readFileSync(file, "utf-8");
+    expect(out).toContain(
+      `import {\n  agents,\n  aiSearch,\n} from "@databricks/appkit/beta";`,
+    );
+    expect(out).toContain(
+      `import { createApp, server } from "@databricks/appkit";`,
+    );
+  });
+
+  it("adds a new line rather than extending a type-only import", () => {
+    const dir = makeTempDir();
+    const file = path.join(dir, "server.ts");
+    fs.writeFileSync(
+      file,
+      `import type { PluginData } from "@databricks/appkit/beta";\n` +
+        `import { createApp } from "@databricks/appkit";\n\n` +
+        `createApp({ plugins: [] });\n`,
+    );
+    registerPluginInServer(dir, "@databricks/appkit/beta", "agents");
+    const out = fs.readFileSync(file, "utf-8");
+    expect(out).toContain(
+      `import type { PluginData } from "@databricks/appkit/beta";`,
+    );
+    expect(out).toContain(`import { agents } from "@databricks/appkit/beta";`);
+  });
+
   it("accepts an external npm package and rejects code in the path", () => {
     const dir = makeTempDir();
     writeServer(dir, "server.ts", "server()");
@@ -61,7 +110,9 @@ describe("registerPluginInServer", () => {
     expect(result.status).toBe("wired");
     const out = fs.readFileSync(file, "utf-8");
     expect(out).toContain(`files({ auth: "on-behalf-of-user" }), server()`);
-    expect(out).toContain(`import { files } from "@databricks/appkit";`);
+    expect(out).toContain(
+      `import { createApp, files } from "@databricks/appkit";`,
+    );
   });
 
   it("wires a plugin into a server root that is a subdir (e.g. api/)", () => {
@@ -123,10 +174,11 @@ describe("registerPluginInServer", () => {
 
     expect(result.status).toBe("wired");
     const written = fs.readFileSync(file, "utf-8");
-    expect(written).toContain('import { hello } from "./plugins/hello";');
+    // `hello` is bound by extending the same-path import; HelloPlugin stays.
+    expect(written).toContain(
+      'import { HelloPlugin, hello } from "./plugins/hello";',
+    );
     expect(written).toContain("hello()");
-    // The pre-existing, differently-named import is left intact.
-    expect(written).toContain('import { HelloPlugin } from "./plugins/hello";');
   });
 
   it("does not add a conflicting import when the binding already exists", () => {
