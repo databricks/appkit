@@ -5,7 +5,6 @@ dist/
 build/
 .env
 .databricks/
-.appkit/
 .smoke-test/
 test-results/
 playwright-report/

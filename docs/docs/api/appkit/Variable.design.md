@@ -1,5 +1,5 @@
 # Variable: design
 
 ```ts
-const design: ToPlugin<typeof DesignPlugin, DesignConfig | undefined, "design">;
+const design: ToPlugin<typeof DesignPlugin, BasePluginConfig, "design">;
 ```

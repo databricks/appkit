@@ -16,17 +16,6 @@ const JSX_ELEMENT_MATCHER = {
 interface ReactSourceLocPluginOptions {
   /** Absolute app root used for data-source relative paths (typically `process.cwd()`). */
   projectRoot: string;
-  /**
-   * Tag component elements (`<Button>`, `<Ui.Card>`) with
-   * `data-appkit-source` instead of native ones. Components needn't forward
-   * it to the DOM: the design picker reads it from the React fiber props.
-   */
-  components?: boolean;
-}
-
-/** Fragments reject unknown props, so they're never tagged. */
-function isFragmentTag(name: SgNode): boolean {
-  return /(^|\.)Fragment$/.test(name.text());
 }
 
 function cleanModuleId(id: string): string {
@@ -51,11 +40,11 @@ function isNativeJsxTag(name: SgNode): boolean {
   return false;
 }
 
-function hasAttribute(node: SgNode, attrName: string): boolean {
+function hasDataSourceAttribute(node: SgNode): boolean {
   for (const attr of node.fieldChildren("attribute")) {
     if (!attr.is("jsx_attribute")) continue;
     for (const child of attr.children()) {
-      if (child.is("property_identifier") && child.text() === attrName) {
+      if (child.is("property_identifier") && child.text() === "data-source") {
         return true;
       }
     }
@@ -71,11 +60,9 @@ export function reactSourceLocPlugin(
   options: ReactSourceLocPluginOptions,
 ): Plugin {
   const projectRoot = path.resolve(options.projectRoot);
-  const components = options.components === true;
-  const attrName = components ? "data-appkit-source" : "data-source";
 
   return {
-    name: components ? "react-source-loc-components" : "react-source-loc",
+    name: "react-source-loc",
     enforce: "pre",
     apply: "serve",
 
@@ -89,17 +76,12 @@ export function reactSourceLocPlugin(
 
       for (const node of root.findAll(JSX_ELEMENT_MATCHER)) {
         const name = node.field("name");
-        if (!name || isNativeJsxTag(name) !== !components) continue;
-        if (
-          components &&
-          (name.kind() === "jsx_namespace_name" || isFragmentTag(name))
-        )
-          continue;
-        if (hasAttribute(node, attrName)) continue;
+        if (!name || !isNativeJsxTag(name)) continue;
+        if (hasDataSourceAttribute(node)) continue;
 
         const nodeRange = node.range();
         const value = `${relPath}:${nodeRange.start.line + 1}:${nodeRange.start.column}`;
-        s.appendLeft(name.range().end.index, ` ${attrName}="${value}"`);
+        s.appendLeft(name.range().end.index, ` data-source="${value}"`);
       }
 
       if (!s.hasChanged()) return;
