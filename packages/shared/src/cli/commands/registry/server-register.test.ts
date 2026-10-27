@@ -70,6 +70,25 @@ describe("registerPluginInServer", () => {
     );
   });
 
+  it("treats a commented `import /* x */ type` as type-only", () => {
+    const dir = makeTempDir();
+    const file = path.join(dir, "server.ts");
+    fs.writeFileSync(
+      file,
+      `import /* types used below */ type { Plugin } from "@databricks/appkit";\n` +
+        `import { createApp } from "@databricks/appkit";\n\n` +
+        `createApp({ plugins: [] });\n`,
+    );
+    registerPluginInServer(dir, "@databricks/appkit", "analytics");
+    const out = fs.readFileSync(file, "utf-8");
+    expect(out).toContain(
+      `import /* types used below */ type { Plugin } from "@databricks/appkit";`,
+    );
+    expect(out).toContain(
+      `import { createApp, analytics } from "@databricks/appkit";`,
+    );
+  });
+
   it("adds a new line rather than extending a type-only import", () => {
     const dir = makeTempDir();
     const file = path.join(dir, "server.ts");

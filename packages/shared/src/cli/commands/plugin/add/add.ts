@@ -4,7 +4,9 @@ import process from "node:process";
 
 import { Command } from "commander";
 import pc from "picocolors";
+import { parseDocument } from "yaml";
 
+import { APP_YAML_FILE } from "../../../deploy-config";
 import { profileFromEnv } from "../../registry/add";
 import {
   planHasContent,
@@ -12,12 +14,13 @@ import {
   validateBundle,
   writeConfig,
 } from "../../registry/config-writer";
-import { serializeEnvAppend } from "../../registry/env-reconcile";
+import { parseEnv, serializeEnvAppend } from "../../registry/env-reconcile";
 import {
   AUTH_MODE_BOTH,
   AUTH_MODE_FIELD,
   AUTH_MODE_OBO,
   AUTH_MODE_SP,
+  type AddPlan,
   type AuthMode,
   authKey,
   buildAddPlan,
@@ -227,6 +230,43 @@ async function aiSearchColumns(
     .filter(Boolean);
 }
 
+/** The env var agents falls back to for its model; serving binds it too. */
+const AGENTS_MODEL_ENV = "DATABRICKS_SERVING_ENDPOINT_NAME";
+
+/**
+ * Env names in the plan already bound to something else: a different
+ * non-empty value in .env, or an app.yaml entry with another valueFrom/value.
+ */
+export function envConflicts(cwd: string, plan: AddPlan): string[] {
+  const dotEnv = fs.existsSync(path.join(cwd, ".env"))
+    ? parseEnv(fs.readFileSync(path.join(cwd, ".env"), "utf-8"))
+    : {};
+  const appYamlFile = path.join(cwd, APP_YAML_FILE);
+  const appEnv = new Map<string, string>();
+  if (fs.existsSync(appYamlFile)) {
+    const env = parseDocument(fs.readFileSync(appYamlFile, "utf-8")).toJSON()
+      ?.env as
+      | { name?: string; valueFrom?: string; value?: string }[]
+      | undefined;
+    for (const e of env ?? []) {
+      if (e?.name) appEnv.set(e.name, JSON.stringify([e.valueFrom, e.value]));
+    }
+  }
+  const out = new Set<string>();
+  for (const e of plan.dotEnv) {
+    if (dotEnv[e.env] && e.value && dotEnv[e.env] !== e.value) out.add(e.env);
+  }
+  for (const e of plan.appYamlEnv) {
+    const want = JSON.stringify([
+      "valueFrom" in e ? e.valueFrom : undefined,
+      "value" in e ? e.value : undefined,
+    ]);
+    const have = appEnv.get(e.name);
+    if (have !== undefined && have !== want) out.add(e.name);
+  }
+  return [...out];
+}
+
 async function runPluginAdd(name: string, opts: AddOptions): Promise<void> {
   const cwd = opts.cwd ? path.resolve(opts.cwd) : process.cwd();
   if (
@@ -291,7 +331,7 @@ async function runPluginAdd(name: string, opts: AddOptions): Promise<void> {
   await fillMissing(missingNow(), values, interactive);
   resources = selectResources(plugin, values);
 
-  const config = pluginConfig(
+  let config = pluginConfig(
     plugin,
     resources,
     modes,
@@ -301,6 +341,34 @@ async function runPluginAdd(name: string, opts: AddOptions): Promise<void> {
   );
 
   const plan = buildAddPlan(plugin, resources, values, modes);
+
+  // An env var holds one value: if another resource already binds one of
+  // these names to something else, the new value would never reach the app.
+  const conflicts = envConflicts(cwd, plan);
+  const model = values["agents-serving-endpoint.name"];
+  if (
+    plugin.name === "agents" &&
+    model &&
+    conflicts.includes(AGENTS_MODEL_ENV)
+  ) {
+    // agents takes its model from defaultModel before that env var.
+    config = { ...config, defaultModel: model };
+    plan.dotEnv = plan.dotEnv.filter((e) => e.env !== AGENTS_MODEL_ENV);
+    plan.appYamlEnv = plan.appYamlEnv.filter(
+      (e) => e.name !== AGENTS_MODEL_ENV,
+    );
+    conflicts.splice(conflicts.indexOf(AGENTS_MODEL_ENV), 1);
+    console.log(
+      pc.dim(
+        `${AGENTS_MODEL_ENV} is already used by another resource; agents gets its model as defaultModel instead.`,
+      ),
+    );
+  }
+  if (conflicts.length > 0) {
+    throw new Error(
+      `${conflicts.join(", ")} already set to a different resource or value in .env or app.yaml; nothing was written. Edit those entries by hand, then rerun.`,
+    );
+  }
 
   if (opts.register !== false) {
     await registerInServer(cwd, plugin, config ? toSource(config) : "");
@@ -331,15 +399,6 @@ async function runPluginAdd(name: string, opts: AddOptions): Promise<void> {
   const updated = [...filled, ...newEnv].map((e) => e.env);
   if (updated.length > 0) {
     console.log(`${pc.green("Updated .env:")} ${updated.join(", ")}`);
-  }
-  for (const e of dotEnv) {
-    if (existing[e.env] && e.value && existing[e.env] !== e.value) {
-      console.warn(
-        pc.yellow(
-          `.env already sets ${e.env}; kept it (the app.yaml and databricks.yml entries use the new value).`,
-        ),
-      );
-    }
   }
 
   if (planHasContent(plan)) {

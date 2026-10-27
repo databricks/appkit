@@ -1,6 +1,10 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { expect, test } from "vitest";
 
-import { pluginConfig, toSource } from "./add";
+import { envConflicts, pluginConfig, toSource } from "./add";
 import type { ManifestPlugin, ManifestResource } from "./plan";
 
 const index: ManifestResource = {
@@ -88,4 +92,28 @@ test("agents auth follows the model endpoint, not the skills volume", () => {
       "volume:agents-skills": "obo",
     }),
   ).toBeUndefined();
+});
+
+test("envConflicts flags env names bound to another resource or value", () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-add-"));
+  fs.writeFileSync(path.join(cwd, ".env"), "A=old\nB=\n");
+  fs.writeFileSync(
+    path.join(cwd, "app.yaml"),
+    "env:\n  - name: C\n    valueFrom: serving-endpoint\n  - name: D\n    valueFrom: same\n",
+  );
+  const plan = {
+    dotEnv: [
+      { env: "A", value: "new" },
+      { env: "B", value: "x" },
+    ],
+    appYamlEnv: [
+      { name: "C", valueFrom: "agents-serving-endpoint" },
+      { name: "D", valueFrom: "same" },
+    ],
+    bundleVariables: [],
+    resourceBindings: [],
+    unverifiedTypes: [],
+  };
+  expect(envConflicts(cwd, plan)).toEqual(["A", "C"]);
+  fs.rmSync(cwd, { recursive: true, force: true });
 });
