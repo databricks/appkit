@@ -4,8 +4,16 @@ import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } fro
 /*
  * The design page, shown full size at /design (dev only). Build the layout here
  * with AppKit components; add more pages as client/src/design/pages/<name>.tsx,
- * served at /design/<name>. Each file's default export is the page.
+ * served at /design/<name>. Each file's default export is the page. Link
+ * between pages with react-router's <Link to="/<name>">: design pages run under
+ * a router whose basename is /design.
  */
+
+// Starter-page marker: while it's exported, /design never reports itself ready
+// (GET /design/__status, appkit:design-ready), so an app builder keeps showing
+// its own view instead of this placeholder. Delete it when you write the page.
+export const designPlaceholder = true;
+
 export default function DesignPage() {
   return (
     <main className="min-h-screen bg-background p-6 md:p-10">
