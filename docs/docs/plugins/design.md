@@ -36,7 +36,7 @@ await createApp({
 | `/design` | `client/src/design/index.tsx` |
 | `/design/<name>` | `client/src/design/pages/<name>.tsx` |
 
-Each file's default export is the page, rendered on its own at full size with the app's styles (`client/src/index.css`). Anything else under `/design` returns 404. Pages hot-reload like the rest of the app. The requested page is loaded directly and other pages only when navigated to, so an unfinished draft only breaks its own URL.
+Each file's default export is the page, rendered on its own at full size with the app's styles (`client/src/index.css`). Anything else under `/design` returns 404. The page names `index` and anything starting with `__` are reserved (`pages/index.tsx` would collide with `/design`, and `__status` is the plugin's own endpoint), so such files aren't served or listed. Pages hot-reload like the rest of the app. The requested page is loaded directly and other pages only when navigated to, so an unfinished draft only breaks its own URL.
 
 When the app has `react-router` (the app template does), design pages share a router whose basename is `/design`. Links between them stay inside `/design`, and keep working when the pages are later promoted into the app's own routes:
 
@@ -72,7 +72,7 @@ In development, the dev server adds `data-source="file:line:col"` to every nativ
 
 ## Readiness
 
-A builder that embeds `/design` can wait until there is a real design to show, instead of revealing an empty page. `/design` is **ready** once `client/src/design/index.tsx` exists, isn't the template placeholder, and has painted in a browser since it last changed.
+A builder that embeds `/design` can wait until there is a real design to show, instead of revealing an empty page. `/design` is **ready** once `client/src/design/index.tsx` exists, isn't the template placeholder, and has painted in a browser since it last changed. A page that throws while rendering shows the error in place and doesn't count as painted, so an edit that breaks the page turns `ready` back to `false` until it's fixed.
 
 The app template's starter page is marked as a placeholder by this export. Delete it when you write the real page:
 

@@ -69,6 +69,17 @@ describe("resolveDesignPage", () => {
     }
   });
 
+  test('"index" and "__*" are reserved, not page names', () => {
+    const r = clientWith([
+      "src/design/index.tsx",
+      "src/design/pages/index.tsx",
+      "src/design/pages/__status.tsx",
+    ]);
+    expect(resolveDesignPage(r, "/design/index")).toBeNull();
+    expect(resolveDesignPage(r, "/design/__status")).toBeNull();
+    expect(listDesignPages(r)).toEqual([{ name: "index", path: "/design" }]);
+  });
+
   test("paths outside /design are left alone", () => {
     for (const p of ["/", "/designer", "/api/design", "/orders"]) {
       expect(resolveDesignPage(root, p)).toBeUndefined();
@@ -146,6 +157,12 @@ describe("entryModule", () => {
     expect(code).not.toContain("eager: true }),");
   });
 
+  test("routes and lists only non-reserved page files", () => {
+    const code = entryModule("index.tsx", [], true);
+    expect(code).toContain('"!/src/design/pages/index.{tsx,jsx}"');
+    expect(code).toContain('"!/src/design/pages/__*"');
+  });
+
   test("without react-router it renders just the page", () => {
     const code = entryModule("index.tsx", [], false);
     expect(code).not.toContain("react-router");
@@ -162,7 +179,10 @@ describe("entryModule", () => {
     expect(code).toContain('type: "appkit:design-ready", version: 1');
     expect(code).toContain("target.postMessage(");
     expect(code).not.toContain('"*"');
-    expect(code).toContain("mod.designPlaceholder === true ? undefined : name");
+    expect(code).toContain(
+      "const placeholder = mod.designPlaceholder === true",
+    );
+    expect(code).toContain("ok: !this.state.error && !placeholder");
   });
 });
 
@@ -191,7 +211,7 @@ describe("builderOrigin", () => {
 describe("page entry", () => {
   const load = (file: string) =>
     (designVitePlugin().load as (id: string) => string | undefined)(
-      `\0virtual:appkit-design-page:${file}`,
+      `\0virtual:appkit-design-page:${file}.mjs`,
     );
 
   test("statically imports only the requested page, so other drafts can't break it", () => {
