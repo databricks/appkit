@@ -27,7 +27,7 @@ await createApp({
 
 | Option | Type | Description |
 | ------ | ---- | ----------- |
-| `builderOrigin` | `string \| string[]` | Origin(s) of the app builder that embeds the app. The [ready message](#readiness) is posted only to these origins. Must be a bare origin like `"https://builder.example.com"`; `"*"` is rejected. Optional: without it no message is posted, and `/design/__status` still works. |
+| `builderOrigin` | `string \| string[]` | Origin(s) of the app builder that embeds the app. The [design](#readiness) and [app](#app-readiness) ready messages are posted only to these origins. Must be a bare origin like `"https://builder.example.com"`; `"*"` is rejected. Optional: without it no message is posted, and `/design/__status` still works. |
 
 ## Pages
 
@@ -100,7 +100,7 @@ function TripsPerDay() {
 }
 ```
 
-Outside `/design` (the real app, tests) the hook does nothing, so it can stay in components that are later promoted into the app.
+It also holds back [app readiness](#app-readiness) on the app's own pages in development. Elsewhere (production, tests) it does nothing, so it can stay in components that are later promoted into the app.
 
 ### Placeholder
 
@@ -143,6 +143,30 @@ window.addEventListener("message", (event) => {
   if (event.origin !== appOrigin) return;
   if (event.data?.type === "appkit:design-ready" && event.data.version === 1) {
     showDesign(event.data.pages);
+  }
+});
+```
+
+## App readiness
+
+The same idea for the real app, so a builder never reveals the template's default home page. In development, when `builderOrigin` is set, the plugin adds a small script to the app's own pages (not `/design`). Once a page has settled (the same waits as [design readiness](#what-ready-waits-for), including `useDesignReady`), and again after client-side navigation and hot updates, it posts:
+
+```ts
+interface AppReadyMessage {
+  type: "appkit:app-ready";
+  version: 1;
+  path: string; // location.pathname of the page that is ready
+}
+```
+
+It isn't posted while an element with the `data-appkit-template-home` attribute is on screen. The app template's default home page (`HomePage` in `client/src/App.tsx`) carries it; a builder can also look for it directly. Remove the attribute, or the page, when the app gets its real home page, and the next settle (a hot update counts) posts `appkit:app-ready`.
+
+```ts
+// In the app builder:
+window.addEventListener("message", (event) => {
+  if (event.origin !== appOrigin) return;
+  if (event.data?.type === "appkit:app-ready" && event.data.version === 1) {
+    showApp(event.data.path);
   }
 });
 ```

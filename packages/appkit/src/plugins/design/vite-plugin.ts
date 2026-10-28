@@ -11,6 +11,16 @@ import type { Plugin } from "vite";
  */
 const ENTRY_PREFIX = "virtual:appkit-design-page:";
 const ENTRY_SUFFIX = ".mjs";
+/** Script added to the app's own pages (not /design) to post appkit:app-ready. */
+const APP_READY_ID = "virtual:appkit-app-ready.mjs";
+
+/**
+ * Marks the app template's default home page. While an element carrying it
+ * is on screen the app isn't reported ready, so a builder never reveals the
+ * placeholder home page. Remove it with the page when the app gets real
+ * content.
+ */
+const TEMPLATE_HOME_ATTR = "data-appkit-template-home";
 const PAGE_FILE = /^(index|pages\/[A-Za-z0-9_-]+)\.(tsx|jsx)$/;
 const DESIGN_ROUTE = /^\/design(?:\/([A-Za-z0-9_-]+))?\/?$/;
 const STATUS_PATH = "/design/__status";
@@ -129,35 +139,13 @@ function hasReactRouter(clientRoot: string): boolean {
 }
 
 /**
- * Entry for one page. The requested page is imported directly; the other
- * pages only load when navigated to, so an unfinished draft can't break this
- * one. With react-router, pages share a router whose basename is `/design`,
- * so `<Link to="/orders">` stays at `/design/orders`.
- *
- * After first paint it reports the page (unless it's the placeholder) to the
- * dev server and posts `appkit:design-ready` to the embedding builder, only
- * to the configured origins.
- *
- * @internal
+ * Browser code shared by the design-page entry and the app-ready script:
+ * `settled(isCurrent)` resolves once the page shows its real content (web
+ * fonts loaded, no `useDesignReady(false)` holder, no page fetch in flight,
+ * no DOM change for 300 ms, then two frames). Expects the including module to
+ * define `schedule()`, which it calls when a fetch completes.
  */
-export function entryModule(
-  file: string,
-  builderOrigins: string[],
-  router: boolean,
-): string {
-  const shared = `
-import { Component, createElement, Suspense, useLayoutEffect } from "react";
-import { createRoot } from "react-dom/client";
-import * as initial from "/src/design/${file}";
-import.meta.glob("/src/index.css", { eager: true });
-
-const ORIGINS = ${JSON.stringify(builderOrigins)};
-const pageName = (file) =>
-  file.startsWith("/src/design/pages/") ? file.slice(18).replace(/\\.[jt]sx$/, "") : "index";
-const pages = Object.keys(import.meta.glob(${JSON.stringify(PAGE_GLOBS)}))
-  .map((file) => ({ name: pageName(file), path: pageName(file) === "index" ? "/design" : "/design/" + pageName(file) }))
-  .sort((a, b) => (a.name === "index" ? -1 : b.name === "index" ? 1 : a.name.localeCompare(b.name)));
-
+const SETTLE_SNIPPET = `
 // Shared with appkit-ui's useDesignReady(): components holding readiness back
 // bump \`blockers\` and call \`changed()\` when they let go.
 // CONTRACT: keep the key and shape in sync with appkit-ui's use-design-ready.ts.
@@ -209,7 +197,39 @@ async function settled(isCurrent) {
   await frame();
   await frame();
 }
+`;
 
+/**
+ * Entry for one page. The requested page is imported directly; the other
+ * pages only load when navigated to, so an unfinished draft can't break this
+ * one. With react-router, pages share a router whose basename is `/design`,
+ * so `<Link to="/orders">` stays at `/design/orders`.
+ *
+ * After first paint it reports the page (unless it's the placeholder) to the
+ * dev server and posts `appkit:design-ready` to the embedding builder, only
+ * to the configured origins.
+ *
+ * @internal
+ */
+export function entryModule(
+  file: string,
+  builderOrigins: string[],
+  router: boolean,
+): string {
+  const shared = `
+import { Component, createElement, Suspense, useLayoutEffect } from "react";
+import { createRoot } from "react-dom/client";
+import * as initial from "/src/design/${file}";
+import.meta.glob("/src/index.css", { eager: true });
+
+const ORIGINS = ${JSON.stringify(builderOrigins)};
+const pageName = (file) =>
+  file.startsWith("/src/design/pages/") ? file.slice(18).replace(/\\.[jt]sx$/, "") : "index";
+const pages = Object.keys(import.meta.glob(${JSON.stringify(PAGE_GLOBS)}))
+  .map((file) => ({ name: pageName(file), path: pageName(file) === "index" ? "/design" : "/design/" + pageName(file) }))
+  .sort((a, b) => (a.name === "index" ? -1 : b.name === "index" ? 1 : a.name.localeCompare(b.name)));
+
+${SETTLE_SNIPPET}
 function postStatus(name, ok) {
   fetch("${STATUS_PATH}", {
     method: "POST",
@@ -324,6 +344,52 @@ createRoot(document.getElementById("root")).render(createElement(RouterProvider,
 `;
 }
 
+/**
+ * Added to the app's own pages in development when a builder origin is set.
+ * Once the page has settled (see SETTLE_SNIPPET), and again after client-side
+ * navigation or a hot update, it posts `appkit:app-ready` v1 to the embedding
+ * builder, unless the template's default home page is on screen.
+ *
+ * @internal
+ */
+export function appReadyModule(builderOrigins: string[]): string {
+  return `
+const ORIGINS = ${JSON.stringify(builderOrigins)};
+${SETTLE_SNIPPET}
+
+let run = 0;
+function schedule() {
+  const mine = ++run;
+  settled(() => mine === run).then(() => {
+    if (mine !== run || host.blockers > 0) return;
+    if (document.querySelector("[${TEMPLATE_HOME_ATTR}]")) return;
+    const target = window.parent !== window ? window.parent : window.opener;
+    if (!target) return;
+    for (const origin of ORIGINS) {
+      target.postMessage({ type: "appkit:app-ready", version: 1, path: location.pathname }, origin);
+    }
+  });
+}
+host.changed = () => {
+  if (host.blockers === 0) schedule();
+};
+
+// Client-side navigation (react-router etc.) changes the page without a load.
+for (const method of ["pushState", "replaceState"]) {
+  const original = history[method];
+  history[method] = function (...args) {
+    const result = original.apply(this, args);
+    schedule();
+    return result;
+  };
+}
+addEventListener("popstate", schedule);
+// E.g. the default home page being replaced by the real one.
+import.meta.hot?.on("vite:afterUpdate", () => setTimeout(schedule, 50));
+schedule();
+`;
+}
+
 const pageHtml = (title: string, entryUrl: string) => `<!doctype html>
 <html lang="en">
   <head>
@@ -362,10 +428,24 @@ export function designVitePlugin({
     },
 
     resolveId(id) {
-      if (id.startsWith(ENTRY_PREFIX)) return `\0${id}`;
+      if (id.startsWith(ENTRY_PREFIX) || id === APP_READY_ID) return `\0${id}`;
+    },
+
+    transformIndexHtml(_html, ctx) {
+      // App pages only: design pages report appkit:design-ready themselves.
+      if (builderOrigins.length === 0) return;
+      if (resolveDesignPage(root, ctx.path.split("?")[0]) !== undefined) return;
+      return [
+        {
+          tag: "script",
+          attrs: { type: "module", src: `/@id/__x00__${APP_READY_ID}` },
+          injectTo: "body",
+        },
+      ];
     },
 
     load(id) {
+      if (id === `\0${APP_READY_ID}`) return appReadyModule(builderOrigins);
       if (!id.startsWith(`\0${ENTRY_PREFIX}`)) return;
       if (!id.endsWith(ENTRY_SUFFIX)) return;
       const file = id.slice(ENTRY_PREFIX.length + 1, -ENTRY_SUFFIX.length);
