@@ -4,12 +4,32 @@ import path from "node:path";
 
 import type { Plugin } from "vite";
 
-/** One virtual entry per page: `virtual:appkit-design-page:<file>`. */
+/**
+ * One virtual entry per page: `virtual:appkit-design-page:<file>.mjs`. The
+ * `.mjs` keeps @vitejs/plugin-react from treating the entry as a `.tsx`
+ * component module and injecting Fast Refresh code that imports it by id.
+ */
 const ENTRY_PREFIX = "virtual:appkit-design-page:";
+const ENTRY_SUFFIX = ".mjs";
 const PAGE_FILE = /^(index|pages\/[A-Za-z0-9_-]+)\.(tsx|jsx)$/;
 const DESIGN_ROUTE = /^\/design(?:\/([A-Za-z0-9_-]+))?\/?$/;
 const STATUS_PATH = "/design/__status";
 const EXTENSIONS = [".tsx", ".jsx"];
+
+/**
+ * `pages/index.tsx` would collide with the root page and `__*` with the
+ * plugin's own endpoints (`/design/__status`), so those names aren't pages.
+ */
+const isReservedName = (name: string) =>
+  name === "index" || name.startsWith("__");
+
+/** Page files the browser entry may route to (reserved names excluded). */
+const PAGE_GLOBS = [
+  "/src/design/index.{tsx,jsx}",
+  "/src/design/pages/*.{tsx,jsx}",
+  "!/src/design/pages/index.{tsx,jsx}",
+  "!/src/design/pages/__*",
+];
 
 /**
  * Marks the template's starter page. A page exporting it is never reported
@@ -42,7 +62,7 @@ export function resolveDesignPage(
     return undefined;
   }
   const match = DESIGN_ROUTE.exec(pathname);
-  if (!match) return null;
+  if (!match || (match[1] && isReservedName(match[1]))) return null;
   const base = match[1]
     ? path.join(clientRoot, "src/design/pages", match[1])
     : path.join(clientRoot, "src/design/index");
@@ -63,7 +83,7 @@ export function listDesignPages(clientRoot: string): DesignPageInfo[] {
     ? fs
         .readdirSync(dir)
         .map((f) => /^([A-Za-z0-9_-]+)\.(tsx|jsx)$/.exec(f)?.[1])
-        .filter((n): n is string => !!n)
+        .filter((n): n is string => !!n && !isReservedName(n))
     : [];
   for (const name of [...new Set(names)].sort()) {
     pages.push({ name, path: `/design/${name}` });
@@ -126,18 +146,15 @@ export function entryModule(
   router: boolean,
 ): string {
   const shared = `
-import { createElement, useEffect } from "react";
+import { Component, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import * as initial from "/src/design/${file}";
 import.meta.glob("/src/index.css", { eager: true });
 
 const ORIGINS = ${JSON.stringify(builderOrigins)};
 const pageName = (file) =>
-  /\\/index\\.[jt]sx$/.test(file) ? "index" : file.replace(/^.*\\/pages\\//, "").replace(/\\.[jt]sx$/, "");
-const files = Object.keys(
-  import.meta.glob(["/src/design/index.{tsx,jsx}", "/src/design/pages/*.{tsx,jsx}"]),
-);
-const pages = files
+  file.startsWith("/src/design/pages/") ? file.slice(18).replace(/\\.[jt]sx$/, "") : "index";
+const pages = Object.keys(import.meta.glob(${JSON.stringify(PAGE_GLOBS)}))
   .map((file) => ({ name: pageName(file), path: pageName(file) === "index" ? "/design" : "/design/" + pageName(file) }))
   .sort((a, b) => (a.name === "index" ? -1 : b.name === "index" ? 1 : a.name.localeCompare(b.name)));
 
@@ -158,22 +175,47 @@ function reportReady(name) {
   }
 }
 
+// The page on screen and whether it rendered (not the placeholder, no error).
 let current;
+
+// Reports readiness only from a successful render. A render error is caught
+// here (and shown) instead of being reported: the server then keeps the page
+// not ready, since the file changed and no good paint was recorded for it.
 function withReady(mod, name) {
-  function DesignReady() {
-    useEffect(() => {
-      current = mod.designPlaceholder === true ? undefined : name;
-      if (current) afterPaint(() => reportReady(name));
-    }, []);
-    return createElement(mod.default);
-  }
-  return DesignReady;
+  const placeholder = mod.designPlaceholder === true;
+  return class DesignReady extends Component {
+    state = { error: null };
+    static getDerivedStateFromError(error) {
+      return { error };
+    }
+    componentDidMount() {
+      this.settle();
+    }
+    componentDidUpdate() {
+      this.settle();
+    }
+    settle() {
+      current = { name, ok: !this.state.error && !placeholder };
+      if (current.ok) afterPaint(() => current?.name === name && current.ok && reportReady(name));
+    }
+    render() {
+      if (this.state.error) {
+        return createElement(
+          "pre",
+          { style: { padding: 16, whiteSpace: "pre-wrap", color: "#b91c1c" } },
+          "Design page failed to render: " + (this.state.error?.message ?? String(this.state.error)),
+        );
+      }
+      return createElement(mod.default);
+    }
+  };
 }
 
-// Hot edits re-render in place; report the repaint so the status catches up.
+// Hot edits re-render in place without remounting; once React has applied
+// the edit and painted, report it if the page is still rendering fine.
 // (Adding or removing the placeholder export reloads the page instead.)
 import.meta.hot?.on("vite:afterUpdate", () => {
-  if (current) afterPaint(() => reportReady(current));
+  setTimeout(() => afterPaint(() => current?.ok && reportReady(current.name)), 50);
 });
 `;
 
@@ -188,7 +230,7 @@ createRoot(document.getElementById("root")).render(
   return `${shared}
 import { createBrowserRouter, RouterProvider } from "react-router";
 
-const lazyPages = import.meta.glob(["/src/design/index.{tsx,jsx}", "/src/design/pages/*.{tsx,jsx}"]);
+const lazyPages = import.meta.glob(${JSON.stringify(PAGE_GLOBS)});
 const routes = Object.keys(lazyPages).map((file) => {
   const name = pageName(file);
   const path = name === "index" ? "/" : "/" + name;
@@ -244,7 +286,8 @@ export function designVitePlugin({
 
     load(id) {
       if (!id.startsWith(`\0${ENTRY_PREFIX}`)) return;
-      const file = id.slice(ENTRY_PREFIX.length + 1);
+      if (!id.endsWith(ENTRY_SUFFIX)) return;
+      const file = id.slice(ENTRY_PREFIX.length + 1, -ENTRY_SUFFIX.length);
       if (PAGE_FILE.test(file)) {
         return entryModule(file, builderOrigins, hasReactRouter(root));
       }
@@ -287,7 +330,7 @@ export function designVitePlugin({
           res.statusCode = 404;
           res.setHeader("Content-Type", "text/plain");
           res.end(
-            `No design page for ${pathname}. Add client/src/design/index.tsx (for /design) or client/src/design/pages/<name>.tsx (for /design/<name>) with a default export.`,
+            `No design page for ${pathname}. Add client/src/design/index.tsx (for /design) or client/src/design/pages/<name>.tsx (for /design/<name>) with a default export. "index" and names starting with "__" are reserved for page files.`,
           );
           return;
         }
@@ -300,7 +343,7 @@ export function designVitePlugin({
             .join("/");
           const html = await server.transformIndexHtml(
             req.url ?? pathname,
-            pageHtml(title, `/@id/__x00__${ENTRY_PREFIX}${rel}`),
+            pageHtml(title, `/@id/__x00__${ENTRY_PREFIX}${rel}${ENTRY_SUFFIX}`),
           );
           res.setHeader("Content-Type", "text/html");
           res.end(html);
