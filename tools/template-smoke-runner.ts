@@ -138,7 +138,17 @@ export async function runTemplateSmoke(
       writeFileSync(lockPath, committedLock);
       run("npm", ["ci", "--no-audit", "--no-fund"]);
     } else {
-      run("pnpm", ["install", "--frozen-lockfile"]);
+      // A fresh store: pnpm 11 drops a package's bundledDependencies when it
+      // reuses that package from a store, and appkit ships patched SDKs that
+      // way. CI restores a cached store, so a shared one breaks every run
+      // after the first. Users with a warm store are affected too; that needs
+      // a packaging fix, not this test.
+      run("pnpm", [
+        "install",
+        "--frozen-lockfile",
+        "--store-dir",
+        join(guardDir, "pnpm-store"),
+      ]);
       const host: Record<string, string> = {
         os: process.platform,
         cpu: process.arch,
