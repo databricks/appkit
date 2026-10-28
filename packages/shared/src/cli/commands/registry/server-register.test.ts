@@ -2,9 +2,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { registerPluginInServer } from "./server-register";
+import {
+  registerPluginInServer,
+  registerPluginsInServer,
+} from "./server-register";
 
 const tempDirs: string[] = [];
 
@@ -35,6 +38,45 @@ afterEach(() => {
     }
   }
   tempDirs.length = 0;
+});
+
+describe("registerPluginsInServer", () => {
+  it("registers several plugins with one write, and none on a rerun", () => {
+    const dir = makeTempDir();
+    const file = writeServer(dir, "server.ts", "server()");
+    const entries = [
+      { importPath: "@databricks/appkit", exportName: "analytics" },
+      { importPath: "@databricks/appkit", exportName: "genie" },
+      {
+        importPath: "@databricks/appkit/beta",
+        exportName: "agents",
+        callArgs: `{ auth: "on-behalf-of-user" }`,
+      },
+    ];
+    const writes = vi.spyOn(fs, "writeFileSync");
+    const first = registerPluginsInServer(dir, entries);
+    expect(first.map((r) => r.status)).toEqual(["wired", "wired", "wired"]);
+    expect(writes).toHaveBeenCalledTimes(1);
+    const out = fs.readFileSync(file, "utf-8");
+    expect(out).toContain(
+      `import { createApp, analytics, genie } from "@databricks/appkit";`,
+    );
+    expect(out).toContain(`import { agents } from "@databricks/appkit/beta";`);
+    expect(out).toContain(
+      `agents({ auth: "on-behalf-of-user" }), genie(), analytics(), server()`,
+    );
+
+    writes.mockClear();
+    const second = registerPluginsInServer(dir, entries);
+    expect(second.map((r) => r.status)).toEqual([
+      "already",
+      "already",
+      "already",
+    ]);
+    expect(writes).not.toHaveBeenCalled();
+    expect(fs.readFileSync(file, "utf-8")).toBe(out);
+    writes.mockRestore();
+  });
 });
 
 describe("registerPluginInServer", () => {

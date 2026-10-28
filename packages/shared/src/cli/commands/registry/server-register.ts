@@ -102,13 +102,60 @@ function importBindingNames(stmt: SgNode): Set<string> {
  * standard shape (a `plugins: [...]` array literal); returns `skipped` otherwise
  * so the caller can fall back to printing manual instructions. Idempotent.
  */
+/** A plugin to register: `import { exportName } from importPath` + `exportName(callArgs)`. */
+export interface RegisterEntry {
+  importPath: string;
+  exportName: string;
+  /** Call arguments, e.g. `{ auth: "on-behalf-of-user" }` (CLI-built, never registry data). */
+  callArgs?: string;
+}
+
 export function registerPluginInServer(
   serverRoot: string,
   importPath: string,
   exportName: string,
-  /** Call arguments, e.g. `{ auth: "on-behalf-of-user" }` (CLI-built, never registry data). */
   callArgs = "",
 ): RegisterResult {
+  return registerPluginsInServer(serverRoot, [
+    { importPath, exportName, callArgs },
+  ])[0];
+}
+
+/**
+ * Registers several plugins in the server entry, writing the file once (a
+ * dev server watching it restarts once). Entries apply in order; each
+ * result is per entry.
+ */
+export function registerPluginsInServer(
+  serverRoot: string,
+  entries: RegisterEntry[],
+): RegisterResult[] {
+  const serverFile = findServerFile(serverRoot);
+  if (!serverFile) {
+    return entries.map(() => ({
+      status: "skipped",
+      reason: "no server entry file found",
+    }));
+  }
+  const file = path.relative(serverRoot, serverFile);
+  const lang = serverFile.endsWith(".tsx") ? Lang.Tsx : Lang.TypeScript;
+  const original = fs.readFileSync(serverFile, "utf-8");
+  let content = original;
+  const results = entries.map((e): RegisterResult => {
+    const { output, ...r } = registerInSource(content, lang, e);
+    if (output !== undefined) content = output;
+    return r.status === "skipped" ? r : { ...r, file };
+  });
+  if (content !== original) fs.writeFileSync(serverFile, content);
+  return results;
+}
+
+/** Applies one entry to the server source; `output` is set when it changed. */
+function registerInSource(
+  content: string,
+  lang: Lang,
+  { importPath, exportName, callArgs = "" }: RegisterEntry,
+): RegisterResult & { output?: string } {
   // exportName and importPath are interpolated into the user's server source.
   // Registry items are untrusted, so refuse anything that isn't a plain JS
   // identifier / clean relative module path — prevents code injection via a
@@ -124,13 +171,6 @@ export function registerPluginInServer(
     return { status: "skipped", reason: "invalid plugin import path" };
   }
 
-  const serverFile = findServerFile(serverRoot);
-  if (!serverFile) {
-    return { status: "skipped", reason: "no server entry file found" };
-  }
-
-  const content = fs.readFileSync(serverFile, "utf-8");
-  const lang = serverFile.endsWith(".tsx") ? Lang.Tsx : Lang.TypeScript;
   const root = parse(lang, content).root();
 
   const arr = findPluginsArray(root);
@@ -141,9 +181,8 @@ export function registerPluginInServer(
     };
   }
 
-  const file = path.relative(serverRoot, serverFile);
   if (arrayElementNames(arr).has(exportName)) {
-    return { status: "already", file };
+    return { status: "already" };
   }
 
   const edits = [];
@@ -202,7 +241,5 @@ export function registerPluginInServer(
   if (!hasBinding && !named && importStmts.length === 0) {
     output = `${importLine}\n${output}`;
   }
-  fs.writeFileSync(serverFile, output);
-
-  return { status: "wired", file };
+  return { status: "wired", output };
 }

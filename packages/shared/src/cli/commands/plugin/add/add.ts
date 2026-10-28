@@ -5,9 +5,11 @@ import process from "node:process";
 import { Command } from "commander";
 import pc from "picocolors";
 import { parseDocument } from "yaml";
+import { z } from "zod";
 
 import { APP_YAML_FILE } from "../../../deploy-config";
 import { profileFromEnv } from "../../registry/add";
+import type { ConfigPlan } from "../../registry/config-plan";
 import {
   assertBundleApp,
   planHasContent,
@@ -43,6 +45,7 @@ const SERVER_SUBDIRS = ["server", "api", "backend"];
 
 interface AddOptions {
   set: string[];
+  fromPlan?: string;
   authMode?: string;
   cwd?: string;
   yes?: boolean;
@@ -238,7 +241,12 @@ const AGENTS_MODEL_ENV = "DATABRICKS_SERVING_ENDPOINT_NAME";
  * Env names in the plan already bound to something else: a different
  * non-empty value in .env, or an app.yaml entry with another valueFrom/value.
  */
-export function envConflicts(cwd: string, plan: AddPlan): string[] {
+export function envConflicts(
+  cwd: string,
+  plan: AddPlan,
+  /** Plans of earlier plugins in the same run, not yet written. */
+  pending: AddPlan[] = [],
+): string[] {
   const dotEnv = fs.existsSync(path.join(cwd, ".env"))
     ? parseEnv(fs.readFileSync(path.join(cwd, ".env"), "utf-8"))
     : {};
@@ -251,6 +259,20 @@ export function envConflicts(cwd: string, plan: AddPlan): string[] {
       | undefined;
     for (const e of env ?? []) {
       if (e?.name) appEnv.set(e.name, JSON.stringify([e.valueFrom, e.value]));
+    }
+  }
+  for (const p of pending) {
+    for (const e of p.dotEnv) if (!dotEnv[e.env]) dotEnv[e.env] = e.value;
+    for (const e of p.appYamlEnv) {
+      if (!appEnv.has(e.name)) {
+        appEnv.set(
+          e.name,
+          JSON.stringify([
+            "valueFrom" in e ? e.valueFrom : undefined,
+            "value" in e ? e.value : undefined,
+          ]),
+        );
+      }
     }
   }
   const out = new Set<string>();
@@ -268,27 +290,49 @@ export function envConflicts(cwd: string, plan: AddPlan): string[] {
   return [...out];
 }
 
-async function runPluginAdd(name: string, opts: AddOptions): Promise<void> {
-  const cwd = opts.cwd ? path.resolve(opts.cwd) : process.cwd();
+/** One plugin of a run: its name, its --set pairs and its default auth mode. */
+export interface PluginRequest {
+  name: string;
+  set: string[];
+  authMode?: string;
+}
+
+interface PreparedPlugin {
+  plugin: ManifestPlugin;
+  plan: AddPlan;
+  config?: Record<string, unknown>;
+}
+
+/**
+ * Everything for one plugin short of writing: prompts, derived values, the
+ * file plan and its registration config. Throws on conflicts with the app's
+ * files or with earlier plugins of the run (`pending`).
+ */
+async function preparePlugin(
+  cwd: string,
+  req: PluginRequest,
+  opts: AddOptions,
+  pending: AddPlan[],
+): Promise<PreparedPlugin> {
   if (
-    opts.authMode !== undefined &&
-    opts.authMode !== AUTH_MODE_SP &&
-    opts.authMode !== AUTH_MODE_OBO
+    req.authMode !== undefined &&
+    req.authMode !== AUTH_MODE_SP &&
+    req.authMode !== AUTH_MODE_OBO
   ) {
     throw new Error(
-      `invalid --auth-mode value: "${opts.authMode}" (must be obo or sp; use --set <plugin>.<resourceKey>.${AUTH_MODE_FIELD}=both for a single resource)`,
+      `invalid --auth-mode value: "${req.authMode}" (must be obo or sp; use --set <plugin>.<resourceKey>.${AUTH_MODE_FIELD}=both for a single resource)`,
     );
   }
-  const plugin = loadPlugin(cwd, name);
-  const values = parseSetValues(opts.set, plugin);
-  const setModes = parseSetAuthModes(opts.set, plugin);
+  const plugin = loadPlugin(cwd, req.name);
+  const values = parseSetValues(req.set, plugin);
+  const setModes = parseSetAuthModes(req.set, plugin);
   const interactive = !opts.yes && Boolean(process.stdin.isTTY);
 
   let resources = selectResources(plugin, values);
   if (interactive) resources.push(...(await promptOptional(plugin, values)));
 
   const promptedModes =
-    interactive && opts.authMode === undefined
+    interactive && req.authMode === undefined
       ? await promptAuthModes(
           resources.filter((r) => !(authKey(r) in setModes)),
         )
@@ -297,7 +341,7 @@ async function runPluginAdd(name: string, opts: AddOptions): Promise<void> {
     resources,
     setModes,
     promptedModes,
-    opts.authMode,
+    req.authMode,
   );
   if (keptSP.length > 0) {
     console.log(
@@ -345,7 +389,7 @@ async function runPluginAdd(name: string, opts: AddOptions): Promise<void> {
 
   // An env var holds one value: if another resource already binds one of
   // these names to something else, the new value would never reach the app.
-  const conflicts = envConflicts(cwd, plan);
+  const conflicts = envConflicts(cwd, plan, pending);
   const model = values["agents-serving-endpoint.name"];
   if (
     plugin.name === "agents" &&
@@ -371,11 +415,106 @@ async function runPluginAdd(name: string, opts: AddOptions): Promise<void> {
     );
   }
 
+  return { plugin, plan, config };
+}
+
+/** Requests from `plugin add a b --set ...`: each plugin gets its own --set pairs. */
+export function requestsFromArgs(
+  names: string[],
+  set: string[],
+  authMode: string | undefined,
+): PluginRequest[] {
+  for (const sv of set) {
+    const prefix = sv.split(".")[0];
+    if (!names.includes(prefix)) {
+      throw new Error(
+        `--set "${sv}" is for "${prefix}", which this run doesn't add (${names.join(", ")})`,
+      );
+    }
+  }
+  return names.map((name) => ({
+    name,
+    set: set.filter((sv) => sv.split(".")[0] === name),
+    authMode,
+  }));
+}
+
+const dataPlanSchema = z.object({
+  version: z.literal(1),
+  plugins: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        authMode: z.enum([AUTH_MODE_OBO, AUTH_MODE_SP]).optional(),
+        /** `resourceKey.field` (or `resourceKey.authMode`) → value. */
+        set: z.record(z.string(), z.string()).optional(),
+      }),
+    )
+    .min(1),
+});
+
+/** Requests from a data plan file (`.appkit/data-plan.json`, version 1). */
+export function requestsFromPlan(file: string): PluginRequest[] {
+  const parsed = dataPlanSchema.safeParse(
+    JSON.parse(fs.readFileSync(file, "utf-8")),
+  );
+  if (!parsed.success) {
+    throw new Error(
+      `invalid data plan ${file}: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`,
+    );
+  }
+  return parsed.data.plugins.map((p) => ({
+    name: p.name,
+    authMode: p.authMode,
+    set: Object.entries(p.set ?? {}).map(([k, v]) => `${p.name}.${k}=${v}`),
+  }));
+}
+
+/**
+ * Adds every requested plugin in one pass: all are planned first (nothing is
+ * written if any fails), then each file is written at most once, so a dev
+ * server watching them restarts once.
+ */
+async function runPluginAdd(names: string[], opts: AddOptions): Promise<void> {
+  const cwd = opts.cwd ? path.resolve(opts.cwd) : process.cwd();
+  if (
+    opts.fromPlan &&
+    (names.length > 0 || opts.set.length > 0 || opts.authMode)
+  ) {
+    throw new Error(
+      "--from-plan can't be combined with plugin names, --set or --auth-mode",
+    );
+  }
+  if (!opts.fromPlan && names.length === 0) {
+    throw new Error("name at least one plugin, or pass --from-plan <file>");
+  }
+  const requests = opts.fromPlan
+    ? requestsFromPlan(path.resolve(cwd, opts.fromPlan))
+    : requestsFromArgs(names, opts.set, opts.authMode);
+  const seen = new Set<string>();
+  for (const r of requests) {
+    if (seen.has(r.name)) throw new Error(`plugin "${r.name}" is listed twice`);
+    seen.add(r.name);
+  }
+
+  const prepared: PreparedPlugin[] = [];
+  for (const req of requests) {
+    prepared.push(
+      await preparePlugin(
+        cwd,
+        req,
+        opts,
+        prepared.map((p) => p.plan),
+      ),
+    );
+  }
+
   // Fail before any write rather than leave a partial install.
   assertBundleApp(cwd);
 
   if (opts.register === false) {
-    if (config) {
+    for (const { plugin, config } of prepared) {
+      if (!config) continue;
       // The config carries required settings (auth mode, columns, model).
       console.log(
         `${pc.bold("Register it with this config in your createApp call:")}\n` +
@@ -383,43 +522,65 @@ async function runPluginAdd(name: string, opts: AddOptions): Promise<void> {
       );
     }
   } else {
-    await registerInServer(cwd, plugin, config ? toSource(config) : "");
+    await registerInServer(cwd, prepared);
   }
 
-  const { appendToFile, readEnvFile } =
-    await import("../../registry/env-writer.js");
-  const envPath = path.join(cwd, ".env");
-  const existing = readEnvFile(envPath);
-  const dotEnv = plan.dotEnv.filter(
-    (e, i) => plan.dotEnv.findIndex((x) => x.env === e.env) === i,
+  const plans = prepared.map((p) => p.plan);
+  await writeDotEnv(
+    cwd,
+    plans.flatMap((p) => p.dotEnv),
   );
-  // Empty placeholders (`KEY=`) are filled in place; set values are kept.
-  const filled = dotEnv.filter((e) => existing[e.env] === "" && e.value);
-  if (filled.length > 0) {
-    let content = fs.readFileSync(envPath, "utf-8");
-    for (const e of filled) {
-      // e.env is a validated identifier, so it is safe in the pattern.
-      content = content.replace(
-        new RegExp(`^(\\s*(?:export\\s+)?${e.env}\\s*=).*$`, "m"),
-        (_, key: string) => key + e.value,
-      );
-    }
-    fs.writeFileSync(envPath, content);
-  }
-  const newEnv = dotEnv.filter((e) => !(e.env in existing));
-  appendToFile(envPath, serializeEnvAppend(newEnv));
-  const updated = [...filled, ...newEnv].map((e) => e.env);
-  if (updated.length > 0) {
-    console.log(`${pc.green("Updated .env:")} ${updated.join(", ")}`);
-  }
 
-  if (planHasContent(plan)) {
-    const result = writeConfig(cwd, plan);
+  const merged: ConfigPlan = {
+    appYamlEnv: plans.flatMap((p) => p.appYamlEnv),
+    bundleVariables: plans.flatMap((p) => p.bundleVariables),
+    resourceBindings: plans.flatMap((p) => p.resourceBindings),
+    userApiScopes: [...new Set(plans.flatMap((p) => p.userApiScopes ?? []))],
+    unverifiedTypes: [...new Set(plans.flatMap((p) => p.unverifiedTypes))],
+  };
+  if (planHasContent(merged)) {
+    const result = writeConfig(cwd, merged);
     reportConfigWrite(result);
     if (result.databricksYmlChanged) {
-      validateBundle(cwd, profile);
+      validateBundle(cwd, opts.profile ?? profileFromEnv(cwd));
     }
   }
+}
+
+/**
+ * Adds the entries to .env in one write: empty placeholders (`KEY=`) are
+ * filled in place, new names appended, set values kept.
+ */
+async function writeDotEnv(
+  cwd: string,
+  entries: { env: string; value: string }[],
+): Promise<void> {
+  const { readEnvFile } = await import("../../registry/env-writer.js");
+  const envPath = path.join(cwd, ".env");
+  const existing = readEnvFile(envPath);
+  const dotEnv = entries.filter(
+    (e, i) => entries.findIndex((x) => x.env === e.env) === i,
+  );
+  const filled = dotEnv.filter((e) => existing[e.env] === "" && e.value);
+  const newEnv = dotEnv.filter((e) => !(e.env in existing));
+  if (filled.length === 0 && newEnv.length === 0) return;
+  let content = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf-8") : "";
+  for (const e of filled) {
+    // e.env is a validated identifier, so it is safe in the pattern.
+    content = content.replace(
+      new RegExp(`^(\\s*(?:export\\s+)?${e.env}\\s*=).*$`, "m"),
+      (_, key: string) => key + e.value,
+    );
+  }
+  const append = serializeEnvAppend(newEnv);
+  if (append) {
+    if (content.length > 0 && !content.endsWith("\n")) content += "\n";
+    content += append;
+  }
+  fs.writeFileSync(envPath, content);
+  console.log(
+    `${pc.green("Updated .env:")} ${[...filled, ...newEnv].map((e) => e.env).join(", ")}`,
+  );
 }
 
 /** Plugins that default to the service principal unless told otherwise. */
@@ -495,68 +656,77 @@ export function toSource(v: unknown): string {
 
 async function registerInServer(
   cwd: string,
-  plugin: ManifestPlugin,
-  callArgs: string,
+  prepared: PreparedPlugin[],
 ): Promise<void> {
   const serverRoot =
     SERVER_SUBDIRS.map((s) => path.join(cwd, s)).find((p) =>
       fs.existsSync(p),
     ) ?? cwd;
   // Lazy: server-register pulls in the @ast-grep/napi native addon.
-  const { findServerFile, registerPluginInServer } =
+  const { findServerFile, registerPluginsInServer } =
     await import("../../registry/server-register.js");
-  // The /beta subpath is AppKit's; other packages export their plugins as is.
-  let importPath =
-    plugin.stability === "beta" && plugin.package === "@databricks/appkit"
-      ? `${plugin.package}/beta`
-      : plugin.package;
-  // Local plugins are recorded relative to the app root; imports resolve
-  // relative to the server file.
-  if (plugin.package.startsWith(".")) {
-    const from = path.dirname(findServerFile(serverRoot) ?? serverRoot);
-    const rel = path
-      .relative(from, path.resolve(cwd, plugin.package))
-      .split(path.sep)
-      .join("/");
-    importPath = rel.startsWith(".") ? rel : `./${rel}`;
-  }
-  const call = `${plugin.name}(${callArgs})`;
-  const result = registerPluginInServer(
-    serverRoot,
-    importPath,
-    plugin.name,
-    callArgs,
-  );
-  const shown =
-    result.file && path.relative(cwd, path.join(serverRoot, result.file));
-  if (result.status === "wired") {
-    console.log(`${pc.green("Registered")} ${call} in ${shown}`);
-  } else if (result.status === "already") {
-    console.log(pc.dim(`${plugin.name} is already registered in ${shown}`));
-    if (callArgs) {
-      console.warn(
-        pc.yellow(
-          `  Make sure it is configured as ${call} for the chosen auth mode.`,
-        ),
+  const serverFile = findServerFile(serverRoot);
+  const entries = prepared.map(({ plugin, config }) => {
+    // The /beta subpath is AppKit's; other packages export their plugins as is.
+    let importPath =
+      plugin.stability === "beta" && plugin.package === "@databricks/appkit"
+        ? `${plugin.package}/beta`
+        : plugin.package;
+    // Local plugins are recorded relative to the app root; imports resolve
+    // relative to the server file.
+    if (plugin.package.startsWith(".")) {
+      const from = path.dirname(serverFile ?? serverRoot);
+      const rel = path
+        .relative(from, path.resolve(cwd, plugin.package))
+        .split(path.sep)
+        .join("/");
+      importPath = rel.startsWith(".") ? rel : `./${rel}`;
+    }
+    return {
+      importPath,
+      exportName: plugin.name,
+      callArgs: config ? toSource(config) : "",
+    };
+  });
+  const results = registerPluginsInServer(serverRoot, entries);
+  results.forEach((result, i) => {
+    const { importPath, exportName, callArgs } = entries[i];
+    const call = `${exportName}(${callArgs})`;
+    const shown =
+      result.file && path.relative(cwd, path.join(serverRoot, result.file));
+    if (result.status === "wired") {
+      console.log(`${pc.green("Registered")} ${call} in ${shown}`);
+    } else if (result.status === "already") {
+      console.log(pc.dim(`${exportName} is already registered in ${shown}`));
+      if (callArgs) {
+        console.warn(
+          pc.yellow(
+            `  Make sure it is configured as ${call} for the chosen auth mode.`,
+          ),
+        );
+      }
+    } else {
+      console.log(
+        pc.yellow(`Couldn't auto-register ${exportName}: ${result.reason}.`) +
+          "\nAdd it to your server's createApp call:\n" +
+          pc.dim(
+            `  import { ${exportName} } from "${importPath}";\n` +
+              `  createApp({ plugins: [${call}, /* ... */] });`,
+          ),
       );
     }
-  } else {
-    console.log(
-      pc.yellow(`Couldn't auto-register ${plugin.name}: ${result.reason}.`) +
-        "\nAdd it to your server's createApp call:\n" +
-        pc.dim(
-          `  import { ${plugin.name} } from "${importPath}";\n` +
-            `  createApp({ plugins: [${call}, /* ... */] });`,
-        ),
-    );
-  }
+  });
 }
 
 export const pluginAddCommand = new Command("add")
   .description(
-    "Add a plugin from appkit.plugins.json to the app: server registration, .env, app.yaml and databricks.yml",
+    "Add plugins from appkit.plugins.json to the app: server registration, .env, app.yaml and databricks.yml, each written once",
   )
-  .argument("<plugin>", "Plugin name, as in appkit.plugins.json")
+  .argument("[plugins...]", "Plugin names, as in appkit.plugins.json")
+  .option(
+    "--from-plan <file>",
+    "Add the plugins listed in a data plan file (e.g. .appkit/data-plan.json, version 1)",
+  )
   .option(
     "--set <plugin.resourceKey.field=value>",
     "Set resource values (format: plugin.resourceKey.field=value, can specify multiple)",
@@ -585,15 +755,29 @@ Resource configuration (--set), as in \`databricks apps init\`:
   on behalf of the user (obo), as the app's service principal (sp), or both.
   obo/both add the resource's user_api_scopes; sp/both bind it with its permission.
 
+Several plugins can be added in one run; each file is written once, so a dev
+server watching them restarts once. Rerunning with the same input changes nothing.
 Existing entries in .env, app.yaml and databricks.yml are never overwritten.
+
+Data plan file (--from-plan), version 1:
+  { "version": 1,
+    "plugins": [
+      { "name": "analytics", "authMode": "obo",
+        "set": { "sql-warehouse.id": "abc123" } },
+      { "name": "genie", "set": { "genie-space.id": "s1", "genie-space.name": "Sales" } } ] }
+  "set" keys are the --set keys without the plugin prefix ("authMode" works per
+  resource, e.g. "sql-warehouse.authMode": "both"); "authMode" is the plugin's default.
 
 Examples:
   $ appkit plugin add analytics --set analytics.sql-warehouse.id=abc123
   $ appkit plugin add analytics --auth-mode obo --set analytics.sql-warehouse.id=abc123
-  $ appkit plugin add jobs --auth-mode obo --set jobs.job.authMode=sp --set jobs.job.id=42`,
+  $ appkit plugin add jobs --auth-mode obo --set jobs.job.authMode=sp --set jobs.job.id=42
+  $ appkit plugin add analytics genie --set analytics.sql-warehouse.id=abc123 \\
+      --set genie.genie-space.id=s1 --set genie.genie-space.name=Sales
+  $ appkit plugin add --from-plan .appkit/data-plan.json --yes`,
   )
-  .action((name: string, opts: AddOptions) =>
-    runPluginAdd(name, opts).catch((err: Error) => {
+  .action((names: string[], opts: AddOptions) =>
+    runPluginAdd(names, opts).catch((err: Error) => {
       console.error(pc.red(err.message));
       process.exit(1);
     }),
