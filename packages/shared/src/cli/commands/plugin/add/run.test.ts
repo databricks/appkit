@@ -4,7 +4,11 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { pluginAddCommand, requestsFromArgs, requestsFromPlan } from "./add";
+import {
+  createPluginAddCommand,
+  requestsFromArgs,
+  requestsFromPlan,
+} from "./add";
 
 // bundle validate would shell out to the Databricks CLI.
 vi.mock("../../registry/config-writer", async (importOriginal) => ({
@@ -126,7 +130,7 @@ test("adds several plugins writing each file once, and nothing on a rerun", asyn
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
   const run = () =>
-    pluginAddCommand.parseAsync(
+    createPluginAddCommand().parseAsync(
       ["--from-plan", ".appkit/data-plan.json", "--yes", "-C", dir],
       { from: "user" },
     );
@@ -161,3 +165,33 @@ test("adds several plugins writing each file once, and nothing on a rerun", asyn
   await run();
   expect(writes).not.toHaveBeenCalled();
 });
+
+test.each([[["agents", "serving"]], [["serving", "agents"]]])(
+  "agents and serving work in either order (%j)",
+  async (names) => {
+    const dir = makeApp();
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await createPluginAddCommand().parseAsync(
+      [
+        ...names,
+        "--set",
+        "agents.agents-serving-endpoint.name=agent-model",
+        "--set",
+        "serving.serving-endpoint.name=serving-model",
+        "--yes",
+        "-C",
+        dir,
+      ],
+      { from: "user" },
+    );
+    const server = fs.readFileSync(
+      path.join(dir, "server", "server.ts"),
+      "utf-8",
+    );
+    expect(server).toContain(`agents({ defaultModel: "agent-model" })`);
+    expect(fs.readFileSync(path.join(dir, ".env"), "utf-8")).toContain(
+      "DATABRICKS_SERVING_ENDPOINT_NAME=serving-model",
+    );
+  },
+);
