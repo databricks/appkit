@@ -52,7 +52,7 @@ export function readEnvFile(file: string): Record<string, string> {
 }
 
 /** Appends text to a file, creating it (with a trailing newline) if needed. */
-export function appendToFile(file: string, text: string): void {
+function appendToFile(file: string, text: string): void {
   if (text === "") return;
   if (fs.existsSync(file)) {
     const existing = fs.readFileSync(file, "utf-8");
