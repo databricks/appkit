@@ -117,3 +117,18 @@ test("envConflicts flags env names bound to another resource or value", () => {
   expect(envConflicts(cwd, plan)).toEqual(["A", "C"]);
   fs.rmSync(cwd, { recursive: true, force: true });
 });
+
+test("files with mixed modes sets auth on the OBO volumes only", () => {
+  const vol = (key: string, env: string): ManifestResource => ({
+    type: "volume",
+    alias: key,
+    resourceKey: key,
+    scope: "files",
+    fields: { path: { env } },
+  });
+  const priv = vol("files", "DATABRICKS_VOLUME_FILES");
+  const exp = vol("exports", "DATABRICKS_VOLUME_EXPORTS");
+  expect(
+    pluginConfig(plugin("files"), [priv, exp], { "volume:files": "obo" }),
+  ).toEqual({ volumes: { files: { auth: "on-behalf-of-user" } } });
+});

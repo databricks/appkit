@@ -537,10 +537,14 @@ async function runPluginAdd(names: string[], opts: AddOptions): Promise<void> {
     plans.flatMap((p) => p.dotEnv),
   );
 
+  // Plugins can share a resource (same env var, variable and binding);
+  // envConflicts already rejected any that differ, so keep the first.
+  const byName = <T extends { name: string }>(xs: T[]) =>
+    xs.filter((x, i) => xs.findIndex((y) => y.name === x.name) === i);
   const merged: ConfigPlan = {
-    appYamlEnv: plans.flatMap((p) => p.appYamlEnv),
-    bundleVariables: plans.flatMap((p) => p.bundleVariables),
-    resourceBindings: plans.flatMap((p) => p.resourceBindings),
+    appYamlEnv: byName(plans.flatMap((p) => p.appYamlEnv)),
+    bundleVariables: byName(plans.flatMap((p) => p.bundleVariables)),
+    resourceBindings: byName(plans.flatMap((p) => p.resourceBindings)),
     userApiScopes: [...new Set(plans.flatMap((p) => p.userApiScopes ?? []))],
     unverifiedTypes: [...new Set(plans.flatMap((p) => p.unverifiedTypes))],
   };
@@ -630,6 +634,16 @@ export function pluginConfig(
         }
       }
     }
+    // files takes auth per volume too: a volume's key is the lowercased
+    // suffix of its DATABRICKS_VOLUME_<KEY> env var (FilesPlugin.discoverVolumes).
+    if (plugin.name === "files" && oboRes.length > 0 && !obo) {
+      const keys = oboRes.map((r) => filesVolumeKey(r));
+      if (keys.every(Boolean)) {
+        return {
+          volumes: Object.fromEntries(keys.map((k) => [k, { auth: OBO }])),
+        };
+      }
+    }
     if (oboRes.length > 0 && !obo) {
       console.warn(
         pc.yellow(
@@ -645,6 +659,15 @@ export function pluginConfig(
       : undefined;
   }
   return obo ? { auth: OBO } : undefined;
+}
+
+/** The files plugin's volume key for a volume resource, from its env var. */
+function filesVolumeKey(r: ManifestResource): string | undefined {
+  const prefix = "DATABRICKS_VOLUME_";
+  const env = Object.values(r.fields ?? {})
+    .map((f) => f.env)
+    .find((e) => e?.startsWith(prefix) && e.length > prefix.length);
+  return env?.slice(prefix.length).toLowerCase();
 }
 
 /** Source text for a config literal: `{ auth: "x", columns: ["a"] }`. */
