@@ -313,6 +313,7 @@ export class SQLWarehouseConnector {
             rowLimit: input.rowLimit,
             onWaitTimeout:
               input.onWaitTimeout || executeStatementDefaults.onWaitTimeout,
+            queryTags: input.queryTags,
           };
 
           span.addEvent("statement.submitting", {
