@@ -162,12 +162,16 @@ function afterPaint(fn) {
   requestAnimationFrame(() => requestAnimationFrame(fn));
 }
 
-function reportReady(name) {
+function postStatus(name, ok) {
   fetch("${STATUS_PATH}", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ page: name }),
+    body: JSON.stringify({ page: name, ok }),
   }).catch(() => {});
+}
+
+function reportReady(name) {
+  postStatus(name, true);
   const target = window.parent !== window ? window.parent : window.opener;
   if (!target) return;
   for (const origin of ORIGINS) {
@@ -196,7 +200,10 @@ function withReady(mod, name) {
     }
     settle() {
       current = { name, ok: !this.state.error && !placeholder };
-      if (current.ok) afterPaint(() => current?.name === name && current.ok && reportReady(name));
+      // The error may come from any component the page imports, not just the
+      // page file, so tell the server instead of relying on its mtime check.
+      if (this.state.error) postStatus(name, false);
+      else if (current.ok) afterPaint(() => current?.name === name && current.ok && reportReady(name));
     }
     render() {
       if (this.state.error) {
@@ -310,7 +317,10 @@ export function designVitePlugin({
               } catch {}
             }
             if (body?.page === "index") {
-              paintedVersion = indexVersion(server.config.root);
+              paintedVersion =
+                (body as { ok?: unknown }).ok === false
+                  ? undefined
+                  : indexVersion(server.config.root);
             }
             res.statusCode = 204;
             res.end();
