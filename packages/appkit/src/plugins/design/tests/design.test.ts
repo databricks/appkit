@@ -7,16 +7,27 @@ import { afterEach, describe, expect, test } from "vitest";
 import { createTestApp, type TestApp } from "../../../testing";
 import { server } from "../../server";
 import { design } from "../index";
-import { designVitePlugin, resolveDesignPage } from "../vite-plugin";
+import {
+  designStatus,
+  designVitePlugin,
+  entryModule,
+  listDesignPages,
+  resolveDesignPage,
+} from "../vite-plugin";
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "appkit-design-"));
 
-function clientWith(files: string[]) {
+const PAGE = "export default function Page() { return null; }";
+
+function clientWith(files: string[] | Record<string, string>) {
   const root = tmp();
-  for (const file of files) {
+  const entries = Array.isArray(files)
+    ? files.map((f) => [f, PAGE] as const)
+    : Object.entries(files);
+  for (const [file, text] of entries) {
     const full = path.join(root, file);
     fs.mkdirSync(path.dirname(full), { recursive: true });
-    fs.writeFileSync(full, "export default function Page() { return null; }");
+    fs.writeFileSync(full, text);
   }
   return root;
 }
@@ -65,19 +76,136 @@ describe("resolveDesignPage", () => {
   });
 });
 
+describe("listDesignPages", () => {
+  test("index first, then pages by name", () => {
+    const root = clientWith([
+      "src/design/index.tsx",
+      "src/design/pages/settings.tsx",
+      "src/design/pages/orders.jsx",
+      "src/design/pages/notes.md",
+    ]);
+    expect(listDesignPages(root)).toEqual([
+      { name: "index", path: "/design" },
+      { name: "orders", path: "/design/orders" },
+      { name: "settings", path: "/design/settings" },
+    ]);
+  });
+
+  test("no design folder, no pages", () => {
+    expect(listDesignPages(clientWith([]))).toEqual([]);
+  });
+});
+
+describe("designStatus", () => {
+  const mtime = (root: string) =>
+    fs.statSync(path.join(root, "src/design/index.tsx")).mtimeMs;
+
+  test("ready only for a real index page painted since its last change", () => {
+    const root = clientWith({
+      "src/design/index.tsx": PAGE,
+      "src/design/pages/orders.tsx": PAGE,
+    });
+    expect(designStatus(root, undefined)).toEqual({
+      ready: false,
+      pages: [
+        { name: "index", path: "/design" },
+        { name: "orders", path: "/design/orders" },
+      ],
+    });
+    expect(designStatus(root, mtime(root)).ready).toBe(true);
+    // A paint of an older version of the file doesn't count.
+    expect(designStatus(root, mtime(root) - 1000).ready).toBe(false);
+  });
+
+  test("never ready while index is the template placeholder", () => {
+    const root = clientWith({
+      "src/design/index.tsx": `export const designPlaceholder = true;\n${PAGE}`,
+    });
+    expect(designStatus(root, mtime(root)).ready).toBe(false);
+  });
+
+  test("never ready without an index page", () => {
+    const root = clientWith(["src/design/pages/orders.tsx"]);
+    expect(designStatus(root, 1)).toEqual({
+      ready: false,
+      pages: [{ name: "orders", path: "/design/orders" }],
+    });
+  });
+});
+
+describe("entryModule", () => {
+  test("router mode: basename /design, other pages lazy", () => {
+    const code = entryModule("pages/orders.tsx", [], true);
+    expect(code).toContain(
+      'import * as initial from "/src/design/pages/orders.tsx"',
+    );
+    expect(code).toContain(
+      'createBrowserRouter(routes, { basename: "/design" })',
+    );
+    expect(code).toContain("lazy: async () =>");
+    expect(code).not.toContain("eager: true }),");
+  });
+
+  test("without react-router it renders just the page", () => {
+    const code = entryModule("index.tsx", [], false);
+    expect(code).not.toContain("react-router");
+    expect(code).toContain('import * as initial from "/src/design/index.tsx"');
+  });
+
+  test("posts appkit:design-ready only to the configured origins", () => {
+    const code = entryModule(
+      "index.tsx",
+      ["https://builder.example.com"],
+      false,
+    );
+    expect(code).toContain('const ORIGINS = ["https://builder.example.com"]');
+    expect(code).toContain('type: "appkit:design-ready", version: 1');
+    expect(code).toContain("target.postMessage(");
+    expect(code).not.toContain('"*"');
+    expect(code).toContain("mod.designPlaceholder === true ? undefined : name");
+  });
+});
+
+describe("builderOrigin", () => {
+  const construct = (builderOrigin: string | string[]) => {
+    const { plugin: DesignPlugin, config } = design({ builderOrigin });
+    return new DesignPlugin(config);
+  };
+
+  test("accepts bare origins", () => {
+    expect(() =>
+      construct(["https://builder.example.com", "http://localhost:3000"]),
+    ).not.toThrow();
+  });
+
+  test.each([
+    "*",
+    "https://builder.example.com/path",
+    "builder.example.com",
+    "null",
+  ])("rejects %s", (origin) => {
+    expect(() => construct(origin)).toThrow(/bare origin/);
+  });
+});
+
 describe("page entry", () => {
   const load = (file: string) =>
     (designVitePlugin().load as (id: string) => string | undefined)(
       `\0virtual:appkit-design-page:${file}`,
     );
 
-  test("imports only the requested page, so other drafts can't break it", () => {
-    const index = load("index.tsx");
-    expect(index).toContain('import Page from "/src/design/index.tsx"');
-    expect(index).not.toContain("pages/");
-    expect(load("pages/orders.jsx")).toContain(
-      'import Page from "/src/design/pages/orders.jsx"',
-    );
+  test("statically imports only the requested page, so other drafts can't break it", () => {
+    for (const [file, code] of [
+      ["index.tsx", load("index.tsx")],
+      ["pages/orders.jsx", load("pages/orders.jsx")],
+    ] as const) {
+      const staticPageImports = code?.match(
+        /^import .* from "\/src\/design\/.*"/gm,
+      );
+      expect(staticPageImports).toEqual([
+        `import * as initial from "/src/design/${file}";`.replace(/;$/, ""),
+      ]);
+    }
   });
 
   test("refuses anything that isn't a design page file", () => {

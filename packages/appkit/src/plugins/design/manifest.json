@@ -2,10 +2,24 @@
   "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
   "name": "design",
   "displayName": "Design Plugin",
-  "description": "Dev-only design pages: /design renders client/src/design/index.tsx and /design/<name> renders client/src/design/pages/<name>.tsx; 404 in production",
+  "description": "Dev-only design pages: /design renders client/src/design/index.tsx and /design/<name> renders client/src/design/pages/<name>.tsx, with a readiness signal for an embedding app builder; 404 in production",
   "stability": "beta",
   "resources": {
     "required": [],
     "optional": []
+  },
+  "config": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "builderOrigin": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Origins of the app builder that embeds the app (e.g. [\"https://builder.example.com\"]; a single string is also accepted). After a design page first paints, an appkit:design-ready message is posted to that window, only to these origins. '*' is not allowed."
+        }
+      }
+    }
   }
 }
