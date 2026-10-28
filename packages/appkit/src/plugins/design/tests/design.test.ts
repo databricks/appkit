@@ -8,6 +8,7 @@ import { createTestApp, type TestApp } from "../../../testing";
 import { server } from "../../server";
 import { design } from "../index";
 import {
+  appReadyModule,
   designStatus,
   designVitePlugin,
   entryModule,
@@ -199,6 +200,56 @@ describe("entryModule", () => {
     expect(code).toContain("ok: !this.state.error && !placeholder");
     // A render error anywhere in the page's tree un-readies the server.
     expect(code).toContain("if (this.state.error) postStatus(name, false)");
+  });
+});
+
+describe("app-ready script", () => {
+  test("posts appkit:app-ready v1 to the builder origins, never on the template home", () => {
+    const code = appReadyModule(["https://builder.example.com"]);
+    expect(code).toContain('const ORIGINS = ["https://builder.example.com"]');
+    expect(code).toContain(
+      'type: "appkit:app-ready", version: 1, path: location.pathname',
+    );
+    expect(code).toContain(
+      'if (document.querySelector("[data-appkit-template-home]")) return;',
+    );
+    expect(code).toContain("await document.fonts?.ready");
+    expect(code).not.toContain('"*"');
+  });
+
+  test("re-checks after client-side navigation and hot updates", () => {
+    const code = appReadyModule(["https://builder.example.com"]);
+    expect(code).toContain(
+      'for (const method of ["pushState", "replaceState"])',
+    );
+    expect(code).toContain('addEventListener("popstate", schedule)');
+    expect(code).toContain('import.meta.hot?.on("vite:afterUpdate"');
+  });
+
+  type HtmlHook = (
+    html: string,
+    ctx: { path: string },
+  ) => { attrs: { src: string } }[] | undefined;
+  const inject = (origins: string[], urlPath: string) => {
+    const plugin = designVitePlugin({ builderOrigins: origins });
+    (plugin.configResolved as (c: { root: string }) => void)({
+      root: clientWith(["src/design/index.tsx"]),
+    });
+    return (plugin.transformIndexHtml as HtmlHook)("<html></html>", {
+      path: urlPath,
+    });
+  };
+
+  test("is added to app pages only, and only with a builder origin", () => {
+    const tags = inject(["https://builder.example.com"], "/orders?x=1");
+    expect(tags?.[0].attrs.src).toBe(
+      "/@id/__x00__virtual:appkit-app-ready.mjs",
+    );
+    expect(inject(["https://builder.example.com"], "/design")).toBeUndefined();
+    expect(
+      inject(["https://builder.example.com"], "/design/x"),
+    ).toBeUndefined();
+    expect(inject([], "/")).toBeUndefined();
   });
 });
 
