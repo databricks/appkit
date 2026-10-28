@@ -195,3 +195,34 @@ test.each([[["agents", "serving"]], [["serving", "agents"]]])(
     );
   },
 );
+
+test("plugins sharing a resource in one run write its entries once", async () => {
+  const dir = makeApp();
+  const file = path.join(dir, "appkit.plugins.json");
+  const manifest = JSON.parse(fs.readFileSync(file, "utf-8"));
+  manifest.plugins.reporting = {
+    ...manifest.plugins.analytics,
+    name: "reporting",
+  };
+  fs.writeFileSync(file, JSON.stringify(manifest));
+  vi.spyOn(console, "log").mockImplementation(() => {});
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  await createPluginAddCommand().parseAsync(
+    [
+      "analytics",
+      "reporting",
+      "--set",
+      "analytics.sql-warehouse.id=wh",
+      "--set",
+      "reporting.sql-warehouse.id=wh",
+      "--yes",
+      "-C",
+      dir,
+    ],
+    { from: "user" },
+  );
+  const appYaml = fs.readFileSync(path.join(dir, "app.yaml"), "utf-8");
+  expect(appYaml.match(/DATABRICKS_WAREHOUSE_ID/g)).toHaveLength(1);
+  const yml = fs.readFileSync(path.join(dir, "databricks.yml"), "utf-8");
+  expect(yml.match(/- name: sql-warehouse/g)).toHaveLength(1);
+});
