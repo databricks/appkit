@@ -6,7 +6,9 @@ import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } fro
  * with AppKit components; add more pages as client/src/design/pages/<name>.tsx,
  * served at /design/<name>. Each file's default export is the page. Link
  * between pages with react-router's <Link to="/<name>">: design pages run under
- * a router whose basename is /design.
+ * a router whose basename is /design. If something renders after loading (a
+ * chart, an animation), hold readiness back with useDesignReady(isDone) from
+ * '@databricks/appkit-ui/react/beta' so an app builder doesn't reveal it half-drawn.
  */
 
 // Starter-page marker: while it's exported, /design never reports itself ready

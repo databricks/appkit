@@ -163,6 +163,20 @@ describe("entryModule", () => {
     expect(code).toContain('"!/src/design/pages/__*"');
   });
 
+  test("waits for real content before reporting ready", () => {
+    const code = entryModule("index.tsx", [], false);
+    expect(code).toContain("await document.fonts?.ready");
+    expect(code).toContain("new MutationObserver(");
+    expect(code).toContain("pendingFetches === 0 && quiet");
+    expect(code).toContain("host.blockers === 0");
+    // A Suspense fallback holds readiness while it's on screen.
+    expect(code).toContain(
+      "createElement(Suspense, { fallback: createElement(Pending) }",
+    );
+    // The useDesignReady() contract with appkit-ui.
+    expect(code).toContain("window.__appkitDesign ??= { blockers: 0 }");
+  });
+
   test("without react-router it renders just the page", () => {
     const code = entryModule("index.tsx", [], false);
     expect(code).not.toContain("react-router");

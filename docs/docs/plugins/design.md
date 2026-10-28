@@ -74,6 +74,36 @@ In development, the dev server adds `data-source="file:line:col"` to every nativ
 
 A builder that embeds `/design` can wait until there is a real design to show, instead of revealing an empty page. `/design` is **ready** once `client/src/design/index.tsx` exists, isn't the template placeholder, and has painted in a browser since it last changed. A page that throws while rendering (in the page file or any component it uses) shows the error in place and turns `ready` back to `false` until a render succeeds again.
 
+### What "ready" waits for
+
+After a successful render the page waits until it shows its real content before reporting:
+
+- web fonts have loaded (`document.fonts.ready`);
+- no `Suspense` fallback is on screen (lazy components and data that suspend);
+- no `fetch` started by the page is still in flight, for example chart data;
+- the page's DOM hasn't changed for 300 ms (charts drawing, lists filling in);
+- then two animation frames, so it has painted.
+
+It never reports while the page is the template placeholder or is showing a render error. The automatic waits give up after 10 seconds, so a stream that never ends can't hold the page back forever.
+
+### Holding readiness back: `useDesignReady`
+
+For content the page can't detect on its own (a chart that draws on a timer, an animation, data from a source that isn't `fetch`), hold readiness back explicitly. While any mounted component passes `false`, the page isn't ready, with no time limit:
+
+```tsx
+import { useDesignReady } from "@databricks/appkit-ui/react/beta";
+
+function TripsPerDay() {
+  const { data, loading } = useAnalyticsQuery("trips_per_day", {});
+  useDesignReady(!loading && data != null);
+  return <LineChart data={data ?? []} />;
+}
+```
+
+Outside `/design` (the real app, tests) the hook does nothing, so it can stay in components that are later promoted into the app.
+
+### Placeholder
+
 The app template's starter page is marked as a placeholder by this export. Delete it when you write the real page:
 
 ```tsx
@@ -96,7 +126,7 @@ export const designPlaceholder = true;
 
 ### `appkit:design-ready` message
 
-After a design page first paints (and after each hot update), unless it's the placeholder, the page posts this to `window.parent` (or `window.opener`), only to the configured `builderOrigin`s:
+Once a design page is ready (see above) and again after each hot update that leaves it ready, the page posts this to `window.parent` (or `window.opener`), only to the configured `builderOrigin`s:
 
 ```ts
 interface DesignReadyMessage {
