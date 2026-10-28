@@ -497,8 +497,14 @@ async function runPluginAdd(names: string[], opts: AddOptions): Promise<void> {
     seen.add(r.name);
   }
 
+  // agents is planned last: it is the one plugin that adapts to an env clash
+  // (see preparePlugin), so it must see the others' entries in any order.
+  const ordered = [
+    ...requests.filter((r) => r.name !== "agents"),
+    ...requests.filter((r) => r.name === "agents"),
+  ];
   const prepared: PreparedPlugin[] = [];
-  for (const req of requests) {
+  for (const req of ordered) {
     prepared.push(
       await preparePlugin(
         cwd,
@@ -718,35 +724,40 @@ async function registerInServer(
   });
 }
 
-export const pluginAddCommand = new Command("add")
-  .description(
-    "Add plugins from appkit.plugins.json to the app: server registration, .env, app.yaml and databricks.yml, each written once",
-  )
-  .argument("[plugins...]", "Plugin names, as in appkit.plugins.json")
-  .option(
-    "--from-plan <file>",
-    "Add the plugins listed in a data plan file (e.g. .appkit/data-plan.json, version 1)",
-  )
-  .option(
-    "--set <plugin.resourceKey.field=value>",
-    "Set resource values (format: plugin.resourceKey.field=value, can specify multiple)",
-    (v: string, acc: string[]) => [...acc, v],
-    [] as string[],
-  )
-  .option(
-    "--auth-mode <mode>",
-    "Default resource auth mode: obo (on behalf of the user) or sp (service principal). With obo, resources that cannot be accessed on behalf of the user use sp. Prompts if not provided in interactive mode, otherwise sp.",
-  )
-  .option("-C, --cwd <dir>", "Run as if started in <dir>")
-  .option("-y, --yes", "Don't prompt; fail on missing required values")
-  .option("--no-register", "Don't edit the server entry to register the plugin")
-  .option(
-    "-p, --profile <name>",
-    "Databricks profile for bundle validate (defaults to the app's DATABRICKS_CONFIG_PROFILE)",
-  )
-  .addHelpText(
-    "after",
-    `
+/** A fresh `plugin add` command (commander keeps parsed values per instance). */
+export const createPluginAddCommand = () =>
+  new Command("add")
+    .description(
+      "Add plugins from appkit.plugins.json to the app: server registration, .env, app.yaml and databricks.yml, each written once",
+    )
+    .argument("[plugins...]", "Plugin names, as in appkit.plugins.json")
+    .option(
+      "--from-plan <file>",
+      "Add the plugins listed in a data plan file (e.g. .appkit/data-plan.json, version 1)",
+    )
+    .option(
+      "--set <plugin.resourceKey.field=value>",
+      "Set resource values (format: plugin.resourceKey.field=value, can specify multiple)",
+      (v: string, acc: string[]) => [...acc, v],
+      [] as string[],
+    )
+    .option(
+      "--auth-mode <mode>",
+      "Default resource auth mode: obo (on behalf of the user) or sp (service principal). With obo, resources that cannot be accessed on behalf of the user use sp. Prompts if not provided in interactive mode, otherwise sp.",
+    )
+    .option("-C, --cwd <dir>", "Run as if started in <dir>")
+    .option("-y, --yes", "Don't prompt; fail on missing required values")
+    .option(
+      "--no-register",
+      "Don't edit the server entry to register the plugin",
+    )
+    .option(
+      "-p, --profile <name>",
+      "Databricks profile for bundle validate (defaults to the app's DATABRICKS_CONFIG_PROFILE)",
+    )
+    .addHelpText(
+      "after",
+      `
 Resource configuration (--set), as in \`databricks apps init\`:
   Set resource values using --set plugin.resourceKey.field=value
   Keys are defined in the app's appkit.plugins.json manifest.
@@ -775,10 +786,12 @@ Examples:
   $ appkit plugin add analytics genie --set analytics.sql-warehouse.id=abc123 \\
       --set genie.genie-space.id=s1 --set genie.genie-space.name=Sales
   $ appkit plugin add --from-plan .appkit/data-plan.json --yes`,
-  )
-  .action((names: string[], opts: AddOptions) =>
-    runPluginAdd(names, opts).catch((err: Error) => {
-      console.error(pc.red(err.message));
-      process.exit(1);
-    }),
-  );
+    )
+    .action((names: string[], opts: AddOptions) =>
+      runPluginAdd(names, opts).catch((err: Error) => {
+        console.error(pc.red(err.message));
+        process.exit(1);
+      }),
+    );
+
+export const pluginAddCommand = createPluginAddCommand();
