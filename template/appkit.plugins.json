@@ -196,6 +196,41 @@
         }
       }
     },
+    "designer": {
+      "name": "designer",
+      "displayName": "Lakeflow Designer",
+      "description": "Serve published Lakeflow Designer Apps with viewer-scoped runs, results, and file transfers.",
+      "package": "@databricks/appkit",
+      "resources": {
+        "required": [],
+        "optional": [
+          {
+            "type": "job",
+            "alias": "Designer runner",
+            "resourceKey": "job",
+            "description": "Publisher-owned Designer runner Job",
+            "permission": "CAN_MANAGE",
+            "fields": {
+              "id": {
+                "env": "DATABRICKS_JOB_ID",
+                "description": "Job bound by the Designer publisher",
+                "origin": "user"
+              }
+            },
+            "binding": {
+              "yamlKey": "job",
+              "varFields": [
+                [
+                  "id",
+                  "id"
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "stability": "beta"
+    },
     "files": {
       "name": "files",
       "displayName": "Files Plugin",

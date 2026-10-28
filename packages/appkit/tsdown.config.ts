@@ -11,6 +11,7 @@ export default defineConfig([
     entry: [
       "src/index.ts",
       "src/beta.ts",
+      "src/designer.ts",
       "src/testing/index.ts",
       "src/tsdown/index.ts",
       "src/type-generator/index.ts",
