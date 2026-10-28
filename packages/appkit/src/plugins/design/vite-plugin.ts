@@ -146,7 +146,7 @@ export function entryModule(
   router: boolean,
 ): string {
   const shared = `
-import { Component, createElement } from "react";
+import { Component, createElement, Suspense, useLayoutEffect } from "react";
 import { createRoot } from "react-dom/client";
 import * as initial from "/src/design/${file}";
 import.meta.glob("/src/index.css", { eager: true });
@@ -158,8 +158,56 @@ const pages = Object.keys(import.meta.glob(${JSON.stringify(PAGE_GLOBS)}))
   .map((file) => ({ name: pageName(file), path: pageName(file) === "index" ? "/design" : "/design/" + pageName(file) }))
   .sort((a, b) => (a.name === "index" ? -1 : b.name === "index" ? 1 : a.name.localeCompare(b.name)));
 
-function afterPaint(fn) {
-  requestAnimationFrame(() => requestAnimationFrame(fn));
+// Shared with appkit-ui's useDesignReady(): components holding readiness back
+// bump \`blockers\` and call \`changed()\` when they let go.
+// CONTRACT: keep the key and shape in sync with appkit-ui's use-design-ready.ts.
+const host = (window.__appkitDesign ??= { blockers: 0 });
+
+// In-flight fetches started by the page (chart data and the like). Our own
+// status POSTs are not counted.
+let pendingFetches = 0;
+const realFetch = window.fetch.bind(window);
+window.fetch = (input, init) => {
+  const url = typeof input === "string" ? input : input?.url ?? String(input);
+  if (url.includes("${STATUS_PATH}")) return realFetch(input, init);
+  pendingFetches++;
+  return realFetch(input, init).finally(() => {
+    pendingFetches--;
+    // The response still has to be read and rendered: count its arrival as
+    // activity so the quiet window starts after it, not before.
+    lastMutation = performance.now();
+    schedule();
+  });
+};
+
+const QUIET_MS = 300;
+// Automatic waits (fetches, DOM changes) give up after this, so a stream that
+// never ends can't hold the page back forever. useDesignReady(false) has no cap.
+const SETTLE_CAP_MS = 10000;
+const frame = () => new Promise((r) => requestAnimationFrame(r));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+let lastMutation = performance.now();
+new MutationObserver(() => (lastMutation = performance.now())).observe(document.getElementById("root"), {
+  subtree: true,
+  childList: true,
+  characterData: true,
+  attributes: true,
+});
+
+// Resolves once the page shows its real content: fonts loaded, no fetch in
+// flight, no DOM change for QUIET_MS, then two frames (painted).
+async function settled(isCurrent) {
+  await document.fonts?.ready;
+  const start = performance.now();
+  while (isCurrent()) {
+    const capped = performance.now() - start > SETTLE_CAP_MS;
+    const quiet = performance.now() - lastMutation >= QUIET_MS;
+    if (host.blockers === 0 && (capped || (pendingFetches === 0 && quiet))) break;
+    await sleep(50);
+  }
+  await frame();
+  await frame();
 }
 
 function postStatus(name, ok) {
@@ -181,10 +229,40 @@ function reportReady(name) {
 
 // The page on screen and whether it rendered (not the placeholder, no error).
 let current;
+let run = 0;
+
+// (Re)starts the wait for the current page; a newer render or update cancels
+// an older wait, so only the latest state can be reported.
+function schedule() {
+  if (!current?.ok) return;
+  const mine = ++run;
+  const { name } = current;
+  const isCurrent = () => mine === run && current?.ok && current.name === name;
+  settled(isCurrent).then(() => {
+    if (isCurrent() && host.blockers === 0) reportReady(name);
+  });
+}
+host.changed = () => {
+  if (host.blockers === 0) schedule();
+};
+
+// A Suspense fallback on screen means the page isn't showing yet.
+function Pending() {
+  useLayoutEffect(() => {
+    host.blockers++;
+    return () => {
+      host.blockers--;
+      // What it revealed may still draw (charts in effects): wait a quiet window.
+      lastMutation = performance.now();
+      host.changed();
+    };
+  }, []);
+  return null;
+}
 
 // Reports readiness only from a successful render. A render error is caught
-// here (and shown) instead of being reported: the server then keeps the page
-// not ready, since the file changed and no good paint was recorded for it.
+// here (and shown) instead of being reported; the server is told, so a
+// failure in any component the page uses un-readies it.
 function withReady(mod, name) {
   const placeholder = mod.designPlaceholder === true;
   return class DesignReady extends Component {
@@ -200,10 +278,8 @@ function withReady(mod, name) {
     }
     settle() {
       current = { name, ok: !this.state.error && !placeholder };
-      // The error may come from any component the page imports, not just the
-      // page file, so tell the server instead of relying on its mtime check.
       if (this.state.error) postStatus(name, false);
-      else if (current.ok) afterPaint(() => current?.name === name && current.ok && reportReady(name));
+      else schedule();
     }
     render() {
       if (this.state.error) {
@@ -213,17 +289,15 @@ function withReady(mod, name) {
           "Design page failed to render: " + (this.state.error?.message ?? String(this.state.error)),
         );
       }
-      return createElement(mod.default);
+      return createElement(Suspense, { fallback: createElement(Pending) }, createElement(mod.default));
     }
   };
 }
 
 // Hot edits re-render in place without remounting; once React has applied
-// the edit and painted, report it if the page is still rendering fine.
+// the edit, wait for the page to settle again before reporting it.
 // (Adding or removing the placeholder export reloads the page instead.)
-import.meta.hot?.on("vite:afterUpdate", () => {
-  setTimeout(() => afterPaint(() => current?.ok && reportReady(current.name)), 50);
-});
+import.meta.hot?.on("vite:afterUpdate", () => setTimeout(schedule, 50));
 `;
 
   if (!router) {
