@@ -72,7 +72,7 @@ In development, the dev server adds `data-source="file:line:col"` to every nativ
 
 ## Readiness
 
-A builder that embeds `/design` can wait until there is a real design to show, instead of revealing an empty page. `/design` is **ready** once `client/src/design/index.tsx` exists, isn't the template placeholder, and has painted in a browser since it last changed. A page that throws while rendering shows the error in place and doesn't count as painted, so an edit that breaks the page turns `ready` back to `false` until it's fixed.
+A builder that embeds `/design` can wait until there is a real design to show, instead of revealing an empty page. `/design` is **ready** once `client/src/design/index.tsx` exists, isn't the template placeholder, and has painted in a browser since it last changed. A page that throws while rendering (in the page file or any component it uses) shows the error in place and turns `ready` back to `false` until a render succeeds again.
 
 The app template's starter page is marked as a placeholder by this export. Delete it when you write the real page:
 

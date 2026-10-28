@@ -183,6 +183,8 @@ describe("entryModule", () => {
       "const placeholder = mod.designPlaceholder === true",
     );
     expect(code).toContain("ok: !this.state.error && !placeholder");
+    // A render error anywhere in the page's tree un-readies the server.
+    expect(code).toContain("if (this.state.error) postStatus(name, false)");
   });
 });
 
