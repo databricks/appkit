@@ -1,7 +1,6 @@
 import { existsSync, globSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-import ts from "typescript";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -10,6 +9,7 @@ import {
   fixturePath,
   LINT_FIXTURES,
   type LintFixture,
+  readJsonc,
   readOxlintConfig,
   ruleOf,
   UNREACHABLE_RULES,
@@ -185,7 +185,9 @@ describe("template lint setup", () => {
   test("no template tsconfig sets baseUrl, which makes tsgolint skip type-aware rules", () => {
     for (const file of globSync("tsconfig*.json", { cwd: template })) {
       const path = join(template, file);
-      const { config: tsconfig } = ts.readConfigFile(path, ts.sys.readFile);
+      const tsconfig = readJsonc<{ compilerOptions?: { baseUrl?: string } }>(
+        path,
+      );
       expect(tsconfig.compilerOptions?.baseUrl, file).toBeUndefined();
     }
   });
