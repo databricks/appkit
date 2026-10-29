@@ -126,8 +126,8 @@ export const designPlaceholder = true;
 
 | Field | Meaning |
 | ----- | ------- |
-| `compiled` | The index page and its imports build (checked server-side, no browser needed). |
-| `compileError` | Why it doesn't, when `compiled` is `false` because of an error. |
+| `compiled` | The index page and every module of the app it imports, transitively, build (compiled server-side as a browser would load them, so no browser is needed; dependencies in `node_modules` aren't recompiled). |
+| `compileError` | Why it doesn't, prefixed with the failing module (`src/design/Card.tsx: ...`). |
 | `waitingFor` | What `ready` is waiting on: `"index"` (no `index.tsx`), `"placeholder"` (still the template page), `"compile"` (build error), `"paint"` (no browser has painted it yet), or `null` when ready. |
 | `placeholder` | `index.tsx` is still the template placeholder. |
 | `drafts`, `blockSchema`, `theme` | See [HTML drafts](#html-drafts). |

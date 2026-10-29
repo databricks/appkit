@@ -2,7 +2,7 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 
-import type { Plugin } from "vite";
+import type { Plugin, ViteDevServer } from "vite";
 
 import {
   DRAFT_ROUTE,
@@ -412,6 +412,62 @@ schedule();
 `;
 }
 
+/** Cap on modules compiled per status check, so a huge graph can't stall it. */
+const COMPILE_GRAPH_LIMIT = 500;
+
+/**
+ * Compiles `url` and every module of the app it imports, transitively
+ * (dependencies in node_modules and virtual modules are skipped), the way a
+ * browser loading the page would. Returns the first error, or undefined when
+ * the whole graph builds.
+ *
+ * `transformRequest` alone only compiles the one module; its imports are only
+ * resolved, so a syntax error in an imported component would go unnoticed.
+ *
+ * @internal
+ */
+export async function compileGraph(
+  server: Pick<ViteDevServer, "transformRequest" | "moduleGraph">,
+  url: string,
+): Promise<string | undefined> {
+  const seen = new Set<string>();
+  const queue = [url];
+  while (queue.length > 0 && seen.size < COMPILE_GRAPH_LIMIT) {
+    const next = queue.shift() as string;
+    if (seen.has(next)) continue;
+    seen.add(next);
+    try {
+      await server.transformRequest(next);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // Name the failing module (Vite's location when it has one), since the
+      // error can come from deep in the graph and may not say where.
+      const loc = (error as { loc?: { file?: string; line?: number } }).loc;
+      const where = loc?.file
+        ? `${loc.file}${loc.line ? `:${loc.line}` : ""}`
+        : next;
+      return message.includes(path.basename(where.split(":")[0]))
+        ? message
+        : `${where}: ${message}`;
+    }
+    const mod = await server.moduleGraph.getModuleByUrl(next);
+    for (const dep of mod?.importedModules ?? []) {
+      const file = dep.file ?? "";
+      if (
+        !file ||
+        file.includes("/node_modules/") ||
+        dep.url.startsWith("/@id/")
+      ) {
+        continue;
+      }
+      // CSS and assets are imported too; only script modules can fail to build.
+      if (!/\.[cm]?[jt]sx?$/.test(file)) continue;
+      queue.push(dep.url);
+    }
+  }
+  return undefined;
+}
+
 const pageHtml = (title: string, entryUrl: string) => `<!doctype html>
 <html lang="en">
   <head>
@@ -595,15 +651,11 @@ export function designVitePlugin({
           let compiled = false;
           let compileError: string | undefined;
           if (index && !status.placeholder) {
-            try {
-              await server.transformRequest(
-                `/${path.relative(server.config.root, index).split(path.sep).join("/")}`,
-              );
-              compiled = true;
-            } catch (error) {
-              compileError =
-                error instanceof Error ? error.message : String(error);
-            }
+            compileError = await compileGraph(
+              server,
+              `/${path.relative(server.config.root, index).split(path.sep).join("/")}`,
+            );
+            compiled = compileError === undefined;
           }
           const waitingFor = !index
             ? "index"
