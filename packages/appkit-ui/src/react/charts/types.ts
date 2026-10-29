@@ -91,7 +91,10 @@ export interface ChartBaseProps {
   colorPalette?: ChartColorPalette;
   /** Custom colors for series (overrides colorPalette) */
   colors?: string[];
-  /** Chart height in pixels @default 300 */
+  /**
+   * Chart height in pixels. By default the chart fills its parent's height
+   * (at least 160px), so it fits the card or grid cell it's in.
+   */
   height?: number;
   /** Additional CSS classes */
   className?: string;

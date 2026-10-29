@@ -1982,6 +1982,9 @@
   .\[animation-duration\:2\.5s\] {
     animation-duration: 2.5s;
   }
+  .fade-in {
+    --tw-enter-opacity: 0;
+  }
   .running {
     animation-play-state: running;
   }

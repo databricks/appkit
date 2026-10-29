@@ -30,7 +30,7 @@ export function createChart<TProps extends UnifiedChartProps>(
       // Data props
       data,
       // Common props
-      height = 300,
+      height,
       className,
       ariaLabel,
       testId,

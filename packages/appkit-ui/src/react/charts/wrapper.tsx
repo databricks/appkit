@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { WarehouseStatus } from "../hooks/types";
 import { useChartData } from "../hooks/use-chart-data";
 import { ChartErrorBoundary } from "./chart-error-boundary";
+import { chartSizeStyle } from "./constants";
 import { EmptyState } from "./empty";
 import { ErrorState } from "./error";
 import { LoadingSkeleton, ResourceWaitingPlaceholder } from "./loading";
@@ -54,7 +55,7 @@ interface ChartWrapperDataProps {
 }
 
 interface CommonProps {
-  /** Chart height in pixels */
+  /** Chart height in pixels. By default the chart fills its parent's height (at least 160px). */
   height?: number;
   /** Additional CSS classes */
   className?: string;
@@ -92,9 +93,19 @@ function QueryModeContent({
   });
 
   if (isWarehouseWaiting(loading, data, warehouseStatus)) {
-    return <ResourceWaitingPlaceholder height={height ?? 300} />;
+    return (
+      <div style={chartSizeStyle(height)}>
+        <ResourceWaitingPlaceholder height="100%" />
+      </div>
+    );
   }
-  if (loading) return <LoadingSkeleton height={height ?? 300} />;
+  if (loading) {
+    return (
+      <div style={chartSizeStyle(height)}>
+        <LoadingSkeleton height="100%" />
+      </div>
+    );
+  }
   if (error) return <ErrorState error={error} />;
   if (isEmpty || !data) return <EmptyState />;
 
@@ -104,7 +115,7 @@ function QueryModeContent({
     >
       <div
         className={className}
-        style={{ height }}
+        style={chartSizeStyle(height)}
         aria-label={ariaLabel}
         data-testid={testId}
         role="img"
@@ -139,7 +150,7 @@ function DataModeContent({
     >
       <div
         className={className}
-        style={{ height }}
+        style={chartSizeStyle(height)}
         aria-label={ariaLabel}
         data-testid={testId}
         role="img"
@@ -177,7 +188,7 @@ function DataModeContent({
  * ```
  */
 export function ChartWrapper(props: ChartWrapperProps) {
-  const { height = 300, className, ariaLabel, testId, children } = props;
+  const { height, className, ariaLabel, testId, children } = props;
 
   // Data mode: use provided data directly
   if ("data" in props && props.data !== undefined) {
