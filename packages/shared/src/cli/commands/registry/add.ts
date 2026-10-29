@@ -22,6 +22,7 @@ import {
   planHasContent,
 } from "./config-plan";
 import {
+  assertBundleApp,
   reportConfigWrite,
   validateBundle,
   writeConfig,
@@ -484,6 +485,15 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
       );
       process.exit(1);
     }
+  }
+
+  // The deploy-config write refuses an ambiguous bundle: check before any
+  // file, and only when an item has resources to write (UI items don't).
+  if (
+    opts.resources !== false &&
+    items.some((i) => extractRequirements(i).length > 0)
+  ) {
+    assertBundleApp(cwd);
   }
 
   const hasUi = items.some((i) => !isPluginItem(i));

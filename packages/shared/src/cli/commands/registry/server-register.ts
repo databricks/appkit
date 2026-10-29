@@ -20,10 +20,29 @@ export interface RegisterResult {
   reason?: string;
 }
 
-function findServerFile(serverRoot: string): string | null {
+export function findServerFile(serverRoot: string): string | null {
   for (const candidate of SERVER_FILE_CANDIDATES) {
     const p = path.join(serverRoot, candidate);
     if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+/**
+ * The named-imports node (`{ a, b }`) of a value import from `module`, to
+ * extend with a new name instead of adding a second import line. Type-only
+ * imports are skipped: a value added there would be erased at compile time.
+ */
+function namedImportsFrom(stmts: SgNode[], module: string): SgNode | null {
+  for (const stmt of stmts) {
+    const source = stmt.field("source")?.text().slice(1, -1);
+    // `import type` shows as an unnamed `type` token, wherever comments sit.
+    const typeOnly = stmt
+      .children()
+      .some((c) => c.kind() === "type" && !c.isNamed());
+    if (source !== module || typeOnly) continue;
+    const named = stmt.find({ rule: { kind: "named_imports" } });
+    if (named) return named;
   }
   return null;
 }
@@ -83,29 +102,75 @@ function importBindingNames(stmt: SgNode): Set<string> {
  * standard shape (a `plugins: [...]` array literal); returns `skipped` otherwise
  * so the caller can fall back to printing manual instructions. Idempotent.
  */
+/** A plugin to register: `import { exportName } from importPath` + `exportName(callArgs)`. */
+export interface RegisterEntry {
+  importPath: string;
+  exportName: string;
+  /** Call arguments, e.g. `{ auth: "on-behalf-of-user" }` (CLI-built, never registry data). */
+  callArgs?: string;
+}
+
 export function registerPluginInServer(
   serverRoot: string,
   importPath: string,
   exportName: string,
+  callArgs = "",
 ): RegisterResult {
+  return registerPluginsInServer(serverRoot, [
+    { importPath, exportName, callArgs },
+  ])[0];
+}
+
+/**
+ * Registers several plugins in the server entry, writing the file once (a
+ * dev server watching it restarts once). Entries apply in order; each
+ * result is per entry.
+ */
+export function registerPluginsInServer(
+  serverRoot: string,
+  entries: RegisterEntry[],
+): RegisterResult[] {
+  const serverFile = findServerFile(serverRoot);
+  if (!serverFile) {
+    return entries.map(() => ({
+      status: "skipped",
+      reason: "no server entry file found",
+    }));
+  }
+  const file = path.relative(serverRoot, serverFile);
+  const lang = serverFile.endsWith(".tsx") ? Lang.Tsx : Lang.TypeScript;
+  const original = fs.readFileSync(serverFile, "utf-8");
+  let content = original;
+  const results = entries.map((e): RegisterResult => {
+    const { output, ...r } = registerInSource(content, lang, e);
+    if (output !== undefined) content = output;
+    return r.status === "skipped" ? r : { ...r, file };
+  });
+  if (content !== original) fs.writeFileSync(serverFile, content);
+  return results;
+}
+
+/** Applies one entry to the server source; `output` is set when it changed. */
+function registerInSource(
+  content: string,
+  lang: Lang,
+  { importPath, exportName, callArgs = "" }: RegisterEntry,
+): RegisterResult & { output?: string } {
   // exportName and importPath are interpolated into the user's server source.
   // Registry items are untrusted, so refuse anything that isn't a plain JS
   // identifier / clean relative module path — prevents code injection via a
-  // crafted export name or import path.
+  // crafted export name or import path. Plugins declared by an npm package
+  // (AppKit's or another) import from a plain package specifier.
   if (!JS_IDENTIFIER.test(exportName)) {
     return { status: "skipped", reason: "invalid plugin export name" };
   }
-  if (!/^[.][./A-Za-z0-9_-]*$/.test(importPath)) {
+  if (
+    !/^[.][./A-Za-z0-9_-]*$/.test(importPath) &&
+    !/^(@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*(\/[\w.-]+)*$/i.test(importPath)
+  ) {
     return { status: "skipped", reason: "invalid plugin import path" };
   }
 
-  const serverFile = findServerFile(serverRoot);
-  if (!serverFile) {
-    return { status: "skipped", reason: "no server entry file found" };
-  }
-
-  const content = fs.readFileSync(serverFile, "utf-8");
-  const lang = serverFile.endsWith(".tsx") ? Lang.Tsx : Lang.TypeScript;
   const root = parse(lang, content).root();
 
   const arr = findPluginsArray(root);
@@ -116,15 +181,14 @@ export function registerPluginInServer(
     };
   }
 
-  const file = path.relative(serverRoot, serverFile);
   if (arrayElementNames(arr).has(exportName)) {
-    return { status: "already", file };
+    return { status: "already" };
   }
 
   const edits = [];
 
   // toPlugin exports are factories, registered as a call: `hello()`.
-  const newElem = `${exportName}()`;
+  const newElem = `${exportName}(${callArgs})`;
 
   // Insert before the first element, matching its indentation so the array
   // formatting is preserved (or inline for a single-line array).
@@ -153,16 +217,29 @@ export function registerPluginInServer(
     importBindingNames(s).has(exportName),
   );
   const importLine = `import { ${exportName} } from "${importPath}";`;
-  if (!hasBinding && importStmts.length > 0) {
+  const named = hasBinding ? null : namedImportsFrom(importStmts, importPath);
+  if (named) {
+    // Append after the last specifier, matching a multi-line list's layout.
+    const specs = named.findAll({ rule: { kind: "import_specifier" } });
+    const lastSpec = specs[specs.length - 1];
+    if (!lastSpec) {
+      edits.push(named.replace(`{ ${exportName} }`));
+    } else {
+      const startIdx = lastSpec.range().start.index;
+      const lineStart = content.lastIndexOf("\n", startIdx - 1);
+      const indent = content.slice(lineStart + 1, startIdx);
+      const multiline = named.text().includes("\n") && /^[ \t]*$/.test(indent);
+      const sep = multiline ? `,\n${indent}` : ", ";
+      edits.push(lastSpec.replace(`${lastSpec.text()}${sep}${exportName}`));
+    }
+  } else if (!hasBinding && importStmts.length > 0) {
     const last = importStmts[importStmts.length - 1];
     edits.push(last.replace(`${last.text()}\n${importLine}`));
   }
 
   let output = root.commitEdits(edits);
-  if (!hasBinding && importStmts.length === 0) {
+  if (!hasBinding && !named && importStmts.length === 0) {
     output = `${importLine}\n${output}`;
   }
-  fs.writeFileSync(serverFile, output);
-
-  return { status: "wired", file };
+  return { status: "wired", output };
 }

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { parseDocument } from "yaml";
 
 import { buildConfigPlan } from "./config-plan";
-import { writeConfig } from "./config-writer";
+import { assertBundleApp, writeConfig } from "./config-writer";
 import type { ResourceRequirementRow } from "./requirements";
 
 const FIXTURES = path.join(__dirname, "__fixtures__");
@@ -193,5 +193,80 @@ describe("writeConfig — additive patching", () => {
     const db = fs.readFileSync(path.join(cwd, "databricks.yml"), "utf-8");
     expect(() => parseDocument(db).toJSON()).not.toThrow();
     expect(sameYaml(db, db)).toBe(true);
+  });
+});
+
+describe("writeConfig — user_api_scopes and literal env values", () => {
+  it("adds missing scopes once and writes literal app.yaml values", () => {
+    const cwd = makeTempDir();
+    fs.writeFileSync(
+      path.join(cwd, "databricks.yml"),
+      "resources:\n  apps:\n    app:\n      user_api_scopes:\n        - sql\n",
+    );
+    const result = writeConfig(cwd, {
+      appYamlEnv: [{ name: "DATABRICKS_WAREHOUSE_ID", value: "wh" }],
+      bundleVariables: [],
+      resourceBindings: [],
+      userApiScopes: ["sql", "files.files"],
+      unverifiedTypes: [],
+    });
+    const db = parseDocument(
+      fs.readFileSync(path.join(cwd, "databricks.yml"), "utf-8"),
+    ).toJSON();
+    expect(db.resources.apps.app.user_api_scopes).toEqual([
+      "sql",
+      "files.files",
+    ]);
+    expect(result.databricksYmlChanged).toBe(true);
+    const app = parseDocument(
+      fs.readFileSync(path.join(cwd, "app.yaml"), "utf-8"),
+    ).toJSON();
+    expect(app.env).toEqual([{ name: "DATABRICKS_WAREHOUSE_ID", value: "wh" }]);
+  });
+});
+
+describe("writeConfig — app key", () => {
+  it("writes scopes and bindings to the bundle's only app, whatever its key", () => {
+    const cwd = makeTempDir();
+    fs.writeFileSync(
+      path.join(cwd, "databricks.yml"),
+      "resources:\n  apps:\n    dashboard:\n      name: dash\n",
+    );
+    writeConfig(cwd, {
+      appYamlEnv: [],
+      bundleVariables: [],
+      resourceBindings: [
+        {
+          name: "wh",
+          type: "sql_warehouse",
+          permission: "CAN_USE",
+          fields: {},
+        },
+      ],
+      userApiScopes: ["sql"],
+      unverifiedTypes: [],
+    });
+    const apps = parseDocument(
+      fs.readFileSync(path.join(cwd, "databricks.yml"), "utf-8"),
+    ).toJSON().resources.apps;
+    expect(Object.keys(apps)).toEqual(["dashboard"]);
+    expect(apps.dashboard.user_api_scopes).toEqual(["sql"]);
+    expect(apps.dashboard.resources[0].name).toBe("wh");
+  });
+});
+
+describe("assertBundleApp", () => {
+  it("throws for several apps without one named app, before any write", () => {
+    const cwd = makeTempDir();
+    fs.writeFileSync(
+      path.join(cwd, "databricks.yml"),
+      "resources:\n  apps:\n    frontend: {}\n    backend: {}\n",
+    );
+    expect(() => assertBundleApp(cwd)).toThrow("several apps");
+    fs.writeFileSync(
+      path.join(cwd, "databricks.yml"),
+      "resources:\n  apps:\n    dash: {}\n",
+    );
+    expect(() => assertBundleApp(cwd)).not.toThrow();
   });
 });
