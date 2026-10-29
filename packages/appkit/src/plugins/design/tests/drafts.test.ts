@@ -351,6 +351,7 @@ describe("draft errors in /design/__status", () => {
       ws: { send() {} },
       middlewares: { use: (h: Handler) => (handler = h) },
       transformRequest,
+      moduleGraph: { getModuleByUrl: async () => undefined },
     });
     return { app, handler: handler as Handler };
   }
