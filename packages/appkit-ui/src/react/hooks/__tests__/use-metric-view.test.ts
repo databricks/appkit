@@ -182,6 +182,20 @@ describe("useMetricView", () => {
     });
   });
 
+  test("serializes queryTags into the POST body when provided", () => {
+    renderHook(() =>
+      useMetricView("orders", {
+        measures: ["revenue"],
+        queryTags: { page: "overview" },
+      }),
+    );
+
+    expect(JSON.parse(lastConnectArgs.payload)).toEqual({
+      measures: ["revenue"],
+      queryTags: { page: "overview" },
+    });
+  });
+
   test("omits orderBy from the body when undefined", () => {
     renderHook(() =>
       useMetricView("orders", {
