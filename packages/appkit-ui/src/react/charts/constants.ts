@@ -122,3 +122,21 @@ export const FALLBACK_UI_TOKENS: ChartUITokens = {
   grid: "hsla(240, 5%, 90%, 1)", // ≈ --border
   tooltipBg: "hsla(0, 0%, 100%, 1)", // ≈ --popover
 };
+
+/** Smallest height a chart takes when it fills its parent (no `height` prop). */
+export const CHART_MIN_HEIGHT = 160;
+
+/**
+ * Size of a chart's box. With an explicit `height` (pixels) the chart is
+ * exactly that tall. Without one it fills its parent's height, so it fits the
+ * card or grid cell it's placed in, and falls back to {@link CHART_MIN_HEIGHT}
+ * when the parent's height comes from its content.
+ */
+export function chartSizeStyle(height?: number): {
+  height: number | string;
+  minHeight?: number;
+} {
+  return height !== undefined
+    ? { height }
+    : { height: "100%", minHeight: CHART_MIN_HEIGHT };
+}

@@ -28,6 +28,7 @@ import { LegacyGridContainLabel } from "echarts/features";
 import { CanvasRenderer } from "echarts/renderers";
 import { useCallback, useMemo, useRef } from "react";
 
+import { chartSizeStyle } from "./constants";
 import { normalizeChartData, normalizeHeatmapData } from "./normalize";
 import {
   applySelectionEmphasis,
@@ -123,7 +124,10 @@ export interface BaseChartProps {
   yKey?: string | string[];
   /** Chart orientation @default "vertical" */
   orientation?: Orientation;
-  /** Chart height in pixels @default 300 */
+  /**
+   * Chart height in pixels. By default the chart fills its parent's height
+   * (at least 160px).
+   */
   height?: number;
   /** Chart title */
   title?: string;
@@ -204,7 +208,7 @@ export function BaseChart({
   xKey,
   yKey,
   orientation,
-  height = 300,
+  height,
   title,
   showLegend = true,
   colorPalette,
@@ -433,7 +437,10 @@ export function BaseChart({
 
   if (!option) {
     return (
-      <div className="flex items-center justify-center h-full text-muted-foreground">
+      <div
+        className="flex items-center justify-center text-muted-foreground"
+        style={chartSizeStyle(height)}
+      >
         No data
       </div>
     );
@@ -444,7 +451,7 @@ export function BaseChart({
       ref={chartRefCallback}
       echarts={echarts}
       option={option}
-      style={{ height }}
+      style={chartSizeStyle(height)}
       className={className}
       opts={{ renderer: "canvas" }}
       notMerge={false}
