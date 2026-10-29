@@ -157,6 +157,239 @@ export function normalizeBlock(
   return { component: kind, props: p };
 }
 
+/**
+ * JSON Schema (2020-12) of each component allowed in a `data-appkit` block,
+ * with an example. Served at `/design/__data-appkit.schema.json` so an agent
+ * (or its skill) can write valid blocks; `normalizeBlock` enforces the same
+ * rules at render time.
+ */
+export function dataAppkitSchema() {
+  const chartBase = {
+    title: { type: "string", description: "Chart title." },
+    height: { type: "number", description: "Height in pixels. Default 300." },
+    showLegend: { type: "boolean", description: "Show the legend." },
+    colors: {
+      type: "array",
+      items: { type: "string" },
+      description: "Series colors (CSS colors); defaults to the theme palette.",
+    },
+    ariaLabel: { type: "string" },
+  };
+  const orientation = {
+    enum: ["vertical", "horizontal"],
+    description: "Default vertical.",
+  };
+  const compact = {
+    type: "object",
+    required: ["x", "series"],
+    properties: {
+      x: {
+        type: "array",
+        minItems: 1,
+        items: { type: ["string", "number"] },
+        description: "Category or x-axis labels.",
+      },
+      series: {
+        type: "array",
+        minItems: 1,
+        items: {
+          type: "object",
+          required: ["name", "data"],
+          properties: {
+            name: { type: "string" },
+            data: {
+              type: "array",
+              items: { type: ["number", "null"] },
+              description: "One value per x label (same length as x).",
+            },
+          },
+        },
+      },
+    },
+  };
+  const rows = {
+    type: "object",
+    required: ["data"],
+    properties: {
+      data: {
+        type: "array",
+        items: { type: "object" },
+        description: 'Rows, e.g. [{"day":"Mon","trips":12}].',
+      },
+      xKey: {
+        type: "string",
+        description: "Row field for x / categories. Auto-detected.",
+      },
+      yKey: {
+        type: ["string", "array"],
+        items: { type: "string" },
+        description: "Row field(s) for values. Auto-detected.",
+      },
+    },
+  };
+  const chart = (
+    description: string,
+    extra: Record<string, unknown>,
+    example: unknown,
+  ) => ({
+    description,
+    schema: {
+      type: "object",
+      oneOf: [compact, rows],
+      properties: { ...chartBase, ...extra },
+    },
+    example,
+  });
+  const pie = {
+    innerRadius: {
+      type: "number",
+      minimum: 0,
+      maximum: 100,
+      description: "Inner radius in %.",
+    },
+    showLabels: {
+      type: "boolean",
+      description: "Labels on slices. Default true.",
+    },
+    labelPosition: { enum: ["outside", "inside", "center"] },
+  };
+  const singleSeries = {
+    x: ["Madrid", "Rome", "Paris"],
+    series: [{ name: "Trips", data: [320, 280, 150] }],
+  };
+
+  return {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "data-appkit blocks",
+    description:
+      'Props for <script type="application/json" data-appkit="<Component>">…</script> blocks in drafts. Each block is one JSON object matching its component\'s schema.',
+    components: {
+      BarChart: chart(
+        "Bar chart (appkit-ui BarChart).",
+        { orientation, stacked: { type: "boolean" } },
+        {
+          title: "Trips per day",
+          x: ["Mon", "Tue", "Wed"],
+          series: [{ name: "Trips", data: [12, 19, 7] }],
+        },
+      ),
+      LineChart: chart(
+        "Line chart (appkit-ui LineChart).",
+        {
+          orientation,
+          smooth: { type: "boolean" },
+          showSymbol: { type: "boolean" },
+        },
+        {
+          title: "Revenue",
+          x: ["Jan", "Feb", "Mar"],
+          series: [
+            { name: "2025", data: [10, 14, 13] },
+            { name: "2026", data: [12, 18, 21] },
+          ],
+        },
+      ),
+      AreaChart: chart(
+        "Area chart (appkit-ui AreaChart).",
+        {
+          orientation,
+          smooth: { type: "boolean" },
+          showSymbol: { type: "boolean" },
+          stacked: { type: "boolean" },
+        },
+        {
+          title: "Signups",
+          data: [
+            { week: "W1", signups: 40 },
+            { week: "W2", signups: 55 },
+          ],
+          xKey: "week",
+          yKey: "signups",
+        },
+      ),
+      PieChart: chart(
+        "Pie chart (appkit-ui PieChart). One series; x are the slice names.",
+        pie,
+        { title: "Trips by city", ...singleSeries },
+      ),
+      DonutChart: chart(
+        "Donut chart (appkit-ui DonutChart). One series; x are the slice names.",
+        pie,
+        { title: "Trips by city", ...singleSeries },
+      ),
+      DataTable: {
+        description: "Static table (appkit-ui Table).",
+        schema: {
+          type: "object",
+          required: ["columns", "rows"],
+          properties: {
+            columns: {
+              type: "array",
+              minItems: 1,
+              items: {
+                oneOf: [
+                  {
+                    type: "string",
+                    description: "Field name, also used as the header.",
+                  },
+                  {
+                    type: "object",
+                    required: ["key"],
+                    properties: {
+                      key: { type: "string", description: "Row field." },
+                      label: {
+                        type: "string",
+                        description: "Header; defaults to key.",
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+            rows: {
+              type: "array",
+              items: {
+                oneOf: [
+                  { type: "object", description: "Keyed by column key." },
+                  { type: "array", description: "Values in column order." },
+                ],
+              },
+            },
+          },
+        },
+        example: {
+          columns: [
+            { key: "city", label: "City" },
+            { key: "trips", label: "Trips" },
+          ],
+          rows: [{ city: "Madrid", trips: 320 }, ["Rome", 280]],
+        },
+      },
+      KpiCard: {
+        description: "KPI card (appkit-ui Card).",
+        schema: {
+          type: "object",
+          required: ["label", "value"],
+          properties: {
+            label: { type: "string" },
+            value: { type: ["string", "number"] },
+            delta: {
+              type: ["string", "number"],
+              description: 'E.g. "+4% vs last week".',
+            },
+            hint: { type: "string" },
+          },
+        },
+        example: {
+          label: "Total trips",
+          value: "1,204",
+          delta: "+4% vs last week",
+        },
+      },
+    },
+  };
+}
+
 /** Tag injected into every served draft; `async` so it runs while streaming. */
 export const hydratorTag = (src: string) =>
   `<script type="module" async src="${src}"></script>`;
@@ -249,14 +482,274 @@ export function streamDraft(
   }
 }
 
+/** What {@link runHydrator} needs; injected so it can run under test. */
+interface HydratorDeps {
+  draft: string;
+  origins: string[];
+  statusPath: string;
+  /** App CSS (or appkit-ui's) to scope into each block's shadow root. */
+  css: string;
+  h: (...args: any[]) => unknown;
+  createRoot: (el: unknown) => { render(node: unknown): void };
+  UI: Record<string, unknown>;
+  normalizeBlock: typeof normalizeBlock;
+  fetch: (url: string, init: RequestInit) => Promise<unknown>;
+}
+
 /**
- * Browser module injected into every served draft. It renders each
+ * Renders a draft's `data-appkit` blocks and reports the ones that can't
+ * render. Runs in the browser: the hydrator embeds it via `toString()`, so it
+ * must stay self-contained (everything comes in through `deps`).
+ *
+ * @internal
+ */
+export function runHydrator(deps: HydratorDeps): {
+  scan(final: boolean): void;
+} {
+  const { draft, origins, statusPath, css, h, createRoot, UI } = deps;
+  // Browser globals; reached through globalThis because this package compiles
+  // without the DOM typings.
+  const win = globalThis as any;
+  const document = win.document;
+
+  // Tailwind's @property rules are ignored inside shadow roots: hoist them.
+  const properties = css.match(/@property[^{]+\{[^}]*\}/g) ?? [];
+  if (properties.length) {
+    const style = document.createElement("style");
+    style.textContent = properties.join("\n");
+    document.head?.append(style);
+  }
+  // :root becomes :host; a compound like :root:not(.light) (the dark-mode
+  // tokens) must become :host(:not(.light)), since :host:not(...) never
+  // matches inside a shadow root.
+  const shadowCss = css
+    .replace(/:root((?::not\([^)]*\))+)/g, ":host($1)")
+    .replaceAll(":root", ":host");
+
+  // Charts read their theme tokens from the document root, where a draft
+  // defines none: copy the resolved tokens there, at the lowest priority
+  // (:where), so a draft's own variables still win. Re-synced when the
+  // system color scheme changes.
+  const tokenNames = [
+    ...new Set(css.match(/--(?!tw-)[a-zA-Z][\w-]*(?=\s*:)/g) ?? []),
+  ];
+  const tokens = document.createElement("style");
+  tokens.setAttribute("data-appkit-tokens", "");
+  (document.head ?? document.documentElement).prepend(tokens);
+  const probe = document.createElement("div");
+  probe.hidden = true;
+  probe.attachShadow({ mode: "open" }).innerHTML =
+    "<style>" + shadowCss + "</style>";
+  document.documentElement.append(probe);
+  const syncTokens = () => {
+    const resolved = win.getComputedStyle(probe);
+    tokens.textContent =
+      ":where(:root){" +
+      tokenNames
+        .map((n) => {
+          const v = resolved.getPropertyValue(n).trim();
+          return v ? n + ":" + v + ";" : "";
+        })
+        .join("") +
+      "}";
+  };
+  syncTokens();
+  win
+    .matchMedia?.("(prefers-color-scheme: dark)")
+    .addEventListener?.("change", syncTokens);
+
+  const text = (v: unknown) =>
+    v == null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
+  const RENDER: Record<string, (p: any) => unknown> = {
+    DataTable: ({
+      columns,
+      rows,
+    }: {
+      columns: { key: string; label: string }[];
+      rows: Record<string, unknown>[];
+    }) =>
+      h(
+        UI.Table,
+        null,
+        h(
+          UI.TableHeader,
+          null,
+          h(
+            UI.TableRow,
+            null,
+            columns.map((c) => h(UI.TableHead, { key: c.key }, c.label)),
+          ),
+        ),
+        h(
+          UI.TableBody,
+          null,
+          rows.map((r, i) =>
+            h(
+              UI.TableRow,
+              { key: i },
+              columns.map((c) =>
+                h(UI.TableCell, { key: c.key }, text(r[c.key])),
+              ),
+            ),
+          ),
+        ),
+      ),
+    KpiCard: ({
+      label,
+      value,
+      delta,
+      hint,
+    }: {
+      label: string;
+      value: unknown;
+      delta?: unknown;
+      hint?: unknown;
+    }) =>
+      h(
+        UI.Card,
+        null,
+        h(
+          UI.CardHeader,
+          null,
+          h(UI.CardDescription, null, label),
+          h(UI.CardTitle, { className: "text-2xl" }, text(value)),
+        ),
+        delta != null || hint != null
+          ? h(
+              UI.CardContent,
+              { className: "text-sm text-muted-foreground" },
+              [delta, hint]
+                .filter((v) => v != null)
+                .map(text)
+                .join(" · "),
+            )
+          : null,
+      ),
+  };
+
+  const mount = (script: any) => {
+    const host = document.createElement("div");
+    host.setAttribute("data-appkit-block", script.dataset.appkit ?? "");
+    host.style.display = "block";
+    script.after(host);
+    const shadow = host.attachShadow({ mode: "open" });
+    const style = document.createElement("style");
+    style.textContent = shadowCss;
+    const root = document.createElement("div");
+    shadow.append(style, root);
+    return root;
+  };
+
+  const blocks = () => [
+    ...document.querySelectorAll(
+      'script[type="application/json"][data-appkit]',
+    ),
+  ];
+  const handled = new WeakSet<any>();
+
+  const post = (body: unknown) =>
+    deps
+      .fetch(statusPath, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      .catch(() => {});
+
+  const fail = (script: any, error: unknown) => {
+    handled.add(script);
+    const component = script.dataset.appkit ?? "";
+    const message = error instanceof Error ? error.message : String(error);
+    createRoot(mount(script)).render(
+      h(
+        "div",
+        {
+          "data-appkit-error": "",
+          style: {
+            padding: "12px",
+            border: "1px dashed var(--border)",
+            borderRadius: "8px",
+            color: "var(--muted-foreground)",
+            font: "13px system-ui, sans-serif",
+          },
+        },
+        "Couldn't render " + component + ": " + message,
+      ),
+    );
+    const report = {
+      draft,
+      block: blocks().indexOf(script),
+      component,
+      error: message,
+    };
+    post(report);
+    const target = win.parent !== win ? win.parent : win.opener;
+    if (target) {
+      for (const origin of origins) {
+        target.postMessage(
+          { type: "appkit:draft-error", version: 1, ...report },
+          origin,
+        );
+      }
+    }
+  };
+
+  // final: the document is complete, so JSON that still doesn't parse never will.
+  const scan = (final: boolean) => {
+    for (const script of blocks()) {
+      if (handled.has(script)) continue;
+      let props: unknown;
+      try {
+        props = JSON.parse(script.textContent ?? "");
+      } catch (error) {
+        if (final)
+          fail(
+            script,
+            new Error("invalid JSON: " + ((error as Error)?.message ?? error)),
+          );
+        continue; // still streaming in
+      }
+      try {
+        const spec = deps.normalizeBlock(script.dataset.appkit ?? "", props);
+        handled.add(script);
+        const render = RENDER[spec.component];
+        createRoot(mount(script)).render(
+          render ? render(spec.props) : h(UI[spec.component], spec.props),
+        );
+      } catch (error) {
+        fail(script, error);
+      }
+    }
+  };
+
+  // A new load of this draft: earlier errors are replaced by this one's.
+  post({ draft, reset: true });
+
+  if (document.readyState === "loading") {
+    const observer = new win.MutationObserver(() => scan(false));
+    observer.observe(document, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+    });
+    document.addEventListener("DOMContentLoaded", () => {
+      observer.disconnect();
+      scan(true);
+    });
+    scan(false);
+  } else {
+    scan(true);
+  }
+  return { scan };
+}
+
+/**
+ * Browser module injected into every served draft: loads React and
+ * appkit-ui, then runs {@link runHydrator}, which renders each
  * `<script type="application/json" data-appkit="<Component>">` block with the
  * real appkit-ui component as soon as its JSON is complete (the draft may
- * still be streaming in), inside a shadow root styled with the app's CSS so
- * the draft's own styles are untouched. A block that can't render shows a
- * small placeholder and is reported to `/design/__status` and, as
- * `appkit:draft-error` v1, to the builder origins.
+ * still be streaming in) and reports blocks that can't render to
+ * `/design/__status` and, as `appkit:draft-error` v1, to the builder origins.
  *
  * @internal
  */
@@ -276,129 +769,35 @@ injectIntoGlobalHook(window);
 window.$RefreshReg$ ??= () => {};
 window.$RefreshSig$ ??= () => (type) => type;
 window.__vite_plugin_react_preamble_installed__ = true;
-const [{ createElement: h }, { createRoot }, UI] = await Promise.all([
+const [{ createElement }, { createRoot }, UI] = await Promise.all([
   import("react"),
   import("react-dom/client"),
   import("@databricks/appkit-ui/react"),
 ]);
 
-const DRAFT = ${JSON.stringify(draft)};
-const ORIGINS = ${JSON.stringify(builderOrigins)};
-const normalizeBlock = ${normalizeBlock.toString()};
-
-// The app's compiled styles (theme tokens + the Tailwind utilities appkit-ui
-// uses), scoped to each block's shadow root. Tailwind's @property rules are
-// ignored inside shadow roots, so they go to the document instead.
+// The app's compiled styles: theme tokens plus the Tailwind utilities
+// appkit-ui uses.
 const appCss = Object.values(
   import.meta.glob("/src/index.css", { query: "?inline", import: "default", eager: true }),
 )[0];
-const css = String(appCss ?? fallbackCss);
-const properties = css.match(/@property[^{]+\\{[^}]*\\}/g) ?? [];
-if (properties.length) {
-  const style = document.createElement("style");
-  style.textContent = properties.join("\\n");
-  document.head.append(style);
-}
-const shadowCss = css.replaceAll(":root", ":host");
 
-const text = (v) => (v == null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v));
-const RENDER = {
-  DataTable: ({ columns, rows }) =>
-    h(UI.Table, null,
-      h(UI.TableHeader, null, h(UI.TableRow, null, columns.map((c) => h(UI.TableHead, { key: c.key }, c.label)))),
-      h(UI.TableBody, null, rows.map((r, i) =>
-        h(UI.TableRow, { key: i }, columns.map((c) => h(UI.TableCell, { key: c.key }, text(r[c.key])))),
-      )),
-    ),
-  KpiCard: ({ label, value, delta, hint }) =>
-    h(UI.Card, null,
-      h(UI.CardHeader, null, h(UI.CardDescription, null, label), h(UI.CardTitle, { className: "text-2xl" }, text(value))),
-      delta != null || hint != null
-        ? h(UI.CardContent, { className: "text-sm text-muted-foreground" }, [delta, hint].filter((v) => v != null).map(text).join(" · "))
-        : null,
-    ),
-};
-
-function mount(script) {
-  const host = document.createElement("div");
-  host.setAttribute("data-appkit-block", script.dataset.appkit);
-  host.style.display = "block";
-  script.after(host);
-  const shadow = host.attachShadow({ mode: "open" });
-  const style = document.createElement("style");
-  style.textContent = shadowCss;
-  const root = document.createElement("div");
-  shadow.append(style, root);
-  return root;
-}
-
-const blocks = () => [...document.querySelectorAll('script[type="application/json"][data-appkit]')];
-const handled = new WeakSet();
-
-function fail(script, error) {
-  handled.add(script);
-  const component = script.dataset.appkit;
-  const message = error instanceof Error ? error.message : String(error);
-  const box = mount(script);
-  createRoot(box).render(
-    h("div", {
-      style: { padding: "12px", border: "1px dashed var(--border)", borderRadius: "8px", color: "var(--muted-foreground)", font: "13px system-ui, sans-serif" },
-    }, "Couldn't render " + component + ": " + message),
-  );
-  const report = { draft: DRAFT, block: blocks().indexOf(script), component, error: message };
-  fetch(${JSON.stringify(statusPath)}, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(report),
-  }).catch(() => {});
-  const target = window.parent !== window ? window.parent : window.opener;
-  if (target) {
-    for (const origin of ORIGINS) {
-      target.postMessage({ type: "appkit:draft-error", version: 1, ...report }, origin);
-    }
-  }
-}
-
-// final: the document is complete, so JSON that still doesn't parse never will.
-function scan(final) {
-  for (const script of blocks()) {
-    if (handled.has(script)) continue;
-    let props;
-    try {
-      props = JSON.parse(script.textContent);
-    } catch (error) {
-      if (final) fail(script, new Error("invalid JSON: " + (error?.message ?? error)));
-      continue; // still streaming in
-    }
-    try {
-      const spec = normalizeBlock(script.dataset.appkit, props);
-      handled.add(script);
-      const render = RENDER[spec.component];
-      createRoot(mount(script)).render(render ? render(spec.props) : h(UI[spec.component], spec.props));
-    } catch (error) {
-      fail(script, error);
-    }
-  }
-}
-
-// A new load of this draft: earlier errors are replaced by this one's.
-fetch(${JSON.stringify(statusPath)}, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ draft: DRAFT, reset: true }),
-}).catch(() => {});
-
-if (document.readyState === "loading") {
-  const observer = new MutationObserver(() => scan(false));
-  observer.observe(document, { subtree: true, childList: true, characterData: true });
-  document.addEventListener("DOMContentLoaded", () => {
-    observer.disconnect();
-    scan(true);
-  });
-  scan(false);
-} else {
-  scan(true);
-}
+const DRAFT = ${JSON.stringify(draft)};
+// Some TypeScript loaders (tsx, esbuild keepNames) wrap named functions in a
+// __name() helper; toString() below copies those calls but not the helper.
+const __name = (target) => target;
+const normalizeBlock = ${normalizeBlock.toString()};
+const runHydrator = ${runHydrator.toString()};
+runHydrator({
+  draft: DRAFT,
+  origins: ${JSON.stringify(builderOrigins)},
+  statusPath: ${JSON.stringify(statusPath)},
+  css: String(appCss ?? fallbackCss),
+  h: createElement,
+  createRoot,
+  UI,
+  normalizeBlock,
+  fetch: (url, init) => fetch(url, init),
+});
 
 // The draft file changed after it finished loading: show the new version.
 import.meta.hot?.on("appkit:draft-changed", (data) => {
