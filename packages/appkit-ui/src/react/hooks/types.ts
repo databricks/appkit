@@ -44,6 +44,18 @@ export interface TypedArrowTable<
 // Query Options & Result Types
 // ============================================================================
 
+/**
+ * Query tags attached to the statement, recorded in
+ * `system.query.history.query_tags`. A `null` value records a key-only tag.
+ * The server validates them (keys must not contain `, : - / = .` or start with
+ * `appkit_`; keys/values are capped at 128 characters), drops invalid ones, and
+ * decides which to forward (server-configured tags win on collisions). Never
+ * put secrets or PII here.
+ *
+ * @example { page: "sales_overview" }
+ */
+export type AnalyticsQueryTags = Record<string, string | null>;
+
 /** Options for configuring an analytics SSE query */
 export interface UseAnalyticsQueryOptions<
   F extends AnalyticsFormat = "JSON_ARRAY",
@@ -56,6 +68,9 @@ export interface UseAnalyticsQueryOptions<
 
   /** Whether to automatically start the query when the hook is mounted. Default is true. */
   autoStart?: boolean;
+
+  /** Query tags for this request, e.g. the page issuing it. See {@link AnalyticsQueryTags}. */
+  queryTags?: AnalyticsQueryTags;
 }
 
 /**
@@ -456,6 +471,8 @@ export type UseMetricViewOptions<
   limit?: number;
   /** Whether to automatically start the metric query. Default is true. */
   autoStart?: boolean;
+  /** Query tags for this request, e.g. the page issuing it. See {@link AnalyticsQueryTags}. */
+  queryTags?: AnalyticsQueryTags;
 } & MetricViewTimeOptions<K, D>;
 
 export interface UseMetricViewResult<T = Record<string, unknown>[]> {

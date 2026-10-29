@@ -16,7 +16,7 @@ import {
   DEFAULT_WAREHOUSE_STARTUP_TIMEOUT_MS,
   type WarehouseStatusUpdate,
 } from "../../connectors/sql-warehouse/client";
-import { getWorkspaceClient } from "../../context";
+import { getWorkspaceClient, isInUserContext } from "../../context";
 import { buildToolkitEntries } from "../../core/agent/build-toolkit";
 import {
   defineTool,
@@ -29,6 +29,7 @@ import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import { defineManifest } from "../../registry";
 import { getWarehouseId } from "../../resources";
+import type { QueryTag } from "../../workspace-client";
 import { queryDefaults } from "./defaults";
 import manifest from "./manifest.json";
 import {
@@ -42,6 +43,7 @@ import {
   validateMetricRequest,
 } from "./metric";
 import { QueryProcessor } from "./query";
+import { resolveQueryTags, withQueryTags } from "./query-tags";
 import {
   type ArrowCapability,
   deliverArrowBytes,
@@ -245,8 +247,11 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     res: express.Response,
   ): Promise<void> {
     const { query_key } = req.params;
-    const { parameters, format: rawFormat = "JSON_ARRAY" } =
-      req.body as IAnalyticsQueryRequest;
+    const {
+      parameters,
+      format: rawFormat = "JSON_ARRAY",
+      queryTags: clientTags,
+    } = req.body as IAnalyticsQueryRequest;
 
     if (
       rawFormat !== "JSON_ARRAY" &&
@@ -291,6 +296,14 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
 
     const { query, isAsUser } = queryResult;
 
+    const queryTags = resolveQueryTags(this.config, {
+      route: "query",
+      queryKey: query_key,
+      lane: isAsUser ? "obo" : "sp",
+      req,
+      clientTags,
+    });
+
     // ARROW_STREAM streams the raw Arrow IPC bytes back as the HTTP response
     // body — no SSE, no server-side stash, no second /arrow-result request.
     // INLINE attachments are piped straight through (the bytes are already in
@@ -305,6 +318,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         query,
         isAsUser,
         parameters,
+        queryTags,
       );
       return;
     }
@@ -401,7 +415,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
               // `result` message with plain rows. (ARROW_STREAM requests are
               // handled earlier via `_handleArrowStreamQuery`.)
               return await self._executeJsonArrayPath(
-                executor,
+                withQueryTags(executor, queryTags),
                 query,
                 processedParams,
                 sig,
@@ -538,6 +552,14 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       res.status(400).json({ error: "Invalid request body" });
       return;
     }
+
+    const queryTags = resolveQueryTags(this.config, {
+      route: "metric",
+      queryKey: key,
+      lane: registration.lane,
+      req,
+      clientTags: request.queryTags,
+    });
 
     // Lane dispatch. The lane comes from the registration (the entry's
     // `executor` in definitions.json), NOT a URL segment or `.obo.sql`
@@ -692,7 +714,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
               // an ARROW_STREAM-inline fallback, returning plain rows in a
               // `result` message — byte-identical envelope to `/query`.
               return await self._executeJsonArrayPath(
-                executor,
+                withQueryTags(executor, queryTags),
                 statement,
                 processedParams,
                 sig,
@@ -754,7 +776,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    * message. External links are never used for the JSON fallback.
    */
   private async _executeJsonArrayPath(
-    executor: AnalyticsPlugin,
+    executor: QueryExecutor,
     query: string,
     processedParams:
       | Record<string, SQLTypeMarker | null | undefined>
@@ -821,6 +843,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     query: string,
     isAsUser: boolean,
     parameters: IAnalyticsQueryRequest["parameters"],
+    queryTags: QueryTag[] | undefined,
   ): Promise<void> {
     const executor = isAsUser ? this._asUserScoped(req) : this;
     const executorKey = isAsUser ? this.resolveUserId(req) : "global";
@@ -866,7 +889,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         // are cached; EXTERNAL_LINKS carry expiring pre-signed URLs and are
         // never cached (see `_arrowCachingExecutor`).
         this._arrowCachingExecutor(
-          executor,
+          withQueryTags(executor, queryTags),
           query_key,
           query,
           parameters,
@@ -997,7 +1020,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    * INLINE→EXTERNAL_LINKS fallback still sees the structured rejection.
    */
   private _arrowCachingExecutor(
-    executor: AnalyticsPlugin,
+    executor: QueryExecutor,
     query_key: string,
     query: string,
     parameters: IAnalyticsQueryRequest["parameters"],
@@ -1101,7 +1124,11 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       autoInheritable: true,
       execute: (args, signal) => {
         assertReadOnlySql(args.query);
-        return this.query(args.query, undefined, undefined, signal);
+        const queryTags = resolveQueryTags(this.config, {
+          route: "agent_tool",
+          lane: isInUserContext() ? "obo" : "sp",
+        });
+        return this.query(args.query, undefined, { queryTags }, signal);
       },
     }),
   };

@@ -7,6 +7,7 @@ export {
 } from "../resource-status-indicator";
 export type {
   AnalyticsFormat,
+  AnalyticsQueryTags,
   GrainsForSelectedTimeDims,
   InferDimensionKeys,
   InferMeasureKeys,

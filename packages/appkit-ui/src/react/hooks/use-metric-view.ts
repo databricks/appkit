@@ -119,6 +119,7 @@ export function useMetricView<
       timeDimension?: unknown;
       orderBy?: ReadonlyArray<unknown>;
       limit?: number;
+      queryTags?: Record<string, string | null>;
     } = { measures: options.measures };
     if (options.dimensions !== undefined) body.dimensions = options.dimensions;
     if (options.filter !== undefined) body.filter = options.filter;
@@ -127,6 +128,7 @@ export function useMetricView<
       body.timeDimension = options.timeDimension;
     if (options.orderBy !== undefined) body.orderBy = options.orderBy;
     if (options.limit !== undefined) body.limit = options.limit;
+    if (options.queryTags !== undefined) body.queryTags = options.queryTags;
     return JSON.stringify(body);
   }, [
     options.measures,
@@ -136,6 +138,7 @@ export function useMetricView<
     options.timeDimension,
     options.orderBy,
     options.limit,
+    options.queryTags,
   ]);
 
   // Detect shape changes: clear rows when metric/measures/dimensions change,

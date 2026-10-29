@@ -255,6 +255,34 @@ describe("SQLWarehouseConnector", () => {
     });
   });
 
+  describe("query tags", () => {
+    test("forwards queryTags to the statement execution request", async () => {
+      const connector = new SQLWarehouseConnector({ timeout: 5000 });
+      const executeStatement = vi.fn().mockResolvedValue({
+        statementId: "stmt-1",
+        status: { state: "SUCCEEDED" },
+        manifest: { format: "JSON_ARRAY", schema: { columns: [] } },
+        result: { dataArray: [] },
+      });
+      const mockWorkspaceClient = {
+        statementExecution: { executeStatement },
+        config: { host: "https://test.databricks.com" },
+      };
+      const queryTags = [{ key: "team", value: "eng" }, { key: "exp" }];
+
+      await connector.executeStatement(mockWorkspaceClient as any, {
+        statement: "SELECT 1",
+        warehouseId: "wh-1",
+        queryTags,
+      });
+
+      expect(executeStatement).toHaveBeenCalledWith(
+        expect.objectContaining({ queryTags }),
+        expect.anything(),
+      );
+    });
+  });
+
   describe("ensureWarehouseRunning", () => {
     let connector: SQLWarehouseConnector;
 

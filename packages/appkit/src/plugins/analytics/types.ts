@@ -6,6 +6,10 @@ import type {
   MetricViewsMetadata,
 } from "shared";
 
+import type { QueryTagMap, QueryTagsContext } from "./query-tags";
+
+export type { QueryTagMap, QueryTagsContext } from "./query-tags";
+
 export type {
   MetricFilter,
   MetricFilterOperatorName,
@@ -15,6 +19,36 @@ export type {
 
 export interface IAnalyticsConfig extends BasePluginConfig {
   timeout?: number;
+  /**
+   * Custom query tags added to every statement the analytics routes and agent
+   * tool issue, recorded in `system.query.history.query_tags`. Pass a static
+   * map (client tags are merged in, config wins on collisions), or a function
+   * to derive tags per request. A function's return value is the whole custom
+   * set: client tags are only sent if it returns them (`ctx.clientTags`).
+   * Keys must not contain `, : - / = .`, must not start with the reserved
+   * `appkit_` prefix, and keys/values are capped at 128 characters; invalid
+   * tags are dropped with a warning. Never put secrets or PII in tags.
+   */
+  queryTags?:
+    | QueryTagMap
+    | ((ctx: QueryTagsContext) => QueryTagMap | undefined);
+  /**
+   * When `true` (default), statements are tagged with `appkit_app`,
+   * `appkit_query_key`, `appkit_route` and `appkit_lane` so warehouse usage
+   * can be attributed to the app and query that issued it.
+   *
+   * @default true
+   */
+  autoQueryTags?: boolean;
+  /**
+   * When `true` (default), tags sent by the client (`queryTags` on
+   * `useAnalyticsQuery` / `useMetricView`) are validated and forwarded — merged
+   * under a static `queryTags` map, or exposed as `ctx.clientTags` to a
+   * function. Set to `false` to ignore client tags entirely.
+   *
+   * @default true
+   */
+  clientQueryTags?: boolean;
   /**
    * Per-column display metadata. The metric route stamps the slice scoped to a
    * request's measures/dimensions into the SSE `result` message.
@@ -125,6 +159,8 @@ export function normalizeAnalyticsFormat(
 export interface IAnalyticsQueryRequest {
   parameters?: Record<string, any>;
   format?: AnalyticsFormat;
+  /** Client-supplied query tags; validated server-side before use. */
+  queryTags?: QueryTagMap;
 }
 
 export interface AnalyticsQueryResponse {
@@ -189,4 +225,6 @@ export interface IAnalyticsMetricRequest {
   orderBy?: MetricOrderBy[];
   limit?: number;
   format?: AnalyticsFormat;
+  /** Client-supplied query tags; validated server-side before use. */
+  queryTags?: QueryTagMap;
 }
