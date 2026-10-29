@@ -1,5 +1,5 @@
 import { BaseChart } from "./base";
-import type { ChartType, UnifiedChartProps } from "./types";
+import type { ChartData, ChartType, UnifiedChartProps } from "./types";
 import { ChartWrapper } from "./wrapper";
 
 /**
@@ -50,7 +50,9 @@ export function createChart<TProps extends UnifiedChartProps>(
 
     const wrapperProps =
       data !== undefined
-        ? { data, height, className, ariaLabel, testId }
+        ? // ChartDataInput also admits interface-typed and readonly rows; at
+          // runtime they're the same plain objects the chart reads.
+          { data: data as ChartData, height, className, ariaLabel, testId }
         : {
             queryKey: queryKey as string,
             parameters,

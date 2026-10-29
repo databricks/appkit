@@ -46,6 +46,10 @@
     "./styles.css": {
       "development": "./src/react/styles/globals.css",
       "default": "./dist/styles.css"
+    },
+    "./design/components.schema.json": {
+      "development": "./src/design/components.schema.json",
+      "default": "./dist/design/components.schema.json"
     }
   },
   "scripts": {
@@ -125,7 +129,8 @@
       "./react": "./dist/react/index.js",
       "./react/beta": "./dist/react/beta.js",
       "./package.json": "./package.json",
-      "./styles.css": "./dist/styles.css"
+      "./styles.css": "./dist/styles.css",
+      "./design/components.schema.json": "./dist/design/components.schema.json"
     }
   }
 }

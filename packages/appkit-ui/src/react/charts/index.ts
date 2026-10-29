@@ -108,6 +108,8 @@ export type {
   ChartClickDatum,
   ChartColorPalette,
   ChartData,
+  ChartDataInput,
+  ChartRow,
   ChartType,
   ChartUITokens,
   ChartValueFormatter,

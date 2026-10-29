@@ -12,6 +12,7 @@ import {
   listDrafts,
   normalizeBlock,
   streamDraft,
+  themeCss,
 } from "../drafts";
 import { designVitePlugin } from "../vite-plugin";
 
@@ -134,6 +135,20 @@ describe("dataAppkitSchema", () => {
     expect(() => normalizeBlock(kind, rest)).toThrow();
   });
 
+  test("the shipped components.schema.json is up to date", () => {
+    const shipped = JSON.parse(
+      fs.readFileSync(
+        path.join(
+          import.meta.dirname,
+          "../../../../../appkit-ui/src/design/components.schema.json",
+        ),
+        "utf-8",
+      ),
+    );
+    // If this fails, run: pnpm exec tsx tools/generate-design-schema.ts
+    expect(shipped).toEqual(dataAppkitSchema());
+  });
+
   test("charts need either x + series or data rows", () => {
     for (const kind of [
       "BarChart",
@@ -146,6 +161,42 @@ describe("dataAppkitSchema", () => {
         /needs "data"/,
       );
     }
+  });
+});
+
+describe("themeCss", () => {
+  const css = themeCss(
+    fs.readFileSync(
+      path.join(
+        import.meta.dirname,
+        "../../../../../appkit-ui/src/react/styles/globals.css",
+      ),
+      "utf-8",
+    ),
+  );
+
+  test("has the template's light and dark tokens, dark via prefers-color-scheme", () => {
+    expect(css).toMatch(
+      /:root \{\n {2}--radius: 0\.625rem;\n {2}color-scheme: light;/,
+    );
+    expect(css).toMatch(
+      /@media \(prefers-color-scheme: dark\) \{\n {2}:root:not\(\.light\) \{\n[\s\S]*color-scheme: dark;/,
+    );
+    for (const token of [
+      "--background",
+      "--foreground",
+      "--primary",
+      "--chart-1",
+      "--border",
+    ]) {
+      expect(css.split(token).length - 1).toBeGreaterThanOrEqual(3); // light, dark, .dark
+    }
+  });
+
+  test("only tokens: no utilities or base rules besides the body colors", () => {
+    expect(css).not.toContain("@layer");
+    expect(css).not.toContain("@import");
+    expect(css).toContain(":where(body) {\n  background: var(--background);");
   });
 });
 
@@ -285,7 +336,9 @@ describe("draft errors in /design/__status", () => {
     return { status: res.statusCode, json: out ? JSON.parse(out) : undefined };
   }
 
-  function start() {
+  function start(
+    transformRequest: (url: string) => Promise<unknown> = async () => ({}),
+  ) {
     const app = tmp();
     fs.mkdirSync(path.join(app, "drafts"));
     fs.writeFileSync(path.join(app, "drafts", "dash.html"), "<html></html>");
@@ -297,9 +350,16 @@ describe("draft errors in /design/__status", () => {
       watcher: { add() {}, on() {} },
       ws: { send() {} },
       middlewares: { use: (h: Handler) => (handler = h) },
+      transformRequest,
     });
     return { app, handler: handler as Handler };
   }
+
+  const writeIndex = (app: string, text: string) => {
+    const file = path.join(app, "client/src/design/index.tsx");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, text);
+  };
 
   test("errors the hydrator POSTs are listed for the draft, and a reload resets them", async () => {
     const { handler } = start();
@@ -329,6 +389,41 @@ describe("draft errors in /design/__status", () => {
 
     await call(handler, "POST", S, { draft: "dash", reset: true });
     expect((await call(handler, "GET", S)).json.drafts[0].errors).toEqual([]);
+  });
+
+  test("compiled and waitingFor tell an agent what /design waits on, without a browser", async () => {
+    const S = "/design/__status";
+    const ok = start();
+    expect((await call(ok.handler, "GET", S)).json).toMatchObject({
+      ready: false,
+      compiled: false,
+      waitingFor: "index",
+    });
+    writeIndex(
+      ok.app,
+      "export const designPlaceholder = true;\nexport default () => null;",
+    );
+    expect((await call(ok.handler, "GET", S)).json.waitingFor).toBe(
+      "placeholder",
+    );
+    writeIndex(ok.app, "export default () => null;");
+    expect((await call(ok.handler, "GET", S)).json).toMatchObject({
+      ready: false,
+      compiled: true,
+      waitingFor: "paint",
+    });
+
+    const broken = start(async () => {
+      throw new Error(
+        'Failed to resolve import "./nope" from "src/design/index.tsx"',
+      );
+    });
+    writeIndex(broken.app, 'import "./nope";\nexport default () => null;');
+    expect((await call(broken.handler, "GET", S)).json).toMatchObject({
+      compiled: false,
+      compileError: expect.stringContaining("Failed to resolve import"),
+      waitingFor: "compile",
+    });
   });
 
   test("serves the block schema and links it from the status", async () => {
