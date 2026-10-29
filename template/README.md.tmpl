@@ -16,7 +16,7 @@ A Databricks App powered by [AppKit](https://developers.databricks.com/docs/appk
 - **Genie** -- AI/BI Genie conversational interface for natural language data queries
 {{- end}}
 {{- if .plugins.design}}
-- **Design** -- Dev-only design pages: `/design` renders `client/src/design/index.tsx`, `/design/<name>` renders `client/src/design/pages/<name>.tsx` (404 in production)
+- **Design** -- Dev-only design pages: `/design` renders `client/src/design/index.tsx`, `/design/<name>` renders `client/src/design/pages/<name>.tsx`, and HTML drafts in `drafts/<name>.html` are served at `/design/drafts/<name>` with their `data-appkit` blocks rendered by real AppKit components (404 in production)
 {{- end}}
 - **Server** -- Express HTTP server with static file serving and Vite dev mode
 

@@ -27,7 +27,7 @@ await createApp({
 
 | Option | Type | Description |
 | ------ | ---- | ----------- |
-| `builderOrigin` | `string \| string[]` | Origin(s) of the app builder that embeds the app. The [design](#readiness) and [app](#app-readiness) ready messages are posted only to these origins. Must be a bare origin like `"https://builder.example.com"`; `"*"` is rejected. Optional: without it no message is posted, and `/design/__status` still works. |
+| `builderOrigin` | `string \| string[]` | Origin(s) of the app builder that embeds the app. The [design](#readiness) and [app](#app-readiness) ready messages and [draft errors](#draft-errors) are posted only to these origins. Must be a bare origin like `"https://builder.example.com"`; `"*"` is rejected. Optional: without it no message is posted, and `/design/__status` still works. |
 
 ## Pages
 
@@ -170,3 +170,58 @@ window.addEventListener("message", (event) => {
   }
 });
 ```
+
+## HTML drafts
+
+Quick layout drafts are plain HTML files in the app's `drafts/` folder, served in development at `/design/drafts/<name>` (`drafts/dashboard.html` → `/design/drafts/dashboard`). A missing draft returns 404.
+
+A draft is streamed while it's still being written: the plugin sends what the file holds and keeps appending what's added, until the file ends with `</html>` (or stops changing for 8 seconds). So a draft fills in on screen as the agent writes it. Editing a finished draft reloads it.
+
+### `data-appkit` blocks
+
+Costly parts of a draft (charts, tables, KPI cards) are written as JSON blocks instead of hand-built HTML. The plugin injects one script into every draft that renders each block with the real appkit-ui component as soon as its JSON is complete, even while the rest of the file is still streaming. It uses no CDN and no network, and theme colors follow the app's styles and the system light/dark preference. Each block renders in its own shadow root, so the draft's own CSS and the components' styles don't affect each other.
+
+```html
+<script type="application/json" data-appkit="BarChart">
+  {"title": "Trips per day", "x": ["Mon", "Tue", "Wed"], "series": [{"name": "Trips", "data": [12, 19, 7]}]}
+</script>
+```
+
+| Component | Props |
+| --------- | ----- |
+| `BarChart`, `LineChart`, `AreaChart`, `PieChart`, `DonutChart` | `{ x: [labels], series: [{ name, data: [values] }] }`, or the chart's own props (`data` rows, `xKey`, `yKey`), plus any other chart props (`title`, `height`, ...) |
+| `DataTable` | `{ columns: ["name" \| { key, label }], rows: [{...} \| [...]] }`, rendered with appkit-ui's `Table` |
+| `KpiCard` | `{ label, value, delta?, hint? }`, rendered with appkit-ui's `Card` |
+
+Turning a draft into a `/design` page is then mostly mechanical: the component and its props are already there.
+
+### Draft errors
+
+A block that can't render (unknown component, props that don't fit, or JSON still invalid once the file is complete) shows a small "Couldn't render" placeholder in the draft, and the error goes back to the agent two ways:
+
+- `GET /design/__status` lists every draft with the errors of its current version:
+
+  ```json
+  {
+    "drafts": [
+      {
+        "name": "dashboard",
+        "path": "/design/drafts/dashboard",
+        "errors": [{ "block": 3, "component": "LineChart", "error": "invalid JSON: ..." }]
+      }
+    ]
+  }
+  ```
+
+- each error is posted to the embedding builder (only to `builderOrigin`):
+
+  ```ts
+  interface DraftErrorMessage {
+    type: "appkit:draft-error";
+    version: 1;
+    draft: string;     // draft name
+    block: number;     // index of the block among the draft's data-appkit blocks
+    component: string; // the data-appkit value
+    error: string;
+  }
+  ```
