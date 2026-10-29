@@ -88,7 +88,11 @@ describe("AnalyticsPlugin.query agent tool — runtime enforcement", () => {
     expect(spy).toHaveBeenCalledWith(
       "SELECT * FROM main.sales.orders",
       undefined,
-      undefined,
+      {
+        queryTags: expect.arrayContaining([
+          { key: "appkit_route", value: "agent_tool" },
+        ]),
+      },
       undefined,
     );
   });

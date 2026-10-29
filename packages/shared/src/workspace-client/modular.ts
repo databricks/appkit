@@ -785,6 +785,7 @@ export type {
   ExecuteStatementRequest,
   ExternalLink,
   Format,
+  QueryTag,
   ResultData,
   ResultManifest,
   Schema,
