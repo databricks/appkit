@@ -1,4 +1,4 @@
-import { createBrowserRouter, RouterProvider, NavLink, Outlet } from 'react-router';
+import { createBrowserRouter, RouterProvider, Link, NavLink, Outlet, useLocation } from 'react-router';
 import { useState } from 'react';
 import {
   Button,
@@ -169,6 +169,7 @@ const router = createBrowserRouter([
 {{- if .plugins.jobs}}
       { path: '/jobs', element: <JobsPage /> },
 {{- end}}
+      { path: '*', element: <NotFoundPage /> },
     ],
   },
 ]);
@@ -219,6 +220,26 @@ function HomePage() {
           </ul>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function NotFoundPage() {
+  const { pathname } = useLocation();
+
+  return (
+    <div className="max-w-2xl mx-auto space-y-6 mt-8 text-center">
+      <div>
+        <p className="text-sm font-medium text-muted-foreground mb-2">404</p>
+        <h2 className="text-3xl font-bold mb-2 text-foreground">Page not found</h2>
+        <p className="text-lg text-muted-foreground">
+          There is no page at{' '}
+          <code className="bg-muted px-1.5 py-0.5 rounded text-base font-mono break-all">{pathname}</code>
+        </p>
+      </div>
+      <Button asChild>
+        <Link to="/">Back to home</Link>
+      </Button>
     </div>
   );
 }
