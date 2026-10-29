@@ -6,13 +6,19 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
   useIsMobile,
 } from '@databricks/appkit-ui/react';
-import { Menu } from 'lucide-react';
+import { FileQuestionMark, Menu } from 'lucide-react';
 {{- if .plugins.agents}}
 import { AgentChat } from './pages/agents/AgentChat';
 {{- end}}
@@ -228,18 +234,21 @@ function NotFoundPage() {
   const { pathname } = useLocation();
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6 mt-8 text-center">
-      <div>
-        <p className="text-sm font-medium text-muted-foreground mb-2">404</p>
-        <h2 className="text-3xl font-bold mb-2 text-foreground">Page not found</h2>
-        <p className="text-lg text-muted-foreground">
-          There is no page at{' '}
-          <code className="bg-muted px-1.5 py-0.5 rounded text-base font-mono break-all">{pathname}</code>
-        </p>
-      </div>
-      <Button asChild>
-        <Link to="/">Back to home</Link>
-      </Button>
-    </div>
+    <Empty>
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <FileQuestionMark />
+        </EmptyMedia>
+        <EmptyTitle>Page not found</EmptyTitle>
+        <EmptyDescription>
+          There is no page at <code className="break-all">{pathname}</code>
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button asChild>
+          <Link to="/">Back to home</Link>
+        </Button>
+      </EmptyContent>
+    </Empty>
   );
 }
