@@ -299,6 +299,18 @@ describe("hydratorModule", () => {
     expect(code).toContain("const normalizeBlock = function normalizeBlock(");
   });
 
+  test("posts errors to this dev server's origin, without Vite's asset-URL pattern", () => {
+    expect(code).toContain(
+      'statusPath: new URL(import.meta.url).origin + "/design/__status"',
+    );
+    expect(code).not.toMatch(/new URL\([^)]*,\s*import\.meta\.url\)/);
+  });
+
+  test("is valid JavaScript", async () => {
+    const { parseAst } = await import("vite");
+    expect(() => parseAst(code)).not.toThrow();
+  });
+
   test("embeds the tested runHydrator with this draft's origins", () => {
     expect(code).toContain("const runHydrator = function runHydrator(");
     expect(code).toContain('origins: ["https://builder.example.com"]');
@@ -325,25 +337,31 @@ describe("draft errors in /design/__status", () => {
     method: string,
     url: string,
     body?: unknown,
+    headers: Record<string, string> = {},
   ) {
     let out = "";
+    const set: Record<string, string> = {};
     const res = {
       statusCode: 200,
-      setHeader() {},
+      setHeader: (k: string, v: string) => (set[k.toLowerCase()] = v),
       end: (b?: string) => (out = b ?? ""),
     };
-    await handler({ url, method, body }, res, () => {});
-    return { status: res.statusCode, json: out ? JSON.parse(out) : undefined };
+    await handler({ url, method, body, headers } as never, res, () => {});
+    let json: unknown;
+    try {
+      json = out ? JSON.parse(out) : undefined;
+    } catch {}
+    return { status: res.statusCode, json: json as any, headers: set };
   }
-
   function start(
     transformRequest: (url: string) => Promise<unknown> = async () => ({}),
+    builderOrigins: string[] = [],
   ) {
     const app = tmp();
     fs.mkdirSync(path.join(app, "drafts"));
     fs.writeFileSync(path.join(app, "drafts", "dash.html"), "<html></html>");
     process.chdir(app);
-    const plugin = designVitePlugin({ builderOrigins: [] });
+    const plugin = designVitePlugin({ builderOrigins });
     let handler: Handler | undefined;
     (plugin.configureServer as (s: unknown) => void)({
       config: { root: path.join(app, "client") },
@@ -425,6 +443,67 @@ describe("draft errors in /design/__status", () => {
       compileError: expect.stringContaining("Failed to resolve import"),
       waitingFor: "compile",
     });
+  });
+
+  test("serves the hydrator at a stable URL for drafts streamed elsewhere", async () => {
+    const { handler } = start();
+    const r = await call(
+      handler,
+      "GET",
+      "/design/drafts/__hydrator.js?draft=dash",
+    );
+    expect(r.status).toBe(302);
+    expect(r.headers.location).toBe(
+      "/@id/__x00__virtual:appkit-draft-hydrator:dash.mjs",
+    );
+    // No (or an unsafe) name: a neutral one, never a path.
+    expect(
+      (await call(handler, "GET", "/design/drafts/__hydrator.js?draft=../x"))
+        .headers.location,
+    ).toBe("/@id/__x00__virtual:appkit-draft-hydrator:stream.mjs");
+    expect((await call(handler, "GET", "/design/__status")).json.hydrator).toBe(
+      "/design/drafts/__hydrator.js",
+    );
+  });
+
+  test("errors of a draft streamed elsewhere (no file) are listed too", async () => {
+    const { handler } = start();
+    const S = "/design/__status";
+    await call(handler, "POST", S, { draft: "live", reset: true });
+    await call(handler, "POST", S, {
+      draft: "live",
+      block: 0,
+      component: "Sparkline",
+      error: "Unknown",
+    });
+    expect((await call(handler, "GET", S)).json.drafts).toContainEqual({
+      name: "live",
+      path: null,
+      streamed: true,
+      errors: [{ block: 0, component: "Sparkline", error: "Unknown" }],
+    });
+  });
+
+  test("its endpoints answer CORS for the builder origins only", async () => {
+    const { handler } = start(undefined, ["https://builder.example.com"]);
+    const pre = await call(handler, "OPTIONS", "/design/__status", undefined, {
+      origin: "https://builder.example.com",
+    });
+    expect(pre.status).toBe(204);
+    expect(pre.headers["access-control-allow-origin"]).toBe(
+      "https://builder.example.com",
+    );
+    expect(pre.headers["access-control-allow-headers"]).toBe("Content-Type");
+    const other = await call(
+      handler,
+      "GET",
+      "/design/drafts/__hydrator.js",
+      undefined,
+      {
+        origin: "https://evil.example.com",
+      },
+    );
+    expect(other.headers["access-control-allow-origin"]).toBeUndefined();
   });
 
   test("serves the block schema and links it from the status", async () => {

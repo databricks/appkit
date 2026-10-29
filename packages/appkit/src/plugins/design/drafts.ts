@@ -166,7 +166,11 @@ export function normalizeBlock(
 export function dataAppkitSchema() {
   const chartBase = {
     title: { type: "string", description: "Chart title." },
-    height: { type: "number", description: "Height in pixels. Default 300." },
+    height: {
+      type: "number",
+      description:
+        "Height in pixels. By default the chart fills its container's height (at least 160px).",
+    },
     showLegend: { type: "boolean", description: "Show the legend." },
     colors: {
       type: "array",
@@ -670,16 +674,56 @@ export function runHydrator(deps: HydratorDeps): {
       ),
   };
 
+  // Skeleton while a block's JSON is still streaming in, then a short fade-in
+  // when it renders; both off with prefers-reduced-motion.
+  const blockCss = `
+.appkit-skeleton { min-height: 160px; border-radius: 8px; background: var(--muted, #f4f4f5); animation: appkit-pulse 1.4s ease-in-out infinite; }
+.appkit-skeleton[data-kind="KpiCard"] { min-height: 96px; }
+.appkit-fade { opacity: 0; transition: opacity 200ms ease-out; }
+.appkit-fade.appkit-in { opacity: 1; }
+@keyframes appkit-pulse { 50% { opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) {
+  .appkit-skeleton { animation: none; }
+  .appkit-fade { transition: none; }
+}`;
+
+  // One host per block, created the first time the block is seen; the
+  // skeleton and later the rendered component live in its shadow root, so
+  // the block keeps its place in the page.
+  const hosts = new WeakMap<any, any>();
+  const shadowOf = (script: any) => {
+    let shadow = hosts.get(script);
+    if (!shadow) {
+      const host = document.createElement("div");
+      host.setAttribute("data-appkit-block", script.dataset.appkit ?? "");
+      host.style.display = "block";
+      script.after(host);
+      shadow = host.attachShadow({ mode: "open" });
+      const style = document.createElement("style");
+      style.textContent = shadowCss + blockCss;
+      shadow.append(style);
+      hosts.set(script, shadow);
+    }
+    return shadow;
+  };
+  const skeleton = (script: any) => {
+    const shadow = shadowOf(script);
+    if (shadow.querySelector(".appkit-skeleton")) return;
+    const bone = document.createElement("div");
+    bone.className = "appkit-skeleton";
+    bone.setAttribute("data-kind", script.dataset.appkit ?? "");
+    shadow.append(bone);
+  };
   const mount = (script: any) => {
-    const host = document.createElement("div");
-    host.setAttribute("data-appkit-block", script.dataset.appkit ?? "");
-    host.style.display = "block";
-    script.after(host);
-    const shadow = host.attachShadow({ mode: "open" });
-    const style = document.createElement("style");
-    style.textContent = shadowCss;
+    const shadow = shadowOf(script);
+    shadow.querySelector(".appkit-skeleton")?.remove();
     const root = document.createElement("div");
-    shadow.append(style, root);
+    root.className = "appkit-fade";
+    shadow.append(root);
+    // Two frames so the initial opacity is painted before the transition.
+    win.requestAnimationFrame?.(() =>
+      win.requestAnimationFrame?.(() => root.classList.add("appkit-in")),
+    );
     return root;
   };
 
@@ -745,12 +789,15 @@ export function runHydrator(deps: HydratorDeps): {
       try {
         props = JSON.parse(script.textContent ?? "");
       } catch (error) {
-        if (final)
+        if (final) {
           fail(
             script,
             new Error("invalid JSON: " + ((error as Error)?.message ?? error)),
           );
-        continue; // still streaming in
+        } else {
+          skeleton(script); // still streaming in
+        }
+        continue;
       }
       try {
         const spec = deps.normalizeBlock(script.dataset.appkit ?? "", props);
@@ -833,7 +880,11 @@ const runHydrator = ${runHydrator.toString()};
 runHydrator({
   draft: DRAFT,
   origins: ${JSON.stringify(builderOrigins)},
-  statusPath: ${JSON.stringify(statusPath)},
+  // Absolute, from this module's origin: the draft may be served from another
+  // origin (e.g. the App Builder runtime streaming it). Deliberately not the
+  // two-argument URL constructor with the module URL as base: Vite rewrites
+  // that pattern as an asset URL (to /@fs/...).
+  statusPath: new URL(import.meta.url).origin + ${JSON.stringify(statusPath)},
   css: String(appCss ?? fallbackCss),
   h: createElement,
   createRoot,
@@ -843,8 +894,15 @@ runHydrator({
 });
 
 // The draft file changed after it finished loading: show the new version.
+// (Only for drafts this dev server serves, not ones streamed from elsewhere.)
 import.meta.hot?.on("appkit:draft-changed", (data) => {
-  if (data?.draft === DRAFT && document.readyState !== "loading") location.reload();
+  if (
+    data?.draft === DRAFT &&
+    location.pathname.replace(/[/]$/, "") === "/design/drafts/" + DRAFT &&
+    document.readyState !== "loading"
+  ) {
+    location.reload();
+  }
 });
 `;
 }
