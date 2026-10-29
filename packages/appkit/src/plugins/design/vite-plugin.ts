@@ -6,6 +6,7 @@ import type { Plugin } from "vite";
 
 import {
   DRAFT_ROUTE,
+  dataAppkitSchema,
   draftFile,
   hydratorModule,
   hydratorTag,
@@ -35,6 +36,7 @@ const TEMPLATE_HOME_ATTR = "data-appkit-template-home";
 const PAGE_FILE = /^(index|pages\/[A-Za-z0-9_-]+)\.(tsx|jsx)$/;
 const DESIGN_ROUTE = /^\/design(?:\/([A-Za-z0-9_-]+))?\/?$/;
 const STATUS_PATH = "/design/__status";
+const BLOCK_SCHEMA_PATH = "/design/__data-appkit.schema.json";
 const EXTENSIONS = [".tsx", ".jsx"];
 
 /**
@@ -582,8 +584,15 @@ export function designVitePlugin({
             JSON.stringify({
               ...designStatus(server.config.root, paintedVersion),
               drafts,
+              blockSchema: BLOCK_SCHEMA_PATH,
             }),
           );
+          return;
+        }
+
+        if (pathname === BLOCK_SCHEMA_PATH) {
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(dataAppkitSchema(), null, 2));
           return;
         }
 

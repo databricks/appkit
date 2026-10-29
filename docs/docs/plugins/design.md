@@ -187,11 +187,18 @@ Costly parts of a draft (charts, tables, KPI cards) are written as JSON blocks i
 </script>
 ```
 
-| Component | Props |
-| --------- | ----- |
-| `BarChart`, `LineChart`, `AreaChart`, `PieChart`, `DonutChart` | `{ x: [labels], series: [{ name, data: [values] }] }`, or the chart's own props (`data` rows, `xKey`, `yKey`), plus any other chart props (`title`, `height`, ...) |
-| `DataTable` | `{ columns: ["name" \| { key, label }], rows: [{...} \| [...]] }`, rendered with appkit-ui's `Table` |
-| `KpiCard` | `{ label, value, delta?, hint? }`, rendered with appkit-ui's `Card` |
+The exact props of each component are published as JSON Schema (2020-12), with an example per component, at `GET /design/__data-appkit.schema.json` (also linked from `/design/__status` as `blockSchema`). Fetch it to write valid blocks. In short:
+
+| Component | Required | Optional |
+| --------- | -------- | -------- |
+| `BarChart` | either `x` (non-empty array of labels) and `series` (non-empty array of `{ name: string, data: (number \| null)[] }`, one value per label), or `data` (array of row objects) | `xKey`, `yKey` (with `data`), `title`, `height`, `showLegend`, `colors`, `ariaLabel`, `orientation` (`"vertical"` \| `"horizontal"`), `stacked` |
+| `LineChart` | same as `BarChart` | as `BarChart` without `stacked`, plus `smooth`, `showSymbol` |
+| `AreaChart` | same as `BarChart` | as `LineChart`, plus `stacked` |
+| `PieChart`, `DonutChart` | same as `BarChart`; one series, `x` are the slice names | `title`, `height`, `showLegend`, `colors`, `ariaLabel`, `innerRadius` (0-100), `showLabels`, `labelPosition` (`"outside"` \| `"inside"` \| `"center"`) |
+| `DataTable` | `columns`: non-empty array of column names or `{ key: string, label?: string }`; `rows`: array of objects keyed by column key, or arrays in column order | |
+| `KpiCard` | `label`: string; `value`: string or number | `delta` (string or number), `hint` (string) |
+
+`DataTable` renders with appkit-ui's `Table` primitives (the `DataTable` component itself loads its rows through a query), and `KpiCard` with appkit-ui's `Card` parts. Charts take their colors from the app's theme tokens, which follow the system light/dark preference, also in a draft with a dark background.
 
 Turning a draft into a `/design` page is then mostly mechanical: the component and its props are already there.
 
@@ -199,7 +206,7 @@ Turning a draft into a `/design` page is then mostly mechanical: the component a
 
 A block that can't render (unknown component, props that don't fit, or JSON still invalid once the file is complete) shows a small "Couldn't render" placeholder in the draft, and the error goes back to the agent two ways:
 
-- `GET /design/__status` lists every draft with the errors of its current version:
+- `GET /design/__status` lists every draft with the errors of its current version (each new load of the draft replaces them):
 
   ```json
   {
