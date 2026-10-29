@@ -4,6 +4,15 @@ import path from "node:path";
 
 import type { Plugin } from "vite";
 
+import {
+  DRAFT_ROUTE,
+  draftFile,
+  hydratorModule,
+  hydratorTag,
+  listDrafts,
+  streamDraft,
+} from "./drafts";
+
 /**
  * One virtual entry per page: `virtual:appkit-design-page:<file>.mjs`. The
  * `.mjs` keeps @vitejs/plugin-react from treating the entry as a `.tsx`
@@ -11,6 +20,8 @@ import type { Plugin } from "vite";
  */
 const ENTRY_PREFIX = "virtual:appkit-design-page:";
 const ENTRY_SUFFIX = ".mjs";
+/** Hydrator injected into served drafts: `virtual:appkit-draft-hydrator:<name>.mjs`. */
+const HYDRATOR_PREFIX = "virtual:appkit-draft-hydrator:";
 /** Script added to the app's own pages (not /design) to post appkit:app-ready. */
 const APP_READY_ID = "virtual:appkit-app-ready.mjs";
 
@@ -27,17 +38,19 @@ const STATUS_PATH = "/design/__status";
 const EXTENSIONS = [".tsx", ".jsx"];
 
 /**
- * `pages/index.tsx` would collide with the root page and `__*` with the
- * plugin's own endpoints (`/design/__status`), so those names aren't pages.
+ * `pages/index.tsx` would collide with the root page, `pages/drafts.tsx` with
+ * the drafts at `/design/drafts/<name>`, and `__*` with the plugin's own
+ * endpoints (`/design/__status`), so those names aren't pages.
  */
 const isReservedName = (name: string) =>
-  name === "index" || name.startsWith("__");
+  name === "index" || name === "drafts" || name.startsWith("__");
 
 /** Page files the browser entry may route to (reserved names excluded). */
 const PAGE_GLOBS = [
   "/src/design/index.{tsx,jsx}",
   "/src/design/pages/*.{tsx,jsx}",
   "!/src/design/pages/index.{tsx,jsx}",
+  "!/src/design/pages/drafts.{tsx,jsx}",
   "!/src/design/pages/__*",
 ];
 
@@ -416,8 +429,26 @@ export function designVitePlugin({
   builderOrigins = [],
 }: { builderOrigins?: string[] } = {}): Plugin {
   let root = process.cwd();
+  // Drafts live in the app folder (the dev server's working directory).
+  const projectRoot = process.cwd();
   // mtime of the index page when a browser last reported painting it.
   let paintedVersion: number | undefined;
+  // Render errors reported by the hydrator, per draft, for one version of it.
+  const draftErrors = new Map<
+    string,
+    {
+      version: number;
+      errors: { block: number; component: string; error: string }[];
+    }
+  >();
+  // Drafts with a response still streaming, and the version last streamed in
+  // full: a change notification (page reload) is only needed after both.
+  const streamingDrafts = new Map<string, number>();
+  const streamedVersion = new Map<string, number>();
+  const draftVersion = (name: string) => {
+    const file = draftFile(projectRoot, name);
+    return file ? fs.statSync(file).mtimeMs : -1;
+  };
 
   return {
     name: "appkit-design",
@@ -428,7 +459,13 @@ export function designVitePlugin({
     },
 
     resolveId(id) {
-      if (id.startsWith(ENTRY_PREFIX) || id === APP_READY_ID) return `\0${id}`;
+      if (
+        id.startsWith(ENTRY_PREFIX) ||
+        id.startsWith(HYDRATOR_PREFIX) ||
+        id === APP_READY_ID
+      ) {
+        return `\0${id}`;
+      }
     },
 
     transformIndexHtml(_html, ctx) {
@@ -446,6 +483,16 @@ export function designVitePlugin({
 
     load(id) {
       if (id === `\0${APP_READY_ID}`) return appReadyModule(builderOrigins);
+      if (id.startsWith(`\0${HYDRATOR_PREFIX}`) && id.endsWith(ENTRY_SUFFIX)) {
+        const draft = id.slice(
+          HYDRATOR_PREFIX.length + 1,
+          -ENTRY_SUFFIX.length,
+        );
+        if (/^[A-Za-z0-9_-]+$/.test(draft)) {
+          return hydratorModule(draft, builderOrigins, STATUS_PATH);
+        }
+        return;
+      }
       if (!id.startsWith(`\0${ENTRY_PREFIX}`)) return;
       if (!id.endsWith(ENTRY_SUFFIX)) return;
       const file = id.slice(ENTRY_PREFIX.length + 1, -ENTRY_SUFFIX.length);
@@ -455,6 +502,25 @@ export function designVitePlugin({
     },
 
     configureServer(server) {
+      const draftsDir = path.join(projectRoot, "drafts");
+      server.watcher.add(draftsDir);
+      server.watcher.on("change", (file) => {
+        if (path.dirname(file) !== draftsDir) return;
+        const name = /^([A-Za-z0-9_-]+)\.html$/.exec(path.basename(file))?.[1];
+        // Writes during a stream reach the page through the stream itself,
+        // and a late event for content already streamed needs no reload.
+        if (
+          name &&
+          !(streamingDrafts.get(name) ?? 0) &&
+          draftVersion(name) !== streamedVersion.get(name)
+        ) {
+          server.ws.send({
+            type: "custom",
+            event: "appkit:draft-changed",
+            data: { draft: name },
+          });
+        }
+      });
       server.middlewares.use(async (req, res, next) => {
         const pathname = req.url?.split("?")[0] ?? "";
 
@@ -470,6 +536,28 @@ export function designVitePlugin({
                 body = JSON.parse(raw);
               } catch {}
             }
+            const report = body as {
+              draft?: unknown;
+              reset?: unknown;
+              block?: unknown;
+              component?: unknown;
+              error?: unknown;
+            };
+            if (typeof report?.draft === "string") {
+              const version = draftVersion(report.draft);
+              let entry = draftErrors.get(report.draft);
+              if (report.reset === true || entry?.version !== version) {
+                entry = { version, errors: [] };
+                draftErrors.set(report.draft, entry);
+              }
+              if (typeof report.error === "string") {
+                entry.errors.push({
+                  block: typeof report.block === "number" ? report.block : -1,
+                  component: String(report.component ?? ""),
+                  error: report.error,
+                });
+              }
+            }
             if (body?.page === "index") {
               paintedVersion =
                 (body as { ok?: unknown }).ok === false
@@ -482,8 +570,43 @@ export function designVitePlugin({
           }
           res.setHeader("Content-Type", "application/json");
           res.setHeader("Cache-Control", "no-store");
+          const drafts = listDrafts(projectRoot).map((d) => {
+            const entry = draftErrors.get(d.name);
+            return {
+              ...d,
+              errors:
+                entry?.version === draftVersion(d.name) ? entry.errors : [],
+            };
+          });
           res.end(
-            JSON.stringify(designStatus(server.config.root, paintedVersion)),
+            JSON.stringify({
+              ...designStatus(server.config.root, paintedVersion),
+              drafts,
+            }),
+          );
+          return;
+        }
+
+        const draft = DRAFT_ROUTE.exec(pathname)?.[1];
+        if (draft) {
+          const file = draftFile(projectRoot, draft);
+          if (!file) {
+            res.statusCode = 404;
+            res.setHeader("Content-Type", "text/plain");
+            res.end(`No draft at drafts/${draft}.html.`);
+            return;
+          }
+          streamingDrafts.set(draft, (streamingDrafts.get(draft) ?? 0) + 1);
+          streamDraft(
+            file,
+            hydratorTag(
+              `/@id/__x00__${HYDRATOR_PREFIX}${draft}${ENTRY_SUFFIX}`,
+            ),
+            res,
+            (mtime) => {
+              streamingDrafts.set(draft, (streamingDrafts.get(draft) ?? 1) - 1);
+              streamedVersion.set(draft, mtime);
+            },
           );
           return;
         }

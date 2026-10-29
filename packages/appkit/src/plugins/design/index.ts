@@ -43,7 +43,9 @@ function parseOrigins(value: DesignConfig["builderOrigin"]): string[] {
  * map them back to source. `GET /design/__status` and an
  * `appkit:design-ready` message tell an embedding builder when the design is
  * ready to show (never while it's the template placeholder) and which pages
- * exist.
+ * exist. HTML drafts in `drafts/<name>.html` are served at
+ * `/design/drafts/<name>`, streamed as they're written, with their
+ * `data-appkit` JSON blocks rendered by real appkit-ui components.
  *
  * In any other environment it does nothing except answer `/design` with 404.
  * The manifest is deliberately not `devOnly`: a dropped plugin couldn't claim
