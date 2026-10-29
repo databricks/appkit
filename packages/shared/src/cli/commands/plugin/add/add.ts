@@ -446,7 +446,10 @@ const dataPlanSchema = z.object({
       z.object({
         name: z.string().min(1),
         authMode: z.enum([AUTH_MODE_OBO, AUTH_MODE_SP]).optional(),
-        /** `resourceKey.field` (or `resourceKey.authMode`) → value. */
+        /**
+         * `resourceKey.field` (or `resourceKey.authMode`) → value; the full
+         * --set key with the plugin prefix is accepted too.
+         */
         set: z.record(z.string(), z.string()).optional(),
       }),
     )
@@ -466,7 +469,13 @@ export function requestsFromPlan(file: string): PluginRequest[] {
   return parsed.data.plugins.map((p) => ({
     name: p.name,
     authMode: p.authMode,
-    set: Object.entries(p.set ?? {}).map(([k, v]) => `${p.name}.${k}=${v}`),
+    set: Object.entries(p.set ?? {}).map(([k, v]) => {
+      // Prefixed = 3+ parts led by the plugin name; counting parts keeps
+      // "files.path" (resourceKey "files") unprefixed.
+      const parts = k.split(".");
+      const prefixed = parts.length >= 3 && parts[0] === p.name;
+      return `${prefixed ? k : `${p.name}.${k}`}=${v}`;
+    }),
   }));
 }
 
@@ -799,7 +808,7 @@ Data plan file (--from-plan), version 1:
       { "name": "analytics", "authMode": "obo",
         "set": { "sql-warehouse.id": "abc123" } },
       { "name": "genie", "set": { "genie-space.id": "s1", "genie-space.name": "Sales" } } ] }
-  "set" keys are the --set keys without the plugin prefix ("authMode" works per
+  "set" keys are the --set keys, with or without the plugin prefix ("authMode" works per
   resource, e.g. "sql-warehouse.authMode": "both"); "authMode" is the plugin's default.
 
 Examples:

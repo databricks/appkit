@@ -91,6 +91,25 @@ describe("requestsFromPlan", () => {
     ]);
   });
 
+  test("accepts set keys that already carry the plugin prefix", () => {
+    const dir = makeApp();
+    const file = path.join(dir, "plan.json");
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          { name: "analytics", set: { "analytics.sql-warehouse.id": "wh" } },
+          { name: "files", set: { "files.path": "/Volumes/c/s/v" } },
+        ],
+      }),
+    );
+    expect(requestsFromPlan(file).map((r) => r.set)).toEqual([
+      ["analytics.sql-warehouse.id=wh"],
+      ["files.files.path=/Volumes/c/s/v"],
+    ]);
+  });
+
   test("rejects an unknown version or auth mode", () => {
     const dir = makeApp();
     const file = path.join(dir, "plan.json");
@@ -225,4 +244,27 @@ test("plugins sharing a resource in one run write its entries once", async () =>
   expect(appYaml.match(/DATABRICKS_WAREHOUSE_ID/g)).toHaveLength(1);
   const yml = fs.readFileSync(path.join(dir, "databricks.yml"), "utf-8");
   expect(yml.match(/- name: sql-warehouse/g)).toHaveLength(1);
+});
+
+test("--from-plan with prefixed set keys adds the plugin", async () => {
+  const dir = makeApp();
+  fs.mkdirSync(path.join(dir, ".appkit"));
+  fs.writeFileSync(
+    path.join(dir, ".appkit", "data-plan.json"),
+    JSON.stringify({
+      version: 1,
+      plugins: [
+        { name: "analytics", set: { "analytics.sql-warehouse.id": "wh-9" } },
+      ],
+    }),
+  );
+  vi.spyOn(console, "log").mockImplementation(() => {});
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  await createPluginAddCommand().parseAsync(
+    ["--from-plan", ".appkit/data-plan.json", "--yes", "-C", dir],
+    { from: "user" },
+  );
+  expect(fs.readFileSync(path.join(dir, ".env"), "utf-8")).toContain(
+    "DATABRICKS_WAREHOUSE_ID=wh-9",
+  );
 });
