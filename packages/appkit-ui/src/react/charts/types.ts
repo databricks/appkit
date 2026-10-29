@@ -38,6 +38,19 @@ export type ChartType =
 /** Data that can be passed to unified charts */
 export type ChartData = Table | Record<string, unknown>[];
 
+/**
+ * One row of chart data. Has an index signature, so it can annotate plain data
+ * modules (`export const trips: ChartRow[] = [...]`).
+ */
+export type ChartRow = Record<string, unknown>;
+
+/**
+ * What a chart's `data` prop accepts: an Arrow Table or rows. Rows may be
+ * typed with an interface (no index signature needed) and may be readonly
+ * (`as const`), so existing data modules work as they are.
+ */
+export type ChartDataInput = Table | readonly object[];
+
 /** Formats a measure value for chart axes, tooltips, and value labels. */
 export type ChartValueFormatter = (
   value: string | number,
@@ -188,7 +201,7 @@ export interface QueryProps extends ChartBaseProps {
 /** Props for direct data injection */
 export interface DataProps extends ChartBaseProps {
   /** Arrow Table or JSON array */
-  data: ChartData;
+  data: ChartDataInput;
 
   // Discriminator: cannot use query props with direct data
   queryKey?: never;

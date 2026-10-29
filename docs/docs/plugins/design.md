@@ -72,7 +72,7 @@ In development, the dev server adds `data-source="file:line:col"` to every nativ
 
 ## Readiness
 
-A builder that embeds `/design` can wait until there is a real design to show, instead of revealing an empty page. `/design` is **ready** once `client/src/design/index.tsx` exists, isn't the template placeholder, and has painted in a browser since it last changed. A page that throws while rendering (in the page file or any component it uses) shows the error in place and turns `ready` back to `false` until a render succeeds again.
+A builder that embeds `/design` can wait until there is a real design to show, instead of revealing an empty page. `/design` is **ready** once `client/src/design/index.tsx` exists, isn't the template placeholder, and has painted in a browser since it last changed. **`ready` needs a browser**: nothing turns it true until a client loads `/design` and paints it (a hidden iframe is enough). To wait without a browser, use `compiled` and `waitingFor` (below). A page that throws while rendering (in the page file or any component it uses) shows the error in place and turns `ready` back to `false` until a render succeeds again.
 
 ### What "ready" waits for
 
@@ -122,7 +122,17 @@ export const designPlaceholder = true;
 }
 ```
 
-`pages` lists every design page, index first, so a builder can show a page switcher.
+`pages` lists every design page, index first, so a builder can show a page switcher. The status also carries:
+
+| Field | Meaning |
+| ----- | ------- |
+| `compiled` | The index page and its imports build (checked server-side, no browser needed). |
+| `compileError` | Why it doesn't, when `compiled` is `false` because of an error. |
+| `waitingFor` | What `ready` is waiting on: `"index"` (no `index.tsx`), `"placeholder"` (still the template page), `"compile"` (build error), `"paint"` (no browser has painted it yet), or `null` when ready. |
+| `placeholder` | `index.tsx` is still the template placeholder. |
+| `drafts`, `blockSchema`, `theme` | See [HTML drafts](#html-drafts). |
+
+An agent writing the page waits for `compiled: true`; a builder that wants to reveal it loads `/design` (hidden is fine) and waits for `ready` or the `appkit:design-ready` message.
 
 ### `appkit:design-ready` message
 
@@ -175,6 +185,12 @@ window.addEventListener("message", (event) => {
 
 Quick layout drafts are plain HTML files in the app's `drafts/` folder, served in development at `/design/drafts/<name>` (`drafts/dashboard.html` → `/design/drafts/dashboard`). A missing draft returns 404.
 
+Drafts share the app template's theme by linking `/design/drafts/theme.css` instead of inlining tokens: appkit-ui's CSS variables (`--background`, `--foreground`, `--primary`, `--muted`, `--border`, `--chart-1` … ) for light, and for dark via `prefers-color-scheme`, plus the page background and text color at zero specificity, so the draft's own styles win:
+
+```html
+<link rel="stylesheet" href="/design/drafts/theme.css" />
+```
+
 A draft is streamed while it's still being written: the plugin sends what the file holds and keeps appending what's added, until the file ends with `</html>` (or stops changing for 8 seconds). So a draft fills in on screen as the agent writes it. Editing a finished draft reloads it.
 
 ### `data-appkit` blocks
@@ -187,7 +203,7 @@ Costly parts of a draft (charts, tables, KPI cards) are written as JSON blocks i
 </script>
 ```
 
-The exact props of each component are published as JSON Schema (2020-12), with an example per component, at `GET /design/__data-appkit.schema.json` (also linked from `/design/__status` as `blockSchema`). Fetch it to write valid blocks. In short:
+The exact props of each component are published as JSON Schema (2020-12), with an example per component, in the package as `@databricks/appkit-ui/design/components.schema.json` (`node_modules/@databricks/appkit-ui/dist/design/components.schema.json`), and served at `GET /design/__data-appkit.schema.json` (linked from `/design/__status` as `blockSchema`). Read it to write valid blocks. In short:
 
 | Component | Required | Optional |
 | --------- | -------- | -------- |

@@ -390,6 +390,49 @@ export function dataAppkitSchema() {
   };
 }
 
+/**
+ * The app template's theme tokens as a standalone stylesheet for drafts
+ * (`/design/drafts/theme.css`): appkit-ui's CSS variables for light, for dark
+ * via `prefers-color-scheme` (unless `.light`), and for an explicit `.dark`,
+ * plus a zero-specificity page background and text color. Drafts link it
+ * instead of inlining a theme block.
+ *
+ * @internal
+ */
+export function themeCss(appkitUiCss: string): string {
+  const tokens = (body = "") =>
+    body
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split(";")
+      .map((d) => d.trim())
+      .filter((d) => /^(--[\w-]+|color-scheme)\s*:/.test(d))
+      .map((d) => `  ${d.replace(/\s+/g, " ")};`)
+      .join("\n");
+  const light = /(?:^|\n)\s*:root\s*\{([^}]*)\}/.exec(appkitUiCss)?.[1];
+  const dark =
+    /@media\s*\(prefers-color-scheme:\s*dark\)\s*\{\s*:root:not\(\.light\)\s*\{([^}]*)\}/.exec(
+      appkitUiCss,
+    )?.[1];
+  const darkClass = /(?:^|\n)\s*\.dark\s*\{([^}]*)\}/.exec(appkitUiCss)?.[1];
+  return `/* AppKit theme tokens for drafts: light, and dark when the system prefers it. */
+:root {
+${tokens(light)}
+}
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+${tokens(dark).replace(/^/gm, "  ")}
+  }
+}
+.dark {
+${tokens(darkClass)}
+}
+:where(body) {
+  background: var(--background);
+  color: var(--foreground);
+}
+`;
+}
+
 /** Tag injected into every served draft; `async` so it runs while streaming. */
 export const hydratorTag = (src: string) =>
   `<script type="module" async src="${src}"></script>`;

@@ -119,6 +119,7 @@ describe("designStatus", () => {
     });
     expect(designStatus(root, undefined)).toEqual({
       ready: false,
+      placeholder: false,
       pages: [
         { name: "index", path: "/design" },
         { name: "orders", path: "/design/orders" },
@@ -133,13 +134,17 @@ describe("designStatus", () => {
     const root = clientWith({
       "src/design/index.tsx": `export const designPlaceholder = true;\n${PAGE}`,
     });
-    expect(designStatus(root, mtime(root)).ready).toBe(false);
+    expect(designStatus(root, mtime(root))).toMatchObject({
+      ready: false,
+      placeholder: true,
+    });
   });
 
   test("never ready without an index page", () => {
     const root = clientWith(["src/design/pages/orders.tsx"]);
     expect(designStatus(root, 1)).toEqual({
       ready: false,
+      placeholder: false,
       pages: [{ name: "orders", path: "/design/orders" }],
     });
   });

@@ -12,6 +12,7 @@ import {
   hydratorTag,
   listDrafts,
   streamDraft,
+  themeCss,
 } from "./drafts";
 
 /**
@@ -37,6 +38,7 @@ const PAGE_FILE = /^(index|pages\/[A-Za-z0-9_-]+)\.(tsx|jsx)$/;
 const DESIGN_ROUTE = /^\/design(?:\/([A-Za-z0-9_-]+))?\/?$/;
 const STATUS_PATH = "/design/__status";
 const BLOCK_SCHEMA_PATH = "/design/__data-appkit.schema.json";
+const DRAFT_THEME_PATH = "/design/drafts/theme.css";
 const EXTENSIONS = [".tsx", ".jsx"];
 
 /**
@@ -132,13 +134,18 @@ function indexVersion(clientRoot: string): number | undefined {
 export function designStatus(
   clientRoot: string,
   paintedVersion: number | undefined,
-): { ready: boolean; pages: DesignPageInfo[] } {
+): { ready: boolean; placeholder: boolean; pages: DesignPageInfo[] } {
   const index = resolveDesignPage(clientRoot, "/design");
-  const real =
-    !!index && !PLACEHOLDER_EXPORT.test(fs.readFileSync(index, "utf-8"));
+  const placeholder =
+    !!index && PLACEHOLDER_EXPORT.test(fs.readFileSync(index, "utf-8"));
+  const real = !!index && !placeholder;
   const painted =
     paintedVersion !== undefined && paintedVersion === indexVersion(clientRoot);
-  return { ready: real && painted, pages: listDesignPages(clientRoot) };
+  return {
+    ready: real && painted,
+    placeholder,
+    pages: listDesignPages(clientRoot),
+  };
 }
 
 /** Whether the app can import `react-router` (the template ships it). */
@@ -580,13 +587,60 @@ export function designVitePlugin({
                 entry?.version === draftVersion(d.name) ? entry.errors : [],
             };
           });
+          const status = designStatus(server.config.root, paintedVersion);
+          // `ready` needs a browser to paint /design. `compiled` doesn't: it
+          // builds the index page (and resolves its imports) server-side, so
+          // an agent can wait on it without a browser.
+          const index = resolveDesignPage(server.config.root, "/design");
+          let compiled = false;
+          let compileError: string | undefined;
+          if (index && !status.placeholder) {
+            try {
+              await server.transformRequest(
+                `/${path.relative(server.config.root, index).split(path.sep).join("/")}`,
+              );
+              compiled = true;
+            } catch (error) {
+              compileError =
+                error instanceof Error ? error.message : String(error);
+            }
+          }
+          const waitingFor = !index
+            ? "index"
+            : status.placeholder
+              ? "placeholder"
+              : !compiled
+                ? "compile"
+                : !status.ready
+                  ? "paint"
+                  : null;
           res.end(
             JSON.stringify({
-              ...designStatus(server.config.root, paintedVersion),
+              ...status,
+              compiled,
+              ...(compileError ? { compileError } : {}),
+              waitingFor,
               drafts,
               blockSchema: BLOCK_SCHEMA_PATH,
+              theme: DRAFT_THEME_PATH,
             }),
           );
+          return;
+        }
+
+        if (pathname === DRAFT_THEME_PATH) {
+          let css = "";
+          try {
+            css = fs.readFileSync(
+              createRequire(
+                path.join(server.config.root, "package.json"),
+              ).resolve("@databricks/appkit-ui/styles.css"),
+              "utf-8",
+            );
+          } catch {}
+          res.setHeader("Content-Type", "text/css; charset=utf-8");
+          res.setHeader("Cache-Control", "no-store");
+          res.end(themeCss(css));
           return;
         }
 
