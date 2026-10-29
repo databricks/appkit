@@ -4,7 +4,7 @@ import {
   type ExactDatabaseParams,
 } from "shared";
 
-import { isDatabaseRow } from "@/js/database/client";
+import { isDatabaseRow } from "@/js/database/entity-client";
 import type {
   DatabaseId,
   DatabaseKeyedEntity,
