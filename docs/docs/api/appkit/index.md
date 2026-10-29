@@ -20,7 +20,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [AuthenticationError](Class.AuthenticationError.md) | Error thrown when authentication fails. Use for missing tokens, invalid credentials, or authorization failures. |
 | [ConfigurationError](Class.ConfigurationError.md) | Error thrown when configuration is missing or invalid. Use for missing environment variables, invalid settings, or setup issues. |
 | [ConnectionError](Class.ConnectionError.md) | Error thrown when a connection or network operation fails. Use for database pool errors, API failures, timeouts, etc. |
-| [DatabaseValidationError](Class.DatabaseValidationError.md) | Deliberate validation failure raised by a database mutation hook. Generated routes answer `422` and echo only the issues naming a public column; every other failure raised inside a hook stays an opaque server error. |
+| [DatabaseValidationError](Class.DatabaseValidationError.md) | Deliberate validation failure. An explicit transaction callback can throw it, and the transaction rethrows that same error. Generated routes answer `422` and echo only the issues naming a public column. Every other failure stays an opaque server error. |
 | [DatabricksAdapter](Class.DatabricksAdapter.md) | Adapter that talks directly to Databricks Model Serving `/invocations` endpoint. |
 | [ExecutionError](Class.ExecutionError.md) | Error thrown when an operation execution fails. Use for statement failures, canceled operations, or unexpected states. |
 | [IdentityExpiredError](Class.IdentityExpiredError.md) | The downstream service rejected the active caller's credentials. |
@@ -64,7 +64,6 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [~~DownloadResponse~~](Interface.DownloadResponse.md) | Response object for file downloads containing a readable stream. |
 | [DriveResult](Interface.DriveResult.md) | What a driver returns for a single `t.send`. |
 | [EndpointConfig](Interface.EndpointConfig.md) | - |
-| [EntityMutationHooks](Interface.EntityMutationHooks.md) | Mutation lifecycle for one entity. A before hook may return a replacement payload, which is revalidated against the trusted schema before it is persisted. Every hook, the mutation, and any write a hook issues through `ctx.app.database` share one transaction, so a rejection anywhere rolls all of them back. Throw `DatabaseValidationError` to answer a generated route with `422`; any other failure stays an opaque server error. |
 | [EvalDefinition](Interface.EvalDefinition.md) | A single eval, default-exported from a `*.eval.ts` file. |
 | [EvalDriver](Interface.EvalDriver.md) | Abstraction over how the agent is driven. The HTTP driver posts to a running app's agents endpoint; future drivers (in-process) implement the same shape. |
 | [EvalResult](Interface.EvalResult.md) | The outcome of running one eval. |
@@ -76,8 +75,6 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [FunctionTool](Interface.FunctionTool.md) | - |
 | [GenerateDatabaseCredentialRequest](Interface.GenerateDatabaseCredentialRequest.md) | Request parameters for generating database OAuth credentials |
 | [GenerationParams](Interface.GenerationParams.md) | Optional generation parameters forwarded to the OpenAI-compatible serving request body. Names match the serving API wire keys. Only keys that are set are sent — undefined values are omitted so the endpoint applies its own defaults. Ranges are not validated here; the serving endpoint validates. |
-| [HookApp](Interface.HookApp.md) | The only capability a hook receives: entities bound to its transaction. |
-| [HookContext](Interface.HookContext.md) | Which entity is being mutated, and the surface a hook may write through. |
 | [HostedSupervisorTool](Interface.HostedSupervisorTool.md) | Tagged record returned by every [supervisorTools](Variable.supervisorTools.md) factory. The `__kind` discriminator lets the agents plugin (and standalone `runAgent`) classify these tools without a structural match against the wire format — keeps the SA wire shape free to evolve and avoids namespace collisions with MCP hosted tools (which use `type: "genie-space"` hyphenated, vs SA's `type: "genie_space"` underscored). |
 | [HttpDriverOptions](Interface.HttpDriverOptions.md) | - |
 | [IAiSearchConfig](Interface.IAiSearchConfig.md) | Base configuration interface for AppKit plugins |
@@ -100,7 +97,6 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [PostResult](Interface.PostResult.md) | Structured result for a best-effort POST that must not throw. |
 | [PromptContext](Interface.PromptContext.md) | Context passed to `baseSystemPrompt` callbacks. |
 | [ReadEvalDatasetOptions](Interface.ReadEvalDatasetOptions.md) | - |
-| [ReadSerializerContext](Interface.ReadSerializerContext.md) | Which entity and generated operation produced the row being shaped. |
 | [RegisteredAgent](Interface.RegisteredAgent.md) | - |
 | [ReportOutcome](Interface.ReportOutcome.md) | - |
 | [RequestedClaims](Interface.RequestedClaims.md) | Optional claims for fine-grained Unity Catalog table permissions When specified, the returned token will be scoped to only the requested tables |
@@ -153,7 +149,6 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [DatabaseApiWriteOperation](TypeAlias.DatabaseApiWriteOperation.md) | Generated HTTP write operations. |
 | [DatabaseApiWritesConfig](TypeAlias.DatabaseApiWritesConfig.md) | All writes by default; false keeps reads only, and an object narrows writes. |
 | [DatabaseExports](TypeAlias.DatabaseExports.md) | Typed database API published by the plugin. |
-| [EntityHooks](TypeAlias.EntityHooks.md) | Response shaping and mutation lifecycle declared for one table. |
 | [EvalProgress](TypeAlias.EvalProgress.md) | - |
 | [ExecutionContext](TypeAlias.ExecutionContext.md) | - |
 | [ExecutionResult](TypeAlias.ExecutionResult.md) | Discriminated union for plugin execution results. |
@@ -168,7 +163,6 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [Matcher](TypeAlias.Matcher.md) | A deterministic matcher: inspects a string value and returns a result. |
 | [PluginData](TypeAlias.PluginData.md) | Tuple of plugin class, config, and name. Created by `toPlugin()` and passed to `createApp()`. |
 | [Plugins](TypeAlias.Plugins.md) | Plugin map passed to the function form of [AgentDefinition.tools](Interface.AgentDefinition.md#tools). Each entry exposes a `.toolkit(opts?)` method that returns a record of [ToolkitEntry](Interface.ToolkitEntry.md) markers ready to be spread into a tool record. |
-| [ReadSerializer](TypeAlias.ReadSerializer.md) | Shape one already private-safe row before it reaches the wire. A `Promise` is not assignable to the return type, so an async callback fails to compile: serializers run inside the response path and must not add latency there. |
 | [ResolvedToolEntry](TypeAlias.ResolvedToolEntry.md) | Internal tool-index entry after a tool record has been resolved to a dispatchable form. |
 | [ResourceFieldEntry](TypeAlias.ResourceFieldEntry.md) | - |
 | [ResourcePermission](TypeAlias.ResourcePermission.md) | Union of all possible permission levels across all resource types. |
@@ -218,7 +212,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [defineEval](Function.defineEval.md) | Define an agent eval. Default-export the result from a `server/agents/<id>/evals/*.eval.ts` file. |
 | [defineEvalConfig](Function.defineEvalConfig.md) | Define per-directory eval config. Default-export from `evals.config.ts`. |
 | [defineManifest](Function.defineManifest.md) | Validates a raw manifest (typically a `manifest.json` import) against the canonical Zod schema and returns it as a strict [PluginManifest](Interface.PluginManifest.md). |
-| [defineSchema](Function.defineSchema.md) | Compile one declared schema. The returned type keeps the table names the builder returned, so `api.tables` and `hooks` can name only real tables. |
+| [defineSchema](Function.defineSchema.md) | Compile one declared schema. The returned type keeps the table names the builder returned, so `api.tables` can name only real tables. |
 | [defineTool](Function.defineTool.md) | Defines a single tool entry for a plugin's internal registry. |
 | [discoverEvalConfigs](Function.discoverEvalConfigs.md) | Discover the per-agent `evals.config.ts` (from [defineEvalConfig](Function.defineEvalConfig.md)) at `<rootDir>/server/agents/<agent>/evals/evals.config.ts`. Config is per-agent: each agent's config applies only to that agent's evals. Agents without a config file are omitted. Returns a stable, sorted list. |
 | [discoverEvalFiles](Function.discoverEvalFiles.md) | Discover evals under `<rootDir>/server/agents/<agent>/evals/` — co-located with each agent's `agent.{md,ts}` (same folder-per-agent layout the agents plugin discovers). The agent id is the folder name; the eval id is the file path relative to that evals dir with `.eval.ts` stripped. Sorted + stable. |

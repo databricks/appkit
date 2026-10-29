@@ -13,7 +13,6 @@ import {
 import { DatabaseValidationError } from "../../../../errors";
 import { MAX_RESPONSE_BYTES } from "../../defaults";
 import type { EntityClient } from "../../entity-client";
-import type { ReadSerializer } from "../../types";
 import { type CrudTable, compileCrudTables } from "../contract";
 import {
   type CrudEntity,
@@ -144,15 +143,10 @@ function writeRequest(
   } as unknown as Request;
 }
 
-function deps(
-  table: string,
-  entity: CrudEntity,
-  serialize?: ReadSerializer,
-): CrudRouteDeps {
+function deps(table: string, entity: CrudEntity): CrudRouteDeps {
   return {
     table: tables.get(table) as CrudTable,
     entity: () => entity,
-    serialize,
     runRouteSpan: (_operation, _route, run) => run(),
   };
 }
@@ -297,86 +291,41 @@ describe("detail route", () => {
   });
 });
 
-describe("serialization and response limits", () => {
-  it("keeps the serializer contract synchronous", () => {
-    // @ts-expect-error a serializer may not defer work into the response path
-    const deferred: ReadSerializer = async (row) => row;
-    expect(deferred).toBeTypeOf("function");
-  });
-
-  it("applies a synchronous serializer and re-checks private columns", async () => {
-    const serialize = vi.fn<ReadSerializer>((row) => ({
-      ...row,
-      label: `#${row.id}`,
-      token: "reintroduced",
-    }));
-    const entity = fakeEntity([{ id: 1, name: "Ada", token: "secret" }]);
-    await createListHandler(deps("users", entity, serialize))(
-      request("/users"),
-      response.res,
-    );
-    expect(serialize).toHaveBeenCalledWith(
-      { id: 1, name: "Ada" },
-      { entity: "users", operation: "list" },
-    );
-    expect(response.json().items).toEqual([
-      { id: 1, name: "Ada", label: "#1" },
-    ]);
-  });
-
-  it("maps a broken serializer to an opaque server error", async () => {
-    const entity = fakeEntity([{ id: 1, name: "Ada" }]);
-    const throwing = vi.fn<ReadSerializer>(() => {
-      throw new Error("boom: select * from users");
-    });
-    await createListHandler(deps("users", entity, throwing))(
-      request("/users"),
-      response.res,
-    );
-    expect(response.sent.status).toBe(500);
-    expect(response.json()).toEqual({ error: "Database operation failed" });
-  });
-
-  it("lets a list serializer replace an include with a summary", async () => {
+describe("projection and response limits", () => {
+  it("projects public columns and included rows", async () => {
     const entity = fakeEntity([
       {
         id: 1,
         name: "Ada",
-        token: "private",
-        notes: [{ id: 2, body: "hello" }],
+        token: "secret",
+        notes: [{ id: 2, body: "hello", draft: "hidden" }],
       },
     ]);
-    await createListHandler(
-      deps("users", entity, (row) => {
-        const { notes, ...view } = row;
-        return { ...view, note_count: (notes as unknown[]).length };
-      }),
-    )(request("/users?include=%7B%22notes%22%3Atrue%7D"), response.res);
-
-    expect(response.sent.status).toBe(200);
+    await createListHandler(deps("users", entity))(
+      request("/users?include=%7B%22notes%22%3Atrue%7D"),
+      response.res,
+    );
     expect(response.json().items).toEqual([
-      { id: 1, name: "Ada", note_count: 1 },
+      { id: 1, name: "Ada", notes: [{ id: 2, body: "hello" }] },
     ]);
   });
 
-  it("lets a detail serializer regroup the row into a different view", async () => {
+  it("projects one detail row without its private columns", async () => {
     const entity = fakeEntity([], {
       id: 1,
       name: "Ada",
       token: "private",
-      notes: [{ id: 2, body: "hello" }],
+      notes: [{ id: 2, body: "hello", draft: "hidden" }],
     });
-    await createDetailHandler(
-      deps("users", entity, (row) => ({
-        subject: { id: row.id, name: row.name },
-        note_ids: (row.notes as { id: number }[]).map((note) => note.id),
-      })),
-    )(request("/users/1", { id: "1" }), response.res);
-
+    await createDetailHandler(deps("users", entity))(
+      request("/users/1", { id: "1" }),
+      response.res,
+    );
     expect(response.sent.status).toBe(200);
     expect(response.json()).toEqual({
-      subject: { id: 1, name: "Ada" },
-      note_ids: [2],
+      id: 1,
+      name: "Ada",
+      notes: [{ id: 2, body: "hello" }],
     });
   });
 
@@ -398,18 +347,26 @@ describe("serialization and response limits", () => {
 
   it("stops shaping rows once the byte budget is exceeded", async () => {
     const wide = "x".repeat(2 * 1024 * 1024);
-    const rows = Array.from({ length: 8 }, (_, index) => ({
-      id: index,
-      name: wide,
-    }));
-    const serialize = vi.fn<ReadSerializer>((row) => row);
-    await createListHandler(deps("users", fakeEntity(rows), serialize))(
+    let touchedSentinel = false;
+    const rows = [
+      ...Array.from({ length: 4 }, (_, index) => ({ id: index, name: wide })),
+      {
+        id: 99,
+        get name(): string {
+          touchedSentinel = true;
+          return "sentinel";
+        },
+      },
+    ];
+    await createListHandler(deps("users", fakeEntity(rows)))(
       request("/users"),
       response.res,
     );
     expect(response.sent.status).toBe(413);
-    // Rows past the budget are never projected, serialized, or encoded.
-    expect(serialize.mock.calls.length).toBeLessThan(rows.length);
+    expect(response.json()).toEqual({
+      error: "Database response is too large",
+    });
+    expect(touchedSentinel).toBe(false);
   });
 
   it("maps an entity failure to its safe category", async () => {
@@ -439,17 +396,6 @@ describe("write routes", () => {
     expect(response.sent.status).toBe(201);
     expect(response.json()).toEqual({ id: 1, name: "Ada" });
     expect(response.sent.headers["Cache-Control"]).toBe("no-store");
-  });
-
-  it("never reshapes a mutation response with a read serializer", async () => {
-    const serialize = vi.fn<ReadSerializer>((row) => ({ ...row, extra: true }));
-    const entity = fakeEntity([]);
-    await createCreateHandler(deps("users", entity, serialize))(
-      writeRequest("/users", { name: "Ada" }),
-      response.res,
-    );
-    expect(serialize).not.toHaveBeenCalled();
-    expect(response.json()).toEqual({ id: 1, name: "Ada" });
   });
 
   it("updates a row at 200 and deletes one at 204", async () => {
@@ -560,7 +506,7 @@ describe("write routes", () => {
     expect(entity.calls.create).toBeUndefined();
   });
 
-  it("answers a hook's validation failure with 422 and its public issues", async () => {
+  it("answers a validation failure with 422 and its public issues", async () => {
     const entity = fakeEntity([]);
     entity.create = async () => {
       throw new DatabaseValidationError("rejected", [

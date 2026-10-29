@@ -336,21 +336,11 @@ describe("generateDatabaseTypes", () => {
         database(defaults);
         database({
           api: { tables: ["posts"], writes: { operations: ["create"] } },
-          hooks: {
-            posts: {
-              beforeCreate(values) {
-                const title: string = values.title;
-                // @ts-expect-error inferred hook fields are not any
-                const invalid: number = values.title;
-                return { ...values, title };
-              },
-            },
-          },
         });
         // @ts-expect-error default API restrictions use generated table names
         database({ api: { tables: ["missing"] } });
-        // @ts-expect-error default hooks use generated table names
-        database({ hooks: { missing: { beforeCreate() {} } } });
+        // @ts-expect-error lifecycle hooks were removed
+        database({ hooks: { posts: {} } });
         declare const db: DatabaseExports;
         db.users.where({ name: { ilike: "%ada%" } }).include({ posts: { limit: 2 } });
         db.posts.where({ score: { gte: 1 }, and: [{ status: ["draft"] }] });

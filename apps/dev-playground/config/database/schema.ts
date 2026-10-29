@@ -1,5 +1,5 @@
-// Annotations a reviewer leaves on a saved dashboard, plus the audit trail the
-// plugin keeps for them. Three tables is enough to exercise a two-edge include;
+// Annotations a reviewer leaves on a saved dashboard, plus an audit trail table
+// for them. Three tables is enough to exercise a two-edge include;
 // the DatabasePlugin does not create them, so the app expects them to exist.
 
 import {
