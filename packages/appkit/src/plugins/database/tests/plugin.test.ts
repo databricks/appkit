@@ -1,14 +1,7 @@
 import type express from "express";
 import { beforeEach, describe, expect, expectTypeOf, test, vi } from "vitest";
 
-import {
-  boolean,
-  defineSchema,
-  fk,
-  id,
-  jsonb,
-  text,
-} from "../../../database/schema-builder";
+import { defineSchema, fk, id, text } from "../../../database/schema-builder";
 
 const mocks = vi.hoisted(() => ({
   createDatabaseState: vi.fn(),
@@ -22,6 +15,7 @@ vi.mock("../load-schema", () => ({
 }));
 
 import { DatabasePlugin, database } from "../database";
+import { defineOperation } from "../operations";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -44,6 +38,18 @@ const routedSchema = defineSchema((builder) => {
   return { users, notes, events };
 });
 
+// The package has no generated registry, so this takes the untyped JS path.
+const define = defineOperation as unknown as (
+  definition: Record<string, unknown>,
+) => unknown;
+const readUser = define({
+  name: "users.get",
+  entity: "users",
+  method: "GET",
+  authorize: () => true,
+  execute: () => null,
+});
+
 function fakeRouter() {
   const routes: string[] = [];
   const record =
@@ -59,6 +65,7 @@ function fakeRouter() {
       patch: record("patch"),
       delete: record("delete"),
       put: record("put"),
+      use: record("use"),
     } as unknown as express.Router,
   };
 }
@@ -131,40 +138,23 @@ describe("DatabasePlugin", () => {
     expect(mocks.createDatabaseState).not.toHaveBeenCalled();
   });
 
-  test.each([undefined, {}, { schema: undefined }])(
-    "loads the conventional schema and enables full CRUD with config=%j",
+  test.each([undefined, {}, { schema: undefined }, { routes: false }] as const)(
+    "loads the conventional schema and serves nothing over HTTP with config=%j",
     async (config) => {
       mocks.loadDefaultDatabaseSchema.mockResolvedValue(routedSchema);
-      const automatic = await registerRoutes(config);
-      const explicit = await registerRoutes({ schema: routedSchema });
-      expect(automatic.routes).toEqual(explicit.routes);
+      const { plugin, routes } = await registerRoutes(config);
+      expect(routes).toEqual([]);
+      expect(plugin.getEndpoints()).toEqual({});
+      expect(plugin.getSkipBodyParsingPrefixes().size).toBe(0);
+      expect(plugin.clientConfig()).toEqual({});
+      expect(plugin.exports()).toHaveProperty("operation");
       expect(mocks.loadDefaultDatabaseSchema).toHaveBeenCalledOnce();
-      expect(mocks.createDatabaseState).toHaveBeenNthCalledWith(
-        1,
+      expect(mocks.createDatabaseState).toHaveBeenCalledWith(
         routedSchema,
         expect.any(Function),
       );
     },
   );
-
-  test("applies API restrictions to the discovered schema", async () => {
-    mocks.loadDefaultDatabaseSchema.mockResolvedValue(routedSchema);
-    const { routes } = await registerRoutes({
-      api: { tables: ["notes"], writes: false },
-    });
-    expect(routes).toEqual(["get /notes", "get /notes/:id"]);
-    expect(mocks.createDatabaseState).toHaveBeenCalledWith(
-      routedSchema,
-      expect.any(Function),
-    );
-  });
-
-  test("keeps the default schema's typed client available when HTTP is disabled", async () => {
-    mocks.loadDefaultDatabaseSchema.mockResolvedValue(routedSchema);
-    const { routes, plugin } = await registerRoutes({ api: false });
-    expect(routes).toEqual([]);
-    expect(plugin.exports()).toHaveProperty("operation");
-  });
 
   test("never loads the convention when an explicit schema is supplied", async () => {
     await registerRoutes({ schema: routedSchema });
@@ -180,6 +170,17 @@ describe("DatabasePlugin", () => {
       );
       expect(mocks.loadDefaultDatabaseSchema).not.toHaveBeenCalled();
       expect(mocks.createDatabaseState).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each([true, {}, [], { schema: () => undefined, modules: [{}] }])(
+    "rejects routes=%j that is not the generated registry or false",
+    (routes) => {
+      const config = { schema, routes } as never;
+      expect(() => database(config)).toThrow("databaseRoutes registry");
+      expect(() => new DatabasePlugin(config)).toThrow(
+        "databaseRoutes registry",
+      );
     },
   );
 
@@ -310,390 +311,87 @@ describe("DatabasePlugin", () => {
     await expect(plugin.shutdown()).rejects.toBe(error);
   });
 
-  test.each([undefined, true, {}, { writes: true }, { writes: {} }] as const)(
-    "registers full CRUD by default with api=%j",
-    async (api) => {
-      const { routes, plugin } = await registerRoutes({
-        schema: routedSchema,
-        api,
-      });
-      expect(routes).toEqual([
-        "get /users",
-        "post /users",
-        "get /users/:id",
-        "patch /users/:id",
-        "delete /users/:id",
-        "get /notes",
-        "post /notes",
-        "get /notes/:id",
-        "patch /notes/:id",
-        "delete /notes/:id",
-        // A keyless table supports list/create, but no keyed operations.
-        "get /events",
-        "post /events",
-      ]);
-      expect(plugin.getEndpoints()).toMatchObject({
-        "users.create": "/api/database/users",
-        "users.update": "/api/database/users/:id",
-        "users.delete": "/api/database/users/:id",
-      });
-      // Upsert stays programmatic, and no PUT route is generated.
-      expect(routes.some((route) => route.startsWith("put "))).toBe(false);
-      expect(plugin.getEndpoints()).not.toHaveProperty("users.upsert");
-    },
-  );
-
-  test("does not publish a list route that cannot be ordered", async () => {
-    const unorderable = defineSchema((builder) => ({
-      blobs: builder.table("blobs", { payload: jsonb() }),
-    }));
-    mocks.createDatabaseState.mockResolvedValue(candidate());
-    const plugin = new DatabasePlugin({ schema: unorderable });
-    await plugin.setup();
-    const { router, routes } = fakeRouter();
-    plugin.injectRoutes(router);
-
-    expect(routes).toEqual(["post /blobs"]);
-    expect(plugin.getEndpoints()).not.toHaveProperty("blobs.list");
-  });
-
-  test("never publishes keyed routes for boolean or JSON primary keys", async () => {
-    const unsupported = defineSchema(({ table }) => ({
-      flags: table("flags", { key: boolean().primaryKey(), label: text() }),
-      documents: table("documents", {
-        key: jsonb().primaryKey(),
-        label: text(),
-      }),
-      blobs: table("blobs", { key: jsonb().primaryKey() }),
-    }));
-    mocks.createDatabaseState.mockResolvedValue(candidate());
-    const plugin = new DatabasePlugin({ schema: unsupported });
-    await plugin.setup();
-    const { router, routes } = fakeRouter();
-    plugin.injectRoutes(router);
-
-    expect(routes).toEqual([
-      "get /flags",
-      "post /flags",
-      "get /documents",
-      "post /documents",
-      "post /blobs",
-    ]);
-    expect(plugin.getEndpoints()).toEqual({
-      "flags.list": "/api/database/flags",
-      "flags.create": "/api/database/flags",
-      "documents.list": "/api/database/documents",
-      "documents.create": "/api/database/documents",
-      "blobs.create": "/api/database/blobs",
-    });
-  });
-
-  test.each([false, { tables: [] }] as const)(
-    "disables generated routes with api=%j without disabling the typed API",
-    async (api) => {
-      const { routes, plugin } = await registerRoutes({
-        schema: routedSchema,
-        api,
-      });
-      expect(routes).toEqual([]);
+  test("uses the routes registry's schema without loading the convention", async () => {
+    const routes = {
+      schema: vi.fn(async () => ({ schema: routedSchema })),
+      modules: [],
+    };
+    for (const config of [{ routes }, { routes, schema: routedSchema }]) {
+      const { plugin } = await registerRoutes(config);
       expect(plugin.exports()).toHaveProperty("operation");
-    },
-  );
-
-  test("restricts CRUD to a selected table without a separate write opt-in", async () => {
-    const assertNames = () => {
-      database({
-        schema: routedSchema,
-        api: {
-          tables: ["notes"],
-          writes: { operations: ["create", "update"] },
-        },
-      });
-      database({
-        schema: routedSchema,
-        // @ts-expect-error only a declared table can be exposed
-        api: { tables: ["missing"] },
-      });
-      database({
-        schema: routedSchema,
-        // @ts-expect-error lifecycle hooks were removed
-        hooks: { notes: {} },
-      });
-    };
-    const assertApiTypes = () => {
-      database({
-        schema: routedSchema,
-        // @ts-expect-error generated writes do not expose upsert
-        api: { writes: { operations: ["upsert"] } },
-      });
-      database({
-        schema: routedSchema,
-        // @ts-expect-error write restrictions must name declared tables
-        api: { writes: { tables: ["missing"] } },
-      });
-      database({
-        schema: routedSchema,
-        // @ts-expect-error the generated API option is named api
-        crudRoutes: false,
-      });
-    };
-    void assertNames;
-    void assertApiTypes;
-
-    const subset = await registerRoutes({
-      schema: routedSchema,
-      api: { tables: ["notes"] },
-    });
-    expect(subset.routes).toEqual([
-      "get /notes",
-      "post /notes",
-      "get /notes/:id",
-      "patch /notes/:id",
-      "delete /notes/:id",
-    ]);
-  });
-
-  test.each([false, { tables: [] }, { operations: [] }] as const)(
-    "keeps reads when writes=%j",
-    async (writes) => {
-      const { routes } = await registerRoutes({
-        schema: routedSchema,
-        api: { writes },
-      });
-      expect(routes).toEqual([
-        "get /users",
-        "get /users/:id",
-        "get /notes",
-        "get /notes/:id",
-        "get /events",
-      ]);
-    },
-  );
-
-  test("defaults to all write operations when restricting writable tables", async () => {
-    const { routes } = await registerRoutes({
-      schema: routedSchema,
-      api: { writes: { tables: ["notes"] } },
-    });
-    expect(routes).toEqual([
-      "get /users",
-      "get /users/:id",
-      "get /notes",
-      "post /notes",
-      "get /notes/:id",
-      "patch /notes/:id",
-      "delete /notes/:id",
-      "get /events",
-    ]);
-  });
-
-  test("can disable delete without restricting tables", async () => {
-    const { routes } = await registerRoutes({
-      schema: routedSchema,
-      api: { writes: { operations: ["create", "update"] } },
-    });
-    expect(routes).toEqual([
-      "get /users",
-      "post /users",
-      "get /users/:id",
-      "patch /users/:id",
-      "get /notes",
-      "post /notes",
-      "get /notes/:id",
-      "patch /notes/:id",
-      "get /events",
-      "post /events",
-    ]);
-  });
-
-  test("restricts writable tables and operations together", async () => {
-    const constrained = await registerRoutes({
-      schema: routedSchema,
-      api: {
-        tables: ["users", "notes"],
-        writes: { tables: ["notes"], operations: ["create", "update"] },
-      },
-    });
-    expect(constrained.routes).toEqual([
-      "get /users",
-      "get /users/:id",
-      "get /notes",
-      "post /notes",
-      "get /notes/:id",
-      "patch /notes/:id",
-    ]);
-  });
-
-  test("fails setup on an exposure list it cannot honor", async () => {
-    for (const tables of [["missing"], ["users", "users"], "users"]) {
-      mocks.createDatabaseState.mockResolvedValue(candidate());
-      const plugin = new DatabasePlugin({
-        schema: routedSchema,
-        api: { tables } as unknown as { tables: ["users"] },
-      });
-      await expect(plugin.setup()).rejects.toMatchObject({
-        category: "SETUP_FAILED",
-      });
     }
-  });
-
-  test("rejects invalid or misspelled route restrictions rather than enabling CRUD", async () => {
-    for (const api of [null, [], "false", { write: false }, new Date()]) {
-      const plugin = new DatabasePlugin({
-        schema: routedSchema,
-        api: api as never,
-      });
-      await expect(plugin.setup()).rejects.toMatchObject({
-        category: "SETUP_FAILED",
-      });
-    }
-    expect(mocks.createDatabaseState).not.toHaveBeenCalled();
-  });
-
-  test("fails setup on write exposure it cannot honor", async () => {
-    const invalid = [
-      { writes: null },
-      { writes: [] },
-      { writes: "false" },
-      { writes: { operation: ["create"] } },
-      {
-        tables: ["notes"],
-        writes: { tables: ["users"], operations: ["create"] },
-      },
-      {
-        tables: ["notes"],
-        writes: { operations: ["create", "create"] },
-      },
-      {
-        tables: ["notes"],
-        writes: { operations: ["upsert"] },
-      },
-    ];
-    for (const api of invalid) {
-      const plugin = new DatabasePlugin({
-        schema: routedSchema,
-        api: api as never,
-      });
-      await expect(plugin.setup()).rejects.toMatchObject({
-        category: "SETUP_FAILED",
-      });
-    }
-  });
-
-  test.each([undefined, true] as const)(
-    "refuses ambiguous route names with api=%j",
-    async (api) => {
-      const unsafe = [
-        defineSchema((builder) => ({
-          users: builder.table("users", { id: id() }),
-          Users: builder.table("Users", { id: id() }),
-        })),
-        defineSchema((builder) => ({
-          _hidden: builder.table("_hidden", { id: id() }),
-        })),
-      ];
-      for (const unsafeSchema of unsafe) {
-        mocks.createDatabaseState.mockResolvedValue(candidate());
-        const plugin = new DatabasePlugin({
-          schema: unsafeSchema,
-          api,
-        });
-        await expect(plugin.setup()).rejects.toMatchObject({
-          category: "SETUP_FAILED",
-          message: expect.stringContaining("api.tables"),
-          clientMessage: "Database setup failed",
-        });
-      }
-      expect(mocks.createDatabaseState).not.toHaveBeenCalled();
-    },
-  );
-
-  test("supports non-routable table names when generated routes are disabled", async () => {
-    const internalSchema = defineSchema((builder) => ({
-      _events: builder.table("_events", { id: id() }),
-    }));
-    mocks.createDatabaseState.mockResolvedValue(candidate());
-    const plugin = new DatabasePlugin({
-      schema: internalSchema,
-      api: false,
-    });
-    await plugin.setup();
-    const { router, routes } = fakeRouter();
-    plugin.injectRoutes(router);
-    expect(routes).toEqual([]);
-  });
-
-  test.each([false, true, { writes: false }, { tables: ["notes"] }])(
-    "rejects the removed crudRoutes option instead of silently enabling the API: %j",
-    (crudRoutes) => {
-      for (const api of [undefined, false, true]) {
-        expect(
-          () =>
-            new DatabasePlugin({
-              schema: routedSchema,
-              api,
-              crudRoutes,
-            } as never),
-        ).toThrow('"crudRoutes" was renamed to "api"');
-      }
-      expect(mocks.createDatabaseState).not.toHaveBeenCalled();
-    },
-  );
-
-  test("can keep an internal table in the schema without generating its routes", async () => {
-    const internalSchema = defineSchema((builder) => ({
-      notes: builder.table("notes", { id: id() }),
-      _events: builder.table("_events", { id: id() }),
-    }));
-    mocks.createDatabaseState.mockResolvedValue(candidate());
-    const plugin = new DatabasePlugin({
-      schema: internalSchema,
-      api: { tables: ["notes"] },
-    });
-    await plugin.setup();
-    const { router, routes } = fakeRouter();
-    plugin.injectRoutes(router);
-    expect(routes).toEqual([
-      "get /notes",
-      "post /notes",
-      "get /notes/:id",
-      "patch /notes/:id",
-      "delete /notes/:id",
-    ]);
+    expect(routes.schema).toHaveBeenCalledTimes(2);
+    expect(mocks.loadDefaultDatabaseSchema).not.toHaveBeenCalled();
     expect(mocks.createDatabaseState).toHaveBeenCalledWith(
-      internalSchema,
+      routedSchema,
       expect.any(Function),
     );
   });
 
-  test("publishes the relations between exposed tables for the client", async () => {
-    const { plugin } = await registerRoutes({ schema: routedSchema });
-
-    expect(plugin.clientConfig()).toEqual({
-      relations: {
-        users: { notes: "notes" },
-        notes: { users: "users" },
+  test("loads routes modules one at a time, in listed order", async () => {
+    const first = deferred<Record<string, unknown>>();
+    const loads: string[] = [];
+    const plugin = new DatabasePlugin({
+      routes: {
+        schema: async () => ({ schema: routedSchema }),
+        modules: [
+          {
+            file: "routes/a.ts",
+            load: () => {
+              loads.push("a");
+              return first.promise;
+            },
+          },
+          {
+            file: "routes/b.ts",
+            load: async () => {
+              loads.push("b");
+              return { readUser };
+            },
+          },
+        ],
       },
     });
+    mocks.createDatabaseState.mockResolvedValue(candidate());
+    const setup = plugin.setup();
+    await vi.waitFor(() => expect(loads).toEqual(["a"]));
+    first.resolve({ helper: () => "not an operation" });
+    await setup;
+
+    expect(loads).toEqual(["a", "b"]);
+    const { router, routes } = fakeRouter();
+    plugin.injectRoutes(router);
+    expect(routes).toEqual(["use /operations"]);
+    expect(plugin.getEndpoints()).toEqual({
+      "users.get": "/api/database/operations/users.get",
+    });
+    expect(plugin.clientConfig()).toEqual({
+      operations: { "users.get": "GET" },
+    });
+    expect([...plugin.getSkipBodyParsingPrefixes()]).toEqual([
+      "/api/database/operations",
+    ]);
   });
 
-  test("publishes no edge to a table the API does not expose", async () => {
-    const { plugin } = await registerRoutes({
-      schema: routedSchema,
-      api: { tables: ["notes", "events"] },
+  test("serves nothing when every declaration was skipped", async () => {
+    const unguarded = define({
+      name: "users.get",
+      entity: "users",
+      method: "GET",
+      execute: () => null,
     });
-
-    // notes → users exists in the schema, but users has no routes.
+    const { plugin, routes } = await registerRoutes({
+      routes: {
+        schema: async () => ({ schema: routedSchema }),
+        modules: [
+          { file: "routes/users.ts", load: async () => ({ unguarded }) },
+        ],
+      },
+    });
+    expect(routes).toEqual([]);
+    expect(plugin.getEndpoints()).toEqual({});
     expect(plugin.clientConfig()).toEqual({});
   });
-
-  test.each([false, { tables: [] }] as const)(
-    "publishes no client config with api=%j",
-    async (api) => {
-      const { plugin } = await registerRoutes({ schema: routedSchema, api });
-      expect(plugin.clientConfig()).toEqual({});
-    },
-  );
 
   test("publishes no client config when setup failed", async () => {
     mocks.createDatabaseState.mockRejectedValue(new Error("boom"));
