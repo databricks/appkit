@@ -8,6 +8,8 @@ import type {
 
 import type { QueryTagMap, QueryTagsContext } from "./query-tags";
 
+export type { QueryTagMap, QueryTagsContext } from "./query-tags";
+
 export type {
   MetricFilter,
   MetricFilterOperatorName,
@@ -20,7 +22,9 @@ export interface IAnalyticsConfig extends BasePluginConfig {
   /**
    * Custom query tags added to every statement the analytics routes and agent
    * tool issue, recorded in `system.query.history.query_tags`. Pass a static
-   * map, or a function to derive tags per request (e.g. a tenant header).
+   * map (client tags are merged in, config wins on collisions), or a function
+   * to derive tags per request. A function's return value is the whole custom
+   * set: client tags are only sent if it returns them (`ctx.clientTags`).
    * Keys must not contain `, : - / = .`, must not start with the reserved
    * `appkit_` prefix, and keys/values are capped at 128 characters; invalid
    * tags are dropped with a warning. Never put secrets or PII in tags.
@@ -38,8 +42,9 @@ export interface IAnalyticsConfig extends BasePluginConfig {
   autoQueryTags?: boolean;
   /**
    * When `true` (default), tags sent by the client (`queryTags` on
-   * `useAnalyticsQuery` / `useMetricView`) are forwarded after validation.
-   * Server tags win on key collisions. Set to `false` to ignore client tags.
+   * `useAnalyticsQuery` / `useMetricView`) are validated and forwarded — merged
+   * under a static `queryTags` map, or exposed as `ctx.clientTags` to a
+   * function. Set to `false` to ignore client tags entirely.
    *
    * @default true
    */

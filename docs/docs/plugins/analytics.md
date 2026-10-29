@@ -323,16 +323,33 @@ useAnalyticsQuery("revenue", params, { queryTags: { page: "sales_overview" } });
 useMetricView("orders", { measures: ["revenue"], queryTags: { page: "orders" } });
 ```
 
-Client tags are untrusted input. Set `clientQueryTags: false` to ignore them, or filter them in a `queryTags` function, which receives the validated client tags as `ctx.clientTags`.
+Client tags are untrusted input, so any user of the app can set them. How they're handled depends on the `queryTags` config:
+
+- **No config, or a static map:** validated client tags are sent. On a key collision, the config wins.
+- **A function:** its return value is the whole custom set. The function receives the validated client tags as `ctx.clientTags`, and they're only sent if it returns them. To keep a client's `page` tag but nothing else:
+
+```ts
+analytics({
+  queryTags: ({ clientTags, req }) => {
+    const tags: Record<string, string> = {};
+    if (clientTags.page) tags.page = clientTags.page;
+    const tenant = req?.header("x-tenant");
+    if (tenant) tags.tenant = tenant;
+    return tags;
+  },
+});
+```
+
+Use a function whenever a tag feeds chargeback or governance, so a client can't fill in a key you left out. Set `clientQueryTags: false` to ignore client tags entirely.
 
 **Rules:**
 
-- Precedence on collisions: automatic `appkit_*` tags, then the `queryTags` config, then client tags. The `appkit_` prefix is reserved and can't be set by config or the client.
+- Precedence on collisions: automatic `appkit_*` tags, then the `queryTags` config, then client tags. The `appkit_` prefix is reserved (in any letter case) and can't be set by config or the client.
 - At most 20 tags are sent per statement, with automatic tags first.
-- Keys must not contain `,` `:` `-` `/` `=` `.` or start with `@@`. Keys and values are limited to 128 characters; longer values are truncated. A `null` value records a key-only tag.
+- Keys must not contain `,` `:` `-` `/` `=` `.` or control characters, start with `@@`, or have leading or trailing spaces. Keys and values are limited to 128 characters; longer values are truncated. A `null` value records a key-only tag.
 - Invalid tags are dropped, never failing the query. Invalid config tags log a warning.
 - Tags are stored as plain text. Never put secrets or PII in them.
-- Cached results never reach the warehouse, so they're not tagged. With a per-request `queryTags` function on a shared (service principal) cache, only the request that missed the cache is recorded.
+- Tags aren't part of the cache key. Cached results never reach the warehouse, so they're not tagged. Concurrent identical requests share one in-flight statement, which carries the tags of the request that arrived first. For per-page or per-request tags, that means only the request that actually ran the statement is recorded, and other requests served by that run go uncounted.
 
 | Option            | Type                           | Default | Description                                                        |
 | ----------------- | ------------------------------ | ------- | ------------------------------------------------------------------ |

@@ -785,6 +785,13 @@ describe("Analytics Plugin", () => {
         disposition: "EXTERNAL_LINKS",
         format: "ARROW_STREAM",
       });
+      // Both attempts carry the query tags, not just the first.
+      for (const call of executeMock.mock.calls) {
+        expect(call[1].queryTags).toContainEqual({
+          key: "appkit_query_key",
+          value: "test_query",
+        });
+      }
       // Streams the pre-signed links from the execute response (no re-fetch).
       expect(streamExternalLinksMock).toHaveBeenCalledTimes(1);
       expect(streamExternalLinksMock.mock.calls[0][0]).toBe(links);
@@ -1336,6 +1343,13 @@ describe("Analytics Plugin", () => {
         disposition: "INLINE",
         format: "ARROW_STREAM",
       });
+      // Both attempts carry the query tags, not just the first.
+      for (const call of executeMock.mock.calls) {
+        expect(call[1].queryTags).toContainEqual({
+          key: "appkit_query_key",
+          value: "test_query",
+        });
+      }
 
       // The SSE wire payload must look like a JSON_ARRAY result, not an
       // arrow message — the caller asked for JSON_ARRAY and the server has

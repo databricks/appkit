@@ -7,53 +7,89 @@ import {
   withQueryTags,
 } from "../query-tags";
 
+function sanitized(input: unknown, source: "client" | "config" = "client") {
+  return Object.fromEntries(sanitizeQueryTags(input, source));
+}
+
 describe("sanitizeQueryTags", () => {
   test("keeps valid string and key-only tags", () => {
-    expect(
-      sanitizeQueryTags(
-        { team: "eng", page_name: "sales", exp: null },
-        "client",
-      ),
-    ).toEqual({ team: "eng", page_name: "sales", exp: null });
+    expect(sanitized({ team: "eng", page_name: "sales", exp: null })).toEqual({
+      team: "eng",
+      page_name: "sales",
+      exp: null,
+    });
   });
 
   test("drops keys with characters the warehouse rejects", () => {
     expect(
-      sanitizeQueryTags(
-        {
-          "a,b": "x",
-          "a:b": "x",
-          "a-b": "x",
-          "a/b": "x",
-          "a=b": "x",
-          "a.b": "x",
-          "@@internal": "x",
-          " ": "x",
-          ok: "x",
-        },
-        "client",
-      ),
+      sanitized({
+        "a,b": "x",
+        "a:b": "x",
+        "a-b": "x",
+        "a/b": "x",
+        "a=b": "x",
+        "a.b": "x",
+        "@@internal": "x",
+        " ": "x",
+        " lead": "x",
+        "trail ": "x",
+        "new\nline": "x",
+        "tab\there": "x",
+        ok: "x",
+      }),
     ).toEqual({ ok: "x" });
   });
 
   test("drops reserved appkit_ keys so attribution cannot be spoofed", () => {
     expect(
-      sanitizeQueryTags({ appkit_app: "spoofed", team: "eng" }, "client"),
+      sanitized({ appkit_app: "spoofed", APPKIT_route: "x", team: "eng" }),
     ).toEqual({ team: "eng" });
   });
 
   test("drops non-string values and over-long keys, truncates long values", () => {
-    const out = sanitizeQueryTags(
-      { n: 1, o: { x: 1 }, ["k".repeat(129)]: "x", long: "v".repeat(500) },
-      "client",
-    );
+    const out = sanitized({
+      n: 1,
+      o: { x: 1 },
+      ["k".repeat(129)]: "x",
+      long: "v".repeat(500),
+    });
     expect(out).toEqual({ long: "v".repeat(128) });
   });
 
   test("ignores non-object input", () => {
     for (const input of [undefined, null, "team:eng", ["team"], 42]) {
-      expect(sanitizeQueryTags(input, "client")).toEqual({});
+      expect(sanitized(input)).toEqual({});
     }
+  });
+
+  test("truncates by code point without splitting surrogate pairs", () => {
+    const value = sanitized({ emoji: "😀".repeat(200) }).emoji as string;
+    expect(Array.from(value)).toHaveLength(128);
+    expect(value).toBe("😀".repeat(128));
+  });
+
+  test("keeps a JSON-parsed __proto__ key as a plain tag", () => {
+    expect(
+      sanitizeQueryTags(JSON.parse('{"__proto__":"exp"}'), "client").get(
+        "__proto__",
+      ),
+    ).toBe("exp");
+  });
+
+  test("examines a bounded number of client entries", () => {
+    const huge = Object.fromEntries(
+      Array.from({ length: 10_000 }, (_, i) => [`k${i}`, "v"]),
+    );
+    expect(sanitizeQueryTags(huge, "client").size).toBe(64);
+  });
+
+  test("logs only the dropped count, never client key names", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    sanitizeQueryTags({ "bad:\nFORGED": "x" }, "config");
+    const logged = warn.mock.calls.flat().join(" ");
+    expect(logged).toContain("Dropped 1 invalid config query tag(s)");
+    expect(logged).not.toContain("FORGED");
+    warn.mockRestore();
   });
 });
 
@@ -121,7 +157,7 @@ describe("resolveQueryTags", () => {
     expect(tags).toBeUndefined();
   });
 
-  test("passes context, including sanitized client tags, to a function config", () => {
+  test("passes context, including validated client tags, to a function config", () => {
     const queryTags = vi.fn().mockReturnValue({ tenant: "acme" });
     const tags = resolveQueryTags(
       { autoQueryTags: false, queryTags },
@@ -140,10 +176,69 @@ describe("resolveQueryTags", () => {
         clientTags: { page: "overview" },
       }),
     );
-    expect(tags).toEqual([
-      { key: "tenant", value: "acme" },
-      { key: "page", value: "overview" },
+    // The function's return value is the whole custom set: client tags it
+    // didn't return are not sent.
+    expect(tags).toEqual([{ key: "tenant", value: "acme" }]);
+  });
+
+  test("a function config that returns nothing drops client tags", () => {
+    // The docs' conditional-tenant example: no header means no tenant, and a
+    // client must not be able to fill the gap.
+    const tags = resolveQueryTags(
+      {
+        queryTags: ({ req }) => {
+          const tenant = req?.header("x-tenant");
+          return tenant ? { tenant } : undefined;
+        },
+      },
+      {
+        route: "query",
+        queryKey: "revenue",
+        lane: "sp",
+        clientTags: { tenant: "acme", page: "overview" },
+      },
+    );
+    expect(tags?.map((t) => t.key)).toEqual([
+      "appkit_app",
+      "appkit_query_key",
+      "appkit_route",
+      "appkit_lane",
     ]);
+  });
+
+  test("a function config can pass client tags through", () => {
+    const tags = resolveQueryTags(
+      {
+        autoQueryTags: false,
+        queryTags: ({ clientTags }) => ({ ...clientTags, team: "finance" }),
+      },
+      { route: "query", lane: "sp", clientTags: { page: "overview" } },
+    );
+    expect(tags).toEqual([
+      { key: "page", value: "overview" },
+      { key: "team", value: "finance" },
+    ]);
+  });
+
+  test("a function config returning a non-object adds no tags", () => {
+    const tags = resolveQueryTags(
+      { autoQueryTags: false, queryTags: () => "team:eng" as never },
+      { route: "query", lane: "sp" },
+    );
+    expect(tags).toBeUndefined();
+  });
+
+  test("an invalid static config warns once, not per statement", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const config = { queryTags: { "cost-center": "x", team: "eng" } };
+    for (let i = 0; i < 3; i++) {
+      resolveQueryTags(config, { route: "query", lane: "sp" });
+    }
+    const drops = warn.mock.calls.filter((call) =>
+      call.join(" ").includes("Dropped"),
+    );
+    expect(drops).toHaveLength(1);
+    warn.mockRestore();
   });
 
   test("a throwing function config never fails the query", () => {
@@ -163,6 +258,23 @@ describe("resolveQueryTags", () => {
       "appkit_lane",
     ]);
     warn.mockRestore();
+  });
+
+  test("integer-like client keys cannot push out automatic tags", () => {
+    const numeric = Object.fromEntries(
+      Array.from({ length: 20 }, (_, i) => [String(i), "v"]),
+    );
+    const tags = resolveQueryTags(
+      {},
+      { route: "query", queryKey: "q", lane: "sp", clientTags: numeric },
+    );
+    expect(tags).toHaveLength(MAX_QUERY_TAGS);
+    expect(tags?.slice(0, 4).map((t) => t.key)).toEqual([
+      "appkit_app",
+      "appkit_query_key",
+      "appkit_route",
+      "appkit_lane",
+    ]);
   });
 
   test("caps at the warehouse limit, keeping automatic tags first", () => {

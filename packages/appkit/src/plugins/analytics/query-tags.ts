@@ -26,7 +26,10 @@ export interface QueryTagsContext {
   lane: "sp" | "obo";
   /** Incoming request; absent for agent tool calls. */
   req?: express.Request;
-  /** Sanitized tags sent by the client in the request body. */
+  /**
+   * Validated tags sent by the client in the request body. They are only
+   * forwarded if the function returns them.
+   */
   clientTags: QueryTagMap;
 }
 
@@ -38,18 +41,39 @@ type QueryTagsConfig = Pick<
 /** Hard cap the warehouse applies; anything past it is dropped server-side. */
 export const MAX_QUERY_TAGS = 20;
 const MAX_TAG_LENGTH = 128;
-/** Prefix reserved for AppKit's automatic tags. */
+/**
+ * Upper bound on client entries examined per request, so a huge `queryTags`
+ * body can't buy unbounded work when at most 20 tags are ever sent.
+ */
+const MAX_CLIENT_CANDIDATES = 64;
+/** Prefix reserved for AppKit's automatic tags (matched case-insensitively). */
 const RESERVED_PREFIX = "appkit_";
-/** Characters the warehouse rejects in tag keys. */
-const INVALID_KEY_CHARS = /[,:\-/=.]/;
+/** Characters the warehouse rejects in tag keys, plus control characters. */
+const INVALID_KEY_CHARS = /[,:\-/=.\p{Cc}]/u;
+
+/**
+ * Tags in priority order. A `Map` keeps insertion order for every key —
+ * a plain object would enumerate integer-like keys (`"0"`, `"1"`) first and
+ * treat `__proto__` as the prototype setter.
+ */
+type TagEntries = Map<string, string | null>;
 
 function isValidKey(key: string): boolean {
   return (
-    key.trim().length > 0 &&
+    key.length > 0 &&
+    key === key.trim() &&
     key.length <= MAX_TAG_LENGTH &&
     !INVALID_KEY_CHARS.test(key) &&
-    !key.startsWith("@@")
+    !key.startsWith("@@") &&
+    !key.toLowerCase().startsWith(RESERVED_PREFIX)
   );
+}
+
+/** Truncate by code point so a surrogate pair is never split. */
+function truncate(value: string): string {
+  return value.length <= MAX_TAG_LENGTH
+    ? value
+    : Array.from(value).slice(0, MAX_TAG_LENGTH).join("");
 }
 
 /**
@@ -60,58 +84,66 @@ function isValidKey(key: string): boolean {
 export function sanitizeQueryTags(
   input: unknown,
   source: "client" | "config",
-): QueryTagMap {
+): TagEntries {
+  const out: TagEntries = new Map();
   if (input === null || typeof input !== "object" || Array.isArray(input)) {
-    return {};
+    return out;
   }
-  const out: QueryTagMap = {};
-  const dropped: string[] = [];
-  for (const [key, value] of Object.entries(input)) {
-    if (
-      !isValidKey(key) ||
-      key.startsWith(RESERVED_PREFIX) ||
-      (value !== null && typeof value !== "string")
-    ) {
-      dropped.push(key);
+  let examined = 0;
+  let dropped = 0;
+  for (const key in input) {
+    if (!Object.hasOwn(input, key)) continue;
+    if (source === "client" && ++examined > MAX_CLIENT_CANDIDATES) {
+      dropped++;
+      break;
+    }
+    const value = (input as Record<string, unknown>)[key];
+    if (!isValidKey(key) || (value !== null && typeof value !== "string")) {
+      dropped++;
       continue;
     }
-    out[key] = value === null ? null : value.slice(0, MAX_TAG_LENGTH);
+    out.set(key, value === null ? null : truncate(value));
   }
-  if (dropped.length > 0) {
-    const message = "Dropped %d invalid %s query tag(s): %s";
-    const keys = dropped.slice(0, 5).join(", ").slice(0, 200);
-    // Client input is untrusted and may be noisy; config mistakes are the
-    // developer's to fix.
+  if (dropped > 0) {
+    // Only the count is logged: key names are untrusted and could forge log
+    // lines. Client input may be noisy; config mistakes are the developer's.
     if (source === "config") {
-      logger.warn(message, dropped.length, source, keys);
+      logger.warn("Dropped %d invalid config query tag(s)", dropped);
     } else {
-      logger.debug(message, dropped.length, source, keys);
+      logger.debug("Dropped %d invalid client query tag(s)", dropped);
     }
   }
   return out;
 }
 
-function autoTags(ctx: QueryTagsContext): QueryTagMap {
-  const tags: QueryTagMap = {};
+function autoTags(
+  ctx: Pick<QueryTagsContext, "route" | "queryKey" | "lane">,
+): TagEntries {
+  const tags: TagEntries = new Map();
   const appName = process.env.DATABRICKS_APP_NAME;
-  if (appName) tags.appkit_app = appName.slice(0, MAX_TAG_LENGTH);
-  if (ctx.queryKey) {
-    tags.appkit_query_key = ctx.queryKey.slice(0, MAX_TAG_LENGTH);
-  }
-  tags.appkit_route = ctx.route;
-  tags.appkit_lane = ctx.lane;
+  if (appName) tags.set("appkit_app", truncate(appName));
+  if (ctx.queryKey) tags.set("appkit_query_key", truncate(ctx.queryKey));
+  tags.set("appkit_route", ctx.route);
+  tags.set("appkit_lane", ctx.lane);
   return tags;
 }
 
-function configTags(
-  config: QueryTagsConfig,
-  ctx: QueryTagsContext,
-): QueryTagMap {
-  const { queryTags } = config;
-  if (queryTags === undefined) return {};
-  if (typeof queryTags !== "function") {
-    return sanitizeQueryTags(queryTags, "config");
+/** Static maps are sanitized (and warned about) once, not per statement. */
+const staticTagsCache = new WeakMap<object, TagEntries>();
+
+function staticConfigTags(queryTags: QueryTagMap): TagEntries {
+  let tags = staticTagsCache.get(queryTags);
+  if (!tags) {
+    tags = sanitizeQueryTags(queryTags, "config");
+    staticTagsCache.set(queryTags, tags);
   }
+  return tags;
+}
+
+function functionConfigTags(
+  queryTags: (ctx: QueryTagsContext) => QueryTagMap | undefined,
+  ctx: QueryTagsContext,
+): TagEntries {
   try {
     return sanitizeQueryTags(queryTags(ctx), "config");
   } catch (err) {
@@ -119,48 +151,62 @@ function configTags(
       "queryTags callback threw; continuing without custom tags: %s",
       err instanceof Error ? err.message : String(err),
     );
-    return {};
+    return new Map();
   }
 }
 
 /**
  * Resolve the tags for one statement.
  *
- * Precedence on key collisions: automatic `appkit_*` tags (reserved, cannot
- * be overridden) > server `queryTags` config > client-sent tags. Tags are
- * then capped at {@link MAX_QUERY_TAGS} in the same priority order, so the
- * automatic tags always fit.
+ * Automatic `appkit_*` tags come first and can't be overridden. Then:
+ * - static `queryTags` map: config tags, then client tags (config wins on
+ *   collisions);
+ * - function `queryTags`: its return value is the whole custom set. Client
+ *   tags are only sent if it returns them, e.g. `{ ...ctx.clientTags }`.
+ *
+ * The result is capped at {@link MAX_QUERY_TAGS} in that priority order, so
+ * the automatic tags always fit.
  */
 export function resolveQueryTags(
   config: QueryTagsConfig,
   ctx: Omit<QueryTagsContext, "clientTags"> & { clientTags?: unknown },
 ): QueryTag[] | undefined {
-  const clientTags =
+  const clientTags: TagEntries =
     config.clientQueryTags === false
-      ? {}
+      ? new Map()
       : sanitizeQueryTags(ctx.clientTags, "client");
-  const fullCtx: QueryTagsContext = { ...ctx, clientTags };
 
-  const merged: QueryTagMap = {
-    ...(config.autoQueryTags === false ? {} : autoTags(fullCtx)),
-  };
-  for (const tags of [configTags(config, fullCtx), clientTags]) {
-    for (const [key, value] of Object.entries(tags)) {
-      if (!Object.hasOwn(merged, key)) merged[key] = value;
+  const merged: TagEntries =
+    config.autoQueryTags === false ? new Map() : autoTags(ctx);
+  const { queryTags } = config;
+  const sources: TagEntries[] =
+    typeof queryTags === "function"
+      ? [
+          functionConfigTags(queryTags, {
+            ...ctx,
+            clientTags: Object.fromEntries(clientTags),
+          }),
+        ]
+      : [queryTags ? staticConfigTags(queryTags) : new Map(), clientTags];
+  for (const tags of sources) {
+    for (const [key, value] of tags) {
+      if (!merged.has(key)) merged.set(key, value);
     }
   }
 
-  const entries = Object.entries(merged).slice(0, MAX_QUERY_TAGS);
-  if (entries.length === 0) return undefined;
-  return entries.map(([key, value]) =>
-    value === null ? { key } : { key, value },
-  );
+  const result: QueryTag[] = [];
+  for (const [key, value] of merged) {
+    if (result.length === MAX_QUERY_TAGS) break;
+    result.push(value === null ? { key } : { key, value });
+  }
+  return result.length > 0 ? result : undefined;
 }
 
 /**
  * Wrap an executor so every statement it issues carries `queryTags`. Tags are
- * not part of any cache key: a cache hit never reaches the warehouse, so there
- * is nothing to attribute.
+ * not part of any cache key: a cache hit never reaches the warehouse, and
+ * concurrent identical requests share one in-flight statement tagged by the
+ * first caller.
  */
 export function withQueryTags(
   executor: QueryExecutor,
