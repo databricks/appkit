@@ -281,34 +281,55 @@ describe("builderOrigin", () => {
 });
 
 describe("page entry", () => {
-  const load = (file: string) =>
-    (designVitePlugin().load as (id: string) => string | undefined)(
-      `\0virtual:appkit-design-page:${file}.mjs`,
-    );
+  type Resolve = (id: string) => Promise<{ id: string } | null>;
+  const load = (file: string, resolve: Resolve = async () => null) =>
+    (
+      designVitePlugin().load as (
+        this: { resolve: Resolve },
+        id: string,
+      ) => Promise<string | undefined>
+    ).call({ resolve }, `\0virtual:appkit-design-page:${file}.mjs`);
 
-  test("statically imports only the requested page, so other drafts can't break it", () => {
-    for (const [file, code] of [
-      ["index.tsx", load("index.tsx")],
-      ["pages/orders.jsx", load("pages/orders.jsx")],
-    ] as const) {
-      const staticPageImports = code?.match(
-        /^import .* from "\/src\/design\/.*"/gm,
-      );
-      expect(staticPageImports).toEqual([
-        `import * as initial from "/src/design/${file}";`.replace(/;$/, ""),
+  test("statically imports only the requested page, so other drafts can't break it", async () => {
+    for (const file of ["index.tsx", "pages/orders.jsx"]) {
+      const code = await load(file);
+      expect(code?.match(/^import .* from "\/src\/design\/.*"/gm)).toEqual([
+        `import * as initial from "/src/design/${file}"`,
       ]);
     }
   });
 
-  test("refuses anything that isn't a design page file", () => {
+  test("refuses anything that isn't a design page file", async () => {
     for (const file of [
       "../main.tsx",
       "pages/a/b.tsx",
       "index.ts",
       "pages/x.css",
     ]) {
-      expect(load(file)).toBeUndefined();
+      expect(await load(file)).toBeUndefined();
     }
+  });
+
+  // react-router as Vite resolves it: a fake package at a given version.
+  const routerAt = (version: string): Resolve => {
+    const dir = path.join(tmp(), "node_modules/react-router");
+    fs.mkdirSync(path.join(dir, "dist"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "package.json"),
+      JSON.stringify({ name: "react-router", version }),
+    );
+    return async () => ({ id: path.join(dir, "dist/index.mjs") });
+  };
+
+  test("uses the router only when Vite resolves react-router 7+", async () => {
+    expect(await load("index.tsx", routerAt("7.18.0"))).toContain(
+      'from "react-router"',
+    );
+    // An older react-router (e.g. hoisted by pnpm) has no createBrowserRouter.
+    expect(await load("index.tsx", routerAt("5.3.4"))).not.toContain(
+      "react-router",
+    );
+    expect(await load("index.tsx")).not.toContain("react-router");
   });
 });
 

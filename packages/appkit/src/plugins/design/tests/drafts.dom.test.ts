@@ -183,8 +183,58 @@ describe("runHydrator", () => {
     ][0] as unknown as {
       shadowRoot: { querySelector(s: string): { textContent: string } };
     };
-    expect(host.shadowRoot.querySelector("style").textContent).toBe(
-      ":host{--x:1}@media (prefers-color-scheme: dark){:host(:not(.light)){--x:2}}",
+    expect(
+      host.shadowRoot
+        .querySelector("style")
+        .textContent.startsWith(
+          ":host{--x:1}@media (prefers-color-scheme: dark){:host(:not(.light)){--x:2}}",
+        ),
+    ).toBe(true);
+  });
+
+  test("a block still streaming shows a skeleton, replaced in place when its JSON completes", () => {
+    doc.body.innerHTML = "";
+    const rendered: unknown[] = [];
+    const { scan } = runHydrator({
+      draft: "d",
+      origins: [],
+      statusPath: "/s",
+      css: "",
+      h: (type: unknown) => ({ type }),
+      createRoot: () => ({ render: (n: unknown) => rendered.push(n) }),
+      UI,
+      normalizeBlock,
+      fetch: async () => ({}),
+    });
+    doc.body.innerHTML =
+      '<script type="application/json" data-appkit="KpiCard">{"label":"Trips","va</script>';
+    scan(false);
+    const host = [
+      ...doc.querySelectorAll("[data-appkit-block]"),
+    ][0] as unknown as {
+      shadowRoot: {
+        querySelector(
+          s: string,
+        ): { getAttribute(n: string): string | null; className: string } | null;
+        querySelector(s: "style"): { textContent: string };
+      };
+    };
+    const bone = host.shadowRoot.querySelector(".appkit-skeleton");
+    expect(bone?.getAttribute("data-kind")).toBe("KpiCard");
+    expect(rendered).toHaveLength(0);
+
+    (
+      doc as unknown as { querySelector(s: string): { textContent: string } }
+    ).querySelector("script[data-appkit]").textContent =
+      '{"label":"Trips","value":12}';
+    scan(false);
+    expect([...doc.querySelectorAll("[data-appkit-block]")]).toHaveLength(1); // same host
+    expect(host.shadowRoot.querySelector(".appkit-skeleton")).toBeNull();
+    expect(host.shadowRoot.querySelector(".appkit-fade")).not.toBeNull();
+    expect(rendered).toHaveLength(1);
+    // The fade and the pulse are off with prefers-reduced-motion.
+    expect(host.shadowRoot.querySelector("style").textContent).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{[^}]*animation: none;[^}]*\}[^}]*transition: none;/,
     );
   });
 

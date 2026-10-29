@@ -74,7 +74,7 @@
           },
           "height": {
             "type": "number",
-            "description": "Height in pixels. Default 300."
+            "description": "Height in pixels. By default the chart fills its container's height (at least 160px)."
           },
           "showLegend": {
             "type": "boolean",
@@ -181,7 +181,7 @@
           },
           "height": {
             "type": "number",
-            "description": "Height in pixels. Default 300."
+            "description": "Height in pixels. By default the chart fills its container's height (at least 160px)."
           },
           "showLegend": {
             "type": "boolean",
@@ -295,7 +295,7 @@
           },
           "height": {
             "type": "number",
-            "description": "Height in pixels. Default 300."
+            "description": "Height in pixels. By default the chart fills its container's height (at least 160px)."
           },
           "showLegend": {
             "type": "boolean",
@@ -413,7 +413,7 @@
           },
           "height": {
             "type": "number",
-            "description": "Height in pixels. Default 300."
+            "description": "Height in pixels. By default the chart fills its container's height (at least 160px)."
           },
           "showLegend": {
             "type": "boolean",
@@ -526,7 +526,7 @@
           },
           "height": {
             "type": "number",
-            "description": "Height in pixels. Default 300."
+            "description": "Height in pixels. By default the chart fills its container's height (at least 160px)."
           },
           "showLegend": {
             "type": "boolean",

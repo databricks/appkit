@@ -39,6 +39,11 @@ const DESIGN_ROUTE = /^\/design(?:\/([A-Za-z0-9_-]+))?\/?$/;
 const STATUS_PATH = "/design/__status";
 const BLOCK_SCHEMA_PATH = "/design/__data-appkit.schema.json";
 const DRAFT_THEME_PATH = "/design/drafts/theme.css";
+/** Stable URL of the draft hydrator, for drafts streamed from elsewhere. */
+const HYDRATOR_PATH = "/design/drafts/__hydrator.js";
+/** Vite's default dev CORS origins (localhost), kept when builders are added. */
+const LOCALHOST_ORIGIN =
+  /^https?:\/\/(?:(?:[^:]+\.)?localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/;
 const EXTENSIONS = [".tsx", ".jsx"];
 
 /**
@@ -148,16 +153,33 @@ export function designStatus(
   };
 }
 
-/** Whether the app can import `react-router` (the template ships it). */
-function hasReactRouter(clientRoot: string): boolean {
-  try {
-    createRequire(path.join(clientRoot, "package.json")).resolve(
-      "react-router",
-    );
-    return true;
-  } catch {
-    return false;
+/**
+ * Whether the page entry can use react-router 7+ (the template ships it), as
+ * Vite will resolve it from the app. Node's own resolution can disagree (e.g. a
+ * hoisted, older react-router under pnpm), so resolve with Vite's resolver and
+ * read the version of what it found.
+ */
+async function hasReactRouter(
+  resolve: (id: string, importer: string) => Promise<{ id: string } | null>,
+  clientRoot: string,
+): Promise<boolean> {
+  const resolved = await resolve(
+    "react-router",
+    path.join(clientRoot, "src/design/index.tsx"),
+  ).catch(() => null);
+  if (!resolved) return false;
+  for (
+    let dir = path.dirname(resolved.id);
+    dir !== path.dirname(dir);
+    dir = path.dirname(dir)
+  ) {
+    const pkg = path.join(dir, "package.json");
+    if (!fs.existsSync(pkg)) continue;
+    const { name, version } = JSON.parse(fs.readFileSync(pkg, "utf-8"));
+    if (name !== "react-router") continue;
+    return Number.parseInt(String(version), 10) >= 7;
   }
+  return false;
 }
 
 /**
@@ -519,6 +541,16 @@ export function designVitePlugin({
     name: "appkit-design",
     apply: "serve",
 
+    // A draft streamed by the builder (from its own origin) loads the
+    // hydrator and its imports from this dev server: allow the builder origins
+    // next to Vite's default localhost ones.
+    config() {
+      if (builderOrigins.length === 0) return;
+      return {
+        server: { cors: { origin: [...builderOrigins, LOCALHOST_ORIGIN] } },
+      };
+    },
+
     configResolved(config) {
       root = config.root;
     },
@@ -546,7 +578,7 @@ export function designVitePlugin({
       ];
     },
 
-    load(id) {
+    async load(id) {
       if (id === `\0${APP_READY_ID}`) return appReadyModule(builderOrigins);
       if (id.startsWith(`\0${HYDRATOR_PREFIX}`) && id.endsWith(ENTRY_SUFFIX)) {
         const draft = id.slice(
@@ -562,7 +594,11 @@ export function designVitePlugin({
       if (!id.endsWith(ENTRY_SUFFIX)) return;
       const file = id.slice(ENTRY_PREFIX.length + 1, -ENTRY_SUFFIX.length);
       if (PAGE_FILE.test(file)) {
-        return entryModule(file, builderOrigins, hasReactRouter(root));
+        const router = await hasReactRouter(
+          (spec, importer) => this.resolve(spec, importer),
+          root,
+        );
+        return entryModule(file, builderOrigins, router);
       }
     },
 
@@ -588,6 +624,43 @@ export function designVitePlugin({
       });
       server.middlewares.use(async (req, res, next) => {
         const pathname = req.url?.split("?")[0] ?? "";
+
+        // The plugin's own endpoints are also used by builder pages on other
+        // origins (a streamed draft posts errors, loads the hydrator).
+        const origin = req.headers?.origin;
+        if (
+          typeof origin === "string" &&
+          builderOrigins.includes(origin) &&
+          (pathname === STATUS_PATH ||
+            pathname === HYDRATOR_PATH ||
+            pathname === DRAFT_THEME_PATH ||
+            pathname === BLOCK_SCHEMA_PATH)
+        ) {
+          res.setHeader("Access-Control-Allow-Origin", origin);
+          res.setHeader("Vary", "Origin");
+          if (req.method === "OPTIONS") {
+            res.setHeader("Access-Control-Allow-Methods", "GET, POST");
+            res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+            res.statusCode = 204;
+            res.end();
+            return;
+          }
+        }
+
+        if (pathname === HYDRATOR_PATH) {
+          const draft = new URL(req.url ?? "", "http://x").searchParams.get(
+            "draft",
+          );
+          const name =
+            draft && /^[A-Za-z0-9_-]+$/.test(draft) ? draft : "stream";
+          res.statusCode = 302;
+          res.setHeader(
+            "Location",
+            `/@id/__x00__${HYDRATOR_PREFIX}${name}${ENTRY_SUFFIX}`,
+          );
+          res.end();
+          return;
+        }
 
         if (pathname === STATUS_PATH) {
           if (req.method === "POST") {
@@ -635,7 +708,13 @@ export function designVitePlugin({
           }
           res.setHeader("Content-Type", "application/json");
           res.setHeader("Cache-Control", "no-store");
-          const drafts = listDrafts(projectRoot).map((d) => {
+          const files = listDrafts(projectRoot);
+          const drafts: {
+            name: string;
+            path: string | null;
+            streamed?: true;
+            errors: { block: number; component: string; error: string }[];
+          }[] = files.map((d) => {
             const entry = draftErrors.get(d.name);
             return {
               ...d,
@@ -643,6 +722,18 @@ export function designVitePlugin({
                 entry?.version === draftVersion(d.name) ? entry.errors : [],
             };
           });
+          // Drafts streamed from elsewhere (no file here) report errors too.
+          for (const [name, entry] of draftErrors) {
+            if (files.some((d) => d.name === name) || entry.version !== -1) {
+              continue;
+            }
+            drafts.push({
+              name,
+              path: null,
+              streamed: true,
+              errors: entry.errors,
+            });
+          }
           const status = designStatus(server.config.root, paintedVersion);
           // `ready` needs a browser to paint /design. `compiled` doesn't: it
           // builds the index page (and resolves its imports) server-side, so
@@ -675,6 +766,7 @@ export function designVitePlugin({
               drafts,
               blockSchema: BLOCK_SCHEMA_PATH,
               theme: DRAFT_THEME_PATH,
+              hydrator: HYDRATOR_PATH,
             }),
           );
           return;

@@ -193,6 +193,28 @@ Drafts share the app template's theme by linking `/design/drafts/theme.css` inst
 
 A draft is streamed while it's still being written: the plugin sends what the file holds and keeps appending what's added, until the file ends with `</html>` (or stops changing for 8 seconds). So a draft fills in on screen as the agent writes it. Editing a finished draft reloads it.
 
+### Drafts streamed by an app builder
+
+A builder that streams a draft itself (from its own URL, while the agent is still writing it) can use the same theme and hydrator by linking them from the app's dev server:
+
+```html
+<!doctype html>
+<html>
+  <head>
+    <link rel="stylesheet" href="http://localhost:8000/design/drafts/theme.css" />
+    <script type="module" async src="http://localhost:8000/design/drafts/__hydrator.js?draft=option-1"></script>
+  </head>
+  <body>
+    <!-- layout, then data-appkit blocks, streamed top to bottom -->
+```
+
+- `/design/drafts/__hydrator.js?draft=<name>` is a stable URL for the hydrator. `draft` names the draft in error reports (it defaults to `stream`).
+- `/design/drafts/theme.css` is the theme stylesheet described above.
+- Both URLs are listed in `/design/__status` (`hydrator`, `theme`). The plugin's endpoints and the modules the hydrator loads answer CORS for the configured `builderOrigin`s, so the draft page can be on the builder's own origin.
+- Errors of a streamed draft are reported like any other; in `/design/__status` such drafts are listed with `path: null` and `streamed: true`.
+
+Each block shows a skeleton while its JSON is still arriving, and the rendered component replaces it in place with a short fade-in (instant with `prefers-reduced-motion`).
+
 ### `data-appkit` blocks
 
 Costly parts of a draft (charts, tables, KPI cards) are written as JSON blocks instead of hand-built HTML. The plugin injects one script into every draft that renders each block with the real appkit-ui component as soon as its JSON is complete, even while the rest of the file is still streaming. It uses no CDN and no network, and theme colors follow the app's styles and the system light/dark preference. Each block renders in its own shadow root, so the draft's own CSS and the components' styles don't affect each other.
