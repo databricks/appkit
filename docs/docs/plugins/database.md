@@ -144,10 +144,11 @@ checkout uses the file's value.
 If a branch or database reference has no value in those files, `migrate` cannot
 tell which branch the reference names. Examples are a target that leaves
 `postgres_branch` unset and `${workspace.current_user.short_name}`. While any such
-reference exists, `migrate` applies migrations to no branch. The message names
-the target and where the reference is. To continue, give the reference a value
-in `databricks.yml`, or in the `variable-overrides.json` the message names. A
-`variable-overrides.json` that is not a JSON object stops `migrate` too.
+reference exists, `migrate` applies migrations to no branch, and `init`, `clean`
+and `seed` refuse every branch. The message names the target and where the
+reference is. To continue, give the reference a value in `databricks.yml`, or in
+the `variable-overrides.json` the message names. A `variable-overrides.json`
+that is not a JSON object stops these commands too.
 
 The check reads only this checkout's files. It does not see values passed at
 deploy time with `--var` or `BUNDLE_VAR_*`, or resources defined in Python. It
@@ -157,11 +158,12 @@ protected branches.
 ### One command at a time
 
 While `migrate`, `introspect`, `clean` or `init` runs, it holds
-`config/database/.appkit-db.lock`. A second `appkit db` command in the same
-checkout fails and names the process that holds the lock. The lock goes when
-the command finishes or exits. `init` holds it for its whole run, including the
-clean and migrate it starts. `init --schema none` changes no migration history,
-so it takes no lock.
+`config/database/.appkit-db.lock`. Another of these commands in the same
+checkout fails and names the process that holds the lock. `seed`, `verify` and
+`clean --delete-branch` change no migration history and take no lock. The lock
+goes when the command finishes or exits. `init` holds it for its whole run,
+including the clean and migrate it starts. `init --schema none` changes no
+migration history, so it takes no lock.
 
 A command stopped by a signal, such as SIGKILL, can leave the file behind. The
 next command then names the holder. When that process no longer runs, the
