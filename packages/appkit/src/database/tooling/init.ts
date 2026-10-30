@@ -5,7 +5,7 @@ import dotenv from "dotenv";
 
 import { loadDefaultDatabaseSchema } from "../../plugins/database/load-schema";
 import { DEFAULT_SCHEMA_NAME } from "../schema-builder/define-schema";
-import { type CleanReport, runClean } from "./clean";
+import { type CleanReport, cleanHolding } from "./clean";
 import type { DbContext } from "./context";
 import {
   ensureDrizzleKit,
@@ -15,8 +15,9 @@ import {
 import { refuseSymlink, updateEnvFile } from "./env-file";
 import { classifyBranch, deployRefusal, takesWrites } from "./guard";
 import { handOffAppSchema } from "./hand-off";
+import { type HistoryLock, withHistoryLock } from "./history-lock";
 import { currentIdentity, type Identity } from "./identity";
-import { type IntrospectReport, runIntrospect } from "./introspect";
+import { introspectHolding, type IntrospectReport } from "./introspect";
 import {
   isAlreadyExists,
   isBranchLimit,
@@ -30,8 +31,8 @@ import {
 import {
   hasSchemaFile,
   type MigrateReport,
+  migrateHolding,
   requireSchemaFile,
-  runMigrate,
 } from "./migrate";
 import {
   devBranchId,
@@ -428,10 +429,24 @@ function readEnvValues(file: string): Record<string, string> {
  * start the schema. No prompts: every choice has a default. It refuses the
  * project's default branch, protected branches and branches databricks.yml
  * deploys to before changing anything, and never touches the deploy bundle.
+ * One lock on the checkout's history covers the whole run, so no other
+ * `appkit db` command runs between its clean and migrate; `--schema none`
+ * changes no history and takes none.
  */
 export async function runInit(
   ctx: DbContext,
   options: InitOptions = {},
+): Promise<InitReport> {
+  if (options.schema === "none") return initHolding(ctx, null, options);
+  return withHistoryLock(ctx.root, "init", (lock) =>
+    initHolding(ctx, lock, options),
+  );
+}
+
+async function initHolding(
+  ctx: DbContext,
+  lock: HistoryLock | null,
+  options: InitOptions,
 ): Promise<InitReport> {
   const onStep = options.onStep ?? (() => undefined);
   const interactive = options.interactive ?? false;
@@ -527,31 +542,33 @@ export async function runInit(
       ? ensureDrizzleKit(ctx.root, options.runCommand ?? runCommand, onStep)
       : null;
 
-  let start: InitStart;
+  // Without a lock (--schema none) the schema stays as the fork has it.
+  let start: InitStart = { kind: "none" };
   const on = `on ${resourceId(branch.name)}`;
-  if (startKind === "migrate") {
+  if (lock && startKind === "migrate") {
     onStep(`Migrating schema ${schemaName} ${on}`);
     start = {
       kind: "migrate",
-      migrate: await runMigrate(branchCtx, { interactive }),
+      migrate: await migrateHolding(branchCtx, lock, { interactive }),
     };
-  } else if (startKind === "introspect") {
+  } else if (lock && startKind === "introspect") {
     onStep(`Writing schema.ts from schema ${schemaName} ${on}`);
     start = {
       kind: "introspect",
-      introspect: await runIntrospect(branchCtx, { interactive }),
+      introspect: await introspectHolding(branchCtx, lock, { interactive }),
     };
-  } else if (startKind === "clean") {
+  } else if (lock && startKind === "clean") {
     onStep(`Dropping schema ${schemaName} ${on}`);
-    const clean = await runClean(branchCtx);
+    const clean = await cleanHolding(branchCtx, lock);
     // Recreate from the committed migrations, so the startup check passes.
     start = {
       kind: "clean",
       clean,
-      migrate: await runMigrate(branchCtx, { interactive, generate: false }),
+      migrate: await migrateHolding(branchCtx, lock, {
+        interactive,
+        generate: false,
+      }),
     };
-  } else {
-    start = { kind: "none" };
   }
 
   return {

@@ -5,6 +5,7 @@ import { quoteIdentifier } from "../migrations/apply";
 import { runInTransaction } from "./branch-sql";
 import { type DbContext, NO_ENV_BRANCH, withBranchPool } from "./context";
 import { notYourBranch, resolveEnvBranch, writableEnvBranch } from "./guard";
+import { type HistoryLock, withHistoryLock } from "./history-lock";
 import { requireSchemaFile } from "./migrate";
 import { resourceId } from "./targets";
 
@@ -182,9 +183,19 @@ export async function previewClean(ctx: DbContext): Promise<CleanReport> {
 /**
  * `appkit db clean`: remove every app-schema object, the migration journal
  * included, on your dev or session branch. Refuses any other branch before
- * connecting.
+ * connecting. One command at a time owns the checkout's history.
  */
 export async function runClean(ctx: DbContext): Promise<CleanReport> {
+  return withHistoryLock(ctx.root, "clean", (lock) => cleanHolding(ctx, lock));
+}
+
+/** runClean for a caller that already holds the checkout's history lock. */
+export async function cleanHolding(
+  ctx: DbContext,
+  lock: HistoryLock,
+): Promise<CleanReport> {
+  // Dropping the schema drops the branch's migration journal too.
+  lock.assertHeld();
   const target = await cleanTarget(ctx);
   const dependents = await runInTransaction(ctx, async (client) => {
     const found = await readCascadeDependents(client, target.schemaName);

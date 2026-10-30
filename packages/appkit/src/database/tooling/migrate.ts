@@ -115,7 +115,8 @@ export async function runMigrate(
   );
 }
 
-async function migrateHolding(
+/** runMigrate for a caller that already holds the checkout's history lock. */
+export async function migrateHolding(
   ctx: DbContext,
   lock: HistoryLock,
   options: MigrateOptions,

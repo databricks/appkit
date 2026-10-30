@@ -3,14 +3,13 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-const { runClean, runIntrospect, runMigrate, withBranchPool } = vi.hoisted(
-  () => ({
-    runClean: vi.fn(),
-    runIntrospect: vi.fn(),
-    runMigrate: vi.fn(),
+const { cleanHolding, introspectHolding, migrateHolding, withBranchPool } =
+  vi.hoisted(() => ({
+    cleanHolding: vi.fn(),
+    introspectHolding: vi.fn(),
+    migrateHolding: vi.fn(),
     withBranchPool: vi.fn(),
-  }),
-);
+  }));
 
 vi.mock("../context", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../context")>()),
@@ -18,14 +17,16 @@ vi.mock("../context", async (importOriginal) => ({
 }));
 vi.mock("../migrate", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../migrate")>()),
-  runMigrate,
+  migrateHolding,
 }));
-vi.mock("../clean", () => ({ runClean }));
-vi.mock("../introspect", () => ({ runIntrospect }));
+vi.mock("../clean", () => ({ cleanHolding }));
+vi.mock("../introspect", () => ({ introspectHolding }));
 
 import type { DbContext } from "../context";
+import type { HistoryLock } from "../history-lock";
 import { type InitOptions, runInit } from "../init";
 import { LakebaseApiError } from "../lakebase-api";
+import { runMigrate } from "../migrate";
 import { DRIZZLE_KIT_VERSION } from "../migrations";
 import { devBranchId, sessionBranchId } from "../naming";
 import {
@@ -157,13 +158,13 @@ beforeEach(() => {
   withBranchPool
     .mockReset()
     .mockImplementation((_ctx, fn: (p: unknown) => unknown) => fn(pool));
-  runMigrate.mockReset().mockResolvedValue(migrateReport);
-  runClean.mockReset().mockResolvedValue({
+  migrateHolding.mockReset().mockResolvedValue(migrateReport);
+  cleanHolding.mockReset().mockResolvedValue({
     branch: DEV,
     schemaName: "app",
     dependents: [],
   });
-  runIntrospect.mockReset().mockResolvedValue({ branch: DEV, tables: [] });
+  introspectHolding.mockReset().mockResolvedValue({ branch: DEV, tables: [] });
 });
 afterEach(cleanupTempApps);
 
@@ -219,7 +220,7 @@ describe("runInit — dev branch", () => {
       /^# Lakebase\n/,
     );
     // Migrate runs against the new branch; the caller's environment is left alone.
-    const [migrateCtx, migrateOptions] = runMigrate.mock.calls[0] ?? [];
+    const [migrateCtx, , migrateOptions] = migrateHolding.mock.calls[0] ?? [];
     expect(migrateCtx.env.LAKEBASE_ENDPOINT).toBe(`${DEV}/endpoints/primary`);
     expect(migrateOptions).toEqual({ interactive: false });
     expect(ctx.env.LAKEBASE_ENDPOINT).toBe(`${PRODUCTION}/endpoints/primary`);
@@ -644,7 +645,9 @@ describe("runInit — schema start", () => {
       kind: "introspect",
       introspect: { branch: DEV, tables: [] },
     });
-    expect(runIntrospect.mock.calls[0]?.[1]).toEqual({ interactive: false });
+    expect(introspectHolding.mock.calls[0]?.[2]).toEqual({
+      interactive: false,
+    });
     expect(
       steps.indexOf(
         `Installing drizzle-kit ${DRIZZLE_KIT_VERSION}, which writes migrations (pnpm ${install.join(" ")})`,
@@ -680,13 +683,13 @@ describe("runInit — schema start", () => {
 
     const { report } = await init(ctx, { schema: "clean", runCommand });
 
-    expect(runClean).toHaveBeenCalledOnce();
-    expect(runMigrate.mock.calls[0]?.[1]).toEqual({
+    expect(cleanHolding).toHaveBeenCalledOnce();
+    expect(migrateHolding.mock.calls[0]?.[2]).toEqual({
       interactive: false,
       generate: false,
     });
-    expect(runClean.mock.invocationCallOrder[0]).toBeLessThan(
-      runMigrate.mock.invocationCallOrder[0] ?? 0,
+    expect(cleanHolding.mock.invocationCallOrder[0]).toBeLessThan(
+      migrateHolding.mock.invocationCallOrder[0] ?? 0,
     );
     expect(runCommand).not.toHaveBeenCalled();
     expect(report.start).toEqual({
@@ -694,6 +697,34 @@ describe("runInit — schema start", () => {
       clean: { branch: DEV, schemaName: "app", dependents: [] },
       migrate: migrateReport,
     });
+  });
+
+  test("one history lock covers init's clean and migrate: another command is refused meanwhile, and the lock goes at the end", async () => {
+    const ctx = appOn(project(), {}, { files: { "package.json": "{}" } });
+    const lockFile = path.join(ctx.root, "config/database/.appkit-db.lock");
+    cleanHolding.mockImplementationOnce(async (_ctx, lock: HistoryLock) => {
+      lock.assertHeld();
+      expect(fs.existsSync(lockFile)).toBe(true);
+      await expect(runMigrate(ctx, { interactive: false })).rejects.toThrow(
+        /^Another `appkit db init` \(pid \d+ on .+\) is changing the migration history in config\/database\. /,
+      );
+      return { branch: DEV, schemaName: "app", dependents: [] };
+    });
+
+    await init(ctx, { schema: "clean" });
+
+    expect(migrateHolding.mock.calls[0]?.[1]).toBe(
+      cleanHolding.mock.calls[0]?.[1],
+    );
+    expect(fs.existsSync(lockFile)).toBe(false);
+  });
+
+  test("--schema none takes no history lock, so an app without config/database still has none", async () => {
+    const ctx = appOn(project(), {}, { schema: false });
+
+    await init(ctx, { schema: "none" });
+
+    expect(fs.existsSync(path.join(ctx.root, "config/database"))).toBe(false);
   });
 
   test.each(["migrate", "clean"] as const)(
