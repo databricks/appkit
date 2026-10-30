@@ -761,6 +761,18 @@ describe("runInit — schema start", () => {
     expect(fs.existsSync(path.join(ctx.root, "config/database"))).toBe(false);
   });
 
+  test("--schema none does not load schema.ts, so a half-edited one does not stop it", async () => {
+    const ctx = appOn(
+      project(),
+      {},
+      { files: { "config/database/schema.ts": "export const schema = (" } },
+    );
+
+    const { report } = await init(ctx, { schema: "none" });
+
+    expect(report.start).toEqual({ kind: "none" });
+  });
+
   test.each(["migrate", "clean"] as const)(
     "%s without schema.ts fails before any change",
     async (start) => {

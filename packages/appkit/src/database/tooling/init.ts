@@ -459,7 +459,9 @@ async function initHolding(
       ? { api: SESSION_BRANCH_TTL, label: "7 days" }
       : { api: parseTtl(options.ttl), label: options.ttl.trim() };
 
-  // Before any change: a .env init may write, what the start needs, and the schema the hand-off is for.
+  // Before any change, check the .env init may write and what the start needs,
+  // and read the schema the hand-off and the start are for. --schema none does
+  // neither, so it reads no schema.ts.
   const envFile = path.join(ctx.root, ENV_FILE);
   refuseSymlink(envFile);
   const hasSchema = hasSchemaFile(ctx.root);
@@ -468,7 +470,7 @@ async function initHolding(
     requireSchemaFile(ctx.root, startKind);
   }
   const schemaName =
-    hasSchema && startKind !== "introspect"
+    hasSchema && startKind !== "introspect" && startKind !== "none"
       ? (await loadDefaultDatabaseSchema(ctx.root, { showImportError: true }))
           .$schemaName
       : DEFAULT_SCHEMA_NAME;
