@@ -112,6 +112,54 @@ Migrations applied on start into `public` also need
 `GRANT CREATE ON SCHEMA public` to the app's service principal, because it does
 not own `public`.
 
+## Generate and apply migrations locally
+
+:::note
+`appkit db` is hidden from `appkit --help` while the database development flow is
+in beta. Its logic ships in `@databricks/appkit/beta/database-tooling`, which
+only the AppKit CLI of the same release imports. It has no semver guarantee.
+:::
+
+`npx appkit db migrate` compares `config/database/schema.ts` with the latest
+committed snapshot. When they differ, it writes
+`config/database/migrations/NNNN_migration.sql`. It regenerates
+`shared/appkit-types/database.d.ts`, then applies pending migrations to the
+branch `.env` names. Commit the migrations with `schema.ts`.
+
+`migrate` applies migrations only to your dev branch or to this checkout's
+session branch. A session branch name includes a hash of the user who created
+it, so a `.env` copied from another developer does not make their session branch
+yours.
+
+### Branches `databricks.yml` deploys to
+
+`migrate` never applies migrations to a branch that `databricks.yml` deploys to.
+It reads every target, every `postgres` resource of every app, the
+`postgres_branch` variable, and the files that `include:` names.
+
+If a branch or database reference has no value in those files, `migrate` cannot
+tell which branch the reference names. Examples are a target that leaves
+`postgres_branch` unset and `${workspace.current_user.short_name}`. While any such
+reference exists, `migrate` applies migrations to no branch. The message names
+the target and where the reference is. To continue, give the reference a value
+in `databricks.yml`.
+
+The check reads only this checkout's files. It does not see values passed at
+deploy time with `--var` or `BUNDLE_VAR_*`. It protects branches from the CLI,
+and does not replace Lakebase permissions or protected branches.
+
+### One command at a time
+
+While `migrate` runs, it holds `config/database/.appkit-db.lock`. A second
+`appkit db` command in the same checkout fails and names the process that holds
+the lock. The lock goes when the command finishes or exits.
+
+A command stopped by a signal, such as SIGKILL, can leave the file behind. The
+next command then reports that the holder stopped. To recover, make sure no
+`appkit db` command runs in the checkout, delete
+`config/database/.appkit-db.lock`, and run the command again. AppKit never
+deletes a lock it does not hold. Scaffolded apps list the file in `.gitignore`.
+
 ## Schema discovery and overrides
 
 `database()` and `database({})` use the same defaults. During setup, the plugin
