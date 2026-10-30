@@ -11,8 +11,8 @@
     "size:compare": "tsx tools/bundle-size.ts --compare",
     "sync:template": "node packages/shared/bin/appkit.js plugin sync --write --silent --plugins-dir packages/appkit/src/plugins --output template/appkit.plugins.json --require-plugins server",
     "build:watch": "pnpm -r --filter=!dev-playground --filter=!docs build:watch",
-    "check:fix": "oxlint --fix && oxfmt",
-    "check": "oxlint && oxfmt --check",
+    "check:fix": "oxlint --disable-nested-config --fix && oxfmt",
+    "check": "oxlint --disable-nested-config && oxfmt --check",
     "generate:types": "tsx tools/generate-json-schema.ts && tsx tools/generate-registry-types.ts && tsx tools/generate-plugin-entries.ts && tsx tools/generate-plugin-doc-banners.ts",
     "generate:plugin-entries": "tsx tools/generate-plugin-entries.ts",
     "generate:plugin-doc-banners": "tsx tools/generate-plugin-doc-banners.ts",
@@ -34,8 +34,8 @@
     "docs:lint": "oxlint docs/",
     "format:check": "oxfmt --check",
     "format": "oxfmt",
-    "lint:fix": "oxlint --fix",
-    "lint": "oxlint",
+    "lint:fix": "oxlint --disable-nested-config --fix",
+    "lint": "oxlint --disable-nested-config",
     "pack:sdk": "pnpm build && pnpm --filter=docs build && pnpm -r tarball",
     "pack:prerelease": "pnpm build && pnpm --filter=docs build && pnpm -r --filter='@databricks/*' tarball:prerelease",
     "prepare": "husky",
@@ -51,7 +51,7 @@
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [
-      "oxlint --fix --no-error-on-unmatched-pattern",
+      "oxlint --disable-nested-config --fix --no-error-on-unmatched-pattern",
       "oxfmt --write --no-error-on-unmatched-pattern"
     ],
     "*.json": [
@@ -66,7 +66,7 @@
     "@release-it/conventional-changelog": "10.0.4",
     "@testing-library/dom": "10.4.1",
     "@testing-library/react": "16.3.0",
-    "@types/node": "24.7.2",
+    "@types/node": "22.20.5",
     "@vitejs/plugin-react": "5.0.4",
     "@vitest/coverage-istanbul": "3.2.4",
     "esbuild": "0.25.10",

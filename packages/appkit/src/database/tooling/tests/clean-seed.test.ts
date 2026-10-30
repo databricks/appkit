@@ -22,6 +22,7 @@ vi.mock("../context", async (importOriginal) => ({
 }));
 
 import { deleteSessionBranch, previewClean, runClean } from "../clean";
+import { withHistoryLock } from "../history-lock";
 import { runSeed, SEED_FILE } from "../seed";
 import { cleanupTempApps, FakeLakebase, fakeContext, tempApp } from "./fakes";
 
@@ -111,6 +112,7 @@ describe("runClean", () => {
     );
     expect(writableEnvBranch).not.toHaveBeenCalled();
     expect(withBranchPool).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(ctx.root, "config/database"))).toBe(false);
   });
 
   test("refuses a branch that is not yours before connecting", async () => {
@@ -133,6 +135,19 @@ describe("runClean", () => {
     await expect(runClean(ctx)).rejects.toThrow("boom");
     expect(statements.slice(-1)).toEqual(["rollback"]);
     expect(client.released?.error).toBeInstanceOf(Error);
+  });
+
+  test("while another appkit db command changes the migration history, it refuses before checking the branch", async () => {
+    const root = tempApp({ "config/database/schema.ts": schemaFile("app") });
+    const ctx = fakeContext({ root });
+
+    await withHistoryLock(root, "migrate", async () => {
+      await expect(runClean(ctx)).rejects.toThrow(
+        /^Another `appkit db migrate` \(pid \d+ on .+\) is changing the migration history in config\/database\. /,
+      );
+    });
+    expect(writableEnvBranch).not.toHaveBeenCalled();
+    expect(withBranchPool).not.toHaveBeenCalled();
   });
 });
 

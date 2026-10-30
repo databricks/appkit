@@ -414,7 +414,7 @@ async function verifyDeploy(
     targetName,
     defaultBundleTarget(bundle),
   );
-  const bound = target.apps.filter((app) => app.postgres);
+  const bound = target.apps.filter((app) => app.postgres.length > 0);
   if (bound.length > 1) {
     throw new Error(
       `Target ${target.name} deploys ${bound.length} apps with a postgres resource (${bound.map((app) => app.key).join(", ")}); verify checks one app per target.`,
@@ -422,15 +422,31 @@ async function verifyDeploy(
   }
   const app =
     bound[0] ?? (target.apps.length === 1 ? target.apps[0] : undefined);
-  const branch = app?.postgres?.branch ?? target.postgresBranch;
-  if (!branch) {
+  if (app && app.postgres.length > 1) {
     throw new Error(
-      app?.postgres
-        ? `No deploy branch: the postgres resource of app ${app.key} in target ${target.name} names its branch with a reference only a deploy resolves.`
-        : `No deploy branch: target ${target.name} in ${file} declares no app with a postgres resource.`,
+      `App ${app.key} in target ${target.name} has ${app.postgres.length} postgres resources (${app.postgres.map((binding) => binding.at).join(", ")}); verify checks one per app.`,
     );
   }
-  const database = app?.postgres?.database ?? target.postgresDatabase;
+  const declared = app?.postgres[0];
+  const branchValue = declared ? declared.branch : target.postgresBranch;
+  if (!branchValue) {
+    throw new Error(
+      `No deploy branch: target ${target.name} in ${file} declares no app with a postgres resource.`,
+    );
+  }
+  if (branchValue.kind === "unresolved") {
+    throw new Error(
+      `No deploy branch: ${declared ? `${declared.at}.branch` : "variables.postgres_branch"} in target ${target.name} is "${branchValue.written}", which this checkout's files do not resolve to a branch.`,
+    );
+  }
+  const databaseValue = declared ? declared.database : target.postgresDatabase;
+  if (databaseValue?.kind === "unresolved") {
+    throw new Error(
+      `No deploy database: ${declared ? `${declared.at}.database` : "variables.postgres_database"} in target ${target.name} is "${databaseValue.written}", which this checkout's files do not resolve to a database.`,
+    );
+  }
+  const branch = branchValue.name;
+  const database = databaseValue?.name ?? null;
   const report = (
     name: string | null,
     problems: string[],

@@ -783,6 +783,41 @@ describe("runVerify --deployed", () => {
     );
   });
 
+  test("an app with two postgres resources, or a branch or database the files do not resolve, is refused before any API call", async () => {
+    const postgres = (branch: string, database: string) =>
+      `        - name: postgres\n          postgres:\n            branch: ${branch}\n            database: ${database}\n`;
+    const app = (resources: string) =>
+      ymlWithApps(
+        `resources:\n  apps:\n    app:\n      name: my-app\n      resources:\n${resources}`,
+      );
+    const cases = [
+      [
+        app(
+          postgres("${var.postgres_branch}", "${var.postgres_database}") +
+            postgres(
+              "${var.postgres_branch}",
+              "${var.postgres_database}",
+            ).replace("name: postgres", "name: other"),
+        ),
+        "App app in target default has 2 postgres resources (resources.apps.app.resources[0].postgres, resources.apps.app.resources[1].postgres); verify checks one per app.",
+      ],
+      [
+        app(postgres("${var.missing}", "${var.postgres_database}")),
+        'No deploy branch: resources.apps.app.resources[0].postgres.branch in target default is "${var.missing}", which this checkout\'s files do not resolve to a branch.',
+      ],
+      [
+        app(postgres("${var.postgres_branch}", "${var.missing}")),
+        'No deploy database: resources.apps.app.resources[0].postgres.database in target default is "${var.missing}", which this checkout\'s files do not resolve to a database.',
+      ],
+    ];
+    for (const [yml, message] of cases) {
+      const { ctx, lakebase, requests } = deployedApp({ yml });
+      await expect(runVerify(ctx, DEPLOYED)).rejects.toThrow(message);
+      expect(requests).toEqual([]);
+      expect(lakebase.calls).toEqual([]);
+    }
+  });
+
   test("an error other than 404 from the apps API names the app", async () => {
     const { ctx } = deployedApp({
       app: Object.assign(new Error("Forbidden"), { statusCode: 403 }),

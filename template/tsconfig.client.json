@@ -19,9 +19,8 @@
     "noUncheckedSideEffectImports": true,
 
     /* Paths */
-    "baseUrl": "./client",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./client/src/*"]
     }
   },
   "include": ["client/src", "shared/appkit-types"]

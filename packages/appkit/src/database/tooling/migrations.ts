@@ -16,6 +16,7 @@ import {
 } from "../migrations/paths";
 import type { Schema } from "../schema-builder";
 import { drizzleKitImports } from "./drizzle-exports";
+import type { HistoryLock } from "./history-lock";
 
 /**
  * The drizzle-kit release the snapshots and SQL are written for; the optional
@@ -24,8 +25,6 @@ import { drizzleKitImports } from "./drizzle-exports";
 export const DRIZZLE_KIT_VERSION = "0.31.10";
 
 interface GenerateOptions {
-  /** Absolute migrations folder. */
-  readonly folder: string;
   readonly schema: Schema;
   /** Default "migration" → "NNNN_migration". */
   readonly tag?: string;
@@ -41,6 +40,8 @@ export interface GeneratedMigration {
   /** Absolute path of the written .sql file. */
   readonly file: string;
   readonly statements: readonly string[];
+  /** The journal's text this migration replaced; null when there was none. */
+  readonly journalBefore: string | null;
 }
 
 /**
@@ -315,6 +316,7 @@ function writeFileAtomic(file: string, content: string): void {
  * and the appended `meta/_journal.json`. null when nothing changed.
  */
 export async function generateMigrationFiles(
+  lock: HistoryLock,
   options: GenerateOptions,
 ): Promise<GeneratedMigration | null> {
   const name = options.tag ?? "migration";
@@ -324,9 +326,10 @@ export async function generateMigrationFiles(
     );
   }
   const { generateDrizzleJson, generateMigration } = await loadDrizzleKit();
+  const { folder } = lock;
 
-  const journal = readJournal(options.folder);
-  const prev = latestSnapshot(options.folder, journal);
+  const journal = readJournal(folder);
+  const prev = latestSnapshot(folder, journal);
   const cur = generateDrizzleJson(drizzleKitImports(options.schema), prev.id, [
     options.schema.$schemaName,
   ]) as unknown as Snapshot;
@@ -366,10 +369,15 @@ export async function generateMigrationFiles(
     entries: [...entries, entry],
   };
 
-  const file = migrationFile(options.folder, tag);
-  fs.mkdirSync(metaFolder(options.folder), { recursive: true });
+  lock.assertHeld();
+  const file = migrationFile(folder, tag);
+  const journalPath = journalFile(folder);
+  const journalBefore = fs.existsSync(journalPath)
+    ? fs.readFileSync(journalPath, "utf-8")
+    : null;
+  fs.mkdirSync(metaFolder(folder), { recursive: true });
   fs.writeFileSync(
-    snapshotFile(options.folder, idx),
+    snapshotFile(folder, idx),
     JSON.stringify(
       { ...cur, _meta: { columns: {}, schemas: {}, tables: {} } },
       null,
@@ -378,25 +386,26 @@ export async function generateMigrationFiles(
   );
   fs.writeFileSync(file, statements.join(BREAKPOINT));
   // The journal is written last: it is what makes the migration visible.
-  writeFileAtomic(journalFile(options.folder), JSON.stringify(next, null, 2));
-  return { tag, file, statements };
+  writeFileAtomic(journalPath, JSON.stringify(next, null, 2));
+  return { tag, file, statements, journalBefore };
 }
 
 /**
- * Remove a migration generateMigrationFiles wrote and put back the journal it
- * replaced (null: there was none, so the folders it created go too).
+ * Remove a migration generateMigrationFiles wrote under the same lock and put
+ * back the journal it replaced (none: the folders it created go too).
  */
 export function discardMigrationFiles(
-  folder: string,
+  lock: HistoryLock,
   migration: GeneratedMigration,
-  journalBefore: string | null,
 ): void {
+  lock.assertHeld();
+  const { folder } = lock;
   fs.rmSync(migration.file, { force: true });
   fs.rmSync(snapshotFile(folder, Number.parseInt(migration.tag, 10)), {
     force: true,
   });
-  if (journalBefore !== null) {
-    writeFileAtomic(journalFile(folder), journalBefore);
+  if (migration.journalBefore !== null) {
+    writeFileAtomic(journalFile(folder), migration.journalBefore);
     return;
   }
   fs.rmSync(journalFile(folder), { force: true });

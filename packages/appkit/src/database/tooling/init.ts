@@ -5,7 +5,7 @@ import dotenv from "dotenv";
 
 import { loadDefaultDatabaseSchema } from "../../plugins/database/load-schema";
 import { DEFAULT_SCHEMA_NAME } from "../schema-builder/define-schema";
-import { type CleanReport, runClean } from "./clean";
+import { type CleanReport, cleanHolding } from "./clean";
 import type { DbContext } from "./context";
 import {
   ensureDrizzleKit,
@@ -13,10 +13,11 @@ import {
   runCommand,
 } from "./drizzle-kit-install";
 import { refuseSymlink, updateEnvFile } from "./env-file";
-import { classifyBranch, takesWrites } from "./guard";
+import { classifyBranch, deployRefusal, takesWrites } from "./guard";
 import { handOffAppSchema } from "./hand-off";
+import { type HistoryLock, withHistoryLock } from "./history-lock";
 import { currentIdentity, type Identity } from "./identity";
-import { type IntrospectReport, runIntrospect } from "./introspect";
+import { introspectHolding, type IntrospectReport } from "./introspect";
 import {
   isAlreadyExists,
   isBranchLimit,
@@ -30,8 +31,8 @@ import {
 import {
   hasSchemaFile,
   type MigrateReport,
+  migrateHolding,
   requireSchemaFile,
-  runMigrate,
 } from "./migrate";
 import {
   devBranchId,
@@ -43,10 +44,11 @@ import {
 } from "./naming";
 import {
   type BranchMode,
+  type DeployBoundary,
   type DeployTarget,
   type LocalTarget,
   parseResourceName,
-  readDeployBranches,
+  readDeployBoundary,
   readDeployTarget,
   readLocalTarget,
   resourceId,
@@ -96,7 +98,10 @@ export interface InitReport {
   readonly database: string;
   readonly user: string;
   readonly role: { readonly name: string; readonly action: RoleAction };
-  /** The Postgres role whose copy of the app schema was handed to you; null when you owned it. */
+  /**
+   * The Postgres role whose copy of the app schema was handed to you; null when
+   * you owned it, the schema is public, or `--schema none` left it alone.
+   */
   readonly handedOff: string | null;
   readonly envFile: string;
   /** The drizzle-kit install init ran; null when it was installed. */
@@ -167,7 +172,7 @@ interface BranchRequest {
   readonly session: string | null;
   /** The API's duration ("3600s"), and how the developer wrote it. */
   readonly ttl: { readonly api: string; readonly label: string };
-  readonly deployBranches: readonly string[];
+  readonly boundary: DeployBoundary;
   readonly envFile: string;
   readonly onStep: (message: string) => void;
 }
@@ -210,7 +215,7 @@ async function findOrCreateBranch(
   ctx: DbContext,
   request: BranchRequest,
 ): Promise<FoundBranch> {
-  const { project, mode, identity, deployBranches, onStep } = request;
+  const { project, mode, identity, boundary, onStep } = request;
   const api = ctx.api();
   let session = mode === "session" ? (request.session ?? newSessionId()) : null;
   let rotated = false;
@@ -226,7 +231,7 @@ async function findOrCreateBranch(
       branch,
       userName: identity.userName,
       sessionId: session,
-      deployBranches,
+      boundary,
     });
     if (!takesWrites(verdict.kind)) {
       throw new Error(
@@ -253,9 +258,10 @@ async function findOrCreateBranch(
 
   for (;;) {
     const name = branchName();
-    if (deployBranches.includes(name)) {
+    const refusal = deployRefusal(boundary, name);
+    if (refusal) {
       throw new Error(
-        `Refusing to set up ${resourceId(name)}: it is a branch databricks.yml deploys to, and the deployed app migrates it itself.`,
+        `Refusing to set up ${resourceId(name)}: ${refusal}. \`appkit db init\` only sets up your dev branch or this checkout's session branch.`,
       );
     }
     const existing = await api.getBranch(name);
@@ -422,14 +428,33 @@ function readEnvValues(file: string): Record<string, string> {
 /**
  * `appkit db init`: find or create your dev branch or this checkout's session
  * branch, ensure a read-write endpoint and your DATABRICKS_SUPERUSER role,
- * point `.env` at the branch, hand the app schema the fork copied to you, then
- * start the schema. No prompts: every choice has a default. It refuses the
- * project's default branch, protected branches and branches databricks.yml
- * deploys to before changing anything, and never touches the deploy bundle.
+ * point `.env` at the branch, hand the app schema the fork copied to you
+ * (except with `--schema none`), then start the schema. No prompts: every
+ * choice has a default. It refuses the project's default branch, protected
+ * branches and branches databricks.yml deploys to before changing anything,
+ * and never touches the deploy bundle.
+ * One lock on the checkout's history covers the whole run, so no other
+ * `appkit db` command runs between its clean and migrate; `--schema none`
+ * changes no history and takes none.
  */
 export async function runInit(
   ctx: DbContext,
   options: InitOptions = {},
+): Promise<InitReport> {
+  if (options.schema === "none") return initHolding(ctx, null, options);
+  // Before the lock, which creates config/database.
+  if (options.schema === "migrate" || options.schema === "clean") {
+    requireSchemaFile(ctx.root, options.schema);
+  }
+  return withHistoryLock(ctx.root, "init", (lock) =>
+    initHolding(ctx, lock, options),
+  );
+}
+
+async function initHolding(
+  ctx: DbContext,
+  lock: HistoryLock | null,
+  options: InitOptions,
 ): Promise<InitReport> {
   const onStep = options.onStep ?? (() => undefined);
   const interactive = options.interactive ?? false;
@@ -438,16 +463,15 @@ export async function runInit(
       ? { api: SESSION_BRANCH_TTL, label: "7 days" }
       : { api: parseTtl(options.ttl), label: options.ttl.trim() };
 
-  // Before any change: a .env init may write, what the start needs, and the schema the hand-off is for.
+  // Before any change, check the .env init may write and read the schema the
+  // hand-off and the start are for. --schema none does neither, so it reads no
+  // schema.ts.
   const envFile = path.join(ctx.root, ENV_FILE);
   refuseSymlink(envFile);
   const hasSchema = hasSchemaFile(ctx.root);
   const startKind = options.schema ?? (hasSchema ? "migrate" : "introspect");
-  if (startKind === "migrate" || startKind === "clean") {
-    requireSchemaFile(ctx.root, startKind);
-  }
   const schemaName =
-    hasSchema && startKind !== "introspect"
+    hasSchema && startKind !== "introspect" && startKind !== "none"
       ? (await loadDefaultDatabaseSchema(ctx.root, { showImportError: true }))
           .$schemaName
       : DEFAULT_SCHEMA_NAME;
@@ -475,7 +499,7 @@ export async function runInit(
     identity,
     session: local.session,
     ttl,
-    deployBranches: readDeployBranches(ctx.root),
+    boundary: readDeployBoundary(ctx.root),
     envFile,
     onStep,
   });
@@ -511,45 +535,51 @@ export async function runInit(
   updateEnvFile(envFile, values);
   const branchCtx: DbContext = { ...ctx, env: { ...ctx.env, ...values } };
 
-  const handedOff = await handOffAppSchema(branchCtx, {
-    branch: branch.name,
-    database,
-    schemaName,
-    developer: role,
-    roles,
-    onStep,
-  });
+  // --schema none leaves the schema as the fork has it, owner included.
+  const handedOff =
+    startKind === "none"
+      ? null
+      : await handOffAppSchema(branchCtx, {
+          branch: branch.name,
+          database,
+          schemaName,
+          developer: role,
+          roles,
+          onStep,
+        });
 
   const installed =
     startKind === "migrate" || startKind === "introspect"
       ? ensureDrizzleKit(ctx.root, options.runCommand ?? runCommand, onStep)
       : null;
 
-  let start: InitStart;
+  // Without a lock (--schema none) the schema stays as the fork has it.
+  let start: InitStart = { kind: "none" };
   const on = `on ${resourceId(branch.name)}`;
-  if (startKind === "migrate") {
+  if (lock && startKind === "migrate") {
     onStep(`Migrating schema ${schemaName} ${on}`);
     start = {
       kind: "migrate",
-      migrate: await runMigrate(branchCtx, { interactive }),
+      migrate: await migrateHolding(branchCtx, lock, { interactive }),
     };
-  } else if (startKind === "introspect") {
+  } else if (lock && startKind === "introspect") {
     onStep(`Writing schema.ts from schema ${schemaName} ${on}`);
     start = {
       kind: "introspect",
-      introspect: await runIntrospect(branchCtx, { interactive }),
+      introspect: await introspectHolding(branchCtx, lock, { interactive }),
     };
-  } else if (startKind === "clean") {
+  } else if (lock && startKind === "clean") {
     onStep(`Dropping schema ${schemaName} ${on}`);
-    const clean = await runClean(branchCtx);
+    const clean = await cleanHolding(branchCtx, lock);
     // Recreate from the committed migrations, so the startup check passes.
     start = {
       kind: "clean",
       clean,
-      migrate: await runMigrate(branchCtx, { interactive, generate: false }),
+      migrate: await migrateHolding(branchCtx, lock, {
+        interactive,
+        generate: false,
+      }),
     };
-  } else {
-    start = { kind: "none" };
   }
 
   return {

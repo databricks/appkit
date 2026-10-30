@@ -13,13 +13,10 @@ import {
   applyPendingMigrations,
   MigrationApplyError,
 } from "../migrations/apply";
-import {
-  journalFile,
-  migrationsFolder,
-  readJournal,
-} from "../migrations/paths";
+import { readJournal } from "../migrations/paths";
 import { type DbContext, NO_ENV_BRANCH, withBranchPool } from "./context";
 import { notYourBranch, resolveEnvBranch, takesWrites } from "./guard";
+import { type HistoryLock, withHistoryLock } from "./history-lock";
 import {
   breakingStatements,
   discardMigrationFiles,
@@ -49,11 +46,6 @@ export function requireSchemaFile(
   );
 }
 
-/** The journal's text before this run writes to it; null when there is none. */
-function readJournalText(folder: string): string | null {
-  const file = journalFile(folder);
-  return fs.existsSync(file) ? fs.readFileSync(file, "utf-8") : null;
-}
 export const DATABASE_TYPES_PATH = path.join(
   "shared/appkit-types",
   DATABASE_TYPES_FILE,
@@ -112,23 +104,31 @@ async function applyToEnvBranch(
 /**
  * `appkit db migrate`: generate a migration when schema.ts changed, regenerate
  * database.d.ts, and apply pending migrations to the `.env` branch (only AppKit
- * dev/session branches).
+ * dev/session branches). One command at a time owns the checkout's history.
  */
 export async function runMigrate(
   ctx: DbContext,
   options: MigrateOptions,
 ): Promise<MigrateReport> {
   requireSchemaFile(ctx.root, "migrate");
+  return withHistoryLock(ctx.root, "migrate", (lock) =>
+    migrateHolding(ctx, lock, options),
+  );
+}
+
+/** runMigrate for a caller that already holds the checkout's history lock. */
+export async function migrateHolding(
+  ctx: DbContext,
+  lock: HistoryLock,
+  options: MigrateOptions,
+): Promise<MigrateReport> {
   const schema = await loadDefaultDatabaseSchema(ctx.root, {
     showImportError: true,
   });
-  const folder = migrationsFolder(ctx.root);
-  const journalBefore = readJournalText(folder);
   const generated =
     options.generate === false
       ? null
-      : await generateMigrationFiles({
-          folder,
+      : await generateMigrationFiles(lock, {
           schema,
           interactive: options.interactive,
         });
@@ -139,7 +139,7 @@ export async function runMigrate(
 
   let outcome: ApplyOutcome;
   try {
-    outcome = await applyToEnvBranch(ctx, folder, schema.$schemaName);
+    outcome = await applyToEnvBranch(ctx, lock.folder, schema.$schemaName);
   } catch (error) {
     if (!generated) throw error;
     const file = path.relative(ctx.root, generated.file);
@@ -150,7 +150,7 @@ export async function runMigrate(
       error.failed === generated.tag &&
       error.code
     ) {
-      discardMigrationFiles(folder, generated, journalBefore);
+      discardMigrationFiles(lock, generated);
       throw new Error(
         `${error.message} Removed ${file}, so the next run writes it again from ${DEFAULT_SCHEMA_FILE}. Change ${DEFAULT_SCHEMA_FILE} or the branch's data, then rerun \`appkit db migrate\`.`,
         { cause: error },

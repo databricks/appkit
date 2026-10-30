@@ -3,14 +3,13 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-const { runClean, runIntrospect, runMigrate, withBranchPool } = vi.hoisted(
-  () => ({
-    runClean: vi.fn(),
-    runIntrospect: vi.fn(),
-    runMigrate: vi.fn(),
+const { cleanHolding, introspectHolding, migrateHolding, withBranchPool } =
+  vi.hoisted(() => ({
+    cleanHolding: vi.fn(),
+    introspectHolding: vi.fn(),
+    migrateHolding: vi.fn(),
     withBranchPool: vi.fn(),
-  }),
-);
+  }));
 
 vi.mock("../context", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../context")>()),
@@ -18,14 +17,16 @@ vi.mock("../context", async (importOriginal) => ({
 }));
 vi.mock("../migrate", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../migrate")>()),
-  runMigrate,
+  migrateHolding,
 }));
-vi.mock("../clean", () => ({ runClean }));
-vi.mock("../introspect", () => ({ runIntrospect }));
+vi.mock("../clean", () => ({ cleanHolding }));
+vi.mock("../introspect", () => ({ introspectHolding }));
 
 import type { DbContext } from "../context";
+import type { HistoryLock } from "../history-lock";
 import { type InitOptions, runInit } from "../init";
 import { LakebaseApiError } from "../lakebase-api";
+import { runMigrate } from "../migrate";
 import { DRIZZLE_KIT_VERSION } from "../migrations";
 import { devBranchId, sessionBranchId } from "../naming";
 import {
@@ -157,13 +158,13 @@ beforeEach(() => {
   withBranchPool
     .mockReset()
     .mockImplementation((_ctx, fn: (p: unknown) => unknown) => fn(pool));
-  runMigrate.mockReset().mockResolvedValue(migrateReport);
-  runClean.mockReset().mockResolvedValue({
+  migrateHolding.mockReset().mockResolvedValue(migrateReport);
+  cleanHolding.mockReset().mockResolvedValue({
     branch: DEV,
     schemaName: "app",
     dependents: [],
   });
-  runIntrospect.mockReset().mockResolvedValue({ branch: DEV, tables: [] });
+  introspectHolding.mockReset().mockResolvedValue({ branch: DEV, tables: [] });
 });
 afterEach(cleanupTempApps);
 
@@ -219,7 +220,7 @@ describe("runInit — dev branch", () => {
       /^# Lakebase\n/,
     );
     // Migrate runs against the new branch; the caller's environment is left alone.
-    const [migrateCtx, migrateOptions] = runMigrate.mock.calls[0] ?? [];
+    const [migrateCtx, , migrateOptions] = migrateHolding.mock.calls[0] ?? [];
     expect(migrateCtx.env.LAKEBASE_ENDPOINT).toBe(`${DEV}/endpoints/primary`);
     expect(migrateOptions).toEqual({ interactive: false });
     expect(ctx.env.LAKEBASE_ENDPOINT).toBe(`${PRODUCTION}/endpoints/primary`);
@@ -232,14 +233,18 @@ describe("runInit — dev branch", () => {
     lakebase.addRole(DEV, `dbrx-apps-${SP}`, SP);
     schemaOwner = USER;
 
-    const { report, steps } = await init(appOn(lakebase), { schema: "none" });
+    const { report, steps } = await init(appOn(lakebase));
 
     expect(report).toMatchObject({
       created: false,
       handedOff: null,
-      start: { kind: "none" },
+      start: { kind: "migrate", migrate: migrateReport },
     });
     expect(steps[0]).toBe(`Using ${devBranchId(USER)}`);
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.stringContaining("nspowner"),
+      ["app"],
+    );
     expect(
       lakebase.calls.some((call) =>
         /^(createBranch|deleteRole|createRole|createEndpoint)/.test(call),
@@ -257,7 +262,7 @@ describe("runInit — dev branch", () => {
       schemaSource("sales"),
     );
 
-    const { steps } = await init(ctx, { schema: "none" });
+    const { steps } = await init(ctx);
 
     expect(pool.query).toHaveBeenCalledWith(
       expect.stringContaining("nspowner"),
@@ -266,6 +271,36 @@ describe("runInit — dev branch", () => {
     expect(steps).toContain(
       `Handing schema sales in database databricks_postgres on ${devBranchId(USER)} to you: deleting this branch's copy of role ${SP}, which owns it, with its objects reassigned to you`,
     );
+  });
+
+  test("--schema none leaves the schema's owner alone: no hand-off, no role deleted", async () => {
+    const lakebase = project();
+
+    const { report } = await init(appOn(lakebase), { schema: "none" });
+
+    expect(report.handedOff).toBeNull();
+    expect(lakebase.calls.some((call) => call.startsWith("deleteRole"))).toBe(
+      false,
+    );
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  test("schema public is never handed off: its owner belongs to the database, not to an app", async () => {
+    const lakebase = project();
+    const ctx = appOn(
+      lakebase,
+      {},
+      { files: { "config/database/schema.ts": schemaSource("public") } },
+    );
+    schemaOwner = "pg_database_owner";
+
+    const { report } = await init(ctx);
+
+    expect(report.handedOff).toBeNull();
+    expect(lakebase.calls.some((call) => call.startsWith("deleteRole"))).toBe(
+      false,
+    );
+    expect(pool.query).not.toHaveBeenCalled();
   });
 
   test("creates a read-write endpoint that scales to zero after 5 idle minutes when the branch has none", async () => {
@@ -527,7 +562,30 @@ describe("runInit — branches it never sets up", () => {
     const before = fs.readFileSync(path.join(ctx.root, ".env"), "utf-8");
 
     await expect(init(ctx)).rejects.toThrow(
-      `Refusing to set up ${devBranchId(USER)}: it is a branch databricks.yml deploys to, and the deployed app migrates it itself.`,
+      `Refusing to set up ${devBranchId(USER)}: it is a branch databricks.yml deploys to. \`appkit db init\` only sets up your dev branch or this checkout's session branch.`,
+    );
+    expect(lakebase.calls).toEqual([]);
+    expect(fs.readFileSync(path.join(ctx.root, ".env"), "utf-8")).toBe(before);
+  });
+
+  test("a databricks.yml binding the files cannot resolve refuses init before any API call or .env write", async () => {
+    const lakebase = project();
+    const ctx = appOn(
+      lakebase,
+      {},
+      {
+        files: {
+          "databricks.yml": databricksYml(
+            `\${resources.postgres_branches.main.name}`,
+            `${PRODUCTION}/databases/databricks-postgres`,
+          ),
+        },
+      },
+    );
+    const before = fs.readFileSync(path.join(ctx.root, ".env"), "utf-8");
+
+    await expect(init(ctx)).rejects.toThrow(
+      `Refusing to set up ${devBranchId(USER)}: databricks.yml may deploy to it: the files do not resolve resources.apps.app.resources[0].postgres.branch in target default`,
     );
     expect(lakebase.calls).toEqual([]);
     expect(fs.readFileSync(path.join(ctx.root, ".env"), "utf-8")).toBe(before);
@@ -621,7 +679,9 @@ describe("runInit — schema start", () => {
       kind: "introspect",
       introspect: { branch: DEV, tables: [] },
     });
-    expect(runIntrospect.mock.calls[0]?.[1]).toEqual({ interactive: false });
+    expect(introspectHolding.mock.calls[0]?.[2]).toEqual({
+      interactive: false,
+    });
     expect(
       steps.indexOf(
         `Installing drizzle-kit ${DRIZZLE_KIT_VERSION}, which writes migrations (pnpm ${install.join(" ")})`,
@@ -657,13 +717,13 @@ describe("runInit — schema start", () => {
 
     const { report } = await init(ctx, { schema: "clean", runCommand });
 
-    expect(runClean).toHaveBeenCalledOnce();
-    expect(runMigrate.mock.calls[0]?.[1]).toEqual({
+    expect(cleanHolding).toHaveBeenCalledOnce();
+    expect(migrateHolding.mock.calls[0]?.[2]).toEqual({
       interactive: false,
       generate: false,
     });
-    expect(runClean.mock.invocationCallOrder[0]).toBeLessThan(
-      runMigrate.mock.invocationCallOrder[0] ?? 0,
+    expect(cleanHolding.mock.invocationCallOrder[0]).toBeLessThan(
+      migrateHolding.mock.invocationCallOrder[0] ?? 0,
     );
     expect(runCommand).not.toHaveBeenCalled();
     expect(report.start).toEqual({
@@ -671,6 +731,46 @@ describe("runInit — schema start", () => {
       clean: { branch: DEV, schemaName: "app", dependents: [] },
       migrate: migrateReport,
     });
+  });
+
+  test("one history lock covers init's clean and migrate: another command is refused meanwhile, and the lock goes at the end", async () => {
+    const ctx = appOn(project(), {}, { files: { "package.json": "{}" } });
+    const lockFile = path.join(ctx.root, "config/database/.appkit-db.lock");
+    cleanHolding.mockImplementationOnce(async (_ctx, lock: HistoryLock) => {
+      lock.assertHeld();
+      expect(fs.existsSync(lockFile)).toBe(true);
+      await expect(runMigrate(ctx, { interactive: false })).rejects.toThrow(
+        /^Another `appkit db init` \(pid \d+ on .+\) is changing the migration history in config\/database\. /,
+      );
+      return { branch: DEV, schemaName: "app", dependents: [] };
+    });
+
+    await init(ctx, { schema: "clean" });
+
+    expect(migrateHolding.mock.calls[0]?.[1]).toBe(
+      cleanHolding.mock.calls[0]?.[1],
+    );
+    expect(fs.existsSync(lockFile)).toBe(false);
+  });
+
+  test("--schema none takes no history lock, so an app without config/database still has none", async () => {
+    const ctx = appOn(project(), {}, { schema: false });
+
+    await init(ctx, { schema: "none" });
+
+    expect(fs.existsSync(path.join(ctx.root, "config/database"))).toBe(false);
+  });
+
+  test("--schema none does not load schema.ts, so a half-edited one does not stop it", async () => {
+    const ctx = appOn(
+      project(),
+      {},
+      { files: { "config/database/schema.ts": "export const schema = (" } },
+    );
+
+    const { report } = await init(ctx, { schema: "none" });
+
+    expect(report.start).toEqual({ kind: "none" });
   });
 
   test.each(["migrate", "clean"] as const)(
@@ -683,6 +783,7 @@ describe("runInit — schema start", () => {
         /^No config\/database\/schema\.ts yet/,
       );
       expect(lakebase.calls).toEqual([]);
+      expect(fs.existsSync(path.join(ctx.root, "config/database"))).toBe(false);
     },
   );
 });
