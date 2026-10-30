@@ -1,12 +1,16 @@
 import path from "node:path";
 
 import ts from "typescript";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 const packageRoot =
   path.basename(process.cwd()) === "appkit-ui"
     ? process.cwd()
     : path.join(process.cwd(), "packages", "appkit-ui");
+
+// Each probe type-checks the package with the TypeScript compiler, which can
+// exceed Vitest's 5s default on CI's 2-core runners.
+vi.setConfig({ testTimeout: 30_000 });
 
 function compileTypeProbe(source: string): readonly ts.Diagnostic[] {
   const configPath = path.join(packageRoot, "tsconfig.json");
