@@ -2,9 +2,11 @@ import { afterEach, describe, expect, test } from "vitest";
 
 import {
   classifyBranch,
+  everyBranchRefusal,
   resolveEnvBranch,
   takesWrites,
   writableEnvBranch,
+  writeRefusal,
 } from "../guard";
 import { devBranchId, sessionBranchId } from "../naming";
 import type { DeployBoundary } from "../targets";
@@ -98,9 +100,34 @@ describe("classifyBranch", () => {
       expect(verdict(branch, {}, "k2x9q0ab", unresolved)).toEqual({
         kind: "deploy-target",
         reason:
-          'databricks.yml may deploy to it: the files do not resolve resources.apps.app.resources[0].postgres.branch in target prod ("${var.postgres_branch}"); give it a value in databricks.yml',
+          "databricks.yml may deploy to it through a reference this checkout's files do not resolve",
       });
     }
+    expect(everyBranchRefusal(unresolved)).toBe(
+      'The files do not resolve resources.apps.app.resources[0].postgres.branch in target prod ("${var.postgres_branch}"), so `appkit db migrate` applies migrations to no branch, and `init`, `introspect`, `clean` and `seed` refuse every branch. Give it a value in databricks.yml',
+    );
+    expect(everyBranchRefusal(NO_DEPLOYS)).toBeNull();
+  });
+
+  test("a refusal gives its advice only while some branch can take writes", () => {
+    const unresolved: DeployBoundary = {
+      branches: new Set(),
+      unresolved: [
+        {
+          target: "dev",
+          at: "variables.postgres_branch",
+          written: "",
+          file: ".databricks/bundle/dev/variable-overrides.json",
+        },
+      ],
+    };
+    expect(writeRefusal("x is refused", NO_DEPLOYS, "Run init")).toBe(
+      "x is refused. Run init",
+    );
+    expect(writeRefusal("x is refused", NO_DEPLOYS)).toBe("x is refused");
+    expect(writeRefusal("x is refused", unresolved, "Run init")).toBe(
+      "x is refused. The files do not resolve variables.postgres_branch in target dev with .databricks/bundle/dev/variable-overrides.json (no value), so `appkit db migrate` applies migrations to no branch, and `init`, `introspect`, `clean` and `seed` refuse every branch. Give it a value in databricks.yml or the variable-overrides.json named",
+    );
   });
 });
 
@@ -207,7 +234,7 @@ describe("resolveEnvBranch", () => {
 
     expect(env?.kind).toBe("deploy-target");
     expect(env && takesWrites(env.kind)).toBe(false);
-    expect(env?.reason).toContain(
+    expect(env && everyBranchRefusal(env.boundary)).toContain(
       'resources.apps.app.resources[0].postgres.branch in target staging ("${var.postgres_branch}")',
     );
   });
@@ -283,6 +310,31 @@ describe("writableEnvBranch", () => {
       writableEnvBranch(fakeContext({ root: tempApp() }), "seed"),
     ).rejects.toThrow(
       "Did not seed: no branch is configured in .env (PGHOST, PGDATABASE and LAKEBASE_ENDPOINT); run `appkit db init`.",
+    );
+  });
+
+  test("while a reference is unresolved, the refusal names it and gives no init advice, on the default branch too", async () => {
+    const lakebase = new FakeLakebase();
+    lakebase.addBranch(`${P}/branches/production`, { default: true });
+    const root = tempApp({
+      "databricks.yml": `${databricksYml(`${P}/branches/production`, `${P}/branches/production/databases/db`)}  staging:
+    variables:
+      postgres_branch: \${var.staging_branch}
+      postgres_database: ${P}/branches/staging/databases/db
+`,
+    });
+
+    const refusal = writableEnvBranch(
+      fakeContext({
+        root,
+        env: envFor(`${P}/branches/production`),
+        api: lakebase.api(),
+      }),
+      "seed",
+    );
+
+    await expect(refusal).rejects.toThrow(
+      `Refusing to seed: production is not your dev or session branch (it is the project's default branch). The files do not resolve resources.apps.app.resources[0].postgres.branch in target staging ("\${var.postgres_branch}"), variables.postgres_branch in target staging ("\${var.staging_branch}"), so \`appkit db migrate\` applies migrations to no branch, and \`init\`, \`introspect\`, \`clean\` and \`seed\` refuse every branch. Give them values in databricks.yml.`,
     );
   });
 });

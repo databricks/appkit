@@ -2,7 +2,10 @@ import { describe, expect, test, vi } from "vitest";
 
 import type { DataPath } from "../../../database/runtime";
 import { defineSchema, fk, id, text } from "../../../database/schema-builder";
-import { assertSchemaMatchesDatabase } from "../schema-check";
+import {
+  assertSchemaMatchesDatabase,
+  findSchemaProblems,
+} from "../schema-check";
 
 // Explicitly public: the assertions name the tables public.boards and public.notes.
 const schema = defineSchema(
@@ -189,5 +192,41 @@ describe("assertSchemaMatchesDatabase", () => {
       defineSchema(() => ({})),
     );
     expect(raw).not.toHaveBeenCalled();
+  });
+});
+
+describe("findSchemaProblems", () => {
+  test("returns every problem without throwing; the assert reports the same ones", async () => {
+    const { path } = catalog(
+      { boards: ["id", "title"], notes: ["id", "body"] },
+      { boards: "v" },
+    );
+
+    const problems = await findSchemaProblems(path, schema);
+
+    expect(problems).toEqual([
+      "table public.boards is a view, not a table",
+      "table public.notes is missing columns board_id, author_email",
+    ]);
+    await expect(assertSchemaMatchesDatabase(path, schema)).rejects.toThrow(
+      `the declared schema does not match the database: ${problems.join("; ")}.`,
+    );
+  });
+
+  test("returns no problems for a matching database or an empty schema", async () => {
+    const { path } = catalog({
+      boards: ["id", "title"],
+      notes: ["id", "board_id", "author_email", "body"],
+    });
+    expect(await findSchemaProblems(path, schema)).toEqual([]);
+
+    const empty = catalog({});
+    expect(
+      await findSchemaProblems(
+        empty.path,
+        defineSchema(() => ({})),
+      ),
+    ).toEqual([]);
+    expect(empty.raw).not.toHaveBeenCalled();
   });
 });

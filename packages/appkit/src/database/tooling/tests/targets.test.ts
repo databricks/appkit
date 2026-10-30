@@ -5,6 +5,7 @@ import { devBranchId } from "../naming";
 import {
   parseProject,
   parseResourceName,
+  readBundle,
   readDeployBoundary,
   readDeployTarget,
   readLocalTarget,
@@ -372,5 +373,93 @@ targets:
     expect(
       readDeployTarget(tempApp({ "databricks.yml": "bundle:\n  name: x\n" })),
     ).toBeNull();
+  });
+
+  test("null when several targets mark no default; a lone target is the default", () => {
+    const variables =
+      "variables:\n  postgres_branch:\n    default: projects/p/branches/main\n";
+    expect(
+      readDeployTarget(
+        tempApp({
+          "databricks.yml": `${variables}targets:\n  dev: {}\n  prod: {}\n`,
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      readDeployTarget(
+        tempApp({ "databricks.yml": `${variables}targets:\n  dev: {}\n` }),
+      ),
+    ).toEqual({ branch: "projects/p/branches/main", database: null });
+  });
+});
+
+describe("readBundle", () => {
+  test("resolves each target's app name and host; a name only a deploy resolves is null", () => {
+    const root = tempApp({
+      "databricks.yml": `bundle:
+  name: shop
+variables:
+  suffix:
+    default: dev
+workspace:
+  host: https://dev.cloud.databricks.com
+resources:
+  apps:
+    app:
+      name: \${bundle.name}-\${var.suffix}
+targets:
+  default:
+    default: true
+  prod:
+    workspace:
+      host: https://prod.cloud.databricks.com
+    variables:
+      suffix: \${bundle.target}
+  mine:
+    resources:
+      apps:
+        app:
+          name: shop-\${workspace.current_user.short_name}
+`,
+    });
+
+    const bundle = readBundle(root);
+
+    expect(bundle?.file).toBe("databricks.yml");
+    expect(
+      bundle?.targets.map((target) => ({
+        name: target.name,
+        host: target.host,
+        apps: target.apps.map(({ declaredName, name }) => ({
+          declaredName,
+          name,
+        })),
+      })),
+    ).toEqual([
+      {
+        name: "default",
+        host: "https://dev.cloud.databricks.com",
+        apps: [
+          { declaredName: "${bundle.name}-${var.suffix}", name: "shop-dev" },
+        ],
+      },
+      {
+        name: "prod",
+        host: "https://prod.cloud.databricks.com",
+        apps: [
+          { declaredName: "${bundle.name}-${var.suffix}", name: "shop-prod" },
+        ],
+      },
+      {
+        name: "mine",
+        host: "https://dev.cloud.databricks.com",
+        apps: [
+          {
+            declaredName: "shop-${workspace.current_user.short_name}",
+            name: null,
+          },
+        ],
+      },
+    ]);
   });
 });

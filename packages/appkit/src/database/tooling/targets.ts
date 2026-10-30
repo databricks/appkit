@@ -117,12 +117,18 @@ interface PostgresBinding {
 interface BundleApp {
   /** Its key under resources.apps. */
   readonly key: string;
+  /** Its name as written; null when it has none. */
+  readonly declaredName: string | null;
+  /** Its name with bundle references resolved; null when one needs a deploy to resolve. */
+  readonly name: string | null;
   /** Every postgres resource it has. */
   readonly postgres: readonly PostgresBinding[];
 }
 
 /** What one target binds with one set of variable values. */
 interface TargetBindings {
+  /** workspace.host of the target, else of the bundle; null when neither names one the files resolve. */
+  readonly host: string | null;
   readonly apps: readonly BundleApp[];
   /** The target's postgres_branch variable; null when the bundle declares none. */
   readonly postgresBranch: BundleValue | null;
@@ -131,7 +137,7 @@ interface TargetBindings {
 }
 
 /** One target of databricks.yml, with what the files alone can resolve resolved. */
-interface BundleTarget extends TargetBindings {
+export interface BundleTarget extends TargetBindings {
   readonly name: string;
   /** `default: true`, or the one target of a bundle that declares none. */
   readonly isDefault: boolean;
@@ -144,6 +150,8 @@ interface BundleTarget extends TargetBindings {
 }
 
 interface Bundle {
+  /** databricks.yml or databricks.yaml. */
+  readonly file: string;
   readonly targets: readonly BundleTarget[];
 }
 
@@ -336,6 +344,7 @@ function bundleApps(
 ): BundleApp[] {
   return Object.entries(apps).map(([key, value]) => {
     const app = record(value);
+    const declared = app?.name;
     const resources = Array.isArray(app?.resources) ? app.resources : [];
     const postgres = resources.flatMap((resource, index): PostgresBinding[] => {
       const binding = record(record(resource)?.postgres);
@@ -351,20 +360,32 @@ function bundleApps(
         },
       ];
     });
-    return { key, postgres };
+    return {
+      key,
+      declaredName: typeof declared === "string" && declared ? declared : null,
+      name: resolve(declared),
+      postgres,
+    };
   });
+}
+
+/** The target `databricks bundle deploy` picks without -t: the one marked default, else the only one. */
+export function defaultBundleTarget(bundle: Bundle): BundleTarget | null {
+  return (
+    bundle.targets.find((target) => target.isDefault) ??
+    (bundle.targets.length === 1 ? (bundle.targets[0] ?? null) : null)
+  );
 }
 
 /**
  * The branch and database the default target deploys to: its first app
  * binding the files resolve, else its postgres_branch and postgres_database
- * variables. null without databricks.yml or a branch the files resolve.
+ * variables. null without databricks.yml, a default target or a branch the
+ * files resolve.
  */
 export function readDeployTarget(root: string): DeployTarget | null {
-  const targets = readBundle(root)?.targets ?? [];
-  const target =
-    targets.find((candidate) => candidate.isDefault) ??
-    targets.find((candidate) => candidate.name === "default");
+  const bundle = readBundle(root);
+  const target = bundle ? defaultBundleTarget(bundle) : null;
   if (!target) return null;
   const resolved = (value: BundleValue | null) =>
     value?.kind === "resolved" ? value.name : null;
@@ -383,7 +404,7 @@ export function readDeployTarget(root: string): DeployTarget | null {
  * databricks.yml, with the files its `include:` names merged in, per target;
  * null without one. Without `targets:` the bundle has one target, "default".
  */
-function readBundle(root: string): Bundle | null {
+export function readBundle(root: string): Bundle | null {
   const file = ["databricks.yml", "databricks.yaml"]
     .map((name) => path.join(root, name))
     .find((candidate) => fs.existsSync(candidate));
@@ -406,6 +427,7 @@ function readBundle(root: string): Bundle | null {
       ? declared.map(([name, target]) => [name, record(target)])
       : [["default", { default: true }]];
   return {
+    file: path.basename(file),
     targets: targets.map(([name, target]) => {
       const apps = record(
         merge(
@@ -432,6 +454,9 @@ function readBundle(root: string): Bundle | null {
               )
             : null;
         return {
+          host: resolve(
+            record(target?.workspace)?.host ?? record(bundle.workspace)?.host,
+          ),
           apps: bundleApps(apps ?? {}, resolve),
           postgresBranch: variable("postgres_branch", "branch"),
           postgresDatabase: variable("postgres_database", "database"),
