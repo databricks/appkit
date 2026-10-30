@@ -717,7 +717,7 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
     expect(dropped.newRelations).toEqual([]);
   });
 
-  test("a foreign key it does not declare is listed, on an existing table or a new one", () => {
+  test("a foreign key it does not declare is listed with the tables it does not declare either", () => {
     const plain = defineSchema(({ table }) => ({
       boards: table("boards", { id: id(), title: text().notNull() }),
       notes: table("notes", {
@@ -731,7 +731,11 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
     const out = renderSchemaSource(
       [
         boards,
-        notes(),
+        notes(
+          [col("reviewer_id", "integer")],
+          [fk("board_id", "boards"), fk("reviewer_id", "users")],
+        ),
+        keyed("users"),
         keyed("tags", [col("note_id", "integer")], [fk("note_id", "notes")]),
       ],
       "app",
@@ -739,9 +743,48 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
     );
 
     expect(out.newRelations).toEqual([
-      "app.notes.board_id → app.boards.id",
-      "app.tags.note_id → app.notes.id",
+      { edge: "app.notes.board_id → app.boards.id", undeclaredTables: [] },
+      {
+        edge: "app.notes.reviewer_id → app.users.id",
+        undeclaredTables: ["app.users"],
+      },
+      {
+        edge: "app.tags.note_id → app.notes.id",
+        undeclaredTables: ["app.tags"],
+      },
     ]);
+  });
+
+  test("a declared foreign key keeps its relation when an undeclared one targets the same table", () => {
+    const declared = defineSchema(({ table }) => {
+      const users = table("users", { id: id() });
+      const posts = table("posts", {
+        id: id(),
+        author_id: integer(),
+        editor_id: references(() => users.id),
+      });
+      return { users, posts };
+    });
+
+    const out = renderSchemaSource(
+      [
+        keyed("users"),
+        keyed(
+          "posts",
+          [col("author_id", "integer"), col("editor_id", "integer")],
+          [fk("author_id", "users"), fk("editor_id", "users")],
+        ),
+      ],
+      "app",
+      { previous: declared },
+    );
+
+    expect(out.source).toContain("editor_id: fk(() => users.id),");
+    expect(out.source).toContain("author_id: integer(),");
+    expect(out.skipped.map((skip) => skip.reason)).toContain(
+      'foreign key to users(id) is not kept: a second foreign key to "users" would make the relation ambiguous',
+    );
+    expect(out.newRelations).toEqual([]);
   });
 
   test("a declaration of another schema keeps nothing: every column renders private and every foreign key is new", () => {
@@ -755,10 +798,13 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
     );
 
     expect(out.warnings).toContain(
-      "sales.boards.id, sales.boards.title, sales.notes.id, sales.notes.board_id, sales.notes.author_email, sales.notes.body are new to schema.ts, so they are private: the API does not return or accept them until you remove .private().",
+      'sales.boards.id, sales.boards.title, sales.notes.id, sales.notes.board_id, sales.notes.author_email, sales.notes.body are new to schema.ts, so they are private: the API does not return or accept them until you remove .private(). schema.ts declares schema "app", so it declares nothing in "sales". `--schema-name app` refreshes it.',
     );
     expect(out.newRelations).toEqual([
-      "sales.notes.board_id → sales.boards.id",
+      {
+        edge: "sales.notes.board_id → sales.boards.id",
+        undeclaredTables: ["sales.notes", "sales.boards"],
+      },
     ]);
   });
 

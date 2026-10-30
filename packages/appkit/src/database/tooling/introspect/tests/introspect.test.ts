@@ -401,7 +401,7 @@ describe("runIntrospect", () => {
 
       expect(error).toBeInstanceOf(IntrospectRefusedError);
       expect(error.message).toBe(
-        "Refusing to introspect: config/database/schema.ts does not load, so introspect cannot keep the columns it marks private. Fix it, or move it out of config/database to start again from the catalog.",
+        "Refusing to introspect: config/database/schema.ts does not load, so introspect cannot keep the columns it marks private. Fix it, then rerun.",
       );
       expect(resolveEnvBranch).not.toHaveBeenCalled();
       expect(catalog.calls).toEqual([]);
@@ -436,39 +436,52 @@ describe("runIntrospect", () => {
 
     expect(catalog.calls.every((call) => call.values[0] === "app")).toBe(true);
     expect(error).toBeInstanceOf(IntrospectRefusedError);
-    expect(error.message).toMatch(
-      /^Refusing to replace config\/database\/schema\.ts: the branch has a foreign key it does not declare \(app\.posts\.author_id → app\.authors\.id\)\./,
+    expect(error.message).toBe(
+      'Refusing to replace config/database/schema.ts: the branch has a foreign key it does not declare (app.posts.author_id → app.authors.id). A foreign key lets the API include the related rows. schema.ts declares schema "sales", so it declares nothing in "app". `--schema-name sales` refreshes it.',
     );
     expect(tree(root)).toEqual(before);
   });
 
-  test("a foreign key the replaced schema.ts does not declare is refused, and nothing changes", async () => {
-    const undeclared = `import { defineSchema, id, integer, text } from ${JSON.stringify(BUILDER)};
+  test.each([
+    [
+      "both tables",
+      `import { defineSchema, id, integer, text } from ${JSON.stringify(BUILDER)};
 export const schema = defineSchema(({ table }) => ({
   authors: table("authors", { id: id(), email: text().private() }),
   posts: table("posts", { id: id(), author_id: integer().notNull() }),
 }));
-`;
-    const root = tempApp({
-      [SCHEMA]: undeclared,
-      [`${SCHEMA}.bak`]: "// an older backup\n",
-      [TYPES]: "// older types\n",
-    });
-    await commitMigration(root);
-    const before = tree(root);
+`,
+      "Declare it with fk() in schema.ts, then rerun.",
+    ],
+    [
+      "only the referenced table",
+      previousSchema,
+      "Declare it with fk() in schema.ts and declare the table app.posts, then rerun.",
+    ],
+  ])(
+    "a foreign key the replaced schema.ts does not declare, with %s declared, is refused, and nothing changes",
+    async (_label, undeclared, advice) => {
+      const root = tempApp({
+        [SCHEMA]: undeclared,
+        [`${SCHEMA}.bak`]: "// an older backup\n",
+        [TYPES]: "// older types\n",
+      });
+      await commitMigration(root);
+      const before = tree(root);
 
-    const error = await refusal(root);
+      const error = await refusal(root);
 
-    expect(error).toBeInstanceOf(IntrospectRefusedError);
-    expect(error.message).toBe(
-      "Refusing to replace config/database/schema.ts: the branch has a foreign key it does not declare (app.posts.author_id → app.authors.id). A foreign key lets the API include the related rows. Declare it with fk() in config/database/schema.ts, then rerun, or move the file out of config/database to start again from the catalog.",
-    );
-    expect(tree(root)).toEqual(before);
-    expect(fs.readFileSync(path.join(root, TYPES), "utf-8")).toBe(
-      "// older types\n",
-    );
-    expect(markMigrationsApplied).not.toHaveBeenCalled();
-  });
+      expect(error).toBeInstanceOf(IntrospectRefusedError);
+      expect(error.message).toBe(
+        `Refusing to replace config/database/schema.ts: the branch has a foreign key it does not declare (app.posts.author_id → app.authors.id). A foreign key lets the API include the related rows. ${advice}`,
+      );
+      expect(tree(root)).toEqual(before);
+      expect(fs.readFileSync(path.join(root, TYPES), "utf-8")).toBe(
+        "// older types\n",
+      );
+      expect(markMigrationsApplied).not.toHaveBeenCalled();
+    },
+  );
 
   test("an empty schema next to an existing schema.ts refuses before writing anything", async () => {
     catalog = catalogResponder({

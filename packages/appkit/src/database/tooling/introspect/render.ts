@@ -33,6 +33,14 @@ export interface Unexpressed {
   readonly reason: string;
 }
 
+/** A foreign key schema.ts gets that the schema.ts it replaces does not declare. */
+interface NewRelation {
+  /** e.g. "app.notes.author_id → app.users.id". */
+  readonly edge: string;
+  /** Its tables the replaced schema.ts does not declare, e.g. "app.users". */
+  readonly undeclaredTables: readonly string[];
+}
+
 interface SchemaSource {
   readonly source: string;
   /** Tables written to schema.ts. */
@@ -43,11 +51,13 @@ interface SchemaSource {
   readonly warnings: readonly string[];
   /** What schema.ts declares differently from the database, which keeps it as it is. */
   readonly approximated: readonly string[];
-  /**
-   * Foreign keys schema.ts gets that `previous` does not declare, as
-   * "app.notes.author_id → app.users.id". Each one is an API include.
-   */
-  readonly newRelations: readonly string[];
+  /** Kept foreign keys `previous` does not declare. Each one is an API include. */
+  readonly newRelations: readonly NewRelation[];
+}
+
+/** Why a schema.ts of another schema keeps nothing in this one, and what refreshes it. */
+export function otherSchemaHint(declared: string, read: string): string {
+  return `schema.ts declares schema "${declared}", so it declares nothing in "${read}". \`--schema-name ${declared}\` refreshes it.`;
 }
 
 interface RenderOptions {
@@ -315,9 +325,9 @@ function mirrored(target: BaseType): string {
  * Render pg_catalog tables as a `defineSchema` source the builder accepts.
  * What the builder cannot express is left out with an `// appkit: skipped …`
  * comment; what it declares differently (a timestamp without its precision,
- * say) is listed in `approximated`. A refresh never widens the API of
- * `previous`: what it does not declare renders private, and the foreign keys
- * it does not declare are listed in `newRelations`.
+ * say) is listed in `approximated`. Columns `previous` does not declare render
+ * private, and the foreign keys it does not declare are listed in
+ * `newRelations`, which introspect refuses.
  */
 export function renderSchemaSource(
   tables: readonly IntrospectedTable[],
@@ -333,7 +343,7 @@ export function renderSchemaSource(
   const tableComments: string[] = [];
   /** Columns rendered private because `previous` does not declare them. */
   const privatized: string[] = [];
-  const newRelations: string[] = [];
+  const newRelations: NewRelation[] = [];
   const qualified = (table: string, column?: string) =>
     `${schemaName}.${table}${column ? `.${column}` : ""}`;
   const skipTable = (table: string, reason: string) => {
@@ -344,14 +354,34 @@ export function renderSchemaSource(
   };
   const { previous } = options;
   // A declaration of another schema declares nothing in this one.
+  const otherSchema =
+    previous && previous.$schemaName !== schemaName
+      ? previous.$schemaName
+      : null;
   const previousTables = new Map<string, AppKitTable>(
-    previous?.$schemaName === schemaName
+    previous && !otherSchema
       ? Object.values(previous.$tables).map((table): [string, AppKitTable] => [
           table.$name,
           table,
         ])
       : [],
   );
+  /** Whether `previous` declares this FK; its toMany reverse comes with it. */
+  const declaresForeignKey = (
+    table: string,
+    foreignKey: IntrospectedForeignKey,
+  ): boolean =>
+    foreignKey.columns.length === 1 &&
+    (previousTables
+      .get(table)
+      ?.$relations.some(
+        (relation) =>
+          relation.cardinality === "toOne" &&
+          relation.localColumn === foreignKey.columns[0] &&
+          relation.targetTable === foreignKey.table &&
+          relation.targetColumn === foreignKey.refColumns[0],
+      ) ??
+      false);
   const isPrivate = (table: string, column: string): boolean => {
     if (!previous) return false;
     const declared = Object.values(
@@ -635,7 +665,13 @@ export function renderSchemaSource(
 
   for (const plan of plans.values()) {
     const targets = new Set<string>();
-    for (const foreignKey of plan.table.foreignKeys) {
+    // Declared FKs go first, so an undeclared one to the same table cannot take the relation.
+    const foreignKeys = [...plan.table.foreignKeys].sort(
+      (a, b) =>
+        Number(declaresForeignKey(plan.table.name, b)) -
+        Number(declaresForeignKey(plan.table.name, a)),
+    );
+    for (const foreignKey of foreignKeys) {
       const source = plan.columns.find(
         (c) => c.column.name === foreignKey.columns[0],
       );
@@ -737,20 +773,15 @@ export function renderSchemaSource(
       const out = edges.get(plan.table.name) ?? new Set<string>();
       out.add(foreignKey.table);
       edges.set(plan.table.name, out);
-      // A toOne edge comes with its toMany reverse, so checking it covers both.
-      const declared = previousTables
-        .get(plan.table.name)
-        ?.$relations.some(
-          (relation) =>
-            relation.cardinality === "toOne" &&
-            relation.localColumn === sourceColumn.column.name &&
-            relation.targetTable === foreignKey.table &&
-            relation.targetColumn === targetColumn.column.name,
-        );
-      if (previous && !declared) {
-        newRelations.push(
-          `${qualified(plan.table.name, sourceColumn.column.name)} → ${qualified(foreignKey.table, targetColumn.column.name)}`,
-        );
+      if (previous && !declaresForeignKey(plan.table.name, foreignKey)) {
+        newRelations.push({
+          edge: shown(
+            `${qualified(plan.table.name, sourceColumn.column.name)} → ${qualified(foreignKey.table, targetColumn.column.name)}`,
+          ),
+          undeclaredTables: [plan.table.name, foreignKey.table]
+            .filter((table) => !previousTables.has(table))
+            .map((table) => shown(qualified(table))),
+        });
       }
     }
   }
@@ -845,7 +876,7 @@ export function renderSchemaSource(
     unexpressed,
     warnings: warnings.map(shown),
     approximated: approximated.map(shown),
-    newRelations: newRelations.map(shown),
+    newRelations,
   });
   if (ordered.length === 0) {
     lines.push(...tableComments);
@@ -890,7 +921,7 @@ export function renderSchemaSource(
   if (privatized.length > 0) {
     const one = privatized.length === 1;
     warnings.push(
-      `${list(privatized)} ${one ? "is" : "are"} new to schema.ts, so ${one ? "it is" : "they are"} private: the API does not return or accept ${one ? "it" : "them"} until you remove .private().`,
+      `${list(privatized)} ${one ? "is" : "are"} new to schema.ts, so ${one ? "it is" : "they are"} private: the API does not return or accept ${one ? "it" : "them"} until you remove .private().${otherSchema ? ` ${otherSchemaHint(otherSchema, schemaName)}` : ""}`,
     );
   }
   for (const comment of tableComments) body.push(`  ${comment}`);
