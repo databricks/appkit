@@ -238,6 +238,8 @@ The exact props of each component are published as JSON Schema (2020-12), with a
 
 `DataTable` renders with appkit-ui's `Table` primitives (the `DataTable` component itself loads its rows through a query), and `KpiCard` with appkit-ui's `Card` parts. Charts take their colors from the app's theme tokens, which follow the system light/dark preference, also in a draft with a dark background.
 
+Each block renders in place, in the element that holds its `<script>`. A block that's alone in its element fills that element's height, so a sized box (`<div style="height: 20rem">`) sizes the chart. Next to a heading or text it keeps its own height (at least 160px, or `height`). A chart's `title` is shown as a heading above the chart; leave it out when the card already has its own heading. Blocks render once: while a draft streams in, a block that has rendered is never mounted or faded in again.
+
 Turning a draft into a `/design` page is then mostly mechanical: the component and its props are already there.
 
 ### Draft errors

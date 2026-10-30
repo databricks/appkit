@@ -165,7 +165,11 @@ export function normalizeBlock(
  */
 export function dataAppkitSchema() {
   const chartBase = {
-    title: { type: "string", description: "Chart title." },
+    title: {
+      type: "string",
+      description:
+        "Heading shown above the chart. Leave it out when the block's container already has its own heading.",
+    },
     height: {
       type: "number",
       description:
@@ -679,6 +683,9 @@ export function runHydrator(deps: HydratorDeps): {
   const blockCss = `
 .appkit-skeleton { min-height: 160px; border-radius: 8px; background: var(--muted, #f4f4f5); animation: appkit-pulse 1.4s ease-in-out infinite; }
 .appkit-skeleton[data-kind="KpiCard"] { min-height: 96px; }
+.appkit-root { height: 100%; display: flex; flex-direction: column; }
+.appkit-title { margin: 0 0 8px; font: 600 14px/1.4 system-ui, sans-serif; color: var(--card-foreground, inherit); }
+.appkit-chart { flex: 1 1 auto; min-height: 0; }
 .appkit-fade { opacity: 0; transition: opacity 200ms ease-out; }
 .appkit-fade.appkit-in { opacity: 1; }
 @keyframes appkit-pulse { 50% { opacity: 0.55; } }
@@ -687,25 +694,38 @@ export function runHydrator(deps: HydratorDeps): {
   .appkit-fade { transition: none; }
 }`;
 
-  // One host per block, created the first time the block is seen; the
-  // skeleton and later the rendered component live in its shadow root, so
-  // the block keeps its place in the page.
-  const hosts = new WeakMap<any, any>();
-  const shadowOf = (script: any) => {
-    let shadow = hosts.get(script);
-    if (!shadow) {
-      const host = document.createElement("div");
-      host.setAttribute("data-appkit-block", script.dataset.appkit ?? "");
-      host.style.display = "block";
-      script.after(host);
-      shadow = host.attachShadow({ mode: "open" });
-      const style = document.createElement("style");
-      style.textContent = shadowCss + blockCss;
-      shadow.append(style);
-      hosts.set(script, shadow);
+  // One host per block, right after its script in the block's own container:
+  // the skeleton and later the rendered component live in its shadow root.
+  // A host already there (the hydrator ran twice) is reused, never doubled.
+  const hostOf = (script: any) => {
+    const next = script.nextElementSibling;
+    if (next?.hasAttribute?.("data-appkit-block") && next.shadowRoot) {
+      return next;
     }
-    return shadow;
+    const host = document.createElement("div");
+    host.setAttribute("data-appkit-block", script.dataset.appkit ?? "");
+    host.style.display = "block";
+    // The block fills its container when it's all the container holds (an
+    // agent's sized box); next to a heading or text it keeps its own height,
+    // so it can't push out of the container.
+    const alone = [...(script.parentElement?.children ?? [])].every(
+      (el: any) =>
+        el === script ||
+        el.hasAttribute("data-appkit-block") ||
+        (el.tagName === "SCRIPT" && el.hasAttribute("data-appkit")),
+    );
+    if (alone) host.style.height = "100%";
+    script.after(host);
+    const shadow = host.attachShadow({ mode: "open" });
+    const style = document.createElement("style");
+    style.textContent = shadowCss + blockCss;
+    shadow.append(style);
+    return host;
   };
+  const shadowOf = (script: any) => hostOf(script).shadowRoot;
+  // Blocks already shown in this page, by content: one the browser re-parses
+  // (same JSON) renders again without fading in again.
+  const shown: Set<string> = (win.__appkitShownBlocks ??= new Set());
   const skeleton = (script: any) => {
     const shadow = shadowOf(script);
     if (shadow.querySelector(".appkit-skeleton")) return;
@@ -715,15 +735,22 @@ export function runHydrator(deps: HydratorDeps): {
     shadow.append(bone);
   };
   const mount = (script: any) => {
-    const shadow = shadowOf(script);
+    const host = hostOf(script);
+    host.setAttribute("data-appkit-state", "rendered");
+    const shadow = host.shadowRoot;
     shadow.querySelector(".appkit-skeleton")?.remove();
     const root = document.createElement("div");
-    root.className = "appkit-fade";
+    root.className = "appkit-root";
     shadow.append(root);
-    // Two frames so the initial opacity is painted before the transition.
-    win.requestAnimationFrame?.(() =>
-      win.requestAnimationFrame?.(() => root.classList.add("appkit-in")),
-    );
+    const key = (script.dataset.appkit ?? "") + "\0" + script.textContent;
+    if (!shown.has(key)) {
+      shown.add(key);
+      root.classList.add("appkit-fade");
+      // Two frames so the initial opacity is painted before the transition.
+      win.requestAnimationFrame?.(() =>
+        win.requestAnimationFrame?.(() => root.classList.add("appkit-in")),
+      );
+    }
     return root;
   };
 
@@ -785,6 +812,15 @@ export function runHydrator(deps: HydratorDeps): {
   const scan = (final: boolean) => {
     for (const script of blocks()) {
       if (handled.has(script)) continue;
+      // Rendered by an earlier run of the hydrator in this page.
+      const next = script.nextElementSibling;
+      if (
+        next?.hasAttribute?.("data-appkit-block") &&
+        next.getAttribute("data-appkit-state") === "rendered"
+      ) {
+        handled.add(script);
+        continue;
+      }
       let props: unknown;
       try {
         props = JSON.parse(script.textContent ?? "");
@@ -803,9 +839,23 @@ export function runHydrator(deps: HydratorDeps): {
         const spec = deps.normalizeBlock(script.dataset.appkit ?? "", props);
         handled.add(script);
         const render = RENDER[spec.component];
-        createRoot(mount(script)).render(
-          render ? render(spec.props) : h(UI[spec.component], spec.props),
-        );
+        if (render) {
+          createRoot(mount(script)).render(render(spec.props));
+        } else {
+          // A chart: its title is a heading above it, not drawn inside the
+          // chart where ECharts would put it over the axes and legend.
+          const { title, ...props } = spec.props as Record<string, unknown>;
+          createRoot(mount(script)).render([
+            title != null
+              ? h("div", { key: "t", className: "appkit-title" }, text(title))
+              : null,
+            h(
+              "div",
+              { key: "c", className: "appkit-chart" },
+              h(UI[spec.component], props),
+            ),
+          ]);
+        }
       } catch (error) {
         fail(script, error);
       }

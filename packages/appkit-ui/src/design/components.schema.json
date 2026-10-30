@@ -70,7 +70,7 @@
         "properties": {
           "title": {
             "type": "string",
-            "description": "Chart title."
+            "description": "Heading shown above the chart. Leave it out when the block's container already has its own heading."
           },
           "height": {
             "type": "number",
@@ -177,7 +177,7 @@
         "properties": {
           "title": {
             "type": "string",
-            "description": "Chart title."
+            "description": "Heading shown above the chart. Leave it out when the block's container already has its own heading."
           },
           "height": {
             "type": "number",
@@ -291,7 +291,7 @@
         "properties": {
           "title": {
             "type": "string",
-            "description": "Chart title."
+            "description": "Heading shown above the chart. Leave it out when the block's container already has its own heading."
           },
           "height": {
             "type": "number",
@@ -409,7 +409,7 @@
         "properties": {
           "title": {
             "type": "string",
-            "description": "Chart title."
+            "description": "Heading shown above the chart. Leave it out when the block's container already has its own heading."
           },
           "height": {
             "type": "number",
@@ -522,7 +522,7 @@
         "properties": {
           "title": {
             "type": "string",
-            "description": "Chart title."
+            "description": "Heading shown above the chart. Leave it out when the block's container already has its own heading."
           },
           "height": {
             "type": "number",

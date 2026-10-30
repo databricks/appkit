@@ -47,7 +47,14 @@ function setup(html: string) {
     origins: ["https://builder.example.com"],
     statusPath: "/design/__status",
     css: ":root { --chart-1: red; }",
-    h: (type: unknown, props: Record<string, unknown>) => ({ type, props }),
+    h: (
+      type: unknown,
+      props: Record<string, unknown>,
+      ...children: unknown[]
+    ) =>
+      children.length
+        ? { type, props: { ...props, children: children[0] } }
+        : { type, props },
     createRoot: () => ({
       render: (node: unknown) =>
         rendered.push(node as (typeof rendered)[number]),
@@ -63,7 +70,10 @@ function setup(html: string) {
 }
 
 let restore = () => {};
-afterEach(() => restore());
+afterEach(() => {
+  restore();
+  delete (globalThis as { __appkitShownBlocks?: unknown }).__appkitShownBlocks;
+});
 
 const BLOCKS = `
   <script type="application/json" data-appkit="KpiCard">{"label":"Trips","value":12}</script>
@@ -138,7 +148,12 @@ describe("runHydrator", () => {
       (n) => "data-appkit-error" in (n.props ?? {}),
     );
     expect(placeholders).toHaveLength(2);
-    expect(t.rendered).toContainEqual({
+    // A chart renders in its wrapper: [heading or null, chart box].
+    const chart = t.rendered.find(Array.isArray) as unknown as [
+      unknown,
+      { props: { children: { type: unknown; props: unknown } } },
+    ];
+    expect(chart[1].props.children).toEqual({
       type: "BarChart",
       props: expect.objectContaining({ xKey: "x", yKey: "s" }),
     });
@@ -243,5 +258,69 @@ describe("runHydrator", () => {
     restore = t.restore;
     const tokens = doc.querySelector("style[data-appkit-tokens]");
     expect(tokens?.textContent?.startsWith(":where(:root){")).toBe(true);
+  });
+
+  const hydrate = (render: (n: unknown) => void = () => {}) =>
+    runHydrator({
+      draft: "d",
+      origins: [],
+      statusPath: "/s",
+      css: "",
+      h: (type: unknown, props: unknown, ...children: unknown[]) => ({
+        type,
+        props,
+        children,
+      }),
+      createRoot: () => ({ render }),
+      UI,
+      normalizeBlock,
+      fetch: async () => ({}),
+    });
+  type Host = {
+    style: { height: string };
+    shadowRoot: { querySelector(s: string): unknown };
+  };
+  const hosts = () =>
+    [...doc.querySelectorAll("[data-appkit-block]")] as unknown as Host[];
+  const BAR =
+    '<script type="application/json" data-appkit="BarChart">{"title":"Fares","x":["a"],"series":[{"name":"s","data":[1]}]}</script>';
+
+  test("a chart's title is a heading above the chart, not drawn inside it", () => {
+    doc.body.innerHTML = BAR;
+    const rendered: any[] = [];
+    hydrate((n) => rendered.push(n));
+    const [heading, box] = rendered[0];
+    expect(heading).toMatchObject({
+      type: "div",
+      props: { className: "appkit-title" },
+      children: ["Fares"],
+    });
+    const chart = box.children[0];
+    expect(chart.type).toBe("BarChart");
+    expect(chart.props).not.toHaveProperty("title");
+  });
+
+  test("a block fills its container only when it's all the container holds", () => {
+    doc.body.innerHTML = `<div style="height:20rem">${BAR}</div><div class="card"><h2>Fares</h2>${BAR}</div>`;
+    hydrate();
+    expect(hosts().map((h) => h.style.height)).toEqual(["100%", ""]);
+  });
+
+  test("running again never doubles, remounts or re-fades a block", () => {
+    doc.body.innerHTML = `<div>${BAR}</div>`;
+    const first: unknown[] = [];
+    hydrate((n) => first.push(n));
+    const again: unknown[] = [];
+    hydrate((n) => again.push(n));
+    expect(hosts()).toHaveLength(1);
+    expect(first).toHaveLength(1);
+    expect(again).toHaveLength(0);
+
+    // The same block parsed again (a fresh node, e.g. the builder re-set the
+    // page): rendered, but without the fade-in.
+    doc.body.innerHTML = `<div>${BAR}</div>`;
+    hydrate();
+    expect(hosts()[0].shadowRoot.querySelector(".appkit-root")).not.toBeNull();
+    expect(hosts()[0].shadowRoot.querySelector(".appkit-fade")).toBeNull();
   });
 });
