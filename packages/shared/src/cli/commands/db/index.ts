@@ -4,7 +4,7 @@ import { dbMigrateCommand } from "./migrate";
 
 /**
  * Lakebase database lifecycle for the DatabasePlugin. The logic lives in
- * `@databricks/appkit/database-tooling`; these commands only parse, prompt and print.
+ * `@databricks/appkit/beta/database-tooling`; these commands only parse, prompt and print.
  */
 export const dbCommand = new Command("db")
   .description("Lakebase database lifecycle")

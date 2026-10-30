@@ -17,7 +17,7 @@ const { createDbContext, runMigrate } = vi.hoisted(() => ({
 
 // The tooling is an ambient module loaded with a dynamic import; mock it so the
 // command never touches drizzle-kit or a database.
-vi.mock("@databricks/appkit/database-tooling", () => ({
+vi.mock("@databricks/appkit/beta/database-tooling", () => ({
   createDbContext,
   runMigrate,
 }));
