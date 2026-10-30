@@ -64,7 +64,8 @@ export function ownershipHint(
       `Schema "${ownership.schemaName}" is owned by "${ownership.owner}", but the app connects as "${ownership.currentUser}". ` +
       "This happens when the app's database resource was removed and added again, or the app was recreated with a new service principal: " +
       `Lakebase hands the objects to another role. Have "${ownership.owner}" transfer the schema and its tables to "${ownership.currentUser}" ` +
-      "(ALTER … OWNER TO), or set another schemaName in schema.ts."
+      "(ALTER … OWNER TO), or set another schemaName in schema.ts. " +
+      "On your dev or session branch, rerun `appkit db init`, which hands you the schema."
     );
   }
   return (

@@ -10,8 +10,13 @@ const exports: DatabaseTooling<DbContext> = tooling;
 
 const contractKeys = {
   createDbContext: true,
+  deleteSessionBranch: true,
+  previewClean: true,
+  runClean: true,
+  runInit: true,
   runIntrospect: true,
   runMigrate: true,
+  runSeed: true,
 } satisfies Record<keyof DatabaseTooling, true>;
 
 test("every function the CLI is typed with is exported", () => {

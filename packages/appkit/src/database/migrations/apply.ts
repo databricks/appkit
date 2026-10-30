@@ -207,7 +207,7 @@ function systemCodeOf(error: unknown): string | undefined {
   return findCode(error, (code) => SYSTEM_CODE.test(code));
 }
 
-function quoteIdentifier(name: string): string {
+export function quoteIdentifier(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
 
@@ -367,14 +367,15 @@ async function acquireMigrationLock(
   }
 }
 
-async function inTransaction(
+export async function inTransaction<T>(
   client: QueryClient,
-  work: () => Promise<void>,
-): Promise<void> {
+  work: () => Promise<T>,
+): Promise<T> {
   await client.query("begin");
   try {
-    await work();
+    const result = await work();
     await client.query("commit");
+    return result;
   } catch (error) {
     await client.query("rollback").catch(() => undefined);
     throw error;

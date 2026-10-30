@@ -25,15 +25,23 @@ import {
 } from "./migrations";
 
 /** Whether the checkout has a config/database/schema.ts yet. */
-function hasSchemaFile(root: string): boolean {
+export function hasSchemaFile(root: string): boolean {
   return fs.existsSync(path.join(root, DEFAULT_SCHEMA_FILE));
 }
 
+const WITHOUT_SCHEMA = {
+  migrate: "there is nothing to migrate",
+  clean: "clean cannot tell which schema to drop",
+} as const;
+
 /** Without schema.ts, point to introspect instead of a load error. */
-function requireSchemaFile(root: string): void {
+export function requireSchemaFile(
+  root: string,
+  command: keyof typeof WITHOUT_SCHEMA,
+): void {
   if (hasSchemaFile(root)) return;
   throw new Error(
-    `No ${DEFAULT_SCHEMA_FILE} yet, so there is nothing to migrate. Run \`appkit db introspect\` to write it from the branch's tables, or create it.`,
+    `No ${DEFAULT_SCHEMA_FILE} yet, so ${WITHOUT_SCHEMA[command]}. Run \`appkit db introspect\` to write it from the branch's tables, or create it.`,
   );
 }
 
@@ -59,6 +67,8 @@ export interface MigrateReport {
 export interface MigrateOptions {
   /** false: an ambiguous rename throws instead of prompting. */
   readonly interactive: boolean;
+  /** false: apply the committed migrations only, without writing one from schema.ts. */
+  readonly generate?: boolean;
 }
 
 type ApplyOutcome = Pick<MigrateReport, "applied" | "adopted" | "notApplied">;
@@ -99,13 +109,14 @@ export async function runMigrate(
   ctx: DbContext,
   options: MigrateOptions,
 ): Promise<MigrateReport> {
-  requireSchemaFile(ctx.root);
+  requireSchemaFile(ctx.root, "migrate");
   return withHistoryLock(ctx.root, "migrate", (lock) =>
     migrateHolding(ctx, lock, options),
   );
 }
 
-async function migrateHolding(
+/** runMigrate for a caller that already holds the checkout's history lock. */
+export async function migrateHolding(
   ctx: DbContext,
   lock: HistoryLock,
   options: MigrateOptions,
@@ -113,10 +124,13 @@ async function migrateHolding(
   const schema = await loadDefaultDatabaseSchema(ctx.root, {
     showImportError: true,
   });
-  const generated = await generateMigrationFiles(lock, {
-    schema,
-    interactive: options.interactive,
-  });
+  const generated =
+    options.generate === false
+      ? null
+      : await generateMigrationFiles(lock, {
+          schema,
+          interactive: options.interactive,
+        });
 
   // The types follow schema.ts alone, so they are current even if applying fails.
   const typesFile = path.join(ctx.root, DATABASE_TYPES_PATH);

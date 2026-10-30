@@ -5,6 +5,8 @@ import yaml from "js-yaml";
 
 import { isValidSessionId } from "./naming";
 
+export type BranchMode = "dev" | "session";
+
 /** Full resource names, e.g. branch = "projects/p/branches/b". */
 interface ResourceName {
   readonly project: string;
@@ -39,9 +41,26 @@ export function resourceId(name: string): string {
   return name.slice(name.lastIndexOf("/") + 1);
 }
 
+const PROJECT_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
+/**
+ * LAKEBASE_PROJECT as a project resource name: accepts "projects/<id>" or a bare
+ * "<id>"; null for anything else (e.g. the .env.example placeholder).
+ */
+export function parseProject(value: string | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  const id = trimmed.startsWith("projects/")
+    ? trimmed.slice("projects/".length)
+    : trimmed;
+  return PROJECT_ID.test(id) ? `projects/${id}` : null;
+}
+
 /** What `.env` says about the local branch. Unparseable values (template placeholders) read as null. */
-interface LocalTarget {
+export interface LocalTarget {
+  /** LAKEBASE_PROJECT, normalized to "projects/<id>". */
+  readonly project: string | null;
   readonly endpoint: string | null;
+  readonly database: string | null;
   readonly session: string | null;
 }
 
@@ -51,7 +70,19 @@ export function readLocalTarget(env: NodeJS.ProcessEnv): LocalTarget {
     env.APPKIT_DB_SESSION && isValidSessionId(env.APPKIT_DB_SESSION)
       ? env.APPKIT_DB_SESSION
       : null;
-  return { endpoint, session };
+  return {
+    project: parseProject(env.LAKEBASE_PROJECT),
+    endpoint,
+    // Without a real endpoint PGDATABASE is a template placeholder too.
+    database: endpoint ? env.PGDATABASE || null : null,
+    session,
+  };
+}
+
+/** The branch the bundle's default target deploys to. */
+export interface DeployTarget {
+  readonly branch: string;
+  readonly database: string | null;
 }
 
 type Yaml = Record<string, unknown> | undefined;
@@ -95,11 +126,15 @@ interface TargetBindings {
   readonly apps: readonly BundleApp[];
   /** The target's postgres_branch variable; null when the bundle declares none. */
   readonly postgresBranch: BundleValue | null;
+  /** The target's postgres_database variable; null when the bundle declares none. */
+  readonly postgresDatabase: BundleValue | null;
 }
 
 /** One target of databricks.yml, with what the files alone can resolve resolved. */
 interface BundleTarget extends TargetBindings {
   readonly name: string;
+  /** `default: true`, or the one target of a bundle that declares none. */
+  readonly isDefault: boolean;
   /**
    * The same bindings with this checkout's variable-overrides.json applied,
    * which a deploy from here uses ahead of the target's own values; null
@@ -321,6 +356,30 @@ function bundleApps(
 }
 
 /**
+ * The branch and database the default target deploys to: its first app
+ * binding the files resolve, else its postgres_branch and postgres_database
+ * variables. null without databricks.yml or a branch the files resolve.
+ */
+export function readDeployTarget(root: string): DeployTarget | null {
+  const targets = readBundle(root)?.targets ?? [];
+  const target =
+    targets.find((candidate) => candidate.isDefault) ??
+    targets.find((candidate) => candidate.name === "default");
+  if (!target) return null;
+  const resolved = (value: BundleValue | null) =>
+    value?.kind === "resolved" ? value.name : null;
+  const binding = target.apps
+    .flatMap((app) => app.postgres)
+    .find((candidate) => candidate.branch.kind === "resolved");
+  const branch = resolved(binding?.branch ?? target.postgresBranch);
+  if (!branch) return null;
+  return {
+    branch,
+    database: resolved(binding ? binding.database : target.postgresDatabase),
+  };
+}
+
+/**
  * databricks.yml, with the files its `include:` names merged in, per target;
  * null without one. Without `targets:` the bundle has one target, "default".
  */
@@ -354,27 +413,34 @@ function readBundle(root: string): Bundle | null {
           record(record(target?.resources)?.apps) ?? {},
         ),
       );
-      const declaresBranch =
-        "postgres_branch" in (record(bundle.variables) ?? {}) ||
-        "postgres_branch" in (record(target?.variables) ?? {});
+      const declares = (variable: string) =>
+        variable in (record(bundle.variables) ?? {}) ||
+        variable in (record(target?.variables) ?? {});
       const bindings = (
         overrides: Record<string, unknown> | null,
       ): TargetBindings => {
         const resolve = resolverFor(bundle, target, name, overrides);
+        const variable = (
+          variableName: string,
+          kind: "branch" | "database",
+        ): BundleValue | null =>
+          declares(variableName)
+            ? bundleValue(
+                variableOf(bundle, target, variableName, overrides),
+                resolve,
+                kind,
+              )
+            : null;
         return {
           apps: bundleApps(apps ?? {}, resolve),
-          postgresBranch: declaresBranch
-            ? bundleValue(
-                variableOf(bundle, target, "postgres_branch", overrides),
-                resolve,
-                "branch",
-              )
-            : null,
+          postgresBranch: variable("postgres_branch", "branch"),
+          postgresDatabase: variable("postgres_database", "database"),
         };
       };
       const overrides = readVariableOverrides(root, name);
       return {
         name,
+        isDefault: target?.default === true,
         ...bindings(null),
         overridden: overrides
           ? { file: overrides.file, ...bindings(overrides.values) }
