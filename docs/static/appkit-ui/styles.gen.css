@@ -1985,6 +1985,9 @@
   .fade-in {
     --tw-enter-opacity: 0;
   }
+  .paused {
+    animation-play-state: paused;
+  }
   .running {
     animation-play-state: running;
   }
