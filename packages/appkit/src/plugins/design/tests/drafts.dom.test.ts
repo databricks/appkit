@@ -70,6 +70,9 @@ function setup(html: string) {
   return { postMessage, fetch, rendered, restore };
 }
 
+// Lets the hydrator's queued status reports go out.
+const flush = () => new Promise((r) => setTimeout(r, 0));
+
 let restore = () => {};
 afterEach(() => {
   restore();
@@ -113,9 +116,10 @@ describe("runHydrator", () => {
     );
   });
 
-  test("reports them to /design/__status, after resetting this draft's earlier errors", () => {
+  test("reports them to /design/__status, after resetting this draft's earlier errors", async () => {
     const t = setup(BLOCKS);
     restore = t.restore;
+    await flush();
 
     const bodies = t.fetch.mock.calls.map((c) => {
       const [url, init] = c as unknown as [string, { body: string }];
@@ -162,7 +166,7 @@ describe("runHydrator", () => {
     });
   });
 
-  test("never posts without a builder win", () => {
+  test("never posts without a builder win", async () => {
     doc.body.innerHTML = BLOCKS;
     const fetch = vi.fn(async () => ({}));
     expect(() =>
@@ -180,7 +184,51 @@ describe("runHydrator", () => {
       }),
     ).not.toThrow();
     // The status endpoint still gets the errors (reset, 2 errors, checked).
+    await flush();
     expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
+  test("sends one status report at a time, in order, even when requests finish out of order", async () => {
+    doc.body.innerHTML = BLOCKS;
+    const pending: {
+      body: { reset?: true; checked?: true; block?: number };
+      done: () => void;
+    }[] = [];
+    const fetch = vi.fn(
+      (_url: string, init: { body: string }) =>
+        new Promise((done) =>
+          pending.push({ body: JSON.parse(init.body), done: () => done({}) }),
+        ),
+    );
+    runHydrator({
+      draft: "dash",
+      origins: [],
+      statusPath: "/s",
+      mockPath: "/m",
+      css: "",
+      h: () => null,
+      createRoot: () => ({ render() {} }),
+      UI,
+      normalizeBlock,
+      fetch: fetch as never,
+    });
+    const sent: unknown[] = [];
+    // Each report starts only once the one before it has finished; finish
+    // the newest first, as a slow network might.
+    for (;;) {
+      await flush();
+      const open = pending.splice(0);
+      if (open.length === 0) break;
+      expect(open).toHaveLength(1);
+      sent.push(open[0].body);
+      open.reverse().forEach((p) => p.done());
+    }
+    expect(sent).toEqual([
+      { draft: "dash", reset: true },
+      expect.objectContaining({ block: 1 }),
+      expect.objectContaining({ block: 2 }),
+      { draft: "dash", checked: true },
+    ]);
   });
 
   test("scopes compound :root selectors as valid :host() selectors", () => {
