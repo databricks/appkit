@@ -803,6 +803,37 @@ describe("runVerify --deployed", () => {
     expect(lakebase.calls).toEqual([]);
   });
 
+  test("a branch that only variable-overrides.json sets is the one verify checks, as a deploy from this checkout uses it", async () => {
+    // The target gives the variables no value; only the overrides file does.
+    const yml = `${databricksYml(PRODUCTION, DATABASE).replace(
+      / {4}variables:\n(?: {6}.*\n)+/,
+      "",
+    )}    workspace:\n      host: ${HOST}\n`;
+    const { ctx } = deployedApp({ yml });
+    await expect(runVerify(ctx, DEPLOYED)).rejects.toThrow(
+      'No deploy branch: resources.apps.app.resources[0].postgres.branch in target default is "${var.postgres_branch}", which this checkout\'s files do not resolve to a branch.',
+    );
+
+    const overrides = path.join(
+      ctx.root,
+      ".databricks/bundle/default/variable-overrides.json",
+    );
+    fs.mkdirSync(path.dirname(overrides), { recursive: true });
+    fs.writeFileSync(
+      overrides,
+      JSON.stringify({
+        postgres_branch: PRODUCTION,
+        postgres_database: DATABASE,
+      }),
+    );
+
+    expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+      branch: PRODUCTION,
+      problems: [],
+      ok: true,
+    });
+  });
+
   test("a host written without a scheme or with a trailing slash matches", async () => {
     const { ctx } = deployedApp({
       yml: ymlWithHost("acme.cloud.databricks.com/"),

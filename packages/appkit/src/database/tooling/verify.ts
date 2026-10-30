@@ -462,13 +462,14 @@ function hostOf(url: string): string {
 /** The API calls go to the workspace this shell is authenticated against, which must be the target's. */
 async function assertTargetWorkspace(
   ctx: DbContext,
-  target: BundleTarget,
+  target: string,
+  host: string | null,
 ): Promise<void> {
-  if (!target.host) return;
+  if (!host) return;
   const authenticated = await ctx.workspace().getHost();
-  if (hostOf(authenticated) === hostOf(target.host)) return;
+  if (hostOf(authenticated) === hostOf(host)) return;
   throw new Error(
-    `Target ${target.name} deploys to ${target.host}, but this shell is authenticated against ${authenticated}. Set DATABRICKS_CONFIG_PROFILE to a profile for ${target.host}, then rerun.`,
+    `Target ${target} deploys to ${host}, but this shell is authenticated against ${authenticated}. Set DATABRICKS_CONFIG_PROFILE to a profile for ${host}, then rerun.`,
   );
 }
 
@@ -520,21 +521,25 @@ async function verifyDeploy(
     targetName,
     defaultBundleTarget(bundle),
   );
-  const bound = target.apps.filter((app) => app.postgres.length > 0);
+  // What a deploy from this checkout uses: variable-overrides.json's values
+  // when it has the file, as the deploy guard reads them.
+  const deploy = target.overridden ?? target;
+  const withFile = target.overridden ? ` with ${target.overridden.file}` : "";
+  const bound = deploy.apps.filter((app) => app.postgres.length > 0);
   if (bound.length > 1) {
     throw new Error(
       `Target ${target.name} deploys ${bound.length} apps with a postgres resource (${bound.map((app) => app.key).join(", ")}); verify checks one app per target.`,
     );
   }
   const app =
-    bound[0] ?? (target.apps.length === 1 ? target.apps[0] : undefined);
+    bound[0] ?? (deploy.apps.length === 1 ? deploy.apps[0] : undefined);
   if (app && app.postgres.length > 1) {
     throw new Error(
       `App ${app.key} in target ${target.name} has ${app.postgres.length} postgres resources (${app.postgres.map((binding) => binding.at).join(", ")}); verify checks one per app.`,
     );
   }
   const declared = app?.postgres[0];
-  const branchValue = declared ? declared.branch : target.postgresBranch;
+  const branchValue = declared ? declared.branch : deploy.postgresBranch;
   if (!branchValue) {
     throw new Error(
       `No deploy branch: target ${target.name} in ${file} declares no app with a postgres resource.`,
@@ -542,13 +547,13 @@ async function verifyDeploy(
   }
   if (branchValue.kind === "unresolved") {
     throw new Error(
-      `No deploy branch: ${declared ? `${declared.at}.branch` : "variables.postgres_branch"} in target ${target.name} is "${branchValue.written}", which this checkout's files do not resolve to a branch.`,
+      `No deploy branch: ${declared ? `${declared.at}.branch` : "variables.postgres_branch"} in target ${target.name}${withFile} is "${branchValue.written}", which this checkout's files do not resolve to a branch.`,
     );
   }
-  const databaseValue = declared ? declared.database : target.postgresDatabase;
+  const databaseValue = declared ? declared.database : deploy.postgresDatabase;
   if (databaseValue?.kind === "unresolved") {
     throw new Error(
-      `No deploy database: ${declared ? `${declared.at}.database` : "variables.postgres_database"} in target ${target.name} is "${databaseValue.written}", which this checkout's files do not resolve to a database.`,
+      `No deploy database: ${declared ? `${declared.at}.database` : "variables.postgres_database"} in target ${target.name}${withFile} is "${databaseValue.written}", which this checkout's files do not resolve to a database.`,
     );
   }
   const branch = branchValue.name;
@@ -561,7 +566,7 @@ async function verifyDeploy(
   ): DeployVerifyReport => ({
     kind: "deploy",
     target: target.name,
-    host: target.host,
+    host: deploy.host,
     branch,
     app: name,
     migrations,
@@ -588,7 +593,7 @@ async function verifyDeploy(
   }
   const name = app.name;
 
-  await assertTargetWorkspace(ctx, target);
+  await assertTargetWorkspace(ctx, target.name, deploy.host);
   const api = ctx.api();
   const [branchFound, databaseFound, deployed] = await Promise.all([
     api.getBranch(branch),

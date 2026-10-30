@@ -127,6 +127,8 @@ interface BundleApp {
 
 /** What one target binds with one set of variable values. */
 interface TargetBindings {
+  /** workspace.host of the target, else of the bundle; null when neither names one the files resolve. */
+  readonly host: string | null;
   readonly apps: readonly BundleApp[];
   /** The target's postgres_branch variable; null when the bundle declares none. */
   readonly postgresBranch: BundleValue | null;
@@ -139,8 +141,6 @@ export interface BundleTarget extends TargetBindings {
   readonly name: string;
   /** `default: true`, or the one target of a bundle that declares none. */
   readonly isDefault: boolean;
-  /** workspace.host of the target, else of the bundle; null when neither names one the files resolve. */
-  readonly host: string | null;
   /**
    * The same bindings with this checkout's variable-overrides.json applied,
    * which a deploy from here uses ahead of the target's own values; null
@@ -454,6 +454,9 @@ export function readBundle(root: string): Bundle | null {
               )
             : null;
         return {
+          host: resolve(
+            record(target?.workspace)?.host ?? record(bundle.workspace)?.host,
+          ),
           apps: bundleApps(apps ?? {}, resolve),
           postgresBranch: variable("postgres_branch", "branch"),
           postgresDatabase: variable("postgres_database", "database"),
@@ -463,12 +466,6 @@ export function readBundle(root: string): Bundle | null {
       return {
         name,
         isDefault: target?.default === true,
-        host: resolverFor(
-          bundle,
-          target,
-          name,
-          null,
-        )(record(target?.workspace)?.host ?? record(bundle.workspace)?.host),
         ...bindings(null),
         overridden: overrides
           ? { file: overrides.file, ...bindings(overrides.values) }
