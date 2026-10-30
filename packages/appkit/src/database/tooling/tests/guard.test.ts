@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from "vitest";
 
 import { classifyBranch, resolveEnvBranch, takesWrites } from "../guard";
-import { devBranchId } from "../naming";
+import { devBranchId, sessionBranchId } from "../naming";
+import type { DeployBoundary } from "../targets";
 import {
   cleanupTempApps,
   databricksYml,
@@ -15,27 +16,28 @@ afterEach(cleanupTempApps);
 const USER = "alice@example.com";
 const P = "projects/p";
 const dev = `${P}/branches/${devBranchId(USER)}`;
+const session = `${P}/branches/${sessionBranchId(USER, "k2x9q0ab")}`;
+
+const NO_DEPLOYS: DeployBoundary = { branches: new Set(), unresolved: [] };
 
 function verdict(
   name: string,
   status = {},
   sessionId: string | null = "k2x9q0ab",
-  deployBranches: string[] = [],
+  boundary: DeployBoundary = NO_DEPLOYS,
 ) {
   return classifyBranch({
     branch: { name, status },
     userName: USER,
     sessionId,
-    deployBranches,
+    boundary,
   });
 }
 
 describe("classifyBranch", () => {
   test("only this developer's dev branch and this checkout's session branch take writes", () => {
     expect(verdict(dev)).toEqual({ kind: "dev" });
-    expect(verdict(`${P}/branches/session-k2x9q0ab`)).toEqual({
-      kind: "session",
-    });
+    expect(verdict(session)).toEqual({ kind: "session" });
     expect(takesWrites("dev")).toBe(true);
     expect(takesWrites("session")).toBe(true);
   });
@@ -49,7 +51,12 @@ describe("classifyBranch", () => {
       kind: "protected",
       reason: "it is a protected branch",
     });
-    expect(verdict(dev, {}, null, [`${P}/branches/staging`, dev])).toEqual({
+    expect(
+      verdict(dev, {}, null, {
+        branches: new Set([`${P}/branches/staging`, dev]),
+        unresolved: [],
+      }),
+    ).toEqual({
       kind: "deploy-target",
       reason: "it is a branch databricks.yml deploys to",
     });
@@ -57,14 +64,37 @@ describe("classifyBranch", () => {
       verdict(`${P}/branches/${devBranchId("bob@example.com")}`).kind,
     ).toBe("other");
     expect(verdict(`${P}/branches/session-other`).kind).toBe("other");
-    expect(verdict(`${P}/branches/session-k2x9q0ab`, {}, null).kind).toBe(
-      "other",
-    );
-    expect(verdict(`${P}/branches/staging`).reason).toContain(
-      devBranchId(USER),
+    expect(verdict(session, {}, null).kind).toBe("other");
+    // Bob's .env copied into Alice's checkout names Bob's session branch.
+    expect(
+      verdict(`${P}/branches/${sessionBranchId("bob@example.com", "k2x9q0ab")}`)
+        .kind,
+    ).toBe("other");
+    expect(verdict(`${P}/branches/staging`).reason).toBe(
+      `it is not your dev branch (${devBranchId(USER)}) or this checkout's session branch (${sessionBranchId(USER, "k2x9q0ab")})`,
     );
     for (const kind of ["default", "protected", "deploy-target", "other"]) {
       expect(takesWrites(kind as "other")).toBe(false);
+    }
+  });
+
+  test("while databricks.yml has a reference the files cannot resolve, no branch takes writes", () => {
+    const unresolved: DeployBoundary = {
+      branches: new Set(),
+      unresolved: [
+        {
+          target: "prod",
+          at: "resources.apps.app.resources[0].postgres.branch",
+          written: "${var.postgres_branch}",
+        },
+      ],
+    };
+    for (const branch of [dev, session]) {
+      expect(verdict(branch, {}, "k2x9q0ab", unresolved)).toEqual({
+        kind: "deploy-target",
+        reason:
+          'databricks.yml may deploy to it: the files do not resolve resources.apps.app.resources[0].postgres.branch in target prod ("${var.postgres_branch}"); give it a value in databricks.yml',
+      });
     }
   });
 });
@@ -130,6 +160,7 @@ describe("resolveEnvBranch", () => {
       "databricks.yml": `${databricksYml(`${P}/branches/production`, `${P}/branches/production/databases/db`)}  personal:
     variables:
       postgres_branch: ${dev}
+      postgres_database: ${dev}/databases/db
 `,
     });
     const broken = tempApp({ "databricks.yml": "targets:\n  default: [\n" });
@@ -141,13 +172,38 @@ describe("resolveEnvBranch", () => {
         api: lakebase.api(),
       }),
     );
-    expect(env).toMatchObject({ kind: "deploy-target" });
+    expect(env).toMatchObject({
+      kind: "deploy-target",
+      reason: "it is a branch databricks.yml deploys to",
+    });
     await expect(
       resolveEnvBranch(
         fakeContext({ root: broken, env: envFor(dev), api: lakebase.api() }),
       ),
     ).rejects.toThrow(
       /^Cannot read databricks\.yml, so the branches it deploys to are unknown: /,
+    );
+  });
+
+  test("a target whose branch the files cannot resolve keeps your own dev branch from taking writes", async () => {
+    const lakebase = new FakeLakebase();
+    lakebase.addBranch(dev);
+    const root = tempApp({
+      "databricks.yml": `${databricksYml(`${P}/branches/production`, `${P}/branches/production/databases/db`)}  staging:
+    variables:
+      postgres_branch: \${var.staging_branch}
+      postgres_database: ${P}/branches/staging/databases/db
+`,
+    });
+
+    const env = await resolveEnvBranch(
+      fakeContext({ root, env: envFor(dev), api: lakebase.api() }),
+    );
+
+    expect(env?.kind).toBe("deploy-target");
+    expect(env && takesWrites(env.kind)).toBe(false);
+    expect(env?.reason).toContain(
+      'resources.apps.app.resources[0].postgres.branch in target staging ("${var.postgres_branch}")',
     );
   });
 
