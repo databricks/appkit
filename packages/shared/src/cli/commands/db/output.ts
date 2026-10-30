@@ -4,6 +4,7 @@ import process from "node:process";
 import pc from "picocolors";
 
 import type {
+  CheckReport,
   CleanReport,
   DeployVerifyReport,
   IntrospectReport,
@@ -181,6 +182,22 @@ function printDeployVerifyReport(report: DeployVerifyReport): void {
 export function printVerifyReport(report: VerifyReport): void {
   if (report.kind === "local") printLocalVerifyReport(report);
   else printDeployVerifyReport(report);
+}
+
+export function printCheckReport(report: CheckReport): void {
+  if (report.ok) {
+    const count = report.migrations.length;
+    ok(
+      count === 0
+        ? "config/database/schema.ts declares nothing a migration would create, and no migration is committed"
+        : `The ${count} committed migration${count === 1 ? " is" : "s are"} in order with every file, and config/database/schema.ts has no change without a migration`,
+    );
+    return;
+  }
+  for (const problem of report.problems) warn(problem);
+  console.error(
+    `${pc.red("✖")} The committed migrations are not ready to deploy. Fix the above, then run \`appkit db check\` again.`,
+  );
 }
 
 export function printIntrospectReport(report: IntrospectReport): void {

@@ -107,6 +107,12 @@ export interface DeployVerifyReport {
 
 export type VerifyReport = LocalVerifyReport | DeployVerifyReport;
 
+export interface CheckReport {
+  readonly migrations: readonly string[];
+  readonly problems: readonly string[];
+  readonly ok: boolean;
+}
+
 export interface InitReport {
   readonly mode: BranchMode;
   readonly branch: string;
@@ -161,4 +167,5 @@ export interface DatabaseTooling<Ctx extends DbContext = DbContext> {
     ctx: Ctx,
     options?: VerifyOptions,
   ) => Promise<VerifyReport>;
+  readonly runCheck: (ctx: Ctx) => Promise<CheckReport>;
 }
