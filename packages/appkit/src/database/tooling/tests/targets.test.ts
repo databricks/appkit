@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "vitest";
 
 import {
   parseResourceName,
-  readDeployBranches,
+  readDeployBoundary,
   readLocalTarget,
 } from "../targets";
 import { cleanupTempApps, databricksYml, tempApp } from "./fakes";
@@ -59,17 +59,18 @@ describe("readLocalTarget", () => {
   });
 });
 
-describe("readDeployBranches", () => {
-  test("reads the default target's postgres_branch", () => {
+describe("readDeployBoundary", () => {
+  test("reads the default target's postgres resource and postgres_branch", () => {
     const root = tempApp({
       "databricks.yml": databricksYml(
         "projects/p/branches/production",
         "projects/p/branches/production/databases/databricks-postgres",
       ),
     });
-    expect(readDeployBranches(root)).toEqual([
-      "projects/p/branches/production",
-    ]);
+    expect(readDeployBoundary(root)).toEqual({
+      branches: new Set(["projects/p/branches/production"]),
+      unresolved: [],
+    });
   });
 
   test("every target's branch counts, and the variable's default", () => {
@@ -88,23 +89,119 @@ targets:
       postgres_branch: projects/p/branches/staging
 `,
     });
-    expect(readDeployBranches(root)).toEqual([
-      "projects/p/branches/main",
-      "projects/p/branches/dev-alice-1a2b3c",
-      "projects/p/branches/staging",
-    ]);
+    expect(readDeployBoundary(root).branches).toEqual(
+      new Set([
+        "projects/p/branches/main",
+        "projects/p/branches/dev-alice-1a2b3c",
+        "projects/p/branches/staging",
+      ]),
+    );
+  });
+
+  test("every postgres resource of every app counts, in an included file too", () => {
+    const root = tempApp({
+      "databricks.yml": `include:
+  - resources/*.yml
+resources:
+  apps:
+    app:
+      resources:
+        - name: postgres
+          postgres:
+            branch: projects/p/branches/production
+        - name: archive
+          postgres:
+            branch: projects/p/branches/archive
+`,
+      "resources/reports.yml": `resources:
+  apps:
+    reports:
+      resources:
+        - name: postgres
+          postgres:
+            branch: projects/p/branches/reports
+            database: projects/p/branches/reports/databases/db
+`,
+    });
+    expect(readDeployBoundary(root)).toEqual({
+      branches: new Set([
+        "projects/p/branches/production",
+        "projects/p/branches/archive",
+        "projects/p/branches/reports",
+      ]),
+      unresolved: [],
+    });
+  });
+
+  test("a target that gives a declared variable no value leaves its references unresolved", () => {
+    const root = tempApp({
+      "databricks.yml": `${databricksYml(
+        "projects/p/branches/production",
+        "projects/p/branches/production/databases/db",
+      )}  prod: {}
+`,
+    });
+    expect(readDeployBoundary(root)).toEqual({
+      branches: new Set(["projects/p/branches/production"]),
+      unresolved: [
+        {
+          target: "prod",
+          at: "resources.apps.app.resources[0].postgres.branch",
+          written: "${var.postgres_branch}",
+        },
+        {
+          target: "prod",
+          at: "resources.apps.app.resources[0].postgres.database",
+          written: "${var.postgres_database}",
+        },
+        { target: "prod", at: "variables.postgres_branch", written: "" },
+      ],
+    });
+  });
+
+  test("a reference only a deploy resolves, or a value that is not a branch, is unresolved", () => {
+    const root = tempApp({
+      "databricks.yml": `resources:
+  apps:
+    app:
+      resources:
+        - name: postgres
+          postgres:
+            branch: projects/p/branches/dev-\${workspace.current_user.short_name}
+        - name: other
+          postgres:
+            branch: main
+`,
+    });
+    expect(readDeployBoundary(root)).toEqual({
+      branches: new Set(),
+      unresolved: [
+        {
+          target: "default",
+          at: "resources.apps.app.resources[0].postgres.branch",
+          written:
+            "projects/p/branches/dev-${workspace.current_user.short_name}",
+        },
+        {
+          target: "default",
+          at: "resources.apps.app.resources[1].postgres.branch",
+          written: "main",
+        },
+      ],
+    });
   });
 
   test("empty without databricks.yml or without a postgres binding", () => {
-    expect(readDeployBranches(tempApp())).toEqual([]);
+    const empty = { branches: new Set(), unresolved: [] };
+    expect(readDeployBoundary(tempApp())).toEqual(empty);
     expect(
-      readDeployBranches(tempApp({ "databricks.yml": "bundle:\n  name: x\n" })),
-    ).toEqual([]);
+      readDeployBoundary(tempApp({ "databricks.yml": "bundle:\n  name: x\n" })),
+    ).toEqual(empty);
   });
 
   test("an invalid databricks.yml throws instead of reading as no binding", () => {
     const root = tempApp({ "databricks.yml": "targets:\n  default: [\n" });
-    expect(() => readDeployBranches(root)).toThrow(
+    expect(() => readDeployBoundary(root)).toThrow(
       /^Cannot read databricks\.yml, so the branches it deploys to are unknown: .+\(\d+:\d+\)$/,
     );
   });

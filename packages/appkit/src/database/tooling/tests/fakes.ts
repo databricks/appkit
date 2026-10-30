@@ -110,6 +110,12 @@ resources:
     app:
       name: "my-app"
       source_code_path: ./
+      resources:
+        - name: postgres
+          postgres:
+            branch: \${var.postgres_branch}
+            database: \${var.postgres_database}
+            permission: CAN_CONNECT_AND_CREATE
 targets:
   default:
     default: true
