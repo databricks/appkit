@@ -141,8 +141,10 @@ you picked in its prompts, usually the branch the app deploys to, and
 2. It makes sure the branch has an endpoint and your Postgres role, points `.env`
    at the branch, and hands you the app schema the fork copied (see
    [One owner per branch](#one-owner-per-branch)).
-3. It sets up the schema. With `schema.ts` it applies the committed migrations;
-   without one, it writes `schema.ts` from the branch's tables (`introspect`).
+3. It sets up the schema. With `schema.ts` it runs `migrate`: it writes a
+   migration when `schema.ts` changed since the last one, then applies the
+   committed migrations. Without `schema.ts`, it writes `schema.ts` from the
+   branch's tables (`introspect`).
    `--schema clean` drops the app schema first. Without a terminal,
    `--schema clean` needs `--yes`. `--schema none` only sets up the branch and
    `.env`: it reads no `schema.ts`, hands over no schema, and leaves the schema
@@ -168,7 +170,7 @@ project whose default branch holds only data every developer may see.
 | Command | What it does |
 | --- | --- |
 | `npx appkit db init` | Points `.env` at your dev branch, or with `--session` at a branch for this checkout that expires, then sets up the schema. |
-| `npx appkit db migrate` | Writes `config/database/migrations/NNNN_migration.sql` when `schema.ts` changed, and applies pending migrations to your branch. |
+| `npx appkit db migrate` | Writes `config/database/migrations/NNNN_migration.sql` when `schema.ts` changed, regenerates `shared/appkit-types/database.d.ts` from `schema.ts`, and applies pending migrations to your branch. |
 | `npx appkit db introspect` | Writes `schema.ts` from tables that already exist, and a `0000_baseline` migration (or `NNNN_introspect` when migrations already exist). |
 | `npx appkit db clean` | Drops the app schema on your branch; `migrate` then rebuilds it from the migrations. `--delete-branch` deletes your session branch instead. |
 | `npx appkit db seed` | Runs `config/database/seed.sql` on your branch in one transaction. |
