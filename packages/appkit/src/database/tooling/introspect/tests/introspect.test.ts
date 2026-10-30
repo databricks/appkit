@@ -32,6 +32,7 @@ vi.mock("../../../../type-generator/database", async (importOriginal) => ({
 
 import { loadDefaultDatabaseSchema } from "../../../../plugins/database/load-schema";
 import { readJournal } from "../../../migrations/paths";
+import { withHistoryLock } from "../../history-lock";
 import { generateMigrationFiles } from "../../migrations";
 import { cleanupTempApps, fakeContext, tempApp } from "../../tests/fakes";
 import type { ColumnRow, ConstraintRow, TableRow } from "../catalog";
@@ -149,11 +150,12 @@ const authorsOnly = (
 
 /** Commit a migration of the current schema.ts; `applied`: the branch has recorded it. */
 async function commitMigration(root: string, applied = true): Promise<void> {
-  await generateMigrationFiles({
-    folder: path.join(root, MIGRATIONS),
-    schema: await loadDefaultDatabaseSchema(root),
-    interactive: false,
-  });
+  await withHistoryLock(root, "migrate", async (lock) =>
+    generateMigrationFiles(lock, {
+      schema: await loadDefaultDatabaseSchema(root),
+      interactive: false,
+    }),
+  );
   if (applied) recorded.push(lastWhen(root));
 }
 
@@ -471,6 +473,19 @@ describe("runIntrospect", () => {
     expect(fs.readFileSync(path.join(root, SCHEMA), "utf-8")).toBe(
       previousSchema,
     );
+  });
+
+  test("while another appkit db command changes the migration history, it refuses before reading the catalog", async () => {
+    const root = tempApp({ [SCHEMA]: previousSchema });
+    const before = tree(root);
+
+    const error = await withHistoryLock(root, "migrate", () => refusal(root));
+
+    expect(error.message).toMatch(
+      /^Another `appkit db migrate` \(pid \d+ on .+\) is changing the migration history in config\/database\. /,
+    );
+    expect(catalog.calls).toEqual([]);
+    expect(tree(root)).toEqual(before);
   });
 
   test("with history, a branch that has not applied every committed migration refuses before reading the catalog", async () => {

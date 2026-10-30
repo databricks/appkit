@@ -10,14 +10,11 @@ import {
   markMigrationsApplied,
   readMigrationDrift,
 } from "../../migrations/apply";
-import {
-  journalFile,
-  migrationsFolder,
-  readJournal,
-} from "../../migrations/paths";
+import { readJournal } from "../../migrations/paths";
 import { DEFAULT_SCHEMA_NAME } from "../../schema-builder/define-schema";
 import { type DbContext, NO_ENV_BRANCH, withBranchPool } from "../context";
 import { notYourBranch, resolveEnvBranch, takesWrites } from "../guard";
+import { type HistoryLock, withHistoryLock } from "../history-lock";
 import { DATABASE_TYPES_PATH } from "../migrate";
 import {
   breakingStatements,
@@ -142,16 +139,27 @@ function refuseDropsOfUnexpressed(
  * migration that brings history up to the database, and record it as applied.
  * Runs only on your dev or session branch, and only when the branch records
  * exactly the committed migrations. A failure puts back schema.ts, the backup,
- * database.d.ts and the migrations folder.
+ * database.d.ts and the migrations folder. One command at a time owns the
+ * checkout's history.
  */
 export async function runIntrospect(
   ctx: DbContext,
   options: IntrospectOptions,
 ): Promise<IntrospectReport> {
+  return withHistoryLock(ctx.root, "introspect", (lock) =>
+    introspectHolding(ctx, lock, options),
+  );
+}
+
+async function introspectHolding(
+  ctx: DbContext,
+  lock: HistoryLock,
+  options: IntrospectOptions,
+): Promise<IntrospectReport> {
   const schemaFile = path.join(ctx.root, DEFAULT_SCHEMA_FILE);
   // Introspect replaces schema.ts, so the current file (missing, empty or broken) is never read.
   const schemaName = options.schemaName || DEFAULT_SCHEMA_NAME;
-  const folder = migrationsFolder(ctx.root);
+  const { folder } = lock;
   const migrationOptions = { migrationsFolder: folder, schemaName };
   const hasHistory = (readJournal(folder)?.entries.length ?? 0) > 0;
 
@@ -228,7 +236,6 @@ export async function runIntrospect(
     const previousBackup = readIfExists(backupFile);
     const previousTypes = readIfExists(typesFile);
     const backsUp = previous !== null && previous !== rendered.source;
-    const journalBefore = readIfExists(journalFile(folder));
     let migration: GeneratedMigration | null = null;
     let recorded: string[] = [];
     try {
@@ -247,8 +254,7 @@ export async function runIntrospect(
         );
       }
 
-      migration = await generateMigrationFiles({
-        folder,
+      migration = await generateMigrationFiles(lock, {
         schema,
         tag: hasHistory ? "introspect" : "baseline",
         interactive: options.interactive,
@@ -278,7 +284,7 @@ export async function runIntrospect(
       writeOrRemove(schemaFile, previous);
       if (backsUp) writeOrRemove(backupFile, previousBackup);
       writeOrRemove(typesFile, previousTypes);
-      if (migration) discardMigrationFiles(folder, migration, journalBefore);
+      if (migration) discardMigrationFiles(lock, migration);
       if (error instanceof IntrospectRefusedError) throw error;
       throw new Error(
         `Introspect changed nothing: ${error instanceof Error ? error.message : String(error)}`,

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, test } from "vitest";
 
 import { loadDefaultDatabaseSchema } from "../../../../plugins/database/load-schema";
 import { drizzleKitImports } from "../../drizzle-exports";
+import { withHistoryLock } from "../../history-lock";
 import { generateMigrationFiles } from "../../migrations";
 import type { IntrospectedTable } from "../catalog";
 import { renderSchemaSource } from "../render";
@@ -123,14 +124,13 @@ describe("introspect round trip", () => {
 
   test("the baseline is generated from the empty snapshot: it creates every rendered table", async () => {
     const { root, schema } = await load(richTables);
-    const folder = path.join(root, "config/database/migrations");
-
-    const migration = await generateMigrationFiles({
-      folder,
-      schema,
-      tag: "baseline",
-      interactive: false,
-    });
+    const migration = await withHistoryLock(root, "migrate", (lock) =>
+      generateMigrationFiles(lock, {
+        schema,
+        tag: "baseline",
+        interactive: false,
+      }),
+    );
 
     expect(migration?.tag).toBe("0000_baseline");
     const sql = migration?.statements.join("\n") ?? "";

@@ -156,9 +156,10 @@ protected branches.
 
 ### One command at a time
 
-While `migrate` runs, it holds `config/database/.appkit-db.lock`. A second
-`appkit db` command in the same checkout fails and names the process that holds
-the lock. The lock goes when the command finishes or exits.
+While `migrate` or `introspect` runs, it holds
+`config/database/.appkit-db.lock`. A second `appkit db` command in the same
+checkout fails and names the process that holds the lock. The lock goes when
+the command finishes or exits.
 
 A command stopped by a signal, such as SIGKILL, can leave the file behind. The
 next command then names the holder. When that process no longer runs, the
