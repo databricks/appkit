@@ -518,6 +518,7 @@ export function designVitePlugin({
   let root = process.cwd();
   // Drafts live in the app folder (the dev server's working directory).
   const projectRoot = process.cwd();
+  const draftsDir = path.join(projectRoot, "drafts");
   // mtime of the index page when a browser last reported painting it.
   let paintedVersion: number | undefined;
   // Render errors reported by the hydrator, per draft, for one version of it.
@@ -603,11 +604,11 @@ export function designVitePlugin({
     },
 
     configureServer(server) {
-      const draftsDir = path.join(projectRoot, "drafts");
-      server.watcher.add(draftsDir);
-      server.watcher.on("change", (file) => {
-        if (path.dirname(file) !== draftsDir) return;
-        const name = /^([A-Za-z0-9_-]+)\.html$/.exec(path.basename(file))?.[1];
+      // Not Vite's watcher: for a changed .html it matches no module, Vite
+      // sends a full reload, and in middleware mode that reloads every page
+      // (a draft mid-stream, the app) on each write.
+      const onDraftChange = (file: string | null) => {
+        const name = /^([A-Za-z0-9_-]+)\.html$/.exec(file ?? "")?.[1];
         // Writes during a stream reach the page through the stream itself,
         // and a late event for content already streamed needs no reload.
         if (
@@ -621,7 +622,16 @@ export function designVitePlugin({
             data: { draft: name },
           });
         }
-      });
+      };
+      let draftsWatcher: fs.FSWatcher | undefined;
+      const watchDrafts = () => {
+        if (draftsWatcher || !fs.existsSync(draftsDir)) return;
+        draftsWatcher = fs.watch(draftsDir, (_, file) => onDraftChange(file));
+        draftsWatcher.unref();
+      };
+      watchDrafts();
+      // drafts/ may only be created once the app is running.
+      fs.watch(projectRoot, watchDrafts).unref();
       server.middlewares.use(async (req, res, next) => {
         const pathname = req.url?.split("?")[0] ?? "";
 
