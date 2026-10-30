@@ -154,22 +154,23 @@ export function designStatus(
 }
 
 /**
- * Whether the page entry can use react-router 7+ (the template ships it), as
- * Vite will resolve it from the app. Node's own resolution can disagree (e.g. a
- * hoisted, older react-router under pnpm), so resolve with Vite's resolver and
- * read the version of what it found.
+ * Whether the page entry can use react-router 7+ (the template ships it):
+ * Node's resolution from the design page, i.e. the app's own copy. Not from
+ * this plugin's folder (pnpm may hoist an older react-router there), and not
+ * through Vite, which returns its pre-bundled copy in node_modules/.vite/deps,
+ * whose package.json has no name or version.
  */
-async function hasReactRouter(
-  resolve: (id: string, importer: string) => Promise<{ id: string } | null>,
-  clientRoot: string,
-): Promise<boolean> {
-  const resolved = await resolve(
-    "react-router",
-    path.join(clientRoot, "src/design/index.tsx"),
-  ).catch(() => null);
-  if (!resolved) return false;
+function hasReactRouter(clientRoot: string): boolean {
+  let entry: string;
+  try {
+    entry = createRequire(
+      path.join(clientRoot, "src/design/index.tsx"),
+    ).resolve("react-router");
+  } catch {
+    return false;
+  }
   for (
-    let dir = path.dirname(resolved.id);
+    let dir = path.dirname(entry);
     dir !== path.dirname(dir);
     dir = path.dirname(dir)
   ) {
@@ -595,10 +596,7 @@ export function designVitePlugin({
       if (!id.endsWith(ENTRY_SUFFIX)) return;
       const file = id.slice(ENTRY_PREFIX.length + 1, -ENTRY_SUFFIX.length);
       if (PAGE_FILE.test(file)) {
-        const router = await hasReactRouter(
-          (spec, importer) => this.resolve(spec, importer),
-          root,
-        );
+        const router = hasReactRouter(root);
         return entryModule(file, builderOrigins, router);
       }
     },

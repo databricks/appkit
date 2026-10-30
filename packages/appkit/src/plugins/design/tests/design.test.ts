@@ -281,14 +281,14 @@ describe("builderOrigin", () => {
 });
 
 describe("page entry", () => {
-  type Resolve = (id: string) => Promise<{ id: string } | null>;
-  const load = (file: string, resolve: Resolve = async () => null) =>
-    (
-      designVitePlugin().load as (
-        this: { resolve: Resolve },
-        id: string,
-      ) => Promise<string | undefined>
-    ).call({ resolve }, `\0virtual:appkit-design-page:${file}.mjs`);
+  // root: the app's client folder (default: a fresh one, no react-router).
+  const load = (file: string, root = path.join(tmp(), "client")) => {
+    const plugin = designVitePlugin();
+    (plugin.configResolved as (c: { root: string }) => void)({ root });
+    return (plugin.load as (id: string) => Promise<string | undefined>)(
+      `\0virtual:appkit-design-page:${file}.mjs`,
+    );
+  };
 
   test("statically imports only the requested page, so other drafts can't break it", async () => {
     for (const file of ["index.tsx", "pages/orders.jsx"]) {
@@ -310,18 +310,26 @@ describe("page entry", () => {
     }
   });
 
-  // react-router as Vite resolves it: a fake package at a given version.
-  const routerAt = (version: string): Resolve => {
-    const dir = path.join(tmp(), "node_modules/react-router");
+  // An app with react-router at a given version installed; returns its client
+  // folder. With a stale pre-bundled copy in node_modules/.vite/deps, as the
+  // dev server leaves it.
+  const routerAt = (version: string) => {
+    const app = tmp();
+    const dir = path.join(app, "node_modules/react-router");
     fs.mkdirSync(path.join(dir, "dist"), { recursive: true });
     fs.writeFileSync(
       path.join(dir, "package.json"),
-      JSON.stringify({ name: "react-router", version }),
+      JSON.stringify({ name: "react-router", version, main: "dist/index.js" }),
     );
-    return async () => ({ id: path.join(dir, "dist/index.mjs") });
+    fs.writeFileSync(path.join(dir, "dist/index.js"), "");
+    const deps = path.join(app, "node_modules/.vite/deps");
+    fs.mkdirSync(deps, { recursive: true });
+    fs.writeFileSync(path.join(deps, "package.json"), '{"type":"module"}');
+    fs.writeFileSync(path.join(deps, "react-router.js"), "");
+    return path.join(app, "client");
   };
 
-  test("uses the router only when Vite resolves react-router 7+", async () => {
+  test("uses the router only when the app has react-router 7+", async () => {
     expect(await load("index.tsx", routerAt("7.18.0"))).toContain(
       'from "react-router"',
     );
