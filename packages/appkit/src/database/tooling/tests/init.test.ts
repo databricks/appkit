@@ -233,14 +233,18 @@ describe("runInit — dev branch", () => {
     lakebase.addRole(DEV, `dbrx-apps-${SP}`, SP);
     schemaOwner = USER;
 
-    const { report, steps } = await init(appOn(lakebase), { schema: "none" });
+    const { report, steps } = await init(appOn(lakebase));
 
     expect(report).toMatchObject({
       created: false,
       handedOff: null,
-      start: { kind: "none" },
+      start: { kind: "migrate", migrate: migrateReport },
     });
     expect(steps[0]).toBe(`Using ${devBranchId(USER)}`);
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.stringContaining("nspowner"),
+      ["app"],
+    );
     expect(
       lakebase.calls.some((call) =>
         /^(createBranch|deleteRole|createRole|createEndpoint)/.test(call),
