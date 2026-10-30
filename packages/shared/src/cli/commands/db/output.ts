@@ -119,6 +119,13 @@ function localVerifyHint(report: LocalVerifyReport): string {
 
 function printLocalVerifyReport(report: LocalVerifyReport): void {
   const branch = shortName(report.branch);
+  if (report.notYours) {
+    warn(
+      report.refusesEveryBranch
+        ? `${branch} takes no writes (${report.notYours}). ${report.refusesEveryBranch}.`
+        : `.env points at ${branch}, not a branch \`appkit db init\` set up for you: ${report.notYours}. \`npx appkit db init\` points it at a branch of your own.`,
+    );
+  }
   if (report.ok) {
     ok(
       `${branch} has every table and column config/database/schema.ts declares, and every committed migration`,

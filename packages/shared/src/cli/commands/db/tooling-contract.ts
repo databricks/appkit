@@ -75,6 +75,8 @@ export interface VerifyOptions {
 export interface LocalVerifyReport {
   readonly kind: "local";
   readonly branch: string;
+  readonly notYours: string | null;
+  readonly refusesEveryBranch: string | null;
   readonly schemaProblems: readonly string[];
   readonly pendingMigrations: readonly string[];
   readonly strandedMigrations: readonly string[];
