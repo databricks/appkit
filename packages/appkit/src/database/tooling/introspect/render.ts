@@ -352,6 +352,22 @@ export function renderSchemaSource(
         ])
       : [],
   );
+  /** Whether `previous` declares this FK; its toMany reverse comes with it. */
+  const declaresForeignKey = (
+    table: string,
+    foreignKey: IntrospectedForeignKey,
+  ): boolean =>
+    foreignKey.columns.length === 1 &&
+    (previousTables
+      .get(table)
+      ?.$relations.some(
+        (relation) =>
+          relation.cardinality === "toOne" &&
+          relation.localColumn === foreignKey.columns[0] &&
+          relation.targetTable === foreignKey.table &&
+          relation.targetColumn === foreignKey.refColumns[0],
+      ) ??
+      false);
   const isPrivate = (table: string, column: string): boolean => {
     if (!previous) return false;
     const declared = Object.values(
@@ -635,7 +651,13 @@ export function renderSchemaSource(
 
   for (const plan of plans.values()) {
     const targets = new Set<string>();
-    for (const foreignKey of plan.table.foreignKeys) {
+    // Declared FKs go first, so an undeclared one to the same table cannot take the relation.
+    const foreignKeys = [...plan.table.foreignKeys].sort(
+      (a, b) =>
+        Number(declaresForeignKey(plan.table.name, b)) -
+        Number(declaresForeignKey(plan.table.name, a)),
+    );
+    for (const foreignKey of foreignKeys) {
       const source = plan.columns.find(
         (c) => c.column.name === foreignKey.columns[0],
       );
@@ -737,17 +759,7 @@ export function renderSchemaSource(
       const out = edges.get(plan.table.name) ?? new Set<string>();
       out.add(foreignKey.table);
       edges.set(plan.table.name, out);
-      // A toOne edge comes with its toMany reverse, so checking it covers both.
-      const declared = previousTables
-        .get(plan.table.name)
-        ?.$relations.some(
-          (relation) =>
-            relation.cardinality === "toOne" &&
-            relation.localColumn === sourceColumn.column.name &&
-            relation.targetTable === foreignKey.table &&
-            relation.targetColumn === targetColumn.column.name,
-        );
-      if (previous && !declared) {
+      if (previous && !declaresForeignKey(plan.table.name, foreignKey)) {
         newRelations.push(
           `${qualified(plan.table.name, sourceColumn.column.name)} → ${qualified(foreignKey.table, targetColumn.column.name)}`,
         );

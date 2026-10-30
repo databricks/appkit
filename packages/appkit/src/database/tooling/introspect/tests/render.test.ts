@@ -744,6 +744,38 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
     ]);
   });
 
+  test("a declared foreign key keeps its relation when an undeclared one targets the same table", () => {
+    const declared = defineSchema(({ table }) => {
+      const users = table("users", { id: id() });
+      const posts = table("posts", {
+        id: id(),
+        author_id: integer(),
+        editor_id: references(() => users.id),
+      });
+      return { users, posts };
+    });
+
+    const out = renderSchemaSource(
+      [
+        keyed("users"),
+        keyed(
+          "posts",
+          [col("author_id", "integer"), col("editor_id", "integer")],
+          [fk("author_id", "users"), fk("editor_id", "users")],
+        ),
+      ],
+      "app",
+      { previous: declared },
+    );
+
+    expect(out.source).toContain("editor_id: fk(() => users.id),");
+    expect(out.source).toContain("author_id: integer(),");
+    expect(out.skipped.map((skip) => skip.reason)).toContain(
+      'foreign key to users(id) is not kept: a second foreign key to "users" would make the relation ambiguous',
+    );
+    expect(out.newRelations).toEqual([]);
+  });
+
   test("a declaration of another schema keeps nothing: every column renders private and every foreign key is new", () => {
     const out = renderSchemaSource(
       [
