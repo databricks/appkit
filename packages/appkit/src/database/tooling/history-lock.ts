@@ -70,7 +70,7 @@ function heldError(root: string, file: string): Error {
     );
   }
   return new Error(
-    `Another \`appkit db ${owner.command}\` (pid ${owner.pid} on ${owner.host}, since ${owner.startedAt}) is changing the migration history in ${path.dirname(relative)}. Wait for it to finish, then rerun.`,
+    `Another \`appkit db ${owner.command}\` (pid ${owner.pid} on ${owner.host}, since ${owner.startedAt}) is changing the migration history in ${path.dirname(relative)}. Wait for it to finish, then rerun. If pid ${owner.pid} is not an appkit db command, for example because a reboot reused it, the lock is stale. ${recovery}`,
   );
 }
 

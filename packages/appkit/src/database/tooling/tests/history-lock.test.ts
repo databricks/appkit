@@ -44,7 +44,7 @@ describe("withHistoryLock", () => {
         withHistoryLock(root, "introspect", async () => "ran"),
       );
       expect(error.message).toBe(
-        `Another \`appkit db migrate\` (pid ${process.pid} on ${os.hostname()}, since ${owner.startedAt}) is changing the migration history in config/database. Wait for it to finish, then rerun.`,
+        `Another \`appkit db migrate\` (pid ${process.pid} on ${os.hostname()}, since ${owner.startedAt}) is changing the migration history in config/database. Wait for it to finish, then rerun. If pid ${process.pid} is not an appkit db command, for example because a reboot reused it, the lock is stale. Make sure no appkit db command runs in this checkout, delete ${LOCK}, then rerun.`,
       );
       return "done";
     });

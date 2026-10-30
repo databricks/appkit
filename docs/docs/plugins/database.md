@@ -161,10 +161,13 @@ While `migrate` runs, it holds `config/database/.appkit-db.lock`. A second
 the lock. The lock goes when the command finishes or exits.
 
 A command stopped by a signal, such as SIGKILL, can leave the file behind. The
-next command then reports that the holder stopped. To recover, make sure no
-`appkit db` command runs in the checkout, delete
-`config/database/.appkit-db.lock`, and run the command again. AppKit never
-deletes a lock it does not hold. Scaffolded apps list the file in `.gitignore`.
+next command then names the holder. When that process no longer runs, the
+message says the holder stopped. When its pid runs on this machine, the message
+says to wait for it. A pid can also belong to an unrelated process, for example
+after a reboot reused it. In either case, if no `appkit db` command runs in the
+checkout, delete `config/database/.appkit-db.lock` and run the command again.
+AppKit never deletes a lock it does not hold. Scaffolded apps list the file in
+`.gitignore`.
 
 ## Schema discovery and overrides
 

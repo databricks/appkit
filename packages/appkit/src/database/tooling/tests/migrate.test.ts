@@ -363,7 +363,7 @@ describe("runMigrate", () => {
     const filesBefore = fs.readdirSync(folder, { recursive: true }).sort();
     await expect(runMigrate(ctx, { interactive: false })).rejects.toThrow(
       new RegExp(
-        `^Another \`appkit db migrate\` \\(pid ${process.pid} on .+\\) is changing the migration history in config/database\\. Wait for it to finish, then rerun\\.$`,
+        `^Another \`appkit db migrate\` \\(pid ${process.pid} on .+\\) is changing the migration history in config/database\\. Wait for it to finish, then rerun\\. If pid ${process.pid} is not an appkit db command, for example because a reboot reused it, the lock is stale\\. Make sure no appkit db command runs in this checkout, delete config/database/\\.appkit-db\\.lock, then rerun\\.$`,
       ),
     );
     expect(fs.readdirSync(folder, { recursive: true }).sort()).toEqual(
