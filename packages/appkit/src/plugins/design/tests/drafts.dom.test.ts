@@ -46,6 +46,7 @@ function setup(html: string) {
     draft: "dash",
     origins: ["https://builder.example.com"],
     statusPath: "/design/__status",
+    mockPath: "/m",
     css: ":root { --chart-1: red; }",
     h: (
       type: unknown,
@@ -167,6 +168,7 @@ describe("runHydrator", () => {
         draft: "dash",
         origins: [],
         statusPath: "/design/__status",
+        mockPath: "/m",
         css: "",
         h: () => null,
         createRoot: () => ({ render() {} }),
@@ -186,6 +188,7 @@ describe("runHydrator", () => {
       draft: "d",
       origins: [],
       statusPath: "/s",
+      mockPath: "/m",
       css: ":root{--x:1}@media (prefers-color-scheme: dark){:root:not(.light){--x:2}}",
       h: () => null,
       createRoot: () => ({ render() {} }),
@@ -214,6 +217,7 @@ describe("runHydrator", () => {
       draft: "d",
       origins: [],
       statusPath: "/s",
+      mockPath: "/m",
       css: "",
       h: (type: unknown) => ({ type }),
       createRoot: () => ({ render: (n: unknown) => rendered.push(n) }),
@@ -265,6 +269,7 @@ describe("runHydrator", () => {
       draft: "d",
       origins: [],
       statusPath: "/s",
+      mockPath: "/m",
       css: "",
       h: (type: unknown, props: unknown, ...children: unknown[]) => ({
         type,
@@ -322,5 +327,122 @@ describe("runHydrator", () => {
     hydrate();
     expect(hosts()[0].shadowRoot.querySelector(".appkit-root")).not.toBeNull();
     expect(hosts()[0].shadowRoot.querySelector(".appkit-fade")).toBeNull();
+  });
+
+  describe('data-src="mock#<key>"', () => {
+    afterEach(() => vi.useRealTimers());
+
+    // fetch for drafts/mock.json: a 404 `missing` times, then this mock.
+    const serveMock = (mock: unknown, missing = 0) => {
+      const calls: string[] = [];
+      const fetch = vi.fn(async (url: string, init?: { method?: string }) => {
+        if (init?.method !== "GET") return {};
+        calls.push(url);
+        return calls.length <= missing
+          ? { ok: false, status: 404 }
+          : { ok: true, text: async () => JSON.stringify(mock) };
+      });
+      return { fetch, calls };
+    };
+    const run = (fetch: unknown, render: (n: any) => void) =>
+      runHydrator({
+        draft: "d",
+        origins: [],
+        statusPath: "/s",
+        mockPath: "/design/drafts/mock.json",
+        css: "",
+        h: (type: unknown, props: unknown, ...children: unknown[]) => ({
+          type,
+          props,
+          children,
+        }),
+        createRoot: () => ({ render }),
+        UI,
+        normalizeBlock,
+        fetch: fetch as never,
+      });
+    const settle = () => vi.advanceTimersByTimeAsync(0);
+
+    test("waits as a skeleton until mock.json is there, then mounts once with its data", async () => {
+      vi.useFakeTimers();
+      doc.body.innerHTML = `
+        <div><script type="application/json" data-appkit="BarChart" data-src="mock#trips">{"xKey":"day","yKey":"n"}</script></div>
+        <div><script type="application/json" data-appkit="KpiCard" data-src="mock#kpi"></script></div>`;
+      const { fetch, calls } = serveMock(
+        {
+          trips: [{ day: "Mon", n: 3 }],
+          kpi: { label: "Trips", value: 12 },
+        },
+        2,
+      );
+      const rendered: any[] = [];
+      run(fetch, (n) => rendered.push(n));
+      await settle();
+      expect(rendered).toHaveLength(0);
+      const shadows = () =>
+        [...doc.querySelectorAll("[data-appkit-block]")].map(
+          (h) =>
+            (
+              h as unknown as {
+                shadowRoot: { querySelector(s: string): unknown };
+              }
+            ).shadowRoot,
+        );
+      expect(shadows().every((s) => s.querySelector(".appkit-skeleton"))).toBe(
+        true,
+      );
+
+      await vi.advanceTimersByTimeAsync(2_000); // two retries
+      expect(calls).toHaveLength(3); // one request at a time, for both blocks
+      expect(rendered).toHaveLength(2);
+      const chart = rendered[0][1].children[0];
+      expect(chart).toMatchObject({
+        type: "BarChart",
+        props: { data: [{ day: "Mon", n: 3 }], xKey: "day", yKey: "n" },
+      });
+      expect(shadows().some((s) => s.querySelector(".appkit-skeleton"))).toBe(
+        false,
+      );
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(calls).toHaveLength(3); // cached: no more requests
+      expect(rendered).toHaveLength(2); // mounted once
+    });
+
+    test("inline props win, and a DataTable gets the rows", async () => {
+      vi.useFakeTimers();
+      doc.body.innerHTML = `
+        <div><script type="application/json" data-appkit="DataTable" data-src="mock#t">{"columns":["city"]}</script></div>
+        <div><script type="application/json" data-appkit="KpiCard" data-src="mock#k">{"label":"Own label"}</script></div>`;
+      const { fetch } = serveMock({
+        t: [{ city: "Rome" }],
+        k: { label: "Mock label", value: 5 },
+      });
+      const rendered: any[] = [];
+      run(fetch, (n) => rendered.push(n));
+      await settle();
+      const [table, kpi] = rendered.map((n) => JSON.stringify(n));
+      expect(table).toContain('"Rome"'); // the mock rows, in the table body
+      expect(kpi).toContain('"Own label"');
+      expect(kpi).not.toContain("Mock label");
+      expect(kpi).toContain('"5"'); // the value still comes from the mock
+    });
+
+    test("a missing key fails just that block, with a clear error", async () => {
+      vi.useFakeTimers();
+      doc.body.innerHTML = `<div><script type="application/json" data-appkit="BarChart" data-src="mock#nope"></script></div>`;
+      const { fetch } = serveMock({ trips: [] });
+      const rendered: any[] = [];
+      run(fetch, (n) => rendered.push(n));
+      await settle();
+      expect(rendered).toHaveLength(1);
+      expect(rendered[0].children[0]).toContain(
+        'drafts/mock.json has no "nope"',
+      );
+      const reports = fetch.mock.calls
+        .map((c) => c[1] as { method?: string; body?: string } | undefined)
+        .filter((i) => i?.method === "POST" && i.body?.includes("nope"));
+      expect(reports).toHaveLength(1);
+    });
   });
 });

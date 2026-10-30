@@ -270,7 +270,7 @@ export function dataAppkitSchema() {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     title: "data-appkit blocks",
     description:
-      'Props for <script type="application/json" data-appkit="<Component>">…</script> blocks in drafts. Each block is one JSON object matching its component\'s schema.',
+      'Props for <script type="application/json" data-appkit="<Component>">…</script> blocks in drafts. Each block is one JSON object matching its component\'s schema. A block with data-src="mock#<key>" takes its data from drafts/mock.json (one JSON object, keyed by name): an array becomes the block\'s data (rows for a DataTable), an object is merged into its props. Props written in the block win; the block may hold no JSON at all.',
     components: {
       BarChart: chart(
         "Bar chart (appkit-ui BarChart).",
@@ -538,6 +538,8 @@ interface HydratorDeps {
   draft: string;
   origins: string[];
   statusPath: string;
+  /** URL of drafts/mock.json, for blocks with `data-src="mock#<key>"`. */
+  mockPath: string;
   /** App CSS (or appkit-ui's) to scope into each block's shadow root. */
   css: string;
   h: (...args: any[]) => unknown;
@@ -808,8 +810,65 @@ export function runHydrator(deps: HydratorDeps): {
     }
   };
 
+  // drafts/mock.json: fetched once per page for `data-src="mock#<key>"`
+  // blocks, and asked for again every second until it's there and parses
+  // (the agent may still be writing it). Blocks wait as skeletons.
+  const MOCK_TRIES = 30;
+  let mock: Record<string, unknown> | undefined;
+  let mockLoading = false;
+  let mockTries = 0;
+  let finalSeen = false;
+  const loadMock = () => {
+    if (mock || mockLoading || mockTries >= MOCK_TRIES) return;
+    mockLoading = true;
+    deps
+      .fetch(deps.mockPath, { method: "GET" })
+      .then((r: any) =>
+        r?.ok ? r.text() : Promise.reject(new Error("HTTP " + r?.status)),
+      )
+      .then((body: string) => {
+        const value = JSON.parse(body);
+        if (!value || typeof value !== "object" || Array.isArray(value)) {
+          throw new Error("not a JSON object");
+        }
+        mock = value;
+      })
+      .catch(() => {
+        mockTries++;
+      })
+      .finally(() => {
+        mockLoading = false;
+        if (mock || mockTries >= MOCK_TRIES) scan(finalSeen);
+        else win.setTimeout(loadMock, 1000);
+      });
+  };
+  // A block's data from mock.json: rows become its data prop (`rows` for a
+  // DataTable), an object is merged into its props. Inline props win.
+  const withMock = (script: any, props: unknown) => {
+    const key = /^mock#(.+)$/.exec(script.dataset.src)?.[1];
+    if (!key) {
+      throw new Error('data-src must be "mock#<key>".');
+    }
+    if (!mock) {
+      throw new Error(
+        "drafts/mock.json didn't load (missing, or not a JSON object).",
+      );
+    }
+    if (!(key in mock))
+      throw new Error('drafts/mock.json has no "' + key + '".');
+    const value = mock[key];
+    const own = (props ?? {}) as Record<string, unknown>;
+    if (Array.isArray(value)) {
+      const prop = script.dataset.appkit === "DataTable" ? "rows" : "data";
+      return { [prop]: value, ...own };
+    }
+    if (value && typeof value === "object") return { ...value, ...own };
+    throw new Error('mock "' + key + '" must be an array or an object.');
+  };
+
   // final: the document is complete, so JSON that still doesn't parse never will.
   const scan = (final: boolean) => {
+    if (final) finalSeen = true;
     for (const script of blocks()) {
       if (handled.has(script)) continue;
       // Rendered by an earlier run of the hydrator in this page.
@@ -822,20 +881,38 @@ export function runHydrator(deps: HydratorDeps): {
         continue;
       }
       let props: unknown;
-      try {
-        props = JSON.parse(script.textContent ?? "");
-      } catch (error) {
-        if (final) {
-          fail(
-            script,
-            new Error("invalid JSON: " + ((error as Error)?.message ?? error)),
-          );
-        } else {
-          skeleton(script); // still streaming in
+      const body = (script.textContent ?? "").trim();
+      // A data-src block may hold no props: empty is `{}` once the parser is
+      // past the script (until then its text may still be coming).
+      if (
+        body === "" &&
+        script.dataset.src != null &&
+        (final || script.nextSibling)
+      ) {
+        props = {};
+      } else
+        try {
+          props = JSON.parse(body);
+        } catch (error) {
+          if (final) {
+            fail(
+              script,
+              new Error(
+                "invalid JSON: " + ((error as Error)?.message ?? error),
+              ),
+            );
+          } else {
+            skeleton(script); // still streaming in
+          }
+          continue;
         }
+      if (script.dataset.src != null && !mock && mockTries < MOCK_TRIES) {
+        skeleton(script);
+        loadMock();
         continue;
       }
       try {
+        if (script.dataset.src != null) props = withMock(script, props);
         const spec = deps.normalizeBlock(script.dataset.appkit ?? "", props);
         handled.add(script);
         const render = RENDER[spec.component];
@@ -897,6 +974,7 @@ export function hydratorModule(
   draft: string,
   builderOrigins: string[],
   statusPath: string,
+  mockPath: string,
 ): string {
   return `
 // Drafts are plain HTML, so nothing installed @vitejs/plugin-react's Fast
@@ -935,6 +1013,7 @@ runHydrator({
   // two-argument URL constructor with the module URL as base: Vite rewrites
   // that pattern as an asset URL (to /@fs/...).
   statusPath: new URL(import.meta.url).origin + ${JSON.stringify(statusPath)},
+  mockPath: new URL(import.meta.url).origin + ${JSON.stringify(mockPath)},
   css: String(appCss ?? fallbackCss),
   h: createElement,
   createRoot,
