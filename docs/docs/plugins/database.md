@@ -135,18 +135,24 @@ yours.
 
 `migrate` never applies migrations to a branch that `databricks.yml` deploys to.
 It reads every target, every `postgres` resource of every app, the
-`postgres_branch` variable, and the files that `include:` names.
+`postgres_branch` variable, and the files that `include:` names. It also reads
+the variable values `databricks bundle` keeps for a target in
+`.databricks/bundle/<target>/variable-overrides.json`. A branch named there
+counts as well as the one `databricks.yml` names, because a deploy from this
+checkout uses the file's value.
 
 If a branch or database reference has no value in those files, `migrate` cannot
 tell which branch the reference names. Examples are a target that leaves
 `postgres_branch` unset and `${workspace.current_user.short_name}`. While any such
 reference exists, `migrate` applies migrations to no branch. The message names
 the target and where the reference is. To continue, give the reference a value
-in `databricks.yml`.
+in `databricks.yml`, or in the `variable-overrides.json` the message names. A
+`variable-overrides.json` that is not a JSON object stops `migrate` too.
 
 The check reads only this checkout's files. It does not see values passed at
-deploy time with `--var` or `BUNDLE_VAR_*`. It protects branches from the CLI,
-and does not replace Lakebase permissions or protected branches.
+deploy time with `--var` or `BUNDLE_VAR_*`, or resources defined in Python. It
+protects branches from the CLI, and does not replace Lakebase permissions or
+protected branches.
 
 ### One command at a time
 

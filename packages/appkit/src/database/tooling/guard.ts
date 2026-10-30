@@ -36,11 +36,14 @@ function deployRefusal(
   if (boundary.unresolved.length > 0) {
     const references = boundary.unresolved
       .map(
-        ({ target, at, written }) =>
-          `${at} in target ${target} (${written ? JSON.stringify(written) : "no value"})`,
+        ({ target, at, written, file }) =>
+          `${at} in target ${target}${file ? ` with ${file}` : ""} (${written ? JSON.stringify(written) : "no value"})`,
       )
       .join(", ");
-    return `databricks.yml may deploy to it: the files do not resolve ${references}; give ${boundary.unresolved.length > 1 ? "them values" : "it a value"} in databricks.yml`;
+    const where = boundary.unresolved.some(({ file }) => file)
+      ? "databricks.yml or the variable-overrides.json named"
+      : "databricks.yml";
+    return `databricks.yml may deploy to it: the files do not resolve ${references}; give ${boundary.unresolved.length > 1 ? "them values" : "it a value"} in ${where}`;
   }
   return boundary.branches.has(branch)
     ? "it is a branch databricks.yml deploys to"

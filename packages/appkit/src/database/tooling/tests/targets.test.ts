@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from "vitest";
 
+import { classifyBranch } from "../guard";
+import { devBranchId } from "../naming";
 import {
   parseResourceName,
   readDeployBoundary,
@@ -190,6 +192,88 @@ resources:
       ],
     });
   });
+
+  test("a variable-overrides.json value binds its target too, so the dev branch it names is a deploy target", () => {
+    const dev = `projects/p/branches/${devBranchId("alice@example.com")}`;
+    const root = tempApp({
+      "databricks.yml": databricksYml(
+        "projects/p/branches/production",
+        "projects/p/branches/production/databases/db",
+      ),
+      ".databricks/bundle/default/variable-overrides.json": JSON.stringify({
+        postgres_branch: dev,
+        postgres_database: `${dev}/databases/db`,
+      }),
+    });
+
+    const boundary = readDeployBoundary(root);
+
+    expect(boundary).toEqual({
+      branches: new Set(["projects/p/branches/production", dev]),
+      unresolved: [],
+    });
+    expect(
+      classifyBranch({
+        branch: { name: dev, status: {} },
+        userName: "alice@example.com",
+        sessionId: null,
+        boundary,
+      }),
+    ).toEqual({
+      kind: "deploy-target",
+      reason: "it is a branch databricks.yml deploys to",
+    });
+  });
+
+  test("a variable-overrides.json value that is not a branch name is unresolved, and names the file", () => {
+    const root = tempApp({
+      "databricks.yml": databricksYml(
+        "projects/p/branches/production",
+        "projects/p/branches/production/databases/db",
+      ),
+      ".databricks/bundle/default/variable-overrides.json": JSON.stringify({
+        postgres_branch: { lookup: { name: "dev" } },
+      }),
+    });
+
+    expect(readDeployBoundary(root).unresolved).toEqual([
+      {
+        target: "default",
+        at: "resources.apps.app.resources[0].postgres.branch",
+        written: "${var.postgres_branch}",
+        file: ".databricks/bundle/default/variable-overrides.json",
+      },
+      {
+        target: "default",
+        at: "variables.postgres_branch",
+        written: "",
+        file: ".databricks/bundle/default/variable-overrides.json",
+      },
+    ]);
+  });
+
+  test.each([
+    [
+      "{",
+      /^Cannot read \.databricks\/bundle\/default\/variable-overrides\.json, so the branches it deploys to are unknown: .+/,
+    ],
+    [
+      "[]",
+      /^Cannot read \.databricks\/bundle\/default\/variable-overrides\.json, so the branches it deploys to are unknown: it is not a JSON object$/,
+    ],
+  ])(
+    "a variable-overrides.json of %s throws instead of reading as no override",
+    (contents, message) => {
+      const root = tempApp({
+        "databricks.yml": databricksYml(
+          "projects/p/branches/production",
+          "projects/p/branches/production/databases/db",
+        ),
+        ".databricks/bundle/default/variable-overrides.json": contents,
+      });
+      expect(() => readDeployBoundary(root)).toThrow(message);
+    },
+  );
 
   test("empty without databricks.yml or without a postgres binding", () => {
     const empty = { branches: new Set(), unresolved: [] };
