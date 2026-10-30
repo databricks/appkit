@@ -225,7 +225,7 @@ Costly parts of a draft (charts, tables, KPI cards) are written as JSON blocks i
 </script>
 ```
 
-Data the drafts share can live in one `drafts/mock.json` instead of inline: a JSON object keyed by name, served at `GET /design/drafts/mock.json` (linked from `/design/__status` as `mock`). A block with `data-src="mock#<key>"` takes `mock[<key>]`: an array becomes its `data` (`rows` for a `DataTable`), an object is merged into its props. Props written in the block win, and the block may hold no JSON at all:
+Data the drafts share can live in one `drafts/mock.json` instead of inline: a JSON object keyed by name, served at `GET /design/drafts/mock.json` (linked from `/design/__status` as `mock`). A block with `data-src="mock#<key>"` takes the key from `mock.datasets` when it's there, else from the top level (so `{"datasets": {"trips": [...]}}` and `{"trips": [...]}` both work): an array becomes its `data` (`rows` for a `DataTable`), an object is merged into its props. Props written in the block win, and the block may hold no JSON at all:
 
 ```html
 <script type="application/json" data-appkit="LineChart" data-src="mock#tripsPerDay">{"xKey": "day", "yKey": "trips"}</script>
@@ -255,7 +255,7 @@ Turning a draft into a `/design` page is then mostly mechanical: the component a
 
 A block that can't render (unknown component, props that don't fit, or JSON still invalid once the file is complete) shows a small "Couldn't render" placeholder in the draft, and the error goes back to the agent two ways:
 
-- `GET /design/__status` lists every draft with the errors of its current version (each new load of the draft replaces them):
+- `GET /design/__status` lists every draft with the errors of its current version (each new load of the draft replaces them). Errors are known only once a browser page has rendered that version and handled every block: until then `checked` is `false` and `errors` is `null` (unknown, not "no errors"), e.g. right after a restart or an edit:
 
   ```json
   {
@@ -263,6 +263,7 @@ A block that can't render (unknown component, props that don't fit, or JSON stil
       {
         "name": "dashboard",
         "path": "/design/drafts/dashboard",
+        "checked": true,
         "errors": [{ "block": 3, "component": "LineChart", "error": "invalid JSON: ..." }]
       }
     ]

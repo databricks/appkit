@@ -123,7 +123,9 @@ describe("runHydrator", () => {
       return JSON.parse(init.body);
     });
     expect(bodies[0]).toEqual({ draft: "dash", reset: true });
-    expect(bodies.slice(1)).toEqual([
+    // Then each error, and last that every block was handled.
+    expect(bodies.at(-1)).toEqual({ draft: "dash", checked: true });
+    expect(bodies.slice(1, -1)).toEqual([
       expect.objectContaining({
         draft: "dash",
         block: 1,
@@ -177,8 +179,8 @@ describe("runHydrator", () => {
         fetch,
       }),
     ).not.toThrow();
-    // The status endpoint still gets the errors.
-    expect(fetch).toHaveBeenCalledTimes(3);
+    // The status endpoint still gets the errors (reset, 2 errors, checked).
+    expect(fetch).toHaveBeenCalledTimes(4);
   });
 
   test("scopes compound :root selectors as valid :host() selectors", () => {
@@ -253,8 +255,30 @@ describe("runHydrator", () => {
     expect(rendered).toHaveLength(1);
     // The fade and the pulse are off with prefers-reduced-motion.
     expect(host.shadowRoot.querySelector("style").textContent).toMatch(
-      /@media \(prefers-reduced-motion: reduce\) \{[^}]*animation: none;[^}]*\}[^}]*transition: none;/,
+      /@media \(prefers-reduced-motion: reduce\) \{[^}]*animation: none;[^}]*\}\s*\.appkit-fade \{ animation: none; \}/,
     );
+  });
+
+  test("the fade-in never hides a block: no opacity is held back for an animation frame", () => {
+    doc.body.innerHTML = BAR;
+    const raf = vi.fn();
+    (globalThis as { requestAnimationFrame?: unknown }).requestAnimationFrame =
+      raf;
+    try {
+      hydrate();
+    } finally {
+      delete (globalThis as { requestAnimationFrame?: unknown })
+        .requestAnimationFrame;
+    }
+    expect(raf).not.toHaveBeenCalled();
+    const css = (
+      hosts()[0].shadowRoot.querySelector("style") as { textContent: string }
+    ).textContent;
+    // Only the keyframes start at 0; the block's own style is fully opaque.
+    expect(css).toMatch(
+      /\.appkit-fade \{ animation: appkit-fade-in 200ms ease-out; \}/,
+    );
+    expect(css).not.toMatch(/\.appkit-fade \{[^}]*opacity/);
   });
 
   test("exposes the theme tokens on the document root at the lowest priority", () => {
@@ -426,6 +450,49 @@ describe("runHydrator", () => {
       expect(kpi).toContain('"Own label"');
       expect(kpi).not.toContain("Mock label");
       expect(kpi).toContain('"5"'); // the value still comes from the mock
+    });
+
+    test('finds the key in "datasets" first, then at the top level', async () => {
+      vi.useFakeTimers();
+      doc.body.innerHTML = `
+        <div><script type="application/json" data-appkit="BarChart" data-src="mock#trips">{"xKey":"day"}</script></div>
+        <div><script type="application/json" data-appkit="KpiCard" data-src="mock#total"></script></div>`;
+      // The drafts skill's shape: { mock, datasets: { <name>: rows } }, with
+      // a same-named top-level key that must lose to datasets.
+      const { fetch } = serveMock({
+        mock: true,
+        trips: [{ day: "top-level", n: 0 }],
+        datasets: { trips: [{ day: "Mon", n: 3 }] },
+        total: { label: "Trips", value: 12 },
+      });
+      const rendered: any[] = [];
+      run(fetch, (n) => rendered.push(n));
+      await settle();
+      expect(rendered).toHaveLength(2);
+      expect(rendered[0][1].children[0].props.data).toEqual([
+        { day: "Mon", n: 3 },
+      ]);
+      expect(JSON.stringify(rendered[1])).toContain('"Trips"');
+    });
+
+    test("reports the draft checked only once blocks waiting on mock.json are handled", async () => {
+      vi.useFakeTimers();
+      doc.body.innerHTML = `<div><script type="application/json" data-appkit="KpiCard" data-src="mock#k"></script></div>`;
+      const { fetch } = serveMock(
+        { datasets: { k: { label: "a", value: 1 } } },
+        1,
+      );
+      run(fetch, () => {});
+      const checked = () =>
+        fetch.mock.calls.filter((c) =>
+          (c[1] as { body?: string } | undefined)?.body?.includes(
+            '"checked":true',
+          ),
+        ).length;
+      await settle();
+      expect(checked()).toBe(0); // still waiting on mock.json
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(checked()).toBe(1);
     });
 
     test("a missing key fails just that block, with a clear error", async () => {
