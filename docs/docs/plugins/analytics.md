@@ -701,8 +701,6 @@ The `selected` prop adds declarative emphasis only to bar, pie, and donut charts
 <BarChart data={rows} xKey="city" yKey="trips" height={208} /> {/* exactly 208px */}
 ```
 
-Charts draw without an entry animation, so they show their data at once, also in a hidden or background frame where the browser pauses animations. Pass `options={{ animation: true }}` to animate them.
-
 **[Plotly](https://plotly.com/javascript/)** — pass the numeric specifier as `tickformat` and the literal currency symbol as `tickprefix`. Keeping them separate is necessary because d3's `$` marker is locale-driven and cannot represent arbitrary symbols:
 
 ```tsx
