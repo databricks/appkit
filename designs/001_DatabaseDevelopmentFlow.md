@@ -194,6 +194,17 @@ branch then costs one connection and one read of the journal table on the start 
 A transaction-mode pooler would void a session lock. The pooled Lakebase endpoint is closed to OAuth roles, so the
 plugin connects direct. The connector refuses a `-pooler` host so that stays true.
 
+The CLI has a second lock, on the checkout's migration history. `appkit db migrate`, `introspect`, `clean` and `init`
+create `config/database/.appkit-db.lock` exclusively and hold it until they finish or exit. `seed`, `verify` and
+`clean --delete-branch` take none. A second `appkit db` command that needs the lock in the same checkout fails and
+says who holds it. `init` holds one lock for its whole run, so no other command runs between its clean and its
+migrate. `init --schema none` changes no migration history and takes no lock.
+
+A command killed by a signal leaves the file behind. The next command fails the same way and says whether the
+holder's pid still runs on this machine. AppKit never takes over or deletes a lock it does not hold. Once no
+`appkit db` command runs in the checkout, the developer deletes the file and reruns the command. The template's
+`.gitignore` lists the file.
+
 ### Fail closed on a history the migrator would skip
 
 drizzle-orm applies only journal entries newer than the last recorded `created_at`. Two developers who add migrations
@@ -234,6 +245,10 @@ A fork copies objects with their owners, so `appkit db init` hands the fork's ap
 the fork's copy of the role that owns schema `app` and reassigns its objects (`reassign_owned_to`). It touches only
 that role, on the fork, and says so before it does.
 
+`appkit db init --schema none` hands off nothing. It reads no `schema.ts`, takes no history lock, and leaves the schema
+and its owner as the fork copied them. Init never hands off schema `public`, because `public` belongs to the database,
+not to an app.
+
 The role delete returns HTTP 500 when Postgres refuses the drop with SQLSTATE 2BP01, for example when the role still
 owns objects in another database of the branch
 ([ES-2265656](https://databricks.atlassian.net/browse/ES-2265656), open). Init lists that role's remaining
@@ -257,9 +272,14 @@ One function resolves the `.env` branch to a kind, in this order: project defaul
 | deploy target, project default, protected, other | Refuse | Write only | Refuse | Refuse | Read |
 
 `init` resolves the kind of the branch it would create or reuse before creating it or writing `.env`. A deploy target
-is the branch any `databricks.yml` target binds, on the app's `postgres` resource or in `postgres_branch`. One reader
-serves the guard, `init` and `verify`. It follows `include:` and resolves variables per target. `verify` also warns
-when `.env` points at a branch that is not yours.
+is a branch that any `databricks.yml` target binds, through any `postgres` resource of any app or through
+`postgres_branch`. A database binding counts for the branch it is on. One reader serves the guard, `init` and `verify`.
+It follows `include:` and resolves variables per target. It also applies the values `databricks bundle` keeps in
+`.databricks/bundle/<target>/variable-overrides.json`, because a deploy from this checkout uses them, so a branch
+named there is a deploy target too. A branch or database reference these files cannot resolve, such as an unset
+`postgres_branch` or `${workspace.current_user.short_name}`, may name any branch. While one exists, every branch
+counts as a deploy target, so no command writes to any branch, and the refusal names the reference. `verify` also
+warns when `.env` points at a branch that is not yours.
 
 The name allowlist is the safety boundary. Only `dev-<you>-<your hash>` and `session-<your hash>-<this checkout>` are
 writable, and the denylist checks come first. Before connecting, the CLI checks that `PGHOST` is a host of
@@ -268,8 +288,8 @@ writable, and the denylist checks come first. Before connecting, the CLI checks 
 ### drizzle-kit generates, the plugin applies
 
 drizzle-kit 0.31.10 generates migrations through `drizzle-kit/api`. It is an exact optional peer dependency, loaded
-lazily from the `@databricks/appkit/database-tooling` entry point that the runtime never imports. The loader checks
-the installed version and the `drizzle-orm` it resolves, and prints the install command on a mismatch.
+lazily from the `@databricks/appkit/beta/database-tooling` entry point that the runtime never imports. The
+loader checks the installed version and the `drizzle-orm` it resolves, and prints the install command on a mismatch.
 
 `appkit db init` installs drizzle-kit as a dev dependency when it is missing, since only database apps run it. A
 template dev dependency would add about 32 MB, 12 downloads and two deprecation warnings to every app, including apps
@@ -288,13 +308,20 @@ U+2028, U+2029, `*/`, backtick and `${`, loaded without running code.
 Introspect records its migration as applied only if the branch's last recorded migration is the one just before it,
 checked inside the migration lock. A branch ahead of the checkout would otherwise record DDL it never ran.
 
+Introspect keeps what an existing `schema.ts` hides from the API. A column the old file declares keeps its
+`.private()`, or stays without one. Introspect writes a column the old file does not declare with `.private()`, and a
+warning names it. When the catalog has a foreign key the old file does not declare, introspect refuses before it
+changes any file, because each foreign key is a relation the API can include. When `schema.ts` does not load,
+introspect refuses before it reads the branch, because it could not keep the private columns. Without a `schema.ts`,
+introspect writes no column private.
+
 ### Flag Strategy
 
 | Flag | Default | Introduced in | Turning it off |
 |---|---|---|---|
 | `APPKIT_DB_MIGRATE_ON_START` (app env) | Off. `apps init` renders `true` into `app.yaml` for database apps. | #654 | The app never migrates. The startup schema check still runs. |
-| `hidden` in the plugin manifest | `true` | Already on `main` | `apps init` does not offer the plugin. Removed in #675. |
-| `appkit db` hidden from `--help` | Hidden | #666 | Discoverability only. The commands are local tools and change only branches `init` created. Shown in #675. |
+| `hidden` in the plugin manifest | `true` | Already on `main` | `apps init` does not offer the plugin. #675 keeps `hidden: true` and leaves the plugin out of `template/appkit.plugins.json`. `beta.ts` exports `database` by hand, because the generated barrel skips hidden plugins. A later, separate change removes the flag. |
+| `appkit db` hidden from `--help` | Hidden | #666 | Discoverability only. The commands are local tools and change only branches `init` created. #675 keeps it hidden. A later, separate change shows it. |
 
 Not flagged:
 
@@ -310,8 +337,9 @@ Not flagged:
 1. `databricks apps init` scaffolds the app with the plugin. It asks for the Lakebase project and the deploy branch
    and database, which go into `databricks.yml`.
 2. `apps init` runs `appkit db init`, which asks nothing. It forks the project's default branch into
-   `dev-<user>-<hash6>`, adds a read-write endpoint and the developer's role, hands the fork's app objects to the
-   developer, writes `.env`, and starts the schema (migrate when `schema.ts` exists, introspect otherwise).
+   `dev-<user>-<hash6>`, adds a read-write endpoint and the developer's role, writes `.env`, hands the fork's app
+   objects to the developer, and starts the schema (migrate when `schema.ts` exists, introspect otherwise). With
+   `--schema none`, init stops after it writes `.env`.
 3. The developer declares a table in `schema.ts` and runs `appkit db migrate`. It writes `0000_migration.sql`,
    regenerates `shared/appkit-types/database.d.ts`, and applies the migration to the dev branch.
 4. The developer commits `config/database/` and runs `databricks apps deploy`.
@@ -325,7 +353,9 @@ warns about it.
 ### A table change
 
 Edit `schema.ts`, run `appkit db migrate`, commit, deploy. CI runs `appkit db check`. After the deploy,
-`appkit db verify --deployed -t <target>` reports whether the app is running with every committed migration.
+`appkit db verify --deployed -t <target>` reports whether the app is running, and whether the source snapshot of its
+active deployment holds exactly the committed migrations, each with the same journal entry and byte-identical SQL.
+Verify fails when it cannot read that snapshot.
 
 ### A second developer
 
@@ -342,7 +372,8 @@ and column already exists. A partial match fails start and changes nothing.
 
 - CLI: `appkit db init | migrate | introspect | clean | seed | verify | check`.
 - `defineSchema()` defaults `schemaName` to `"app"`.
-- Package export `@databricks/appkit/database-tooling`. It is internal, with no semver guarantee outside the CLI.
+- Package export `@databricks/appkit/beta/database-tooling`. It is beta and internal to the AppKit CLI. It has no semver
+  guarantee, and only the CLI of the same AppKit release imports it.
 - App env: `APPKIT_DB_MIGRATE_ON_START`. Local env written by init: `LAKEBASE_PROJECT`, `LAKEBASE_ENDPOINT`,
   `PGHOST`, `PGDATABASE`, `APPKIT_DB_SESSION`, and `DATABRICKS_CONFIG_PROFILE` or `DATABRICKS_HOST`.
 - Flags: `appkit db init --dev | --session`, `--ttl <duration>` for session branches,
@@ -353,11 +384,10 @@ and column already exists. A partial match fails start and changes nothing.
 ## Observability
 
 Migrations run before `TelemetryManager.start()` registers the tracer provider, so a span opened during setup is
-dropped. The migrator returns `lockWaitMs`, per-migration `durationMs`, the state, and the tags. The plugin logs them
-as one structured event per run. After setup completes it emits a `database.migrate` span with explicit start and end
-times and these attributes: `applied_count`, `adopted_count`, `state`, `outcome`, `sqlstate`. It also records a
-duration histogram and an outcome counter. Tags and SQL text are never attributes. The start log names the branch,
-the schema and the role.
+dropped. The plugin opens no span and records no metric for migrations. The migrator returns the applied, adopted and
+edited tags, the number of recorded migrations the checkout does not commit, and `lockWaitMs`. It logs one line per
+applied migration with its duration. The plugin then logs one line per run with the schema, the migrations folder,
+the counts of applied, adopted, edited and unknown migrations, `lock_wait_ms` and `duration_ms`.
 
 ## Security Considerations
 
@@ -399,11 +429,14 @@ the schema and the role.
    applies `0000` and then `0001`.
 3. **Commands, hidden.** Land #666 to #674. Done when a developer on the dev-playground runs `init`, `migrate` and
    `verify` on their own branch, and the deployed app applies the migration.
-4. **Reveal.** Land #675, then #678 (`appkit db check`). Until a CLI release runs `appkit db init`, the README says to
-   run it once. Done when `apps init` with the plugin, one table and a deploy need no step outside the README, and
-   when two people on the dev-playground add migrations on parallel git branches, `appkit db check` fails a merge
-   that keeps both, and the documented fix passes.
-5. **GA of the plugin** is a separate plan.
+4. **Template and docs, hidden.** Land #675, then #678 (`appkit db check`). #675 keeps the plugin `hidden: true` and out
+   of `template/appkit.plugins.json`, and keeps `appkit db` hidden from `appkit --help`. Done when two people on the
+   dev-playground add migrations on parallel git branches, `appkit db check` fails a merge that keeps both, and the
+   documented fix passes.
+5. **Reveal.** A later, separate change offers the plugin in `apps init` and shows `appkit db` in `appkit --help`. Until
+   a CLI release runs `appkit db init`, the README says to run it once. Done when `apps init` with the plugin, one table
+   and a deploy need no step outside the README.
+6. **GA of the plugin** is a separate plan.
 
 ## PR Stack
 
@@ -423,11 +456,17 @@ the schema and the role.
    with no prompts, the hand-off of the app schema, the 2BP01 dependency report, the 5-minute scale to zero, the
    branch-limit stop, `--ttl` and `--delete-branch`, atomic `.env` writes, and the drizzle-kit install.
 7. [#674](https://github.com/databricks/appkit/pull/674) `appkit db verify`: the local check, including `ahead` rows,
-   and `--deployed` with `-t, --target`, which checks the host and compares the deployed journal with the local one.
-   One `databricks.yml` reader serves the guard, `init` and `verify`.
-8. [#675](https://github.com/databricks/appkit/pull/675) Offer the plugin in `apps init`: the flag in `app.yaml`, no
-   drizzle-kit in the template, exit 1 on a failed start, a README that works before the CLI release, `verify`'s
-   warning for a `.env` branch that is not yours, the recreated-app recovery in the owner error, and the docs.
+   and `--deployed` with `-t, --target`. The deployed check resolves the target as the deploy guard does,
+   `variable-overrides.json` included, and checks the host. It reads the journal in the source snapshot of the app's
+   active deployment, which must list exactly the committed migrations, with the same journal entries and
+   byte-identical SQL. A snapshot without a journal has none of them, so verify says to deploy. Any other failure to
+   read the snapshot fails the check. One `databricks.yml` reader serves the guard, `init` and `verify`.
+8. [#675](https://github.com/databricks/appkit/pull/675) The template wiring for apps that select the plugin, which
+   stays hidden: the flag in `app.yaml`, no drizzle-kit in the template, exit 1 on a failed start, a README that works
+   before the CLI release, `verify`'s warning for a `.env` branch that is not yours, the recreated-app recovery in the
+   owner error, and the docs. The manifest keeps `hidden: true`, `beta.ts` exports `database` by hand,
+   `template/appkit.plugins.json` does not list the plugin, and `appkit db` stays hidden from `appkit --help`. Any
+   reveal is a later, separate change.
 9. [#678](https://github.com/databricks/appkit/pull/678) `appkit db check`.
 
 ## Open Questions
