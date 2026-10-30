@@ -202,6 +202,7 @@ describe("deleteSessionBranch", () => {
   test("refuses any other branch, and a .env without one", async () => {
     resolveEnvBranch.mockResolvedValueOnce({
       branch: { name: "projects/p/branches/production" },
+      boundary: { branches: new Set(), unresolved: [] },
       kind: "default",
       reason: "it is the project's default branch",
     });

@@ -445,6 +445,8 @@ function deployedApp(
     deployedJournal?: Migration[] | string;
     /** The deployed SQL by tag, else the committed SQL; "unreadable" or "missing" as for the journal. */
     deployedSql?: Record<string, string>;
+    /** The deployed snapshot folder's status: "unreadable" or "missing" as for the journal; it exists otherwise. */
+    snapshot?: "unreadable" | "missing";
     authenticatedHost?: string;
   } = {},
 ) {
@@ -505,6 +507,21 @@ function deployedApp(
           return Response.json({
             content: Buffer.from(content).toString("base64"),
           });
+        }
+        if (method === "GET" && apiPath === "/api/2.0/workspace/get-status") {
+          const file = String(query?.path);
+          requests.push(`workspace.get-status ${file}`);
+          if (options.snapshot === "unreadable") {
+            throw Object.assign(new Error("Permission denied"), {
+              statusCode: 403,
+            });
+          }
+          if (options.snapshot === "missing" || file !== SNAPSHOT) {
+            throw Object.assign(new Error("Path does not exist."), {
+              statusCode: 404,
+            });
+          }
+          return Response.json({ object_type: "DIRECTORY", path: file });
         }
         throw new Error(
           `--deployed only reads the app and its journal, not ${method} ${apiPath}`,
@@ -730,11 +747,11 @@ describe("runVerify --deployed", () => {
   });
 
   test.each([
-    ["has no journal", "missing"],
-    ["has a journal without entries", []],
+    ["has no journal", "missing", [`workspace.get-status ${SNAPSHOT}`]],
+    ["has a journal without entries", [], []],
   ] as const)(
     "without committed migrations, a snapshot that %s passes, and schema.ts is not needed",
-    async (_label, deployedJournal) => {
+    async (_label, deployedJournal, statusRequests) => {
       const { ctx, requests } = deployedApp({
         deployedJournal: deployedJournal as Migration[] | string,
       });
@@ -747,11 +764,38 @@ describe("runVerify --deployed", () => {
       expect(requests).toEqual([
         "apps.get my-app",
         `workspace.export ${JOURNAL}`,
+        ...statusRequests,
       ]);
     },
   );
 
-  test("without committed migrations, a snapshot with migrations fails, naming them: verify ran outside the app's root, or the checkout is behind", async () => {
+  test.each([
+    [
+      "does not exist",
+      "missing",
+      `the source snapshot ${SNAPSHOT} does not exist`,
+    ],
+    [
+      "has a status verify cannot read",
+      "unreadable",
+      `reading the status of ${SNAPSHOT} failed: Permission denied`,
+    ],
+  ] as const)(
+    "without committed migrations, a journal 404 in a snapshot that %s is unavailable, not a pass",
+    async (_label, snapshot, reason) => {
+      const { ctx } = deployedApp({ deployedJournal: "missing", snapshot });
+
+      expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+        migrations: { evidence: "unavailable", reason },
+        problems: [
+          `verify cannot tell whether app my-app's active deployment has the committed migrations: ${reason}`,
+        ],
+        ok: false,
+      });
+    },
+  );
+
+  test("without committed migrations, a snapshot with migrations fails, naming them: the checkout is behind", async () => {
     const { ctx } = deployedApp({
       deployedJournal: [{ tag: "0000_migration", when: 1000 }],
     });
@@ -760,10 +804,10 @@ describe("runVerify --deployed", () => {
       migrations: {
         evidence: "unavailable",
         reason:
-          "the deployment has 0000_migration, and this checkout commits no migration: run verify from the app's root, or pull them",
+          "the deployment has 0000_migration, and this checkout commits none in config/database/migrations next to databricks.yml: pull it, then run verify again",
       },
       problems: [
-        "verify cannot tell whether app my-app's active deployment has the committed migrations: the deployment has 0000_migration, and this checkout commits no migration: run verify from the app's root, or pull them",
+        "verify cannot tell whether app my-app's active deployment has the committed migrations: the deployment has 0000_migration, and this checkout commits none in config/database/migrations next to databricks.yml: pull it, then run verify again",
       ],
       ok: false,
     });
@@ -903,6 +947,34 @@ describe("runVerify --deployed", () => {
       branch: PRODUCTION,
       problems: [],
       ok: true,
+    });
+  });
+
+  test("a branch variable-overrides.json sets is credited to that file when it is missing or the app is bound elsewhere", async () => {
+    const staging = "projects/p/branches/staging";
+    const { ctx, lakebase } = deployedApp();
+    const overrides = path.join(
+      ctx.root,
+      ".databricks/bundle/default/variable-overrides.json",
+    );
+    fs.mkdirSync(path.dirname(overrides), { recursive: true });
+    fs.writeFileSync(overrides, JSON.stringify({ postgres_branch: staging }));
+    const source =
+      "databricks.yml with .databricks/bundle/default/variable-overrides.json";
+
+    expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+      branch: staging,
+      problems: [`${source} deploys to ${staging}, which does not exist`],
+      ok: false,
+    });
+
+    lakebase.addBranch(staging);
+    expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+      branch: staging,
+      problems: expect.arrayContaining([
+        `app my-app uses branch ${PRODUCTION}, not ${staging} from ${source}: \`databricks apps deploy\` applies ${source}`,
+      ]),
+      ok: false,
     });
   });
 

@@ -167,6 +167,7 @@ describe("runMigrate", () => {
     const ctx = app(`notes: table("notes", { id: id() })`);
     resolveEnvBranch.mockResolvedValue({
       branch: { name: "projects/p/branches/production" },
+      boundary: { branches: new Set(), unresolved: [] },
       kind: "default",
       reason: "it is the project's default branch",
     });
