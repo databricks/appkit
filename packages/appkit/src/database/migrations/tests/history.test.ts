@@ -72,4 +72,19 @@ describe("reconcileMigrations", () => {
     expect(history.pending).toEqual([]);
     expect(history.stranded).toEqual([]);
   });
+
+  test("two entries with one `when` keep their own rows: both recorded is clean, one recorded strands the other", () => {
+    const twins = [file("0000_a", 1000), file("0001_twin", 1000)];
+    const both = reconcileMigrations(twins, [
+      { hash: "hash-0000_a", createdAt: 1000 },
+      { hash: "hash-0001_twin", createdAt: 1000 },
+    ]);
+    expect([...both.pending, ...both.stranded, ...both.edited]).toEqual([]);
+
+    const one = reconcileMigrations(twins, [
+      { hash: "hash-0000_a", createdAt: 1000 },
+    ]);
+    expect(tags(one.stranded)).toEqual(["0001_twin"]);
+    expect(one.edited).toEqual([]);
+  });
 });

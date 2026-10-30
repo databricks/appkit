@@ -42,7 +42,7 @@
       "development": "./src/type-generator/index.ts",
       "default": "./dist/type-generator/index.js"
     },
-    "./database-tooling": {
+    "./beta/database-tooling": {
       "types": "./dist/database/tooling/index.d.ts",
       "development": "./src/database/tooling/index.ts",
       "default": "./dist/database/tooling/index.js"
@@ -171,7 +171,7 @@
       "./beta": "./dist/beta.js",
       "./dist/shared/src/plugin": "./dist/shared/src/plugin.d.ts",
       "./type-generator": "./dist/type-generator/index.js",
-      "./database-tooling": "./dist/database/tooling/index.js",
+      "./beta/database-tooling": "./dist/database/tooling/index.js",
       "./testing": {
         "types": "./dist/testing/index.d.ts",
         "default": "./dist/testing/index.js"

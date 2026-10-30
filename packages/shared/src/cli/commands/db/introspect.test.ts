@@ -13,7 +13,7 @@ const tooling = vi.hoisted(() => ({
   runIntrospect: vi.fn(),
 }));
 
-vi.mock("@databricks/appkit/database-tooling", () => tooling);
+vi.mock("@databricks/appkit/beta/database-tooling", () => tooling);
 
 import { dbCommand } from "./index";
 

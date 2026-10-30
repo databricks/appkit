@@ -18,6 +18,7 @@ import {
   timestamp,
   varchar,
 } from "../../schema-builder";
+import { withHistoryLock } from "../history-lock";
 import {
   breakingStatements,
   discardMigrationFiles,
@@ -31,6 +32,21 @@ function tempFolder(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "appkit-migrations-"));
   folders.push(root);
   return path.join(root, "config/database/migrations");
+}
+
+/** The checkout a tempFolder belongs to. */
+function rootOf(folder: string): string {
+  return path.resolve(folder, "../../..");
+}
+
+/** generateMigrationFiles under the checkout's history lock, as a command runs it. */
+function generate({
+  folder,
+  ...options
+}: Parameters<typeof generateMigrationFiles>[1] & { folder: string }) {
+  return withHistoryLock(rootOf(folder), "migrate", (lock) =>
+    generateMigrationFiles(lock, options),
+  );
 }
 
 /** Every file under a folder, relative, sorted — to prove nothing was written. */
@@ -71,7 +87,7 @@ const blog = (extraPostColumns = {}) =>
 describe("generateMigrationFiles", () => {
   test("writes a v7 migration from real drizzle-kit output for the builder's tables", async () => {
     const folder = tempFolder();
-    const generated = await generateMigrationFiles({
+    const generated = await generate({
       folder,
       schema: blog(),
       interactive: false,
@@ -127,7 +143,7 @@ describe("generateMigrationFiles", () => {
 
   test("returns null and writes nothing when the schema matches the latest snapshot", async () => {
     const folder = tempFolder();
-    await generateMigrationFiles({
+    await generate({
       folder,
       schema: blog(),
       interactive: false,
@@ -138,7 +154,7 @@ describe("generateMigrationFiles", () => {
     ]);
 
     await expect(
-      generateMigrationFiles({ folder, schema: blog(), interactive: false }),
+      generate({ folder, schema: blog(), interactive: false }),
     ).resolves.toBeNull();
     expect(
       listFiles(folder).map((file) => [
@@ -152,14 +168,14 @@ describe("generateMigrationFiles", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
     const folder = tempFolder();
-    await generateMigrationFiles({
+    await generate({
       folder,
       schema: blog(),
       interactive: false,
     });
 
     // A clock that did not move must still yield a newer journal entry.
-    const next = await generateMigrationFiles({
+    const next = await generate({
       folder,
       schema: blog({ views: integer().notNull().default(0) }),
       interactive: false,
@@ -187,14 +203,14 @@ describe("generateMigrationFiles", () => {
 
   test("a non-interactive column rename throws instead of prompting, and writes nothing", async () => {
     const folder = tempFolder();
-    await generateMigrationFiles({
+    await generate({
       folder,
       schema: blog({ summary: text() }),
       interactive: false,
     });
     const before = listFiles(folder);
 
-    const error = await generateMigrationFiles({
+    const error = await generate({
       folder,
       schema: blog({ abstract: text() }),
       interactive: false,
@@ -215,14 +231,14 @@ describe("generateMigrationFiles", () => {
     const folder = tempFolder();
     const named = (name: string) =>
       defineSchema(({ table }) => ({ [name]: table(name, { id: id() }) }));
-    await generateMigrationFiles({
+    await generate({
       folder,
       schema: named("notes"),
       interactive: false,
     });
 
     await expect(
-      generateMigrationFiles({
+      generate({
         folder,
         schema: named("memos"),
         interactive: false,
@@ -238,7 +254,7 @@ describe("generateMigrationFiles", () => {
   test("an empty schema with no history writes nothing", async () => {
     const folder = tempFolder();
     await expect(
-      generateMigrationFiles({
+      generate({
         folder,
         schema: defineSchema(() => ({})),
         interactive: false,
@@ -249,12 +265,12 @@ describe("generateMigrationFiles", () => {
 
   test("drizzle-orm's runtime migrator reads the written files", async () => {
     const folder = tempFolder();
-    await generateMigrationFiles({
+    await generate({
       folder,
       schema: blog(),
       interactive: false,
     });
-    await generateMigrationFiles({
+    await generate({
       folder,
       schema: blog({ views: integer() }),
       interactive: false,
@@ -281,14 +297,14 @@ describe("generateMigrationFiles", () => {
           role: enumColumn(enumName, ["admin", "member"]),
         }),
       }));
-    await generateMigrationFiles({
+    await generate({
       folder,
       schema: roles("user_role"),
       interactive: false,
     });
     const before = listFiles(folder);
 
-    const error = await generateMigrationFiles({
+    const error = await generate({
       folder,
       schema: roles("member_role"),
       interactive: false,
@@ -305,7 +321,7 @@ describe("generateMigrationFiles", () => {
 
   test("rejects a tag that is not a safe file name", async () => {
     await expect(
-      generateMigrationFiles({
+      generate({
         folder: tempFolder(),
         schema: blog(),
         tag: "../escape",
@@ -316,14 +332,14 @@ describe("generateMigrationFiles", () => {
 
   test("refuses to diff when the latest snapshot is missing", async () => {
     const folder = tempFolder();
-    await generateMigrationFiles({
+    await generate({
       folder,
       schema: blog(),
       interactive: false,
     });
     fs.rmSync(path.join(folder, "meta/0000_snapshot.json"));
     await expect(
-      generateMigrationFiles({
+      generate({
         folder,
         schema: blog({ views: integer() }),
         interactive: false,
@@ -333,7 +349,7 @@ describe("generateMigrationFiles", () => {
 
   test("a corrupt snapshot names the file and how to recover", async () => {
     const folder = tempFolder();
-    await generateMigrationFiles({
+    await generate({
       folder,
       schema: blog(),
       interactive: false,
@@ -342,7 +358,7 @@ describe("generateMigrationFiles", () => {
     fs.writeFileSync(snapshot, "{ not json");
 
     await expect(
-      generateMigrationFiles({
+      generate({
         folder,
         schema: blog({ views: integer() }),
         interactive: false,
@@ -358,7 +374,7 @@ describe("generateMigrationFiles", () => {
     const folder = tempFolder();
     const seen: string[][] = [];
 
-    const error = await generateMigrationFiles({
+    const error = await generate({
       folder,
       schema: blog(),
       interactive: false,
@@ -372,45 +388,6 @@ describe("generateMigrationFiles", () => {
     expect(seen).toHaveLength(1);
     expect(seen[0]?.join("\n")).toContain('CREATE TABLE "app"."authors"');
     expect(listFiles(folder)).toEqual([]);
-  });
-});
-
-describe("discardMigrationFiles", () => {
-  test("a first migration goes with the folders it created", async () => {
-    const folder = tempFolder();
-    const migration = await generateMigrationFiles({
-      folder,
-      schema: blog(),
-      interactive: false,
-    });
-
-    discardMigrationFiles(folder, migration as never, null);
-
-    expect(fs.existsSync(folder)).toBe(false);
-  });
-
-  test("a later migration goes, and the previous journal comes back byte for byte", async () => {
-    const folder = tempFolder();
-    await generateMigrationFiles({
-      folder,
-      schema: blog(),
-      interactive: false,
-    });
-    const journalFile = path.join(folder, "meta/_journal.json");
-    const journalBefore = `${fs.readFileSync(journalFile, "utf-8")}\n`;
-    fs.writeFileSync(journalFile, journalBefore);
-    const filesBefore = listFiles(folder);
-    const migration = await generateMigrationFiles({
-      folder,
-      schema: blog({ summary: text() }),
-      interactive: false,
-    });
-    expect(listFiles(folder)).not.toEqual(filesBefore);
-
-    discardMigrationFiles(folder, migration as never, journalBefore);
-
-    expect(listFiles(folder)).toEqual(filesBefore);
-    expect(fs.readFileSync(journalFile, "utf-8")).toBe(journalBefore);
   });
 });
 
@@ -443,38 +420,58 @@ describe("breakingStatements", () => {
 describe("discardMigrationFiles", () => {
   test("a first migration goes with the folders it created", async () => {
     const folder = tempFolder();
-    const migration = await generateMigrationFiles({
-      folder,
-      schema: blog(),
-      interactive: false,
+    await withHistoryLock(rootOf(folder), "migrate", async (lock) => {
+      const migration = await generateMigrationFiles(lock, {
+        schema: blog(),
+        interactive: false,
+      });
+      expect(migration?.journalBefore).toBeNull();
+      discardMigrationFiles(lock, migration as never);
     });
-
-    discardMigrationFiles(folder, migration as never, null);
 
     expect(fs.existsSync(folder)).toBe(false);
   });
 
-  test("a later migration goes, and the previous journal comes back byte for byte", async () => {
+  test("a later migration goes, and the journal it replaced comes back byte for byte", async () => {
     const folder = tempFolder();
-    await generateMigrationFiles({
-      folder,
-      schema: blog(),
-      interactive: false,
-    });
+    await generate({ folder, schema: blog(), interactive: false });
     const journalFile = path.join(folder, "meta/_journal.json");
     const journalBefore = `${fs.readFileSync(journalFile, "utf-8")}\n`;
     fs.writeFileSync(journalFile, journalBefore);
     const filesBefore = listFiles(folder);
-    const migration = await generateMigrationFiles({
-      folder,
-      schema: blog({ summary: text() }),
-      interactive: false,
-    });
-    expect(listFiles(folder)).not.toEqual(filesBefore);
 
-    discardMigrationFiles(folder, migration as never, journalBefore);
+    await withHistoryLock(rootOf(folder), "migrate", async (lock) => {
+      const migration = await generateMigrationFiles(lock, {
+        schema: blog({ summary: text() }),
+        interactive: false,
+      });
+      expect(listFiles(folder)).not.toEqual(filesBefore);
+      discardMigrationFiles(lock, migration as never);
+    });
 
     expect(listFiles(folder)).toEqual(filesBefore);
     expect(fs.readFileSync(journalFile, "utf-8")).toBe(journalBefore);
+  });
+
+  test("a writer whose lock was released removes nothing", async () => {
+    const folder = tempFolder();
+    let released: Parameters<typeof discardMigrationFiles>[0] | undefined;
+    const migration = await withHistoryLock(
+      rootOf(folder),
+      "migrate",
+      async (lock) => {
+        released = lock;
+        return generateMigrationFiles(lock, {
+          schema: blog(),
+          interactive: false,
+        });
+      },
+    );
+    const filesBefore = listFiles(folder);
+
+    expect(() =>
+      discardMigrationFiles(released as never, migration as never),
+    ).toThrow(/lock .* was released/);
+    expect(listFiles(folder)).toEqual(filesBefore);
   });
 });
