@@ -164,4 +164,52 @@ describe("compileGraph on a real Vite server", () => {
       }),
     );
   });
+
+  test("an app's react-router 7 is found when Vite serves its pre-bundled copy", async () => {
+    const app = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "appkit-router-")),
+    );
+    const write = (file: string, text: string) => {
+      fs.mkdirSync(path.dirname(path.join(app, file)), { recursive: true });
+      fs.writeFileSync(path.join(app, file), text);
+    };
+    write(
+      "node_modules/react-router/package.json",
+      JSON.stringify({
+        name: "react-router",
+        version: "7.18.0",
+        type: "module",
+        exports: { ".": "./index.js" },
+      }),
+    );
+    write(
+      "node_modules/react-router/index.js",
+      "export const createBrowserRouter = () => {};\nexport const RouterProvider = () => null;\n",
+    );
+    write("client/src/design/index.tsx", "export default () => null;\n");
+    server = await createServer({
+      root: path.join(app, "client"),
+      configFile: false,
+      logLevel: "silent",
+      plugins: [designVitePlugin()],
+      server: { middlewareMode: true, hmr: false, ws: false },
+      optimizeDeps: { include: ["react-router"], noDiscovery: true },
+      cacheDir: path.join(app, "node_modules/.vite"),
+    });
+    await server.environments.client.depsOptimizer?.init();
+    await server.environments.client.depsOptimizer?.scanProcessing;
+    // What made the old check miss it: Vite resolves to the pre-bundled copy.
+    const resolved = await server.pluginContainer.resolveId(
+      "react-router",
+      path.join(app, "client/src/design/index.tsx"),
+    );
+    expect(resolved?.id).toMatch(/[/]\.vite[/]deps[/]/);
+
+    const entry = await server.pluginContainer.load(
+      "\0virtual:appkit-design-page:index.tsx.mjs",
+    );
+    expect(String(typeof entry === "string" ? entry : entry?.code)).toContain(
+      'from "react-router"',
+    );
+  });
 });
