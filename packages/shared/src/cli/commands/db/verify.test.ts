@@ -33,6 +33,7 @@ const local = {
   kind: "local" as const,
   branch: "projects/p/branches/dev-alice-3f9a2c",
   notYours: null,
+  refusesEveryBranch: false,
   schemaProblems: [],
   pendingMigrations: [],
   strandedMigrations: [],
@@ -100,6 +101,23 @@ describe("appkit db verify", () => {
     expect(output(log)).toContain(
       ".env points at production, not a branch `appkit db init` set up for you: it is the project's default branch. `npx appkit db init` points it at a branch of your own.",
     );
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  test("while databricks.yml leaves a reference unresolved, the warning says every branch refuses writes, not to run init", async () => {
+    runVerify.mockResolvedValue({
+      ...local,
+      notYours:
+        "databricks.yml may deploy to it: the files do not resolve variables.postgres_branch in target default (no value); give it a value in databricks.yml",
+      refusesEveryBranch: true,
+    });
+
+    await dbCommand.parseAsync(["verify"], { from: "user" });
+
+    expect(output(log)).toContain(
+      "dev-alice-3f9a2c takes no writes (databricks.yml may deploy to it: the files do not resolve variables.postgres_branch in target default (no value); give it a value in databricks.yml). Until databricks.yml's references have values, `appkit db migrate`, `clean`, `seed` and `init` refuse every branch.",
+    );
+    expect(output(log)).not.toContain("npx appkit db init");
     expect(process.exitCode).toBeUndefined();
   });
 

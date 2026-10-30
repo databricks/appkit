@@ -39,6 +39,11 @@ interface LocalVerifyReport {
   readonly branch: string;
   /** Why the branch is not your dev or session branch, e.g. "it is the project's default branch"; null when it is. */
   readonly notYours: string | null;
+  /**
+   * databricks.yml has a reference this checkout's files do not resolve, so
+   * migrate, clean, seed and init refuse every branch until it has a value.
+   */
+  readonly refusesEveryBranch: boolean;
   /** Declared tables or columns the branch lacks (the plugin's startup check). */
   readonly schemaProblems: readonly string[];
   /** Committed migrations the branch has not run yet, newer than every one it ran. */
@@ -62,6 +67,8 @@ type DeployedMigrations =
       readonly missing: readonly string[];
       /** Committed migrations the snapshot has with another journal entry or other SQL. */
       readonly changed: readonly string[];
+      /** Migrations the snapshot has that this checkout does not commit. */
+      readonly unknown: readonly string[];
     }
   /** The snapshot could not be read, so whether it has them is unknown. */
   | { readonly evidence: "unavailable"; readonly reason: string };
@@ -75,11 +82,11 @@ interface DeployVerifyReport {
   readonly branch: string;
   /** The app the target deploys; null when it declares none. */
   readonly app: string | null;
-  /** null only when this checkout commits no migration. */
+  /** null only when neither this checkout nor the deployed snapshot has a migration. */
   readonly migrations: DeployedMigrations | null;
   /** What keeps the deployed app from using the branch, each with its fix. */
   readonly problems: readonly string[];
-  /** No problem, and the deployed migrations verified or none committed. */
+  /** No problem, and the deployed migrations verified or none on either side. */
   readonly ok: boolean;
 }
 
@@ -125,6 +132,7 @@ async function verifyLocal(ctx: DbContext): Promise<LocalVerifyReport> {
         kind: "local",
         branch,
         notYours: takesWrites(env.kind) ? null : (env.reason ?? null),
+        refusesEveryBranch: env.boundary.unresolved.length > 0,
         schemaProblems,
         pendingMigrations: drift.pending,
         strandedMigrations: drift.stranded,
@@ -193,8 +201,11 @@ async function readApp(
   }
 }
 
-/** A workspace file's bytes; throws with the reason when the export fails or has no content. */
-async function exportFile(ctx: DbContext, file: string): Promise<Buffer> {
+/** A workspace file's bytes; null when it does not exist. Throws with the reason when the export fails otherwise or has no content. */
+async function exportFile(
+  ctx: DbContext,
+  file: string,
+): Promise<Buffer | null> {
   let content: string | undefined;
   try {
     const response = await ctx.workspace().request({
@@ -204,6 +215,9 @@ async function exportFile(ctx: DbContext, file: string): Promise<Buffer> {
     });
     ({ content } = (await response.json()) as { content?: string });
   } catch (error) {
+    if ((error as { statusCode?: unknown } | null)?.statusCode === 404) {
+      return null;
+    }
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`exporting ${file} failed: ${message}`, { cause: error });
   }
@@ -232,16 +246,16 @@ function readCommitted(folder: string): CommittedMigration[] {
 /**
  * The committed migrations against the snapshot of the source the active
  * deployment runs: each needs the same journal entry (idx, when,
- * breakpoints) and byte-identical SQL there. Only that snapshot is evidence.
- * Anything verify cannot read in it makes the result unavailable, never a
- * match.
+ * breakpoints) and byte-identical SQL there, and the snapshot may have no
+ * migration the checkout does not commit. A snapshot without a journal has no
+ * migration. Only that snapshot is evidence. Anything verify cannot read in it
+ * makes the result unavailable, never a match.
  */
 async function readDeployedMigrations(
   ctx: DbContext,
   deployment: Deployment | undefined,
   committed: readonly CommittedMigration[],
 ): Promise<DeployedMigrations | null> {
-  if (committed.length === 0) return null;
   if (!deployment) {
     return {
       evidence: "unavailable",
@@ -263,17 +277,34 @@ async function readDeployedMigrations(
     `${snapshot}/${path.relative(ctx.root, file).split(path.sep).join("/")}`;
   try {
     const journalPath = deployedPath(journalFile(folder));
-    const text = (await exportFile(ctx, journalPath)).toString("utf-8");
-    let json: unknown;
-    try {
-      json = JSON.parse(text);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`${journalPath} is not JSON: ${message}`, {
-        cause: error,
-      });
+    const journal = await exportFile(ctx, journalPath);
+    let deployed: JournalEntry[] = [];
+    // A snapshot without a journal has no migration.
+    if (journal) {
+      let json: unknown;
+      try {
+        json = JSON.parse(journal.toString("utf-8"));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`${journalPath} is not JSON: ${message}`, {
+          cause: error,
+        });
+      }
+      deployed = parseJournal(json, journalPath).entries;
     }
-    const deployed = parseJournal(json, journalPath).entries;
+    const committedTags = new Set(committed.map(({ entry }) => entry.tag));
+    const unknown = deployed.flatMap((entry) =>
+      typeof entry?.tag === "string" && !committedTags.has(entry.tag)
+        ? [entry.tag]
+        : [],
+    );
+    if (committed.length === 0) {
+      if (deployed.length === 0) return null;
+      return {
+        evidence: "unavailable",
+        reason: `the deployment has ${unknown.join(", ")}, and this checkout commits no migration: run verify from the app's root, or pull them`,
+      };
+    }
     const compared = await Promise.all(
       committed.map(async ({ entry, sql }) => {
         const found = deployed.find((other) => other?.tag === entry.tag);
@@ -286,7 +317,13 @@ async function readDeployedMigrations(
           return "changed";
         }
         const file = deployedPath(migrationFile(folder, entry.tag));
-        return (await exportFile(ctx, file)).equals(sql) ? "same" : "changed";
+        const bytes = await exportFile(ctx, file);
+        if (!bytes) {
+          throw new Error(
+            `${file} is listed in the deployed journal but missing from the snapshot`,
+          );
+        }
+        return bytes.equals(sql) ? "same" : "changed";
       }),
     );
     const tags = (status: "missing" | "changed") =>
@@ -295,9 +332,9 @@ async function readDeployedMigrations(
         .map(({ entry }) => entry.tag);
     const missing = tags("missing");
     const changed = tags("changed");
-    return missing.length === 0 && changed.length === 0
+    return missing.length === 0 && changed.length === 0 && unknown.length === 0
       ? { evidence: "verified" }
-      : { evidence: "differs", missing, changed };
+      : { evidence: "differs", missing, changed, unknown };
   } catch (error) {
     return {
       evidence: "unavailable",
@@ -318,7 +355,7 @@ function migrationsProblems(
     ];
   }
   const problems: string[] = [];
-  const { missing, changed } = migrations;
+  const { missing, changed, unknown } = migrations;
   if (missing.length > 0) {
     const them = missing.length === 1 ? "it" : "them";
     problems.push(
@@ -329,6 +366,12 @@ function migrationsProblems(
     const them = changed.length === 1 ? "it" : "them";
     problems.push(
       `app ${name}'s active deployment has ${changed.join(", ")} with another journal entry or other SQL than this checkout commits. A migration that ran never runs again: restore ${them} to what was deployed, and put the change in a new migration`,
+    );
+  }
+  if (unknown.length > 0) {
+    const them = unknown.length === 1 ? "it" : "them";
+    problems.push(
+      `app ${name}'s active deployment has ${unknown.join(", ")}, which this checkout does not commit: pull ${them}, then run verify again`,
     );
   }
   return problems;
@@ -422,13 +465,14 @@ function hostOf(url: string): string {
 /** The API calls go to the workspace this shell is authenticated against, which must be the target's. */
 async function assertTargetWorkspace(
   ctx: DbContext,
-  target: BundleTarget,
+  target: string,
+  host: string | null,
 ): Promise<void> {
-  if (!target.host) return;
+  if (!host) return;
   const authenticated = await ctx.workspace().getHost();
-  if (hostOf(authenticated) === hostOf(target.host)) return;
+  if (hostOf(authenticated) === hostOf(host)) return;
   throw new Error(
-    `Target ${target.name} deploys to ${target.host}, but this shell is authenticated against ${authenticated}. Set DATABRICKS_CONFIG_PROFILE to a profile for ${target.host}, then rerun.`,
+    `Target ${target} deploys to ${host}, but this shell is authenticated against ${authenticated}. Set DATABRICKS_CONFIG_PROFILE to a profile for ${host}, then rerun.`,
   );
 }
 
@@ -480,21 +524,25 @@ async function verifyDeploy(
     targetName,
     defaultBundleTarget(bundle),
   );
-  const bound = target.apps.filter((app) => app.postgres.length > 0);
+  // What a deploy from this checkout uses: variable-overrides.json's values
+  // when it has the file, as the deploy guard reads them.
+  const deploy = target.overridden ?? target;
+  const withFile = target.overridden ? ` with ${target.overridden.file}` : "";
+  const bound = deploy.apps.filter((app) => app.postgres.length > 0);
   if (bound.length > 1) {
     throw new Error(
       `Target ${target.name} deploys ${bound.length} apps with a postgres resource (${bound.map((app) => app.key).join(", ")}); verify checks one app per target.`,
     );
   }
   const app =
-    bound[0] ?? (target.apps.length === 1 ? target.apps[0] : undefined);
+    bound[0] ?? (deploy.apps.length === 1 ? deploy.apps[0] : undefined);
   if (app && app.postgres.length > 1) {
     throw new Error(
       `App ${app.key} in target ${target.name} has ${app.postgres.length} postgres resources (${app.postgres.map((binding) => binding.at).join(", ")}); verify checks one per app.`,
     );
   }
   const declared = app?.postgres[0];
-  const branchValue = declared ? declared.branch : target.postgresBranch;
+  const branchValue = declared ? declared.branch : deploy.postgresBranch;
   if (!branchValue) {
     throw new Error(
       `No deploy branch: target ${target.name} in ${file} declares no app with a postgres resource.`,
@@ -502,13 +550,13 @@ async function verifyDeploy(
   }
   if (branchValue.kind === "unresolved") {
     throw new Error(
-      `No deploy branch: ${declared ? `${declared.at}.branch` : "variables.postgres_branch"} in target ${target.name} is "${branchValue.written}", which this checkout's files do not resolve to a branch.`,
+      `No deploy branch: ${declared ? `${declared.at}.branch` : "variables.postgres_branch"} in target ${target.name}${withFile} is "${branchValue.written}", which this checkout's files do not resolve to a branch.`,
     );
   }
-  const databaseValue = declared ? declared.database : target.postgresDatabase;
+  const databaseValue = declared ? declared.database : deploy.postgresDatabase;
   if (databaseValue?.kind === "unresolved") {
     throw new Error(
-      `No deploy database: ${declared ? `${declared.at}.database` : "variables.postgres_database"} in target ${target.name} is "${databaseValue.written}", which this checkout's files do not resolve to a database.`,
+      `No deploy database: ${declared ? `${declared.at}.database` : "variables.postgres_database"} in target ${target.name}${withFile} is "${databaseValue.written}", which this checkout's files do not resolve to a database.`,
     );
   }
   const branch = branchValue.name;
@@ -521,7 +569,7 @@ async function verifyDeploy(
   ): DeployVerifyReport => ({
     kind: "deploy",
     target: target.name,
-    host: target.host,
+    host: deploy.host,
     branch,
     app: name,
     migrations,
@@ -532,16 +580,10 @@ async function verifyDeploy(
   });
   /** A report from before verify reads the deployment; its problems say why. */
   const stopped = (name: string | null, problems: string[]) =>
-    report(
-      name,
-      problems,
-      committed.length === 0
-        ? null
-        : {
-            evidence: "unavailable",
-            reason: "verify stopped before reading the app's deployment",
-          },
-    );
+    report(name, problems, {
+      evidence: "unavailable",
+      reason: "verify stopped before reading the app's deployment",
+    });
   if (!app) {
     return stopped(null, [`target ${target.name} in ${file} declares no app`]);
   }
@@ -554,7 +596,7 @@ async function verifyDeploy(
   }
   const name = app.name;
 
-  await assertTargetWorkspace(ctx, target);
+  await assertTargetWorkspace(ctx, target.name, deploy.host);
   const api = ctx.api();
   const [branchFound, databaseFound, deployed] = await Promise.all([
     api.getBranch(branch),
@@ -593,7 +635,11 @@ async function verifyDeploy(
       `the app's service principal ${sp} has no Postgres role on ${branchId}: ${DEPLOY} creates it from the app's postgres resource`,
     );
   }
-  if (migrations) problems.push(...migrationsProblems(name, migrations));
+  // Without an active deployment, runningProblems already says why; the
+  // migrations stay unavailable, so the report is not ok either way.
+  if (migrations && deployed.active_deployment) {
+    problems.push(...migrationsProblems(name, migrations));
+  }
   return report(name, problems, migrations);
 }
 

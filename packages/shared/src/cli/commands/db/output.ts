@@ -122,7 +122,9 @@ function printLocalVerifyReport(report: LocalVerifyReport): void {
   const branch = shortName(report.branch);
   if (report.notYours) {
     warn(
-      `.env points at ${branch}, not a branch \`appkit db init\` set up for you: ${report.notYours}. \`npx appkit db init\` points it at a branch of your own.`,
+      report.refusesEveryBranch
+        ? `${branch} takes no writes (${report.notYours}). Until databricks.yml's references have values, \`appkit db migrate\`, \`clean\`, \`seed\` and \`init\` refuse every branch.`
+        : `.env points at ${branch}, not a branch \`appkit db init\` set up for you: ${report.notYours}. \`npx appkit db init\` points it at a branch of your own.`,
     );
   }
   if (report.ok) {

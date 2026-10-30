@@ -76,6 +76,7 @@ export interface LocalVerifyReport {
   readonly kind: "local";
   readonly branch: string;
   readonly notYours: string | null;
+  readonly refusesEveryBranch: boolean;
   readonly schemaProblems: readonly string[];
   readonly pendingMigrations: readonly string[];
   readonly strandedMigrations: readonly string[];
@@ -96,6 +97,7 @@ export interface DeployVerifyReport {
         readonly evidence: "differs";
         readonly missing: readonly string[];
         readonly changed: readonly string[];
+        readonly unknown: readonly string[];
       }
     | { readonly evidence: "unavailable"; readonly reason: string }
     | null;

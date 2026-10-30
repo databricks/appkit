@@ -141,8 +141,10 @@ you picked in its prompts, usually the branch the app deploys to, and
 2. It makes sure the branch has an endpoint and your Postgres role, points `.env`
    at the branch, and hands you the app schema the fork copied (see
    [One owner per branch](#one-owner-per-branch)).
-3. It sets up the schema. With `schema.ts` it applies the committed migrations;
-   without one, it writes `schema.ts` from the branch's tables (`introspect`).
+3. It sets up the schema. With `schema.ts` it runs `migrate`: it writes a
+   migration when `schema.ts` changed since the last one, then applies the
+   committed migrations. Without `schema.ts`, it writes `schema.ts` from the
+   branch's tables (`introspect`).
    `--schema clean` drops the app schema first. Without a terminal,
    `--schema clean` needs `--yes`. `--schema none` only sets up the branch and
    `.env`: it reads no `schema.ts`, hands over no schema, and leaves the schema
@@ -168,7 +170,7 @@ project whose default branch holds only data every developer may see.
 | Command | What it does |
 | --- | --- |
 | `npx appkit db init` | Points `.env` at your dev branch, or with `--session` at a branch for this checkout that expires, then sets up the schema. |
-| `npx appkit db migrate` | Writes `config/database/migrations/NNNN_migration.sql` when `schema.ts` changed, and applies pending migrations to your branch. |
+| `npx appkit db migrate` | Writes `config/database/migrations/NNNN_migration.sql` when `schema.ts` changed, regenerates `shared/appkit-types/database.d.ts` from `schema.ts`, and applies pending migrations to your branch. |
 | `npx appkit db introspect` | Writes `schema.ts` from tables that already exist, and a `0000_baseline` migration (or `NNNN_introspect` when migrations already exist). |
 | `npx appkit db clean` | Drops the app schema on your branch; `migrate` then rebuilds it from the migrations. `--delete-branch` deletes your session branch instead. |
 | `npx appkit db seed` | Runs `config/database/seed.sql` on your branch in one transaction. |
@@ -205,10 +207,11 @@ checkout uses the file's value.
 If a branch or database reference has no value in those files, `migrate` cannot
 tell which branch the reference names. Examples are a target that leaves
 `postgres_branch` unset and `${workspace.current_user.short_name}`. While any such
-reference exists, `migrate` applies migrations to no branch. The message names
-the target and where the reference is. To continue, give the reference a value
-in `databricks.yml`, or in the `variable-overrides.json` the message names. A
-`variable-overrides.json` that is not a JSON object stops `migrate` too.
+reference exists, `migrate` applies migrations to no branch, and `init`, `clean`
+and `seed` refuse every branch. The message names the target and where the
+reference is. To continue, give the reference a value in `databricks.yml`, or in
+the `variable-overrides.json` the message names. A `variable-overrides.json`
+that is not a JSON object stops these commands too.
 
 The check reads only this checkout's files. It does not see values passed at
 deploy time with `--var` or `BUNDLE_VAR_*`, or resources defined in Python. It
@@ -218,11 +221,12 @@ protected branches.
 ### One command at a time
 
 While `migrate`, `introspect`, `clean` or `init` runs, it holds
-`config/database/.appkit-db.lock`. A second `appkit db` command in the same
-checkout fails and names the process that holds the lock. The lock goes when
-the command finishes or exits. `init` holds it for its whole run, including the
-clean and migrate it starts. `init --schema none` changes no migration history,
-so it takes no lock.
+`config/database/.appkit-db.lock`. Another of these commands in the same
+checkout fails and names the process that holds the lock. `seed`, `verify` and
+`clean --delete-branch` change no migration history and take no lock. The lock
+goes when the command finishes or exits. `init` holds it for its whole run,
+including the clean and migrate it starts. `init --schema none` changes no
+migration history, so it takes no lock.
 
 A command stopped by a signal, such as SIGKILL, can leave the file behind. The
 next command then names the holder. When that process no longer runs, the
