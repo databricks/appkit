@@ -365,7 +365,6 @@ describe("draft errors in /design/__status", () => {
     let handler: Handler | undefined;
     (plugin.configureServer as (s: unknown) => void)({
       config: { root: path.join(app, "client") },
-      watcher: { add() {}, on() {} },
       ws: { send() {} },
       middlewares: { use: (h: Handler) => (handler = h) },
       transformRequest,

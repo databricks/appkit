@@ -126,4 +126,42 @@ describe("compileGraph on a real Vite server", () => {
     expect(status).toMatchObject({ compiled: false, waitingFor: "compile" });
     expect(String(status.compileError)).toMatch(/Bad\.tsx.*Unexpected/);
   });
+
+  test("a draft write reaches only its own page, never Vite's reload-all", async () => {
+    const app = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "appkit-drafts-")),
+    );
+    fs.mkdirSync(path.join(app, "drafts"));
+    fs.mkdirSync(path.join(app, "client"));
+    fs.writeFileSync(path.join(app, "drafts/dash.html"), "<p>a");
+    const cwd = process.cwd();
+    process.chdir(app);
+    try {
+      server = await createServer({
+        root: path.join(app, "client"),
+        configFile: false,
+        logLevel: "silent",
+        plugins: [designVitePlugin()],
+        server: { middlewareMode: true, ws: false },
+        optimizeDeps: { noDiscovery: true, include: [] },
+      });
+    } finally {
+      process.chdir(cwd);
+    }
+    const sent: unknown[] = [];
+    server.environments.client.hot.send = (p: unknown) => sent.push(p);
+    server.ws.send = (p: unknown) => sent.push(p);
+
+    fs.appendFileSync(path.join(app, "drafts/dash.html"), "b</p>");
+    await new Promise((r) => setTimeout(r, 500));
+    expect(sent).not.toContainEqual(
+      expect.objectContaining({ type: "full-reload" }),
+    );
+    expect(sent).toContainEqual(
+      expect.objectContaining({
+        event: "appkit:draft-changed",
+        data: { draft: "dash" },
+      }),
+    );
+  });
 });
