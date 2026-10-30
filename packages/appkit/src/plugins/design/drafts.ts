@@ -763,14 +763,20 @@ export function runHydrator(deps: HydratorDeps): {
   ];
   const handled = new WeakSet<any>();
 
-  const post = (body: unknown) =>
-    deps
-      .fetch(statusPath, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      })
-      .catch(() => {});
+  // One report at a time, in order: the status endpoint must see the reset,
+  // then the errors, then `checked` (a late reset would wipe the rest).
+  let reports: Promise<unknown> = Promise.resolve();
+  const post = (body: unknown) => {
+    reports = reports.then(() =>
+      deps
+        .fetch(statusPath, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        })
+        .catch(() => {}),
+    );
+  };
 
   const fail = (script: any, error: unknown) => {
     handled.add(script);
