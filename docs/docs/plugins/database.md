@@ -115,6 +115,12 @@ not own `public`.
 
 ## Development workflow
 
+:::note
+`appkit db` is hidden from `appkit --help` while the database development flow is
+in beta. Its logic ships in `@databricks/appkit/beta/database-tooling`, which
+only the AppKit CLI of the same release imports. It has no semver guarantee.
+:::
+
 You develop against a Lakebase branch of your own, never the deployed one. Tables
 are created and changed through migrations: generated locally from `schema.ts`,
 committed with your code, and applied by the deployed app when it starts.
@@ -132,12 +138,15 @@ you picked in its prompts, usually the branch the app deploys to, and
    otherwise uses your dev branch, `dev-<you>-<hash>`. It creates the branch when
    it does not exist yet. `--session` uses a branch for this checkout that expires
    after 7 days (`--ttl` changes that), and `--dev` goes back to your dev branch.
-2. It makes sure the branch has an endpoint and your Postgres role, hands you the
-   app schema the fork copied, and points `.env` at the branch.
+2. It makes sure the branch has an endpoint and your Postgres role, points `.env`
+   at the branch, and hands you the app schema the fork copied (see
+   [One owner per branch](#one-owner-per-branch)).
 3. It sets up the schema. With `schema.ts` it applies the committed migrations;
    without one, it writes `schema.ts` from the branch's tables (`introspect`).
-   `--schema clean` drops the app schema first, and `--schema none` leaves it as it
-   is. Without a terminal, `--schema clean` needs `--yes`.
+   `--schema clean` drops the app schema first. Without a terminal,
+   `--schema clean` needs `--yes`. `--schema none` only sets up the branch and
+   `.env`: it reads no `schema.ts`, hands over no schema, and leaves the schema
+   and its owner as the fork copied them.
 4. When that needs drizzle-kit and the app does not have it, it installs the
    version AppKit pins as a dev dependency. `migrate` and `introspect` generate
    migrations with it.
@@ -166,7 +175,9 @@ project whose default branch holds only data every developer may see.
 | `npx appkit db verify` | Read-only check of your branch: missing tables or columns, pending migrations, migrations that will never run there, and migrations it ran that this checkout does not commit. `--deployed` checks a target's deployed app instead. |
 
 `migrate`, `clean` and `seed` change only branches `db init` created for you (your
-dev branch, or this checkout's session branch). On any other branch, including the
+dev branch, or this checkout's session branch). A session branch name includes a
+hash of the user who created it, so a `.env` copied from another developer does
+not make their session branch yours. On any other branch, including the
 project's default branch, a protected branch, or a branch `databricks.yml`
 deploys to, `clean` and `seed` refuse and `migrate` only writes the migration files.
 
@@ -179,6 +190,47 @@ git add config/database          # commit schema.ts with its migrations
 databricks apps deploy           # the deployed app applies it on start
 npx appkit db verify --deployed  # the app runs, with every committed migration
 ```
+
+### Branches `databricks.yml` deploys to
+
+`migrate` never applies migrations to a branch that `databricks.yml` deploys to.
+It reads every target, every `postgres` resource of every app, the
+`postgres_branch` variable, and the files that `include:` names. It also reads
+the variable values `databricks bundle` keeps for a target in
+`.databricks/bundle/<target>/variable-overrides.json`. A branch named there
+counts as well as the one `databricks.yml` names, because a deploy from this
+checkout uses the file's value.
+
+If a branch or database reference has no value in those files, `migrate` cannot
+tell which branch the reference names. Examples are a target that leaves
+`postgres_branch` unset and `${workspace.current_user.short_name}`. While any such
+reference exists, `migrate` applies migrations to no branch. The message names
+the target and where the reference is. To continue, give the reference a value
+in `databricks.yml`, or in the `variable-overrides.json` the message names. A
+`variable-overrides.json` that is not a JSON object stops `migrate` too.
+
+The check reads only this checkout's files. It does not see values passed at
+deploy time with `--var` or `BUNDLE_VAR_*`, or resources defined in Python. It
+protects branches from the CLI, and does not replace Lakebase permissions or
+protected branches.
+
+### One command at a time
+
+While `migrate`, `introspect`, `clean` or `init` runs, it holds
+`config/database/.appkit-db.lock`. A second `appkit db` command in the same
+checkout fails and names the process that holds the lock. The lock goes when
+the command finishes or exits. `init` holds it for its whole run, including the
+clean and migrate it starts. `init --schema none` changes no migration history,
+so it takes no lock.
+
+A command stopped by a signal, such as SIGKILL, can leave the file behind. The
+next command then names the holder. When that process no longer runs, the
+message says the holder stopped. When its pid runs on this machine, the message
+says to wait for it. A pid can also belong to an unrelated process, for example
+after a reboot reused it. In either case, if no `appkit db` command runs in the
+checkout, delete `config/database/.appkit-db.lock` and run the command again.
+AppKit never deletes a lock it does not hold. Scaffolded apps list the file in
+`.gitignore`.
 
 ### Changing tables in use
 
@@ -252,7 +304,10 @@ tables:
   first start and owns everything in it. The `postgres` resource's
   `CAN_CONNECT_AND_CREATE` permission is all it needs; no grants are required.
 - On your dev or session branch, you own it. A fork copies its parent's objects
-  with their owners, so `db init` hands them over to you.
+  with their owners, so `db init` hands the app schema to you: it deletes the
+  branch's copy of the role that owns it, with its objects reassigned to you.
+  `db init --schema none` hands over nothing. Schema `public` is never handed
+  over, because it belongs to the database rather than to an app.
 
 Do not apply migrations to the deploy branch yourself: you would own those objects,
 and the app could no longer change them. If schema `app` on the deploy branch
@@ -276,10 +331,12 @@ databricks postgres delete-role projects/<project>/branches/<branch>/roles/<old-
 `npx appkit db verify --deployed` checks a `databricks.yml` target's app through
 the Databricks API: the app exists, its `postgres` resource names the target's
 branch and database with `CAN_CONNECT_AND_CREATE`, its service principal has a role
-on the branch, the app is running, and its active deployment has every committed
-migration. `-t, --target` picks the target; without it, verify uses the bundle's
-default target. When the target's `workspace.host` is not the workspace your shell
-is authenticated against, verify refuses and names the profile to set. It needs no
+on the branch, and the app is running. It also reads the source the app's active
+deployment runs: every committed migration must be there with the same journal
+entry and SQL. When verify cannot read that source, it fails and says why.
+`-t, --target` picks the target; without it, verify uses the bundle's default
+target. When the target's `workspace.host` is not the workspace your shell is
+authenticated against, verify refuses and names the profile to set. It needs no
 access to the deploy branch's database and changes nothing. A failed check names
 `databricks apps logs`, `start` or `deploy`.
 
@@ -293,8 +350,9 @@ databricks apps deploy -t prod
 npx appkit db verify --deployed -t prod
 ```
 
-It exits 1 when the app is not running, is bound to another branch, or lacks a
-committed migration.
+It exits 1 when the app is not running or is bound to another branch, and when
+verify cannot confirm that its deployment has every committed migration with the
+same SQL.
 
 ## Schema discovery and overrides
 

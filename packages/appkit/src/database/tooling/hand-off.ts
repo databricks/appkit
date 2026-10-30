@@ -61,11 +61,16 @@ interface HandOff {
  * you by deleting that owner's copy of its role on this branch, with its
  * objects reassigned to you. Only the app schema's owner is deleted. Returns
  * that owner; null when you already own the schema or it does not exist.
+ * Schema public is never handed off: it belongs to the database
+ * (pg_database_owner on PostgreSQL 15 and later, the bootstrap superuser
+ * before), never to an app, so AppKit never deletes its owner or reassigns its
+ * objects.
  */
 export async function handOffAppSchema(
   ctx: DbContext,
   input: HandOff,
 ): Promise<string | null> {
+  if (input.schemaName === "public") return null;
   const found = await withBranchPool(ctx, async (pool) => {
     const { owner, currentUser } = await schemaOwnership(
       pool,

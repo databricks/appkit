@@ -15,6 +15,8 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import { parse } from "yaml";
 
+import { checkTemplateLint } from "./template-lint-fixtures";
+
 export type PackageManager = "npm" | "pnpm";
 
 /** Test fixture shaping; end-user package-manager selection belongs to the CLI. */
@@ -167,6 +169,7 @@ export async function runTemplateSmoke(
       }
     }
     run(process.execPath, ["--input-type=commonjs", "-e", nativeCheck]);
+    checkTemplateLint(appDir, env);
     run(pm, ["run", "build"]);
     const html = readFileSync(join(appDir, "client/dist/index.html"), "utf-8");
     assert(readFileSync(join(appDir, "dist/server.js"), "utf-8").length > 0);

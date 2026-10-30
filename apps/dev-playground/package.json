@@ -36,7 +36,7 @@
   },
   "devDependencies": {
     "@playwright/test": "1.61.0",
-    "@types/node": "20.19.21",
+    "@types/node": "22.20.5",
     "dotenv": "16.6.1",
     "tsdown": "0.20.3",
     "tsx": "4.20.6",

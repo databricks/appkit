@@ -49,9 +49,10 @@ ran that this checkout does not commit.
 branch's database. It checks that the target's app exists, that its postgres
 resource names the branch and database in databricks.yml with
 CAN_CONNECT_AND_CREATE, that its service principal has a role on the branch,
-that the app is running, and that its active deployment has every committed
-migration. It refuses when the target's workspace.host is not the workspace
-this shell is authenticated against.
+that the app is running, and that the source its active deployment runs has
+every committed migration, with the same journal entry and SQL. When verify
+cannot read that source, it fails. It refuses when the target's
+workspace.host is not the workspace this shell is authenticated against.
 
 Exits 1 on any finding. Nothing is written or created.
 

@@ -131,6 +131,10 @@ the project's default branch, so they start with a copy of its rows, production
 data included. init never changes the default branch, a protected branch or a
 branch databricks.yml deploys to, and never edits databricks.yml.
 
+With --schema none, init only sets up the branch and .env: the schema and its
+owner stay as the fork copied them. init never hands off schema public, which
+belongs to the database rather than to an app.
+
 The project comes from LAKEBASE_PROJECT in .env (projects/<id> or <id>), else
 from LAKEBASE_ENDPOINT, else from the bundle's postgres_branch variable. When
 .env names neither DATABRICKS_CONFIG_PROFILE nor DATABRICKS_HOST, init adds the

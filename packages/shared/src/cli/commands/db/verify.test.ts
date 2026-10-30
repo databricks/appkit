@@ -15,7 +15,7 @@ const { createDbContext, runVerify } = vi.hoisted(() => ({
 
 // The tooling is an ambient module loaded with a dynamic import; mock it so the
 // command never touches a database.
-vi.mock("@databricks/appkit/database-tooling", () => ({
+vi.mock("@databricks/appkit/beta/database-tooling", () => ({
   createDbContext,
   runVerify,
 }));
@@ -200,7 +200,7 @@ describe("appkit db verify", () => {
       host: "https://acme.cloud.databricks.com",
       branch: "projects/p/branches/production",
       app: "my-app",
-      migrations: { checked: "deployed code" as const, missing: [] },
+      migrations: { evidence: "verified" as const },
       problems: [],
       ok: true,
     };
@@ -221,26 +221,22 @@ describe("appkit db verify", () => {
         "app my-app (target prod on https://acme.cloud.databricks.com) is running, bound to production with CAN_CONNECT_AND_CREATE, and its service principal has a role there",
       );
       expect(printed).toContain(
-        "Its active deployment has every committed migration",
+        "Its active deployment has every committed migration, with the same SQL",
       );
       expect(error).not.toHaveBeenCalled();
       expect(process.exitCode).toBeUndefined();
     });
 
-    test("says when migrations were compared by deploy time", async () => {
-      runVerify.mockResolvedValue({
-        ...deploy,
-        migrations: { checked: "deploy time", missing: [] },
-      });
+    test("claims nothing about migrations when the checkout commits none", async () => {
+      runVerify.mockResolvedValue({ ...deploy, migrations: null });
 
       await dbCommand.parseAsync(["verify", "--deployed"], { from: "user" });
 
       expect(runVerify).toHaveBeenCalledWith(expect.anything(), {
         deployed: true,
       });
-      expect(output(log)).toContain(
-        "Every committed migration was generated before its active deployment; its code could not be read, so verify compared times",
-      );
+      expect(output(log)).not.toContain("committed migration");
+      expect(process.exitCode).toBeUndefined();
     });
 
     test("lists each problem with its fix, and exits 1", async () => {

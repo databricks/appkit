@@ -21,7 +21,7 @@ const prompts = vi.hoisted(() => ({
   isCancel: vi.fn((value: unknown) => typeof value === "symbol"),
 }));
 
-vi.mock("@databricks/appkit/database-tooling", () => tooling);
+vi.mock("@databricks/appkit/beta/database-tooling", () => tooling);
 vi.mock("@clack/prompts", () => prompts);
 
 import { dbCommand } from "./index";

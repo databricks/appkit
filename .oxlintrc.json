@@ -81,7 +81,7 @@
                 "group": [
                   "**/tooling",
                   "**/tooling/**",
-                  "@databricks/appkit/database-tooling"
+                  "@databricks/appkit/beta/database-tooling"
                 ],
                 "message": "The database tooling may import drizzle-kit, so only the CLI loads it. Runtime code must not import it."
               }

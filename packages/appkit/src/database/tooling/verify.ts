@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 
 import type { PoolClient } from "pg";
@@ -8,7 +9,10 @@ import { readMigrationDrift } from "../migrations/apply";
 import {
   journalFile,
   type JournalEntry,
+  MigrationFilesError,
+  migrationFile,
   migrationsFolder,
+  parseJournal,
   readJournal,
 } from "../migrations/paths";
 import type { DataPath } from "../runtime";
@@ -48,13 +52,19 @@ interface LocalVerifyReport {
   readonly ok: boolean;
 }
 
-/** How the deployed migrations compare with the committed ones. */
-interface DeployedMigrations {
-  /** "deployed code": the deployment's journal; "deploy time": committed after the deployment was created. */
-  readonly checked: "deployed code" | "deploy time";
-  /** Committed migrations the active deployment does not have. */
-  readonly missing: readonly string[];
-}
+/** The committed migrations against the snapshot of the source the active deployment runs. */
+type DeployedMigrations =
+  /** The snapshot has every committed migration, with the same journal entry and SQL. */
+  | { readonly evidence: "verified" }
+  | {
+      readonly evidence: "differs";
+      /** Committed migrations the snapshot does not have. */
+      readonly missing: readonly string[];
+      /** Committed migrations the snapshot has with another journal entry or other SQL. */
+      readonly changed: readonly string[];
+    }
+  /** The snapshot could not be read, so whether it has them is unknown. */
+  | { readonly evidence: "unavailable"; readonly reason: string };
 
 /** `appkit db verify --deployed`: whether a target's deployed app runs on its branch with the committed migrations. */
 interface DeployVerifyReport {
@@ -65,10 +75,11 @@ interface DeployVerifyReport {
   readonly branch: string;
   /** The app the target deploys; null when it declares none. */
   readonly app: string | null;
-  /** null when there are no committed migrations, or no deployment to compare with. */
+  /** null only when this checkout commits no migration. */
   readonly migrations: DeployedMigrations | null;
   /** What keeps the deployed app from using the branch, each with its fix. */
   readonly problems: readonly string[];
+  /** No problem, and the deployed migrations verified or none committed. */
   readonly ok: boolean;
 }
 
@@ -139,7 +150,6 @@ interface DeploymentStatus {
 }
 
 interface Deployment {
-  readonly create_time?: string;
   /** The snapshot of the source the deployment runs. */
   readonly deployment_artifacts?: { readonly source_code_path?: string };
   readonly status?: DeploymentStatus;
@@ -183,87 +193,145 @@ async function readApp(
   }
 }
 
-/** The tags in a deployed journal; null when it cannot be read, which includes a deployment without one. */
-async function readDeployedTags(
-  ctx: DbContext,
-  file: string,
-): Promise<Set<string> | null> {
+/** A workspace file's bytes; throws with the reason when the export fails or has no content. */
+async function exportFile(ctx: DbContext, file: string): Promise<Buffer> {
+  let content: string | undefined;
   try {
     const response = await ctx.workspace().request({
       method: "GET",
       path: "/api/2.0/workspace/export",
       query: { path: file, format: "AUTO" },
     });
-    const { content } = (await response.json()) as { content?: string };
-    if (!content) return null;
-    const journal = JSON.parse(
-      Buffer.from(content, "base64").toString("utf-8"),
-    );
-    const entries: unknown[] = Array.isArray(journal?.entries)
-      ? journal.entries
-      : [];
-    return new Set(
-      entries
-        .map((entry) => (entry as { tag?: unknown } | null)?.tag)
-        .filter((tag): tag is string => typeof tag === "string"),
-    );
-  } catch {
-    return null;
+    ({ content } = (await response.json()) as { content?: string });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`exporting ${file} failed: ${message}`, { cause: error });
   }
+  if (!content) throw new Error(`${file} exported no content`);
+  return Buffer.from(content, "base64");
+}
+
+/** A committed migration's journal entry and the bytes of its SQL file. */
+interface CommittedMigration {
+  readonly entry: JournalEntry;
+  readonly sql: Buffer;
+}
+
+function readCommitted(folder: string): CommittedMigration[] {
+  return (readJournal(folder)?.entries ?? []).map((entry) => {
+    const file = migrationFile(folder, entry.tag);
+    if (!fs.existsSync(file)) {
+      throw new MigrationFilesError(
+        `Missing ${file}, listed in meta/_journal.json. Restore it from version control.`,
+      );
+    }
+    return { entry, sql: fs.readFileSync(file) };
+  });
 }
 
 /**
- * Committed migrations the active deployment lacks: from the journal in the
- * snapshot it runs when that is readable, else the ones generated after the
- * deployment was created.
+ * The committed migrations against the snapshot of the source the active
+ * deployment runs: each needs the same journal entry (idx, when,
+ * breakpoints) and byte-identical SQL there. Only that snapshot is evidence.
+ * Anything verify cannot read in it makes the result unavailable, never a
+ * match.
  */
-async function deployedMigrations(
+async function readDeployedMigrations(
   ctx: DbContext,
   deployment: Deployment | undefined,
-  committed: readonly JournalEntry[],
+  committed: readonly CommittedMigration[],
 ): Promise<DeployedMigrations | null> {
-  if (!deployment || committed.length === 0) return null;
-  const snapshot = deployment.deployment_artifacts?.source_code_path;
-  if (snapshot) {
-    const relative = path
-      .relative(ctx.root, journalFile(migrationsFolder(ctx.root)))
-      .split(path.sep)
-      .join("/");
-    const deployed = await readDeployedTags(
-      ctx,
-      `${snapshot.replace(/\/+$/, "")}/${relative}`,
-    );
-    if (deployed) {
-      return {
-        checked: "deployed code",
-        missing: committed
-          .filter((entry) => !deployed.has(entry.tag))
-          .map((entry) => entry.tag),
-      };
-    }
+  if (committed.length === 0) return null;
+  if (!deployment) {
+    return {
+      evidence: "unavailable",
+      reason: "the app has no active deployment",
+    };
   }
-  const created = Date.parse(deployment.create_time ?? "");
-  if (Number.isNaN(created)) return null;
-  return {
-    checked: "deploy time",
-    missing: committed
-      .filter((entry) => entry.when > created)
-      .map((entry) => entry.tag),
-  };
+  const snapshot = deployment.deployment_artifacts?.source_code_path?.replace(
+    /\/+$/,
+    "",
+  );
+  if (!snapshot) {
+    return {
+      evidence: "unavailable",
+      reason: "its active deployment names no source snapshot",
+    };
+  }
+  const folder = migrationsFolder(ctx.root);
+  const deployedPath = (file: string) =>
+    `${snapshot}/${path.relative(ctx.root, file).split(path.sep).join("/")}`;
+  try {
+    const journalPath = deployedPath(journalFile(folder));
+    const text = (await exportFile(ctx, journalPath)).toString("utf-8");
+    let json: unknown;
+    try {
+      json = JSON.parse(text);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`${journalPath} is not JSON: ${message}`, {
+        cause: error,
+      });
+    }
+    const deployed = parseJournal(json, journalPath).entries;
+    const compared = await Promise.all(
+      committed.map(async ({ entry, sql }) => {
+        const found = deployed.find((other) => other?.tag === entry.tag);
+        if (!found) return "missing";
+        if (
+          found.idx !== entry.idx ||
+          found.when !== entry.when ||
+          found.breakpoints !== entry.breakpoints
+        ) {
+          return "changed";
+        }
+        const file = deployedPath(migrationFile(folder, entry.tag));
+        return (await exportFile(ctx, file)).equals(sql) ? "same" : "changed";
+      }),
+    );
+    const tags = (status: "missing" | "changed") =>
+      committed
+        .filter((_, index) => compared[index] === status)
+        .map(({ entry }) => entry.tag);
+    const missing = tags("missing");
+    const changed = tags("changed");
+    return missing.length === 0 && changed.length === 0
+      ? { evidence: "verified" }
+      : { evidence: "differs", missing, changed };
+  } catch (error) {
+    return {
+      evidence: "unavailable",
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
-function migrationsProblem(
+/** Why the deployed migrations do not match the committed ones, each with its fix; empty when verified. */
+function migrationsProblems(
   name: string,
   migrations: DeployedMigrations,
-  deployment: Deployment | undefined,
-): string | null {
-  const { missing } = migrations;
-  if (missing.length === 0) return null;
-  const them = missing.length === 1 ? "it" : "them";
-  const fix = `${DEPLOY} deploys ${them}, and the app applies ${them} on start`;
-  return migrations.checked === "deployed code"
-    ? `app ${name}'s active deployment does not have ${missing.join(", ")}, which this checkout commits: ${fix}`
-    : `${missing.join(", ")} ${missing.length === 1 ? "was" : "were"} generated after app ${name}'s active deployment (${deployment?.create_time}), so it does not have ${them}: ${fix}`;
+): string[] {
+  if (migrations.evidence === "verified") return [];
+  if (migrations.evidence === "unavailable") {
+    return [
+      `verify cannot tell whether app ${name}'s active deployment has the committed migrations: ${migrations.reason}`,
+    ];
+  }
+  const problems: string[] = [];
+  const { missing, changed } = migrations;
+  if (missing.length > 0) {
+    const them = missing.length === 1 ? "it" : "them";
+    problems.push(
+      `app ${name}'s active deployment does not have ${missing.join(", ")}, which this checkout commits: ${DEPLOY} deploys ${them}, and the app applies ${them} on start`,
+    );
+  }
+  if (changed.length > 0) {
+    const them = changed.length === 1 ? "it" : "them";
+    problems.push(
+      `app ${name}'s active deployment has ${changed.join(", ")} with another journal entry or other SQL than this checkout commits. A migration that ran never runs again: restore ${them} to what was deployed, and put the change in a new migration`,
+    );
+  }
+  return problems;
 }
 
 /** The app's postgres resource against databricks.yml: same branch and database, and the permission to create its schema. */
@@ -392,7 +460,8 @@ function selectTarget(
  * Postgres role on the deploy branch is needed. The target's app must exist,
  * be bound to the branch and database databricks.yml names with
  * CAN_CONNECT_AND_CREATE, have a role on the branch for its service
- * principal, be running, and run code with every committed migration.
+ * principal, be running, and run a snapshot with the journal entry and SQL of
+ * every committed migration.
  */
 async function verifyDeploy(
   ctx: DbContext,
@@ -411,7 +480,7 @@ async function verifyDeploy(
     targetName,
     defaultBundleTarget(bundle),
   );
-  const bound = target.apps.filter((app) => app.postgres);
+  const bound = target.apps.filter((app) => app.postgres.length > 0);
   if (bound.length > 1) {
     throw new Error(
       `Target ${target.name} deploys ${bound.length} apps with a postgres resource (${bound.map((app) => app.key).join(", ")}); verify checks one app per target.`,
@@ -419,19 +488,36 @@ async function verifyDeploy(
   }
   const app =
     bound[0] ?? (target.apps.length === 1 ? target.apps[0] : undefined);
-  const branch = app?.postgres?.branch ?? target.postgresBranch;
-  if (!branch) {
+  if (app && app.postgres.length > 1) {
     throw new Error(
-      app?.postgres
-        ? `No deploy branch: the postgres resource of app ${app.key} in target ${target.name} names its branch with a reference only a deploy resolves.`
-        : `No deploy branch: target ${target.name} in ${file} declares no app with a postgres resource.`,
+      `App ${app.key} in target ${target.name} has ${app.postgres.length} postgres resources (${app.postgres.map((binding) => binding.at).join(", ")}); verify checks one per app.`,
     );
   }
-  const database = app?.postgres?.database ?? target.postgresDatabase;
+  const declared = app?.postgres[0];
+  const branchValue = declared ? declared.branch : target.postgresBranch;
+  if (!branchValue) {
+    throw new Error(
+      `No deploy branch: target ${target.name} in ${file} declares no app with a postgres resource.`,
+    );
+  }
+  if (branchValue.kind === "unresolved") {
+    throw new Error(
+      `No deploy branch: ${declared ? `${declared.at}.branch` : "variables.postgres_branch"} in target ${target.name} is "${branchValue.written}", which this checkout's files do not resolve to a branch.`,
+    );
+  }
+  const databaseValue = declared ? declared.database : target.postgresDatabase;
+  if (databaseValue?.kind === "unresolved") {
+    throw new Error(
+      `No deploy database: ${declared ? `${declared.at}.database` : "variables.postgres_database"} in target ${target.name} is "${databaseValue.written}", which this checkout's files do not resolve to a database.`,
+    );
+  }
+  const branch = branchValue.name;
+  const database = databaseValue?.name ?? null;
+  const committed = readCommitted(migrationsFolder(ctx.root));
   const report = (
     name: string | null,
     problems: string[],
-    migrations: DeployedMigrations | null = null,
+    migrations: DeployedMigrations | null,
   ): DeployVerifyReport => ({
     kind: "deploy",
     target: target.name,
@@ -440,13 +526,27 @@ async function verifyDeploy(
     app: name,
     migrations,
     problems,
-    ok: problems.length === 0,
+    ok:
+      problems.length === 0 &&
+      (migrations === null || migrations.evidence === "verified"),
   });
+  /** A report from before verify reads the deployment; its problems say why. */
+  const stopped = (name: string | null, problems: string[]) =>
+    report(
+      name,
+      problems,
+      committed.length === 0
+        ? null
+        : {
+            evidence: "unavailable",
+            reason: "verify stopped before reading the app's deployment",
+          },
+    );
   if (!app) {
-    return report(null, [`target ${target.name} in ${file} declares no app`]);
+    return stopped(null, [`target ${target.name} in ${file} declares no app`]);
   }
   if (!app.name) {
-    return report(app.declaredName, [
+    return stopped(app.declaredName, [
       app.declaredName
         ? `${file} names the app ${app.declaredName}, with a reference verify cannot resolve`
         : `app ${app.key} in ${file} has no name`,
@@ -463,7 +563,9 @@ async function verifyDeploy(
   ]);
   const branchId = resourceId(branch);
   if (!branchFound) {
-    return report(name, [`${file} deploys to ${branch}, which does not exist`]);
+    return stopped(name, [
+      `${file} deploys to ${branch}, which does not exist`,
+    ]);
   }
   const problems: string[] = [];
   if (database && !databaseFound) {
@@ -475,27 +577,23 @@ async function verifyDeploy(
     problems.push(
       `app ${name} is not deployed yet: ${DEPLOY} creates it and gives it access to ${branchId}`,
     );
-    return report(name, problems);
+    return stopped(name, problems);
   }
 
   const binding = bindingProblems(deployed, name, branch, database, file);
   problems.push(...binding, ...runningProblems(deployed, name));
   const sp = deployed.service_principal_client_id;
-  const committed = readJournal(migrationsFolder(ctx.root))?.entries ?? [];
   const [roles, migrations] = await Promise.all([
     // Only meaningful once the app is bound to this branch.
     sp && binding.length === 0 ? api.listRoles(branch) : null,
-    deployedMigrations(ctx, deployed.active_deployment, committed),
+    readDeployedMigrations(ctx, deployed.active_deployment, committed),
   ]);
   if (roles && !roles.some((role) => role.status?.postgres_role === sp)) {
     problems.push(
       `the app's service principal ${sp} has no Postgres role on ${branchId}: ${DEPLOY} creates it from the app's postgres resource`,
     );
   }
-  const missing = migrations
-    ? migrationsProblem(name, migrations, deployed.active_deployment)
-    : null;
-  if (missing) problems.push(missing);
+  if (migrations) problems.push(...migrationsProblems(name, migrations));
   return report(name, problems, migrations);
 }
 
