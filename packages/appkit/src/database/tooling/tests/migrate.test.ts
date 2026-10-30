@@ -341,4 +341,42 @@ describe("runMigrate", () => {
     ]);
     expect(report.breaking).toEqual(report.generated?.statements);
   });
+
+  test("a second migrate in the same checkout fails while the first runs, and writes nothing", async () => {
+    const ctx = app(`notes: table("notes", { id: id() })`);
+    let finishApply: (value: unknown) => void = () => undefined;
+    let applying: (value?: unknown) => void = () => undefined;
+    const started = new Promise((resolve) => {
+      applying = resolve;
+    });
+    applyPendingMigrations.mockImplementation(() => {
+      applying();
+      return new Promise((resolve) => {
+        finishApply = resolve;
+      });
+    });
+    const first = runMigrate(ctx, { interactive: false });
+    await started;
+
+    writeSchema(ctx.root, `notes: table("notes", { id: id(), body: text() })`);
+    const folder = path.join(ctx.root, "config/database/migrations");
+    const filesBefore = fs.readdirSync(folder, { recursive: true }).sort();
+    await expect(runMigrate(ctx, { interactive: false })).rejects.toThrow(
+      new RegExp(
+        `^Another \`appkit db migrate\` \\(pid ${process.pid} on .+\\) is changing the migration history in config/database\\. Wait for it to finish, then rerun\\.$`,
+      ),
+    );
+    expect(fs.readdirSync(folder, { recursive: true }).sort()).toEqual(
+      filesBefore,
+    );
+
+    finishApply({ applied: ["0000_migration"], adopted: [] });
+    await expect(first).resolves.toMatchObject({
+      applied: ["0000_migration"],
+    });
+    applyPendingMigrations.mockResolvedValue({ applied: [], adopted: [] });
+    await expect(
+      runMigrate(ctx, { interactive: false }),
+    ).resolves.toMatchObject({ generated: { tag: "0001_migration" } });
+  });
 });
