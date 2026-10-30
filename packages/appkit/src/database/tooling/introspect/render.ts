@@ -3,6 +3,7 @@ import {
   isReservedColumnName,
   isReservedTableName,
 } from "../../schema-builder/define-schema";
+import type { AppKitTable, Schema } from "../../schema-builder/types";
 import type {
   IntrospectedColumn,
   IntrospectedForeignKey,
@@ -42,11 +43,22 @@ interface SchemaSource {
   readonly warnings: readonly string[];
   /** What schema.ts declares differently from the database, which keeps it as it is. */
   readonly approximated: readonly string[];
+  /**
+   * Foreign keys schema.ts gets that `previous` does not declare, as
+   * "app.notes.author_id → app.users.id". Each one is an API include.
+   */
+  readonly newRelations: readonly string[];
 }
 
 interface RenderOptions {
   /** Module the builder is imported from. Default "@databricks/appkit/beta". */
   readonly importSource?: string;
+  /**
+   * The schema.ts this render replaces; null when there is none. A column it
+   * declares (same schema, table and column name) keeps its privacy; every
+   * other column renders `.private()`. Null renders nothing private.
+   */
+  readonly previous: Schema | null;
 }
 
 /** Storage as the builder sees it; id/bigid are server-generated integer/bigint keys. */
@@ -303,12 +315,14 @@ function mirrored(target: BaseType): string {
  * Render pg_catalog tables as a `defineSchema` source the builder accepts.
  * What the builder cannot express is left out with an `// appkit: skipped …`
  * comment; what it declares differently (a timestamp without its precision,
- * say) is listed in `approximated`.
+ * say) is listed in `approximated`. A refresh never widens the API of
+ * `previous`: what it does not declare renders private, and the foreign keys
+ * it does not declare are listed in `newRelations`.
  */
 export function renderSchemaSource(
   tables: readonly IntrospectedTable[],
   schemaName: string,
-  options: RenderOptions = {},
+  options: RenderOptions,
 ): SchemaSource {
   const skipped: Skip[] = [];
   const unexpressed: Unexpressed[] = [];
@@ -317,6 +331,9 @@ export function renderSchemaSource(
   /** Constraints whose database name is not the one migrations use: "db (migrations)". */
   const renamed: string[] = [];
   const tableComments: string[] = [];
+  /** Columns rendered private because `previous` does not declare them. */
+  const privatized: string[] = [];
+  const newRelations: string[] = [];
   const qualified = (table: string, column?: string) =>
     `${schemaName}.${table}${column ? `.${column}` : ""}`;
   const skipTable = (table: string, reason: string) => {
@@ -324,6 +341,25 @@ export function renderSchemaSource(
     skipped.push(skip);
     unexpressed.push({ kind: "table", name: table, reason });
     tableComments.push(skipComment(skip));
+  };
+  const { previous } = options;
+  // A declaration of another schema declares nothing in this one.
+  const previousTables = new Map<string, AppKitTable>(
+    previous?.$schemaName === schemaName
+      ? Object.values(previous.$tables).map((table): [string, AppKitTable] => [
+          table.$name,
+          table,
+        ])
+      : [],
+  );
+  const isPrivate = (table: string, column: string): boolean => {
+    if (!previous) return false;
+    const declared = Object.values(
+      previousTables.get(table)?.$columns ?? {},
+    ).find((meta) => meta.columnName === column);
+    if (declared) return declared.isPrivate;
+    privatized.push(qualified(table, column));
+    return true;
   };
 
   // 1. Tables the builder can key: one primary-key column, a usable name.
@@ -701,6 +737,21 @@ export function renderSchemaSource(
       const out = edges.get(plan.table.name) ?? new Set<string>();
       out.add(foreignKey.table);
       edges.set(plan.table.name, out);
+      // A toOne edge comes with its toMany reverse, so checking it covers both.
+      const declared = previousTables
+        .get(plan.table.name)
+        ?.$relations.some(
+          (relation) =>
+            relation.cardinality === "toOne" &&
+            relation.localColumn === sourceColumn.column.name &&
+            relation.targetTable === foreignKey.table &&
+            relation.targetColumn === targetColumn.column.name,
+        );
+      if (previous && !declared) {
+        newRelations.push(
+          `${qualified(plan.table.name, sourceColumn.column.name)} → ${qualified(foreignKey.table, targetColumn.column.name)}`,
+        );
+      }
     }
   }
 
@@ -794,6 +845,7 @@ export function renderSchemaSource(
     unexpressed,
     warnings: warnings.map(shown),
     approximated: approximated.map(shown),
+    newRelations: newRelations.map(shown),
   });
   if (ordered.length === 0) {
     lines.push(...tableComments);
@@ -828,9 +880,18 @@ export function renderSchemaSource(
       if (column.isUnique) chain.push(".unique()");
       if (column.defaultCall) chain.push(column.defaultCall);
       chain.push(...(column.fk?.actions ?? []));
+      if (isPrivate(plan.table.name, column.column.name)) {
+        chain.push(".private()");
+      }
       body.push(`    ${key(column.column.name)}: ${head}${chain.join("")},`);
     }
     body.push("  });", "");
+  }
+  if (privatized.length > 0) {
+    const one = privatized.length === 1;
+    warnings.push(
+      `${list(privatized)} ${one ? "is" : "are"} new to schema.ts, so ${one ? "it is" : "they are"} private: the API does not return or accept ${one ? "it" : "them"} until you remove .private().`,
+    );
   }
   for (const comment of tableComments) body.push(`  ${comment}`);
   if (tableComments.length > 0) body.push("");
