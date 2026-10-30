@@ -325,9 +325,9 @@ function mirrored(target: BaseType): string {
  * Render pg_catalog tables as a `defineSchema` source the builder accepts.
  * What the builder cannot express is left out with an `// appkit: skipped …`
  * comment; what it declares differently (a timestamp without its precision,
- * say) is listed in `approximated`. A refresh never widens the API of
- * `previous`: what it does not declare renders private, and the foreign keys
- * it does not declare are listed in `newRelations`.
+ * say) is listed in `approximated`. Columns `previous` does not declare render
+ * private, and the foreign keys it does not declare are listed in
+ * `newRelations`, which introspect refuses.
  */
 export function renderSchemaSource(
   tables: readonly IntrospectedTable[],
