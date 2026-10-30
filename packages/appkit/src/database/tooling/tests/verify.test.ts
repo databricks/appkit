@@ -160,10 +160,13 @@ function branch(state: {
 
 const WRITES = /\b(insert|update|delete|create|drop|alter|grant|truncate)\b/i;
 
+const RESOLVED = { branches: new Set<string>(), unresolved: [] };
+
 beforeEach(() => {
   withBranchPool.mockReset();
   resolveEnvBranch.mockReset().mockResolvedValue({
     branch: { name: BRANCH },
+    boundary: RESOLVED,
     kind: "dev",
   });
 });
@@ -181,6 +184,7 @@ describe("runVerify", () => {
   ];
   const clean = {
     notYours: null,
+    refusesEveryBranch: false,
     schemaProblems: [],
     pendingMigrations: [],
     strandedMigrations: [],
@@ -290,6 +294,7 @@ describe("runVerify", () => {
     });
     resolveEnvBranch.mockResolvedValue({
       branch: { name: "projects/p/branches/production" },
+      boundary: RESOLVED,
       kind: "default",
       reason: "it is the project's default branch",
     });
@@ -297,6 +302,40 @@ describe("runVerify", () => {
     expect(await runVerify(ctx)).toMatchObject({
       branch: "projects/p/branches/production",
       notYours: "it is the project's default branch",
+      refusesEveryBranch: false,
+      ok: true,
+    });
+  });
+
+  test("a reference databricks.yml leaves unresolved refuses every branch, and the report says so", async () => {
+    const ctx = app(two);
+    branch({
+      columns: { notes: ["id", "body"] },
+      recorded: recordedAs(ctx, two),
+    });
+    const reason =
+      'databricks.yml may deploy to it: the files do not resolve resources.apps.app.resources[0].postgres.branch in target default ("projects/p/branches/dev-${workspace.current_user.short_name}"); give it a value in databricks.yml';
+    resolveEnvBranch.mockResolvedValue({
+      branch: { name: BRANCH },
+      boundary: {
+        branches: new Set<string>(),
+        unresolved: [
+          {
+            target: "default",
+            at: "resources.apps.app.resources[0].postgres.branch",
+            written:
+              "projects/p/branches/dev-${workspace.current_user.short_name}",
+          },
+        ],
+      },
+      kind: "deploy-target",
+      reason,
+    });
+
+    expect(await runVerify(ctx)).toMatchObject({
+      branch: BRANCH,
+      notYours: reason,
+      refusesEveryBranch: true,
       ok: true,
     });
   });

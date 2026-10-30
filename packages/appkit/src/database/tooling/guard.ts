@@ -86,9 +86,10 @@ export function takesWrites(kind: BranchKind): boolean {
   return kind === "dev" || kind === "session";
 }
 
-/** The .env branch and what it is to this developer. */
+/** The .env branch, what it is to this developer, and the boundary that decided it. */
 interface EnvBranch extends Classification {
   readonly branch: LakebaseBranch;
+  readonly boundary: DeployBoundary;
 }
 
 /** Why a command does not write to the branch. */
@@ -118,6 +119,7 @@ export async function resolveEnvBranch(
   }
   return {
     branch,
+    boundary,
     ...classifyBranch({
       branch,
       userName,

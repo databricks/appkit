@@ -39,6 +39,11 @@ interface LocalVerifyReport {
   readonly branch: string;
   /** Why the branch is not your dev or session branch, e.g. "it is the project's default branch"; null when it is. */
   readonly notYours: string | null;
+  /**
+   * databricks.yml has a reference this checkout's files do not resolve, so
+   * migrate, clean, seed and init refuse every branch until it has a value.
+   */
+  readonly refusesEveryBranch: boolean;
   /** Declared tables or columns the branch lacks (the plugin's startup check). */
   readonly schemaProblems: readonly string[];
   /** Committed migrations the branch has not run yet, newer than every one it ran. */
@@ -127,6 +132,7 @@ async function verifyLocal(ctx: DbContext): Promise<LocalVerifyReport> {
         kind: "local",
         branch,
         notYours: takesWrites(env.kind) ? null : (env.reason ?? null),
+        refusesEveryBranch: env.boundary.unresolved.length > 0,
         schemaProblems,
         pendingMigrations: drift.pending,
         strandedMigrations: drift.stranded,
