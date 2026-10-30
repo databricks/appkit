@@ -368,11 +368,6 @@ export function BaseChart({
     }
 
     // Apply selection after custom options; empty selection is a no-op.
-    // No entry animation by default: ECharts advances it on animation frames,
-    // which the browser pauses in hidden or background frames (an embedding
-    // builder's preview), freezing the series part-drawn or empty while the
-    // axes show. `options={{ animation: true }}` turns it back on.
-    opt = { animation: false, ...opt };
     const merged = customOptions ? { ...opt, ...customOptions } : opt;
     return applySelectionEmphasis(merged, selected);
   }, [
