@@ -161,10 +161,19 @@ function readVariableOverrides(
   return { file, values };
 }
 
-/** Files an `include:` pattern names. `*` and `?` match within one path segment, as in the Databricks CLI. */
+/**
+ * Files an `include:` pattern names. `*` and `?` match within one path
+ * segment, as in the Databricks CLI; a pattern with other glob syntax throws
+ * instead of matching nothing.
+ */
 function includedFiles(root: string, pattern: string): string[] {
   let paths = [root];
   for (const segment of pattern.split("/")) {
+    if (/[[\]\\]/.test(segment)) {
+      throw new Error(
+        `Cannot read include pattern ${JSON.stringify(pattern)}, so the branches it deploys to are unknown: only * and ? are supported, not [, ] or \\.`,
+      );
+    }
     if (!segment || segment === ".") continue;
     if (!/[*?]/.test(segment)) {
       paths = paths.map((dir) => path.join(dir, segment));

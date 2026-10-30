@@ -135,6 +135,23 @@ resources:
     });
   });
 
+  test("an include pattern with glob syntax beyond * and ? throws instead of matching nothing", () => {
+    const root = tempApp({
+      "databricks.yml": "include:\n  - resources/[ab]*.yml\n",
+      "resources/app.yml": `resources:
+  apps:
+    app:
+      resources:
+        - name: postgres
+          postgres:
+            branch: projects/p/branches/production
+`,
+    });
+    expect(() => readDeployBoundary(root)).toThrow(
+      'Cannot read include pattern "resources/[ab]*.yml", so the branches it deploys to are unknown: only * and ? are supported, not [, ] or \\.',
+    );
+  });
+
   test("a target that gives a declared variable no value leaves its references unresolved", () => {
     const root = tempApp({
       "databricks.yml": `${databricksYml(
