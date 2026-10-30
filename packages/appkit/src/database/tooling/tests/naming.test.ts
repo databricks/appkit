@@ -31,9 +31,27 @@ describe("branch naming", () => {
     );
   });
 
-  test("session branches are session-<id>; ids are lowercase base36", () => {
-    expect(sessionBranchId("k2x9q0ab")).toBe("session-k2x9q0ab");
+  test("session branches are session-<user hash>-<id>; ids are lowercase base36", () => {
+    const hash = devBranchId("alice@example.com").slice(-6);
+    expect(sessionBranchId("Alice@example.com", "k2x9q0ab")).toBe(
+      `session-${hash}-k2x9q0ab`,
+    );
     expect(isValidSessionId("Bad-Id")).toBe(false);
-    expect(() => sessionBranchId("Bad-Id")).toThrow(/APPKIT_DB_SESSION/);
+    expect(() => sessionBranchId("alice@example.com", "Bad-Id")).toThrow(
+      /APPKIT_DB_SESSION/,
+    );
+  });
+
+  test("the longest session id still makes a valid branch ID", () => {
+    const id = sessionBranchId("alice@example.com", "a".repeat(48));
+    expect(id).toHaveLength(63);
+    expect(id).toMatch(BRANCH_ID);
+    expect(isValidSessionId("a".repeat(49))).toBe(false);
+  });
+
+  test("a copied .env names a session branch only its creator owns", () => {
+    expect(sessionBranchId("alice@example.com", "abc")).not.toBe(
+      sessionBranchId("bob@example.com", "abc"),
+    );
   });
 });

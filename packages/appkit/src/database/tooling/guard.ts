@@ -46,15 +46,12 @@ export function classifyBranch(input: {
   }
   const id = resourceId(branch.name);
   if (id === devBranchId(userName)) return { kind: "dev" };
-  if (sessionId && id === sessionBranchId(sessionId)) {
-    return { kind: "session" };
-  }
+  const session = sessionId ? sessionBranchId(userName, sessionId) : null;
+  if (id === session) return { kind: "session" };
   return {
     kind: "other",
     reason: `it is not your dev branch (${devBranchId(userName)})${
-      sessionId
-        ? ` or this checkout's session branch (${sessionBranchId(sessionId)})`
-        : ""
+      session ? ` or this checkout's session branch (${session})` : ""
     }`,
   };
 }
