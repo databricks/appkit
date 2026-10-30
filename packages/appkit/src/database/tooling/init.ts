@@ -442,6 +442,10 @@ export async function runInit(
   options: InitOptions = {},
 ): Promise<InitReport> {
   if (options.schema === "none") return initHolding(ctx, null, options);
+  // Before the lock, which creates config/database.
+  if (options.schema === "migrate" || options.schema === "clean") {
+    requireSchemaFile(ctx.root, options.schema);
+  }
   return withHistoryLock(ctx.root, "init", (lock) =>
     initHolding(ctx, lock, options),
   );
@@ -459,16 +463,13 @@ async function initHolding(
       ? { api: SESSION_BRANCH_TTL, label: "7 days" }
       : { api: parseTtl(options.ttl), label: options.ttl.trim() };
 
-  // Before any change, check the .env init may write and what the start needs,
-  // and read the schema the hand-off and the start are for. --schema none does
-  // neither, so it reads no schema.ts.
+  // Before any change, check the .env init may write and read the schema the
+  // hand-off and the start are for. --schema none does neither, so it reads no
+  // schema.ts.
   const envFile = path.join(ctx.root, ENV_FILE);
   refuseSymlink(envFile);
   const hasSchema = hasSchemaFile(ctx.root);
   const startKind = options.schema ?? (hasSchema ? "migrate" : "introspect");
-  if (startKind === "migrate" || startKind === "clean") {
-    requireSchemaFile(ctx.root, startKind);
-  }
   const schemaName =
     hasSchema && startKind !== "introspect" && startKind !== "none"
       ? (await loadDefaultDatabaseSchema(ctx.root, { showImportError: true }))

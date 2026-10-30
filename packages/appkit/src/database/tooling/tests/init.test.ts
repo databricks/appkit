@@ -783,6 +783,7 @@ describe("runInit — schema start", () => {
         /^No config\/database\/schema\.ts yet/,
       );
       expect(lakebase.calls).toEqual([]);
+      expect(fs.existsSync(path.join(ctx.root, "config/database"))).toBe(false);
     },
   );
 });

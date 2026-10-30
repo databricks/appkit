@@ -186,6 +186,8 @@ export async function previewClean(ctx: DbContext): Promise<CleanReport> {
  * connecting. One command at a time owns the checkout's history.
  */
 export async function runClean(ctx: DbContext): Promise<CleanReport> {
+  // Before the lock, which creates config/database.
+  requireSchemaFile(ctx.root, "clean");
   return withHistoryLock(ctx.root, "clean", (lock) => cleanHolding(ctx, lock));
 }
 

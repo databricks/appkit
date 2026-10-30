@@ -112,6 +112,7 @@ describe("runClean", () => {
     );
     expect(writableEnvBranch).not.toHaveBeenCalled();
     expect(withBranchPool).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(ctx.root, "config/database"))).toBe(false);
   });
 
   test("refuses a branch that is not yours before connecting", async () => {
