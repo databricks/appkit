@@ -81,15 +81,20 @@ export function readJsonFile<T>(file: string): T {
   }
 }
 
+/** A parsed meta/_journal.json, checked to be drizzle-kit's PostgreSQL journal; label names it in the error. */
+export function parseJournal(json: unknown, label: string): Journal {
+  const parsed = json as Partial<Journal> | null;
+  if (parsed?.dialect !== "postgresql" || !Array.isArray(parsed.entries)) {
+    throw new MigrationFilesError(
+      `${label} is not a drizzle-kit PostgreSQL migration journal`,
+    );
+  }
+  return parsed as Journal;
+}
+
 /** null when meta/_journal.json is absent (nothing committed yet). */
 export function readJournal(folder: string): Journal | null {
   const file = journalFile(folder);
   if (!fs.existsSync(file)) return null;
-  const parsed = readJsonFile<Partial<Journal>>(file);
-  if (parsed.dialect !== "postgresql" || !Array.isArray(parsed.entries)) {
-    throw new MigrationFilesError(
-      `${file} is not a drizzle-kit PostgreSQL migration journal`,
-    );
-  }
-  return parsed as Journal;
+  return parseJournal(readJsonFile<unknown>(file), file);
 }

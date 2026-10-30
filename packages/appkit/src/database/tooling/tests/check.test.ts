@@ -8,6 +8,7 @@ import { type Journal, readJournal } from "../../migrations/paths";
 import { defineSchema, id, text } from "../../schema-builder";
 import { runCheck } from "../check";
 import type { DbContext } from "../context";
+import { withHistoryLock } from "../history-lock";
 import { generateMigrationFiles } from "../migrations";
 
 const builder = path.resolve(
@@ -76,12 +77,14 @@ function migrations(ctx: DbContext): string {
   return path.join(ctx.root, "config/database/migrations");
 }
 
+/** generateMigrationFiles under the checkout's history lock, as migrate runs it. */
 function generate(folder: string, tables: Tables) {
-  return generateMigrationFiles({
-    folder,
-    schema: schemaOf(tables),
-    interactive: false,
-  });
+  return withHistoryLock(path.resolve(folder, "../../.."), "migrate", (lock) =>
+    generateMigrationFiles(lock, {
+      schema: schemaOf(tables),
+      interactive: false,
+    }),
+  );
 }
 
 function editJournal(folder: string, edit: (journal: Journal) => void): void {
@@ -163,9 +166,11 @@ describe("runCheck", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const ctx = app({ ...withTags, ...withLikes });
     const main = migrations(ctx);
-    const parallel = path.join(ctx.root, "parallel");
+    // Another checkout of the same history: the history lock is per checkout.
+    const parallel = path.join(ctx.root, "parallel/config/database/migrations");
     vi.setSystemTime(new Date("2026-10-01T00:00:00Z"));
     await generate(main, notes);
+    fs.mkdirSync(path.dirname(parallel), { recursive: true });
     fs.cpSync(main, parallel, { recursive: true });
     vi.setSystemTime(new Date("2026-10-02T00:00:00Z"));
     await generate(main, withTags);

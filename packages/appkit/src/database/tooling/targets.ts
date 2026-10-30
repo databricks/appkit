@@ -79,37 +79,10 @@ export function readLocalTarget(env: NodeJS.ProcessEnv): LocalTarget {
   };
 }
 
-/** An app one target of databricks.yml deploys. */
-export interface BundleApp {
-  /** Its key under resources.apps. */
-  readonly key: string;
-  /** Its name as written; null when it has none. */
-  readonly declaredName: string | null;
-  /** Its name with bundle references resolved; null when one needs a deploy to resolve. */
-  readonly name: string | null;
-  /** Its postgres resource; null when it has none. */
-  readonly postgres: {
-    readonly branch: string | null;
-    readonly database: string | null;
-  } | null;
-}
-
-/** One target of databricks.yml, with what the files alone can resolve resolved. */
-export interface BundleTarget {
-  readonly name: string;
-  readonly isDefault: boolean;
-  /** workspace.host of the target, else of the bundle. */
-  readonly host: string | null;
-  readonly apps: readonly BundleApp[];
-  /** The target's postgres_branch and postgres_database variables. */
-  readonly postgresBranch: string | null;
-  readonly postgresDatabase: string | null;
-}
-
-interface Bundle {
-  /** databricks.yml or databricks.yaml. */
-  readonly file: string;
-  readonly targets: readonly BundleTarget[];
+/** The branch the bundle's default target deploys to. */
+export interface DeployTarget {
+  readonly branch: string;
+  readonly database: string | null;
 }
 
 type Yaml = Record<string, unknown> | undefined;
@@ -118,6 +91,68 @@ function record(value: unknown): Yaml {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+/**
+ * A branch or database databricks.yml names, as far as the checkout's files
+ * resolve it. A reference that is not declared at all has no value: the
+ * binding or variable that holds it is absent instead.
+ */
+type BundleValue =
+  /** A full resource name, e.g. "projects/p/branches/b". */
+  | { readonly kind: "resolved"; readonly name: string }
+  /** As written: a `${…}` only a deploy resolves, no value, or not a resource name. */
+  | { readonly kind: "unresolved"; readonly written: string };
+
+/** One postgres resource of an app. */
+interface PostgresBinding {
+  /** Where it is in the merged bundle, e.g. "resources.apps.app.resources[0].postgres". */
+  readonly at: string;
+  readonly branch: BundleValue;
+  /** null when the binding names no database. */
+  readonly database: BundleValue | null;
+}
+
+/** An app one target of databricks.yml deploys. */
+interface BundleApp {
+  /** Its key under resources.apps. */
+  readonly key: string;
+  /** Its name as written; null when it has none. */
+  readonly declaredName: string | null;
+  /** Its name with bundle references resolved; null when one needs a deploy to resolve. */
+  readonly name: string | null;
+  /** Every postgres resource it has. */
+  readonly postgres: readonly PostgresBinding[];
+}
+
+/** What one target binds with one set of variable values. */
+interface TargetBindings {
+  readonly apps: readonly BundleApp[];
+  /** The target's postgres_branch variable; null when the bundle declares none. */
+  readonly postgresBranch: BundleValue | null;
+  /** The target's postgres_database variable; null when the bundle declares none. */
+  readonly postgresDatabase: BundleValue | null;
+}
+
+/** One target of databricks.yml, with what the files alone can resolve resolved. */
+export interface BundleTarget extends TargetBindings {
+  readonly name: string;
+  /** `default: true`, or the one target of a bundle that declares none. */
+  readonly isDefault: boolean;
+  /** workspace.host of the target, else of the bundle; null when neither names one the files resolve. */
+  readonly host: string | null;
+  /**
+   * The same bindings with this checkout's variable-overrides.json applied,
+   * which a deploy from here uses ahead of the target's own values; null
+   * without the file.
+   */
+  readonly overridden: (TargetBindings & { readonly file: string }) | null;
+}
+
+interface Bundle {
+  /** databricks.yml or databricks.yaml. */
+  readonly file: string;
+  readonly targets: readonly BundleTarget[];
 }
 
 /** Invalid YAML throws, so no check that reads the bundle passes silently. */
@@ -133,10 +168,55 @@ function parseYaml(file: string): Record<string, unknown> {
   }
 }
 
-/** Files an `include:` pattern names. `*` and `?` match within one path segment, as in the Databricks CLI. */
+/**
+ * The variable values `databricks bundle` keeps for a target in
+ * `.databricks/bundle/<target>/variable-overrides.json`; null without the
+ * file. Anything but a JSON object throws.
+ */
+function readVariableOverrides(
+  root: string,
+  target: string,
+): { readonly file: string; readonly values: Record<string, unknown> } | null {
+  const file = `.databricks/bundle/${target}/variable-overrides.json`;
+  const full = path.join(
+    root,
+    ".databricks",
+    "bundle",
+    target,
+    "variable-overrides.json",
+  );
+  if (!fs.existsSync(full)) return null;
+  let values: Yaml;
+  try {
+    values = record(JSON.parse(fs.readFileSync(full, "utf-8")));
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Cannot read ${file}, so the branches it deploys to are unknown: ${reason}`,
+      { cause: error },
+    );
+  }
+  if (!values) {
+    throw new Error(
+      `Cannot read ${file}, so the branches it deploys to are unknown: it is not a JSON object`,
+    );
+  }
+  return { file, values };
+}
+
+/**
+ * Files an `include:` pattern names. `*` and `?` match within one path
+ * segment, as in the Databricks CLI; a pattern with other glob syntax throws
+ * instead of matching nothing.
+ */
 function includedFiles(root: string, pattern: string): string[] {
   let paths = [root];
   for (const segment of pattern.split("/")) {
+    if (/[[\]\\]/.test(segment)) {
+      throw new Error(
+        `Cannot read include pattern ${JSON.stringify(pattern)}, so the branches it deploys to are unknown: only * and ? are supported, not [, ] or \\.`,
+      );
+    }
     if (!segment || segment === ".") continue;
     if (!/[*?]/.test(segment)) {
       paths = paths.map((dir) => path.join(dir, segment));
@@ -192,6 +272,22 @@ function merge(base: unknown, override: unknown): unknown {
   return override;
 }
 
+/**
+ * A variable's value for one target: from variable-overrides.json when it has
+ * one, else the target's value, else the variable's default.
+ */
+function variableOf(
+  bundle: Record<string, unknown>,
+  target: Yaml,
+  name: string,
+  overrides: Record<string, unknown> | null,
+): unknown {
+  if (overrides && Object.hasOwn(overrides, name)) return overrides[name];
+  const override = record(target?.variables)?.[name];
+  if (override !== undefined) return record(override)?.default ?? override;
+  return record(record(bundle.variables)?.[name])?.default;
+}
+
 const REFERENCE = /\$\{([^}]+)\}/g;
 const MAX_REFERENCE_DEPTH = 10;
 
@@ -200,18 +296,22 @@ function resolverFor(
   bundle: Record<string, unknown>,
   target: Yaml,
   targetName: string,
+  overrides: Record<string, unknown> | null,
 ): (value: unknown) => string | null {
-  const variable = (name: string): unknown => {
-    const override = record(target?.variables)?.[name];
-    if (override !== undefined) return record(override)?.default ?? override;
-    return record(record(bundle.variables)?.[name])?.default;
-  };
   const resolve = (value: unknown, depth: number): string | null => {
     if (typeof value !== "string" || depth > MAX_REFERENCE_DEPTH) return null;
     let unresolved = false;
     const text = value.replace(REFERENCE, (_, reference: string) => {
       const resolved = reference.startsWith("var.")
-        ? resolve(variable(reference.slice("var.".length)), depth + 1)
+        ? resolve(
+            variableOf(
+              bundle,
+              target,
+              reference.slice("var.".length),
+              overrides,
+            ),
+            depth + 1,
+          )
         : reference === "bundle.target"
           ? targetName
           : reference === "bundle.name"
@@ -225,6 +325,19 @@ function resolverFor(
   return (value) => resolve(value, 0);
 }
 
+function bundleValue(
+  written: unknown,
+  resolve: (value: unknown) => string | null,
+  kind: "branch" | "database",
+): BundleValue {
+  const name = parseResourceName(resolve(written) ?? undefined)?.[kind];
+  if (name) return { kind: "resolved", name };
+  return {
+    kind: "unresolved",
+    written: typeof written === "string" ? written : "",
+  };
+}
+
 function bundleApps(
   apps: Record<string, unknown>,
   resolve: (value: unknown) => string | null,
@@ -233,25 +346,58 @@ function bundleApps(
     const app = record(value);
     const declared = app?.name;
     const resources = Array.isArray(app?.resources) ? app.resources : [];
-    const postgres = resources
-      .map((resource) => record(record(resource)?.postgres))
-      .find((binding) => binding !== undefined);
+    const postgres = resources.flatMap((resource, index): PostgresBinding[] => {
+      const binding = record(record(resource)?.postgres);
+      if (!binding) return [];
+      return [
+        {
+          at: `resources.apps.${key}.resources[${index}].postgres`,
+          branch: bundleValue(binding.branch, resolve, "branch"),
+          database:
+            binding.database === undefined
+              ? null
+              : bundleValue(binding.database, resolve, "database"),
+        },
+      ];
+    });
     return {
       key,
       declaredName: typeof declared === "string" && declared ? declared : null,
       name: resolve(declared),
-      postgres: postgres
-        ? {
-            branch:
-              parseResourceName(resolve(postgres.branch) ?? undefined)
-                ?.branch ?? null,
-            database:
-              parseResourceName(resolve(postgres.database) ?? undefined)
-                ?.database ?? null,
-          }
-        : null,
+      postgres,
     };
   });
+}
+
+/** The target `databricks bundle deploy` picks without -t: the one marked default, else the only one. */
+export function defaultBundleTarget(bundle: Bundle): BundleTarget | null {
+  return (
+    bundle.targets.find((target) => target.isDefault) ??
+    (bundle.targets.length === 1 ? (bundle.targets[0] ?? null) : null)
+  );
+}
+
+/**
+ * The branch and database the default target deploys to: its first app
+ * binding the files resolve, else its postgres_branch and postgres_database
+ * variables. null without databricks.yml, a default target or a branch the
+ * files resolve.
+ */
+export function readDeployTarget(root: string): DeployTarget | null {
+  const bundle = readBundle(root);
+  const target = bundle ? defaultBundleTarget(bundle) : null;
+  if (!target) return null;
+  const resolved = (value: BundleValue | null) =>
+    value?.kind === "resolved" ? value.name : null;
+  const binding = target.apps
+    .flatMap((app) => app.postgres)
+    .find((candidate) => candidate.branch.kind === "resolved");
+  const branch = resolved(binding?.branch ?? target.postgresBranch);
+  if (!branch) return null;
+  return {
+    branch,
+    database: resolved(binding ? binding.database : target.postgresDatabase),
+  };
 }
 
 /**
@@ -283,70 +429,110 @@ export function readBundle(root: string): Bundle | null {
   return {
     file: path.basename(file),
     targets: targets.map(([name, target]) => {
-      const resolve = resolverFor(bundle, target, name);
       const apps = record(
         merge(
           record(record(bundle.resources)?.apps) ?? {},
           record(record(target?.resources)?.apps) ?? {},
         ),
       );
-      const variable = (variableName: string) =>
-        resolve(`\${var.${variableName}}`) ?? undefined;
+      const declares = (variable: string) =>
+        variable in (record(bundle.variables) ?? {}) ||
+        variable in (record(target?.variables) ?? {});
+      const bindings = (
+        overrides: Record<string, unknown> | null,
+      ): TargetBindings => {
+        const resolve = resolverFor(bundle, target, name, overrides);
+        const variable = (
+          variableName: string,
+          kind: "branch" | "database",
+        ): BundleValue | null =>
+          declares(variableName)
+            ? bundleValue(
+                variableOf(bundle, target, variableName, overrides),
+                resolve,
+                kind,
+              )
+            : null;
+        return {
+          apps: bundleApps(apps ?? {}, resolve),
+          postgresBranch: variable("postgres_branch", "branch"),
+          postgresDatabase: variable("postgres_database", "database"),
+        };
+      };
+      const overrides = readVariableOverrides(root, name);
       return {
         name,
         isDefault: target?.default === true,
-        host: resolve(
-          record(target?.workspace)?.host ?? record(bundle.workspace)?.host,
-        ),
-        apps: bundleApps(apps ?? {}, resolve),
-        postgresBranch:
-          parseResourceName(variable("postgres_branch"))?.branch ?? null,
-        postgresDatabase:
-          parseResourceName(variable("postgres_database"))?.database ?? null,
+        host: resolverFor(
+          bundle,
+          target,
+          name,
+          null,
+        )(record(target?.workspace)?.host ?? record(bundle.workspace)?.host),
+        ...bindings(null),
+        overridden: overrides
+          ? { file: overrides.file, ...bindings(overrides.values) }
+          : null,
       };
     }),
   };
 }
 
-/** The target `databricks bundle deploy` picks without -t: the one marked default, else the only one. */
-export function defaultBundleTarget(bundle: Bundle): BundleTarget | null {
-  return (
-    bundle.targets.find((target) => target.isDefault) ??
-    (bundle.targets.length === 1 ? (bundle.targets[0] ?? null) : null)
-  );
+/** A reference in databricks.yml the checkout's files cannot resolve to a branch or database. */
+export interface UnresolvedBinding {
+  readonly target: string;
+  /** Where it is written, e.g. "resources.apps.app.resources[0].postgres.branch". */
+  readonly at: string;
+  readonly written: string;
+  /** The variable-overrides.json whose values leave it unresolved; absent for databricks.yml's own values. */
+  readonly file?: string;
 }
 
-/** Every branch a target deploys to: its apps' postgres resources, and its postgres_branch variable. */
-function targetBranches(target: BundleTarget): string[] {
-  return [
-    ...target.apps.map((app) => app.postgres?.branch),
-    target.postgresBranch,
-  ].filter((branch): branch is string => !!branch);
+/** What databricks.yml deploys to, read from this checkout's files only, variable-overrides.json included. */
+export interface DeployBoundary {
+  /** Every branch any target binds, through an app's postgres resources or its postgres_branch variable. */
+  readonly branches: ReadonlySet<string>;
+  /** While any exists, any branch may be one a target deploys to. */
+  readonly unresolved: readonly UnresolvedBinding[];
 }
 
-/** The branch and database a target deploys to. */
-export interface DeployTarget {
-  readonly branch: string;
-  readonly database: string | null;
-}
-
-/** The default target's branch and database; null without databricks.yml, a default target or a postgres binding. */
-export function readDeployTarget(root: string): DeployTarget | null {
-  const bundle = readBundle(root);
-  const target = bundle ? defaultBundleTarget(bundle) : null;
-  if (!target) return null;
-  const bound = target.apps.find((app) => app.postgres?.branch);
-  const branch = bound?.postgres?.branch ?? target.postgresBranch;
-  if (!branch) return null;
-  return {
-    branch,
-    database: bound?.postgres?.database ?? target.postgresDatabase,
-  };
-}
-
-/** Every branch databricks.yml can deploy to, across targets. Empty without databricks.yml or a postgres binding. */
-export function readDeployBranches(root: string): string[] {
-  const bundle = readBundle(root);
-  if (!bundle) return [];
-  return [...new Set(bundle.targets.flatMap(targetBranches))];
+/**
+ * Every branch databricks.yml can deploy to, across targets, and every
+ * reference it cannot resolve. Empty without databricks.yml or a postgres
+ * binding. A database counts for the branch it is on.
+ */
+export function readDeployBoundary(root: string): DeployBoundary {
+  const branches = new Set<string>();
+  const unresolved: UnresolvedBinding[] = [];
+  for (const target of readBundle(root)?.targets ?? []) {
+    const views: Array<[TargetBindings, string | undefined]> = [
+      [target, undefined],
+    ];
+    if (target.overridden) {
+      views.push([target.overridden, target.overridden.file]);
+    }
+    for (const [bindings, file] of views) {
+      const add = (at: string, value: BundleValue) => {
+        if (value.kind === "unresolved") {
+          unresolved.push({
+            target: target.name,
+            at,
+            written: value.written,
+            ...(file ? { file } : {}),
+          });
+          return;
+        }
+        const branch = parseResourceName(value.name)?.branch;
+        if (branch) branches.add(branch);
+      };
+      for (const binding of bindings.apps.flatMap((app) => app.postgres)) {
+        add(`${binding.at}.branch`, binding.branch);
+        if (binding.database) add(`${binding.at}.database`, binding.database);
+      }
+      if (bindings.postgresBranch) {
+        add("variables.postgres_branch", bindings.postgresBranch);
+      }
+    }
+  }
+  return { branches, unresolved };
 }

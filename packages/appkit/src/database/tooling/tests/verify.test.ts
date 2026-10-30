@@ -361,7 +361,6 @@ const DATABASE = `${PRODUCTION}/databases/db-1`;
 const SP = "11111111-2222-3333-4444-555555555555";
 const HOST = "https://acme.cloud.databricks.com";
 const SNAPSHOT = "/Workspace/Users/sp/src/01f0";
-const DEPLOYED_AT = "2026-10-01T12:00:00Z";
 
 /** The app API's response for a deployed, running app bound to the deploy branch. */
 function runningApp(overrides: Record<string, unknown> = {}) {
@@ -381,7 +380,6 @@ function runningApp(overrides: Record<string, unknown> = {}) {
     app_status: { state: "RUNNING", message: "App is running." },
     compute_status: { state: "ACTIVE", message: "App compute is running." },
     active_deployment: {
-      create_time: DEPLOYED_AT,
       deployment_artifacts: { source_code_path: SNAPSHOT },
       status: { state: "SUCCEEDED", message: "App started successfully" },
     },
@@ -404,8 +402,10 @@ function deployedApp(
     yml?: string;
     spRole?: boolean;
     migrations?: Migration[];
-    /** The deployed snapshot's journal; "unreadable" when export fails. */
-    deployedJournal?: Migration[] | "unreadable";
+    /** The deployed snapshot's journal: its entries, its raw text, or "unreadable" when its export fails. */
+    deployedJournal?: Migration[] | string;
+    /** The deployed SQL by tag, else the committed SQL; "unreadable" when its export fails. */
+    deployedSql?: Record<string, string>;
     authenticatedHost?: string;
   } = {},
 ) {
@@ -442,15 +442,24 @@ function deployedApp(
         }
         if (method === "GET" && apiPath === "/api/2.0/workspace/export") {
           expect(query?.format).toBe("AUTO");
-          requests.push(`workspace.export ${query?.path}`);
+          const file = String(query?.path);
+          requests.push(`workspace.export ${file}`);
+          const relative = file.slice(`${SNAPSHOT}/${MIGRATIONS}/`.length);
           const deployed = options.deployedJournal ?? options.migrations ?? [];
-          if (deployed === "unreadable") {
+          const content =
+            relative === "meta/_journal.json"
+              ? typeof deployed === "string"
+                ? deployed
+                : journal(deployed)
+              : (options.deployedSql?.[relative.replace(/\.sql$/, "")] ??
+                `-- ${relative.replace(/\.sql$/, "")}\nselect 1;\n`);
+          if (content === "unreadable") {
             throw Object.assign(new Error("Permission denied"), {
               statusCode: 403,
             });
           }
           return Response.json({
-            content: Buffer.from(journal(deployed)).toString("base64"),
+            content: Buffer.from(content).toString("base64"),
           });
         }
         throw new Error(
@@ -490,7 +499,7 @@ function ymlWithApps(apps: string): string {
 }
 
 describe("runVerify --deployed", () => {
-  test("a running app bound to the deploy branch with every committed migration is ok, with no database connection and no role of yours there", async () => {
+  test("a running app whose snapshot has every committed migration, with the same journal entry and SQL, is ok, with no database connection and no role of yours there", async () => {
     const migrations = [{ tag: "0000_migration", when: 1000 }];
     const { ctx, lakebase, requests } = deployedApp({ migrations });
 
@@ -500,13 +509,14 @@ describe("runVerify --deployed", () => {
       host: HOST,
       branch: PRODUCTION,
       app: "my-app",
-      migrations: { checked: "deployed code", missing: [] },
+      migrations: { evidence: "verified" },
       problems: [],
       ok: true,
     });
     expect(requests).toEqual([
       "apps.get my-app",
-      `workspace.export ${SNAPSHOT}/config/database/migrations/meta/_journal.json`,
+      `workspace.export ${SNAPSHOT}/${MIGRATIONS}/meta/_journal.json`,
+      `workspace.export ${SNAPSHOT}/${MIGRATIONS}/0000_migration.sql`,
     ]);
     expect(withBranchPool).not.toHaveBeenCalled();
     expect(resolveEnvBranch).not.toHaveBeenCalled();
@@ -528,7 +538,11 @@ describe("runVerify --deployed", () => {
     });
 
     expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
-      migrations: { checked: "deployed code", missing: ["0001_migration"] },
+      migrations: {
+        evidence: "differs",
+        missing: ["0001_migration"],
+        changed: [],
+      },
       problems: [
         "app my-app's active deployment does not have 0001_migration, which this checkout commits: `databricks apps deploy` deploys it, and the app applies it on start",
       ],
@@ -536,22 +550,124 @@ describe("runVerify --deployed", () => {
     });
   });
 
-  test("when the deployed code cannot be read, migrations generated after the deployment fail it", async () => {
-    const deployedAt = Date.parse(DEPLOYED_AT);
-    const { ctx } = deployedApp({
-      migrations: [
-        { tag: "0000_migration", when: deployedAt - 1000 },
-        { tag: "0001_migration", when: deployedAt + 1000 },
+  test("the same tag with other SQL, or with another journal entry, in the deployment fails it", async () => {
+    const migrations = [
+      { tag: "0000_migration", when: 1000 },
+      { tag: "0001_migration", when: 2000 },
+    ];
+    const { ctx, requests } = deployedApp({
+      migrations,
+      deployedJournal: [
+        { tag: "0000_migration", when: 1000 },
+        { tag: "0001_migration", when: 3000 },
       ],
-      deployedJournal: "unreadable",
+      deployedSql: { "0000_migration": "-- 0000_migration\nselect 2;\n" },
     });
 
     expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
-      migrations: { checked: "deploy time", missing: ["0001_migration"] },
+      migrations: {
+        evidence: "differs",
+        missing: [],
+        changed: ["0000_migration", "0001_migration"],
+      },
       problems: [
-        `0001_migration was generated after app my-app's active deployment (${DEPLOYED_AT}), so it does not have it: \`databricks apps deploy\` deploys it, and the app applies it on start`,
+        "app my-app's active deployment has 0000_migration, 0001_migration with another journal entry or other SQL than this checkout commits. A migration that ran never runs again: restore them to what was deployed, and put the change in a new migration",
       ],
+      ok: false,
     });
+    // Its journal entry already differs, so its SQL is not read.
+    expect(requests).not.toContain(
+      `workspace.export ${SNAPSHOT}/${MIGRATIONS}/0001_migration.sql`,
+    );
+  });
+
+  const JOURNAL = `${SNAPSHOT}/${MIGRATIONS}/meta/_journal.json`;
+  test.each([
+    [
+      "its journal cannot be exported",
+      { deployedJournal: "unreadable" },
+      `exporting ${JOURNAL} failed: Permission denied`,
+    ],
+    [
+      "its journal is empty",
+      { deployedJournal: "" },
+      `${JOURNAL} exported no content`,
+    ],
+    [
+      "its journal is not JSON",
+      { deployedJournal: "{" },
+      `${JOURNAL} is not JSON: `,
+    ],
+    [
+      "its journal is not drizzle-kit's",
+      {
+        deployedJournal: JSON.stringify({ dialect: "mysql", entries: [] }),
+      },
+      `${JOURNAL} is not a drizzle-kit PostgreSQL migration journal`,
+    ],
+    [
+      "a migration's SQL cannot be exported",
+      { deployedSql: { "0000_migration": "unreadable" } },
+      `exporting ${SNAPSHOT}/${MIGRATIONS}/0000_migration.sql failed: Permission denied`,
+    ],
+    [
+      "the deployment names no source snapshot",
+      {
+        app: runningApp({
+          active_deployment: { status: { state: "SUCCEEDED" } },
+        }),
+      },
+      "its active deployment names no source snapshot",
+    ],
+  ] as const)(
+    "when %s, the migrations are unavailable and verify fails",
+    async (_label, options, reason) => {
+      const { ctx } = deployedApp({
+        migrations: [{ tag: "0000_migration", when: 1000 }],
+        ...options,
+      });
+
+      expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+        migrations: {
+          evidence: "unavailable",
+          reason: expect.stringContaining(reason),
+        },
+        problems: [
+          expect.stringContaining(
+            `verify cannot tell whether app my-app's active deployment has the committed migrations: ${reason}`,
+          ),
+        ],
+        ok: false,
+      });
+    },
+  );
+
+  test("with committed migrations, a report that stops before reading the deployment leaves them unverified", async () => {
+    const { ctx } = deployedApp({
+      migrations: [{ tag: "0000_migration", when: 1000 }],
+      app: "missing",
+    });
+
+    expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+      migrations: {
+        evidence: "unavailable",
+        reason: "verify stopped before reading the app's deployment",
+      },
+      ok: false,
+    });
+  });
+
+  test("a committed migration whose SQL file is missing fails before any API call", async () => {
+    const { ctx, lakebase, requests } = deployedApp({
+      migrations: [{ tag: "0000_migration", when: 1000 }],
+    });
+    fs.rmSync(path.join(ctx.root, MIGRATIONS, "0000_migration.sql"));
+
+    await expect(runVerify(ctx, DEPLOYED)).rejects.toThrow(
+      /^Missing .*0000_migration\.sql, listed in meta\/_journal\.json\. Restore it from version control\.$/,
+    );
+    expect(requests).toEqual([]);
+    expect(lakebase.calls).toEqual([]);
   });
 
   test("without committed migrations nothing is compared, and schema.ts is not needed", async () => {
@@ -814,6 +930,41 @@ describe("runVerify --deployed", () => {
     await expect(runVerify(several.ctx, DEPLOYED)).rejects.toThrow(
       "Target default deploys 2 apps with a postgres resource (web, worker); verify checks one app per target.",
     );
+  });
+
+  test("an app with two postgres resources, or a branch or database the files do not resolve, is refused before any API call", async () => {
+    const postgres = (branch: string, database: string) =>
+      `        - name: postgres\n          postgres:\n            branch: ${branch}\n            database: ${database}\n`;
+    const app = (resources: string) =>
+      ymlWithApps(
+        `resources:\n  apps:\n    app:\n      name: my-app\n      resources:\n${resources}`,
+      );
+    const cases = [
+      [
+        app(
+          postgres("${var.postgres_branch}", "${var.postgres_database}") +
+            postgres(
+              "${var.postgres_branch}",
+              "${var.postgres_database}",
+            ).replace("name: postgres", "name: other"),
+        ),
+        "App app in target default has 2 postgres resources (resources.apps.app.resources[0].postgres, resources.apps.app.resources[1].postgres); verify checks one per app.",
+      ],
+      [
+        app(postgres("${var.missing}", "${var.postgres_database}")),
+        'No deploy branch: resources.apps.app.resources[0].postgres.branch in target default is "${var.missing}", which this checkout\'s files do not resolve to a branch.',
+      ],
+      [
+        app(postgres("${var.postgres_branch}", "${var.missing}")),
+        'No deploy database: resources.apps.app.resources[0].postgres.database in target default is "${var.missing}", which this checkout\'s files do not resolve to a database.',
+      ],
+    ];
+    for (const [yml, message] of cases) {
+      const { ctx, lakebase, requests } = deployedApp({ yml });
+      await expect(runVerify(ctx, DEPLOYED)).rejects.toThrow(message);
+      expect(requests).toEqual([]);
+      expect(lakebase.calls).toEqual([]);
+    }
   });
 
   test("an error other than 404 from the apps API names the app", async () => {

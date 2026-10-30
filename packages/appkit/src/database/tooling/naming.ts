@@ -10,7 +10,6 @@ const HASH_LENGTH = 6;
 
 /** Seven days: a session branch outlives a working week, then expires on its own. */
 export const SESSION_BRANCH_TTL = "604800s";
-
 const SESSION_ID_LENGTH =
   MAX_BRANCH_ID - SESSION_PREFIX.length - HASH_LENGTH - 1;
 const SESSION_ID = new RegExp(`^[a-z0-9]{1,${SESSION_ID_LENGTH}}$`);

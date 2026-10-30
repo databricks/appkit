@@ -14,7 +14,7 @@ const { createDbContext, runCheck } = vi.hoisted(() => ({
 }));
 
 // The tooling is an ambient module loaded with a dynamic import.
-vi.mock("@databricks/appkit/database-tooling", () => ({
+vi.mock("@databricks/appkit/beta/database-tooling", () => ({
   createDbContext,
   runCheck,
 }));

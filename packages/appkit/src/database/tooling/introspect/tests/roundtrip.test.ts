@@ -5,8 +5,11 @@ import path from "node:path";
 import { getTableConfig, type PgTable } from "drizzle-orm/pg-core";
 import { afterEach, describe, expect, test } from "vitest";
 
+import { columnHttpCapabilities } from "../../../../plugins/database/crud/capabilities";
 import { loadDefaultDatabaseSchema } from "../../../../plugins/database/load-schema";
+import type { Schema } from "../../../schema-builder/types";
 import { drizzleKitImports } from "../../drizzle-exports";
+import { withHistoryLock } from "../../history-lock";
 import { generateMigrationFiles } from "../../migrations";
 import type { IntrospectedTable } from "../catalog";
 import { renderSchemaSource } from "../render";
@@ -25,18 +28,37 @@ afterEach(() => {
     fs.rmSync(root, { recursive: true, force: true });
 });
 
-/** Write the rendered source as an app's schema.ts and load it the way the plugin does. */
-async function load(tables: IntrospectedTable[]) {
+/** Write the source as an app's schema.ts and load it the way the plugin does. */
+async function loadSource(source: string) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "appkit-introspect-"));
   roots.push(root);
   const file = path.join(root, "config/database/schema.ts");
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(
-    file,
-    renderSchemaSource(tables, "app", { importSource: BUILDER }).source,
-  );
+  fs.writeFileSync(file, source);
   return { root, schema: await loadDefaultDatabaseSchema(root) };
 }
+
+/** Render the tables as a first schema.ts and load it. */
+const load = (tables: IntrospectedTable[]) =>
+  loadSource(
+    renderSchemaSource(tables, "app", { importSource: BUILDER, previous: null })
+      .source,
+  );
+
+/** What the generated API lets a caller do with a schema: per column, and per include. */
+const granted = (schema: Schema) =>
+  Object.values(schema.$tables).flatMap((table) => [
+    ...Object.values(table.$columns).flatMap((meta) =>
+      Object.entries(columnHttpCapabilities(meta))
+        .filter(([, allowed]) => allowed)
+        .map(
+          ([capability]) => `${table.$name}.${meta.columnName} ${capability}`,
+        ),
+    ),
+    ...table.$relations.map(
+      (relation) => `${table.$name} includes ${relation.name}`,
+    ),
+  ]);
 
 interface KitColumn {
   name: string;
@@ -123,14 +145,13 @@ describe("introspect round trip", () => {
 
   test("the baseline is generated from the empty snapshot: it creates every rendered table", async () => {
     const { root, schema } = await load(richTables);
-    const folder = path.join(root, "config/database/migrations");
-
-    const migration = await generateMigrationFiles({
-      folder,
-      schema,
-      tag: "baseline",
-      interactive: false,
-    });
+    const migration = await withHistoryLock(root, "migrate", (lock) =>
+      generateMigrationFiles(lock, {
+        schema,
+        tag: "baseline",
+        interactive: false,
+      }),
+    );
 
     expect(migration?.tag).toBe("0000_baseline");
     const sql = migration?.statements.join("\n") ?? "";
@@ -364,5 +385,68 @@ describe("introspect round trip", () => {
         fk.reference().foreignColumns.map((c) => c.name),
       ),
     ).toEqual([[quote]]);
+  });
+
+  test("a refresh over the schema.ts it replaces keeps exactly what the API could read, write or include", async () => {
+    const before =
+      await loadSource(`import { defineSchema, fk, id, text } from ${JSON.stringify(BUILDER)};
+export const schema = defineSchema(({ table }) => {
+  const boards = table("boards", { id: id(), title: text().notNull() });
+  const notes = table("notes", {
+    id: id(),
+    board_id: fk(() => boards.id).notNull(),
+    author_email: text().private(),
+    body: text().notNull(),
+  });
+  return { boards, notes };
+});
+`);
+    const key = col("id", "integer", { notNull: true, identity: "d" });
+    const catalog = [
+      tableOf({
+        name: "boards",
+        primaryKey: ["id"],
+        columns: [key, col("title", "text", { notNull: true })],
+      }),
+      tableOf({
+        name: "notes",
+        primaryKey: ["id"],
+        foreignKeys: [
+          foreignKey({
+            name: "notes_board_id_boards_id_fk",
+            columns: ["board_id"],
+            schema: "app",
+            table: "boards",
+            refColumns: ["id"],
+            onDelete: "no action",
+            onUpdate: "no action",
+          }),
+        ],
+        columns: [
+          key,
+          col("board_id", "integer", { notNull: true }),
+          col("author_email", "text"),
+          col("body", "text", { notNull: true }),
+          col("summary", "text"),
+        ],
+      }),
+      tableOf({
+        name: "tags",
+        primaryKey: ["id"],
+        columns: [key, col("label", "text")],
+      }),
+    ];
+
+    const rendered = renderSchemaSource(catalog, "app", {
+      importSource: BUILDER,
+      previous: before.schema,
+    });
+    const after = await loadSource(rendered.source);
+
+    expect(rendered.newRelations).toEqual([]);
+    // The new column and the new table arrive private, so they grant nothing.
+    expect(after.schema.$tables.notes?.$columns.summary?.isPrivate).toBe(true);
+    expect(after.schema.$tables.tags?.$columns.label?.isPrivate).toBe(true);
+    expect(granted(after.schema)).toEqual(granted(before.schema));
   });
 });

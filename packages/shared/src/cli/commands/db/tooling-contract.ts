@@ -90,10 +90,15 @@ export interface DeployVerifyReport {
   readonly host: string | null;
   readonly branch: string;
   readonly app: string | null;
-  readonly migrations: {
-    readonly checked: "deployed code" | "deploy time";
-    readonly missing: readonly string[];
-  } | null;
+  readonly migrations:
+    | { readonly evidence: "verified" }
+    | {
+        readonly evidence: "differs";
+        readonly missing: readonly string[];
+        readonly changed: readonly string[];
+      }
+    | { readonly evidence: "unavailable"; readonly reason: string }
+    | null;
   readonly problems: readonly string[];
   readonly ok: boolean;
 }
@@ -128,7 +133,7 @@ export interface InitReport {
 }
 
 /**
- * The exports of `@databricks/appkit/database-tooling` the CLI calls. `shared`
+ * The exports of `@databricks/appkit/beta/database-tooling` the CLI calls. `shared`
  * must not depend on appkit, so the CLI imports the tooling dynamically and
  * types it with this interface, and appkit's typecheck checks its real exports
  * against it (`database/tooling/tests/contract.test.ts`). Function properties,

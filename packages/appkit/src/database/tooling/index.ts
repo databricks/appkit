@@ -1,10 +1,10 @@
 /**
- * `@databricks/appkit/database-tooling` — CLI-only logic behind `appkit db`.
+ * `@databricks/appkit/beta/database-tooling` — CLI-only logic behind `appkit db`.
  * Loaded lazily by the shared CLI; it may import drizzle-kit, so the runtime
  * plugin never imports it.
  *
- * Internal to the AppKit CLI: it has no semver guarantee, and only the CLI of
- * the same AppKit release should import it.
+ * Beta and internal to the AppKit CLI: it has no semver guarantee, and only
+ * the CLI of the same AppKit release should import it.
  */
 export { type CheckReport, runCheck } from "./check";
 export {

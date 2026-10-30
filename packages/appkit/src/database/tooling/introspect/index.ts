@@ -10,14 +10,12 @@ import {
   markMigrationsApplied,
   readMigrationDrift,
 } from "../../migrations/apply";
-import {
-  journalFile,
-  migrationsFolder,
-  readJournal,
-} from "../../migrations/paths";
+import { readJournal } from "../../migrations/paths";
 import { DEFAULT_SCHEMA_NAME } from "../../schema-builder/define-schema";
+import type { Schema } from "../../schema-builder/types";
 import { type DbContext, NO_ENV_BRANCH, withBranchPool } from "../context";
 import { notYourBranch, resolveEnvBranch, takesWrites } from "../guard";
+import { type HistoryLock, withHistoryLock } from "../history-lock";
 import { DATABASE_TYPES_PATH } from "../migrate";
 import {
   breakingStatements,
@@ -28,6 +26,7 @@ import {
 import { resourceId } from "../targets";
 import { readCatalog, readUnreadObjects } from "./catalog";
 import {
+  otherSchemaHint,
   renderSchemaSource,
   type Skip,
   shown,
@@ -37,7 +36,7 @@ import {
 export interface IntrospectOptions {
   /** false: an ambiguous rename against existing history throws instead of prompting. */
   readonly interactive: boolean;
-  /** Schema to read; defaults to DEFAULT_SCHEMA_NAME. The current schema.ts is never read. */
+  /** Schema to read; defaults to DEFAULT_SCHEMA_NAME. */
   readonly schemaName?: string;
   /** Module the written schema.ts imports the builder from. Default "@databricks/appkit/beta". */
   readonly importSource?: string;
@@ -64,8 +63,8 @@ export interface IntrospectReport {
 
 /** Introspect would record history the branch or the deployed app contradicts. */
 export class IntrospectRefusedError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = "IntrospectRefusedError";
   }
 }
@@ -137,21 +136,52 @@ function refuseDropsOfUnexpressed(
 }
 
 /**
+ * The schema.ts introspect replaces; null when there is none. The rewrite
+ * keeps its private columns and its foreign keys, so a file that does not load
+ * refuses the run before anything is read or written.
+ */
+async function readPreviousSchema(root: string): Promise<Schema | null> {
+  if (!fs.existsSync(path.join(root, DEFAULT_SCHEMA_FILE))) return null;
+  try {
+    return await loadDefaultDatabaseSchema(root, { showImportError: true });
+  } catch (error) {
+    throw new IntrospectRefusedError(
+      `Refusing to introspect: ${DEFAULT_SCHEMA_FILE} does not load, so introspect cannot keep the columns it marks private. Fix it, then rerun.`,
+      { cause: error },
+    );
+  }
+}
+
+/**
  * `appkit db introspect`: read the `.env` branch's app schema from pg_catalog,
  * write schema.ts (the previous file goes to schema.ts.bak), write the
  * migration that brings history up to the database, and record it as applied.
- * Runs only on your dev or session branch, and only when the branch records
- * exactly the committed migrations. A failure puts back schema.ts, the backup,
- * database.d.ts and the migrations folder.
+ * Columns the previous schema.ts declares keep their privacy; new ones are
+ * written private, and a foreign key it does not declare is refused. Runs only
+ * on your dev or session branch, and only when the branch records exactly the
+ * committed migrations. A failure puts back schema.ts, the backup,
+ * database.d.ts and the migrations folder. One command at a time owns the
+ * checkout's history.
  */
 export async function runIntrospect(
   ctx: DbContext,
   options: IntrospectOptions,
 ): Promise<IntrospectReport> {
+  return withHistoryLock(ctx.root, "introspect", (lock) =>
+    introspectHolding(ctx, lock, options),
+  );
+}
+
+/** runIntrospect for a caller that already holds the checkout's history lock. */
+export async function introspectHolding(
+  ctx: DbContext,
+  lock: HistoryLock,
+  options: IntrospectOptions,
+): Promise<IntrospectReport> {
   const schemaFile = path.join(ctx.root, DEFAULT_SCHEMA_FILE);
-  // Introspect replaces schema.ts, so the current file (missing, empty or broken) is never read.
+  const previousSchema = await readPreviousSchema(ctx.root);
   const schemaName = options.schemaName || DEFAULT_SCHEMA_NAME;
-  const folder = migrationsFolder(ctx.root);
+  const { folder } = lock;
   const migrationOptions = { migrationsFolder: folder, schemaName };
   const hasHistory = (readJournal(folder)?.entries.length ?? 0) > 0;
 
@@ -207,6 +237,7 @@ export async function runIntrospect(
     const unread = await readUnreadObjects(query, schemaName);
     const rendered = renderSchemaSource(tables, schemaName, {
       importSource: options.importSource,
+      previous: previousSchema,
     });
     // An app on another schema that forgot --schema-name must not lose its
     // schema.ts to an empty one; with history, an empty schema drops every table.
@@ -221,6 +252,28 @@ export async function runIntrospect(
         `Schema "${schemaName}" on ${branchId} has no tables${tables.length > 0 ? ` introspect can write (${reasons.join("; ")})` : ""}, so introspect would ${hasHistory ? "write a migration that drops every table" : `replace ${DEFAULT_SCHEMA_FILE} with an empty one`}. Pass --schema-name <name> to read another schema.`,
       );
     }
+    if (rendered.newRelations.length > 0) {
+      const one = rendered.newRelations.length === 1;
+      const edges = rendered.newRelations.map((relation) => relation.edge);
+      const tables = [
+        ...new Set(
+          rendered.newRelations.flatMap(
+            (relation) => relation.undeclaredTables,
+          ),
+        ),
+      ];
+      const declareTables =
+        tables.length === 0
+          ? ""
+          : ` and declare ${tables.length === 1 ? "the table" : "the tables"} ${tables.join(", ")}`;
+      const advice =
+        previousSchema && previousSchema.$schemaName !== schemaName
+          ? otherSchemaHint(previousSchema.$schemaName, schemaName)
+          : `Declare ${one ? "it" : "them"} with fk() in schema.ts${declareTables}, then rerun.`;
+      throw new IntrospectRefusedError(
+        `Refusing to replace ${DEFAULT_SCHEMA_FILE}: the branch has ${one ? "a foreign key" : "foreign keys"} it does not declare (${edges.join(", ")}). A foreign key lets the API include the related rows. ${advice}`,
+      );
+    }
 
     const backupFile = `${schemaFile}.bak`;
     const typesFile = path.join(ctx.root, DATABASE_TYPES_PATH);
@@ -228,7 +281,6 @@ export async function runIntrospect(
     const previousBackup = readIfExists(backupFile);
     const previousTypes = readIfExists(typesFile);
     const backsUp = previous !== null && previous !== rendered.source;
-    const journalBefore = readIfExists(journalFile(folder));
     let migration: GeneratedMigration | null = null;
     let recorded: string[] = [];
     try {
@@ -247,8 +299,7 @@ export async function runIntrospect(
         );
       }
 
-      migration = await generateMigrationFiles({
-        folder,
+      migration = await generateMigrationFiles(lock, {
         schema,
         tag: hasHistory ? "introspect" : "baseline",
         interactive: options.interactive,
@@ -278,7 +329,7 @@ export async function runIntrospect(
       writeOrRemove(schemaFile, previous);
       if (backsUp) writeOrRemove(backupFile, previousBackup);
       writeOrRemove(typesFile, previousTypes);
-      if (migration) discardMigrationFiles(folder, migration, journalBefore);
+      if (migration) discardMigrationFiles(lock, migration);
       if (error instanceof IntrospectRefusedError) throw error;
       throw new Error(
         `Introspect changed nothing: ${error instanceof Error ? error.message : String(error)}`,

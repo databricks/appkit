@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { defineSchema, id } from "../../schema-builder";
+import { withHistoryLock } from "../history-lock";
 
 const SRC = path.resolve(import.meta.dirname, "../../..");
 const folders: string[] = [];
@@ -41,13 +42,14 @@ function tempRoot(): string {
 }
 
 function generate(migrations: typeof import("../migrations")) {
-  return migrations.generateMigrationFiles({
-    folder: path.join(tempRoot(), "migrations"),
-    schema: defineSchema(({ table }) => ({
-      notes: table("notes", { id: id() }),
-    })),
-    interactive: false,
-  });
+  return withHistoryLock(tempRoot(), "migrate", (lock) =>
+    migrations.generateMigrationFiles(lock, {
+      schema: defineSchema(({ table }) => ({
+        notes: table("notes", { id: id() }),
+      })),
+      interactive: false,
+    }),
+  );
 }
 
 /** A file URL in an app whose node_modules holds these drizzle-kit and drizzle-orm versions. */
