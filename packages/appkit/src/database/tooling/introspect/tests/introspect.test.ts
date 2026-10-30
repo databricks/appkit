@@ -436,8 +436,8 @@ describe("runIntrospect", () => {
 
     expect(catalog.calls.every((call) => call.values[0] === "app")).toBe(true);
     expect(error).toBeInstanceOf(IntrospectRefusedError);
-    expect(error.message).toMatch(
-      /^Refusing to replace config\/database\/schema\.ts: the branch has a foreign key it does not declare \(app\.posts\.author_id → app\.authors\.id\)\./,
+    expect(error.message).toBe(
+      'Refusing to replace config/database/schema.ts: the branch has a foreign key it does not declare (app.posts.author_id → app.authors.id). A foreign key lets the API include the related rows. schema.ts declares schema "sales", so it declares nothing in "app". `--schema-name sales` refreshes it.',
     );
     expect(tree(root)).toEqual(before);
   });

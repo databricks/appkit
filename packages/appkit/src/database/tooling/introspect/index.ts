@@ -26,6 +26,7 @@ import {
 import { resourceId } from "../targets";
 import { readCatalog, readUnreadObjects } from "./catalog";
 import {
+  otherSchemaHint,
   renderSchemaSource,
   type Skip,
   shown,
@@ -264,8 +265,12 @@ async function introspectHolding(
         tables.length === 0
           ? ""
           : ` and declare ${tables.length === 1 ? "the table" : "the tables"} ${tables.join(", ")}`;
+      const advice =
+        previousSchema && previousSchema.$schemaName !== schemaName
+          ? otherSchemaHint(previousSchema.$schemaName, schemaName)
+          : `Declare ${one ? "it" : "them"} with fk() in schema.ts${declareTables}, then rerun.`;
       throw new IntrospectRefusedError(
-        `Refusing to replace ${DEFAULT_SCHEMA_FILE}: the branch has ${one ? "a foreign key" : "foreign keys"} it does not declare (${edges.join(", ")}). A foreign key lets the API include the related rows. Declare ${one ? "it" : "them"} with fk() in schema.ts${declareTables}, then rerun.`,
+        `Refusing to replace ${DEFAULT_SCHEMA_FILE}: the branch has ${one ? "a foreign key" : "foreign keys"} it does not declare (${edges.join(", ")}). A foreign key lets the API include the related rows. ${advice}`,
       );
     }
 

@@ -798,7 +798,7 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
     );
 
     expect(out.warnings).toContain(
-      "sales.boards.id, sales.boards.title, sales.notes.id, sales.notes.board_id, sales.notes.author_email, sales.notes.body are new to schema.ts, so they are private: the API does not return or accept them until you remove .private().",
+      'sales.boards.id, sales.boards.title, sales.notes.id, sales.notes.board_id, sales.notes.author_email, sales.notes.body are new to schema.ts, so they are private: the API does not return or accept them until you remove .private(). schema.ts declares schema "app", so it declares nothing in "sales". `--schema-name app` refreshes it.',
     );
     expect(out.newRelations).toEqual([
       {

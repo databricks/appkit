@@ -55,6 +55,11 @@ interface SchemaSource {
   readonly newRelations: readonly NewRelation[];
 }
 
+/** Why a schema.ts of another schema keeps nothing in this one, and what refreshes it. */
+export function otherSchemaHint(declared: string, read: string): string {
+  return `schema.ts declares schema "${declared}", so it declares nothing in "${read}". \`--schema-name ${declared}\` refreshes it.`;
+}
+
 interface RenderOptions {
   /** Module the builder is imported from. Default "@databricks/appkit/beta". */
   readonly importSource?: string;
@@ -349,8 +354,12 @@ export function renderSchemaSource(
   };
   const { previous } = options;
   // A declaration of another schema declares nothing in this one.
+  const otherSchema =
+    previous && previous.$schemaName !== schemaName
+      ? previous.$schemaName
+      : null;
   const previousTables = new Map<string, AppKitTable>(
-    previous?.$schemaName === schemaName
+    previous && !otherSchema
       ? Object.values(previous.$tables).map((table): [string, AppKitTable] => [
           table.$name,
           table,
@@ -912,7 +921,7 @@ export function renderSchemaSource(
   if (privatized.length > 0) {
     const one = privatized.length === 1;
     warnings.push(
-      `${list(privatized)} ${one ? "is" : "are"} new to schema.ts, so ${one ? "it is" : "they are"} private: the API does not return or accept ${one ? "it" : "them"} until you remove .private().`,
+      `${list(privatized)} ${one ? "is" : "are"} new to schema.ts, so ${one ? "it is" : "they are"} private: the API does not return or accept ${one ? "it" : "them"} until you remove .private().${otherSchema ? ` ${otherSchemaHint(otherSchema, schemaName)}` : ""}`,
     );
   }
   for (const comment of tableComments) body.push(`  ${comment}`);
