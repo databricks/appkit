@@ -177,9 +177,12 @@ export default function App() {
   return <RouterProvider router={router} />;
 }
 
+// The template's default home page. `data-appkit-template-home` tells an app
+// builder this is still the placeholder (it won't report the app ready while it
+// is on screen); drop the attribute, or the page, when you build the real home.
 function HomePage() {
   return (
-    <div className="max-w-2xl mx-auto space-y-6 mt-8">
+    <div data-appkit-template-home className="max-w-2xl mx-auto space-y-6 mt-8">
       <div className="text-center">
         <h2 className="text-3xl font-bold mb-2 text-foreground">
           Welcome to your Databricks App

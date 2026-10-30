@@ -1,0 +1,215 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { createServer, type ViteDevServer } from "vite";
+import { afterEach, describe, expect, test } from "vitest";
+
+import { compileGraph, designVitePlugin } from "../vite-plugin";
+
+// A real Vite dev server: the status check must catch errors anywhere in the
+// page's import graph, which a mocked transformRequest can't show. The sample
+// modules avoid JSX so the temp app doesn't need React installed.
+let server: ViteDevServer | undefined;
+afterEach(async () => {
+  await server?.close();
+  server = undefined;
+});
+
+async function serve(files: Record<string, string>) {
+  const root = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "appkit-compile-")),
+  );
+  for (const [file, text] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+    fs.writeFileSync(path.join(root, file), text);
+  }
+  server = await createServer({
+    root,
+    configFile: false,
+    logLevel: "silent",
+    server: { middlewareMode: true, hmr: false, ws: false },
+    optimizeDeps: { noDiscovery: true, include: [] },
+  });
+  return server;
+}
+
+const INDEX = "/src/design/index.tsx";
+
+describe("compileGraph on a real Vite server", () => {
+  test("a page whose whole import graph builds", async () => {
+    const s = await serve({
+      "src/design/index.tsx":
+        'import { Card } from "./Card";\nexport default () => Card();\n',
+      "src/design/Card.tsx":
+        'import { label } from "../lib/label";\nexport const Card = () => label;\n',
+      "src/lib/label.ts": 'export const label = "ok";\n',
+    });
+    expect(await compileGraph(s, INDEX)).toBeUndefined();
+  });
+
+  test("a syntax error in a component two imports deep is reported", async () => {
+    const s = await serve({
+      "src/design/index.tsx":
+        'import { Card } from "./Card";\nexport default () => Card();\n',
+      "src/design/Card.tsx":
+        'import { Bad } from "./Bad";\nexport const Card = () => Bad();\n',
+      "src/design/Bad.tsx": "const x = {;\nexport const Bad = () => null;\n",
+    });
+    const error = await compileGraph(s, INDEX);
+    // Names the broken module, not just the parser message.
+    expect(error).toMatch(/Bad\.tsx/);
+    expect(error).toMatch(/Unexpected/);
+  });
+
+  test("an unresolvable import in an imported module is reported", async () => {
+    const s = await serve({
+      "src/design/index.tsx":
+        'import { Card } from "./Card";\nexport default () => Card();\n',
+      "src/design/Card.tsx":
+        'import { Nope } from "./nope";\nexport const Card = () => Nope();\n',
+    });
+    expect(await compileGraph(s, INDEX)).toMatch(
+      /Failed to resolve import "\.\/nope"/,
+    );
+  });
+
+  test("/design/__status reports it: compiled false, waitingFor compile", async () => {
+    const root = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "appkit-compile-")),
+    );
+    const write = (file: string, text: string) => {
+      fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      fs.writeFileSync(path.join(root, file), text);
+    };
+    write(
+      "src/design/index.tsx",
+      'import { Bad } from "./Bad";\nexport default () => Bad();\n',
+    );
+    write(
+      "src/design/Bad.tsx",
+      "const x = {;\nexport const Bad = () => null;\n",
+    );
+    server = await createServer({
+      root,
+      configFile: false,
+      logLevel: "silent",
+      server: { middlewareMode: true, hmr: false, ws: false },
+      optimizeDeps: { noDiscovery: true, include: [] },
+    });
+    // The plugin's own handler, on top of the real server's transformRequest,
+    // moduleGraph and config (Vite's request pipeline isn't under test).
+    type Handler = (
+      req: unknown,
+      res: unknown,
+      next: () => void,
+    ) => Promise<void>;
+    let handler: Handler | undefined;
+    const proxy = Object.create(server, {
+      middlewares: { value: { use: (h: Handler) => (handler = h) } },
+    });
+    const plugin = designVitePlugin();
+    (plugin.configResolved as (c: { root: string }) => void)({ root });
+    (plugin.configureServer as (s: unknown) => void)(proxy);
+
+    let body = "";
+    await (handler as Handler)(
+      { url: "/design/__status", method: "GET" },
+      {
+        statusCode: 200,
+        setHeader() {},
+        end: (b?: string) => (body = b ?? ""),
+      },
+      () => {},
+    );
+    const status = JSON.parse(body);
+    expect(status).toMatchObject({ compiled: false, waitingFor: "compile" });
+    expect(String(status.compileError)).toMatch(/Bad\.tsx.*Unexpected/);
+  });
+
+  test("a draft write reaches only its own page, never Vite's reload-all", async () => {
+    const app = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "appkit-drafts-")),
+    );
+    fs.mkdirSync(path.join(app, "drafts"));
+    fs.mkdirSync(path.join(app, "client"));
+    fs.writeFileSync(path.join(app, "drafts/dash.html"), "<p>a");
+    const cwd = process.cwd();
+    process.chdir(app);
+    try {
+      server = await createServer({
+        root: path.join(app, "client"),
+        configFile: false,
+        logLevel: "silent",
+        plugins: [designVitePlugin()],
+        server: { middlewareMode: true, ws: false },
+        optimizeDeps: { noDiscovery: true, include: [] },
+      });
+    } finally {
+      process.chdir(cwd);
+    }
+    const sent: unknown[] = [];
+    server.environments.client.hot.send = (p: unknown) => sent.push(p);
+    server.ws.send = (p: unknown) => sent.push(p);
+
+    fs.appendFileSync(path.join(app, "drafts/dash.html"), "b</p>");
+    await new Promise((r) => setTimeout(r, 500));
+    expect(sent).not.toContainEqual(
+      expect.objectContaining({ type: "full-reload" }),
+    );
+    expect(sent).toContainEqual(
+      expect.objectContaining({
+        event: "appkit:draft-changed",
+        data: { draft: "dash" },
+      }),
+    );
+  });
+
+  test("an app's react-router 7 is found when Vite serves its pre-bundled copy", async () => {
+    const app = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "appkit-router-")),
+    );
+    const write = (file: string, text: string) => {
+      fs.mkdirSync(path.dirname(path.join(app, file)), { recursive: true });
+      fs.writeFileSync(path.join(app, file), text);
+    };
+    write(
+      "node_modules/react-router/package.json",
+      JSON.stringify({
+        name: "react-router",
+        version: "7.18.0",
+        type: "module",
+        exports: { ".": "./index.js" },
+      }),
+    );
+    write(
+      "node_modules/react-router/index.js",
+      "export const createBrowserRouter = () => {};\nexport const RouterProvider = () => null;\n",
+    );
+    write("client/src/design/index.tsx", "export default () => null;\n");
+    server = await createServer({
+      root: path.join(app, "client"),
+      configFile: false,
+      logLevel: "silent",
+      plugins: [designVitePlugin()],
+      server: { middlewareMode: true, hmr: false, ws: false },
+      optimizeDeps: { include: ["react-router"], noDiscovery: true },
+      cacheDir: path.join(app, "node_modules/.vite"),
+    });
+    await server.environments.client.depsOptimizer?.init();
+    await server.environments.client.depsOptimizer?.scanProcessing;
+    // What made the old check miss it: Vite resolves to the pre-bundled copy.
+    const resolved = await server.pluginContainer.resolveId(
+      "react-router",
+      path.join(app, "client/src/design/index.tsx"),
+    );
+    expect(resolved?.id).toMatch(/[/]\.vite[/]deps[/]/);
+
+    const entry = await server.pluginContainer.load(
+      "\0virtual:appkit-design-page:index.tsx.mjs",
+    );
+    expect(String(typeof entry === "string" ? entry : entry?.code)).toContain(
+      'from "react-router"',
+    );
+  });
+});

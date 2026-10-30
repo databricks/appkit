@@ -5,6 +5,11 @@ import { tableFromIPC } from "apache-arrow";
 import pc from "picocolors";
 
 import { createLogger } from "../logging/logger";
+import {
+  extractParameters,
+  getProtectedRanges,
+  isInsideProtectedRange,
+} from "../utils/sql-parameters";
 import { CACHE_VERSION, hashSQL, loadCache, saveCache } from "./cache";
 import {
   classifyBlockingFailure,
@@ -41,20 +46,6 @@ const logger = createLogger("type-generator:query-registry");
 const PREFLIGHT_WAIT_MAX_MS = 300_000;
 
 /**
- * Regex breakdown:
- *   '(?:[^']|'')*'   — matches a SQL string literal, including escaped '' pairs
- *   |                 — alternation: whichever branch matches first at a position wins
- *   --[^\n]*          — matches a single-line SQL comment
- *
- * Because the regex engine scans left-to-right, a `'` is consumed as a string
- * literal before any `--` inside it could match as a comment — giving us
- * correct single-pass ordering without a manual state machine.
- *
- * V1: no block-comment support (deferred to next PR).
- */
-const PROTECTED_RANGE_RE = /'(?:[^']|'')*'|--[^\n]*/g;
-
-/**
  * Numeric-context patterns for positional type inference.
  * Hoisted to module scope — safe because matchAll() clones the regex internally.
  */
@@ -69,21 +60,6 @@ const NUMERIC_PATTERNS: RegExp[] = [
   /[+\-*/]\s*:([a-zA-Z_]\w*)/g,
   /:([a-zA-Z_]\w*)\s*[+\-*/]/g,
 ];
-
-export function getProtectedRanges(sql: string): Array<[number, number]> {
-  const ranges: Array<[number, number]> = [];
-  for (const m of sql.matchAll(PROTECTED_RANGE_RE)) {
-    ranges.push([m.index, m.index + m[0].length]);
-  }
-  return ranges;
-}
-
-function isInsideProtectedRange(
-  offset: number,
-  ranges: Array<[number, number]>,
-): boolean {
-  return ranges.some(([start, end]) => offset >= start && offset < end);
-}
 
 /**
  * Parse a raw API/SDK error into a structured code + message.
@@ -108,25 +84,7 @@ function parseError(raw: string): { code?: string; message: string } {
   return { message: raw };
 }
 
-/**
- * Extract parameters from a SQL query
- * @param sql - the SQL query to extract parameters from
- * @returns an array of parameter names
- */
-export function extractParameters(
-  sql: string,
-  ranges?: Array<[number, number]>,
-): string[] {
-  const protectedRanges = ranges ?? getProtectedRanges(sql);
-  const matches = sql.matchAll(/(?<!:):([a-zA-Z_]\w*)/g);
-  const params = new Set<string>();
-  for (const match of matches) {
-    if (!isInsideProtectedRange(match.index, protectedRanges)) {
-      params.add(match[1]);
-    }
-  }
-  return Array.from(params);
-}
+export { extractParameters, getProtectedRanges };
 
 // parameters that are injected by the server
 export const SERVER_INJECTED_PARAMS = ["workspaceId"];

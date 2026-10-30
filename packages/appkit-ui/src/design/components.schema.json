@@ -1,0 +1,668 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "data-appkit blocks",
+  "description": "Props for <script type=\"application/json\" data-appkit=\"<Component>\">…</script> blocks in drafts. Each block is one JSON object matching its component's schema. A block with data-src=\"mock#<key>\" takes its data from drafts/mock.json (one JSON object; the key is looked up in its \"datasets\" object first, then at the top level): an array becomes the block's data (rows for a DataTable), an object is merged into its props. Props written in the block win; the block may hold no JSON at all.",
+  "components": {
+    "BarChart": {
+      "description": "Bar chart (appkit-ui BarChart).",
+      "schema": {
+        "type": "object",
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["x", "series"],
+            "properties": {
+              "x": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": ["string", "number"]
+                },
+                "description": "Category or x-axis labels."
+              },
+              "series": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["name", "data"],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": ["number", "null"]
+                      },
+                      "description": "One value per x label (same length as x)."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["data"],
+            "properties": {
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                },
+                "description": "Rows, e.g. [{\"day\":\"Mon\",\"trips\":12}]."
+              },
+              "xKey": {
+                "type": "string",
+                "description": "Row field for x / categories. Auto-detected."
+              },
+              "yKey": {
+                "type": ["string", "array"],
+                "items": {
+                  "type": "string"
+                },
+                "description": "Row field(s) for values. Auto-detected."
+              }
+            }
+          }
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Heading shown above the chart. Leave it out when the block's container already has its own heading."
+          },
+          "height": {
+            "type": "number",
+            "description": "Height in pixels. By default the chart fills its container's height (at least 160px)."
+          },
+          "showLegend": {
+            "type": "boolean",
+            "description": "Show the legend."
+          },
+          "colors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Series colors (CSS colors); defaults to the theme palette."
+          },
+          "ariaLabel": {
+            "type": "string"
+          },
+          "orientation": {
+            "enum": ["vertical", "horizontal"],
+            "description": "Default vertical."
+          },
+          "stacked": {
+            "type": "boolean"
+          }
+        }
+      },
+      "example": {
+        "title": "Trips per day",
+        "x": ["Mon", "Tue", "Wed"],
+        "series": [
+          {
+            "name": "Trips",
+            "data": [12, 19, 7]
+          }
+        ]
+      }
+    },
+    "LineChart": {
+      "description": "Line chart (appkit-ui LineChart).",
+      "schema": {
+        "type": "object",
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["x", "series"],
+            "properties": {
+              "x": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": ["string", "number"]
+                },
+                "description": "Category or x-axis labels."
+              },
+              "series": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["name", "data"],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": ["number", "null"]
+                      },
+                      "description": "One value per x label (same length as x)."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["data"],
+            "properties": {
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                },
+                "description": "Rows, e.g. [{\"day\":\"Mon\",\"trips\":12}]."
+              },
+              "xKey": {
+                "type": "string",
+                "description": "Row field for x / categories. Auto-detected."
+              },
+              "yKey": {
+                "type": ["string", "array"],
+                "items": {
+                  "type": "string"
+                },
+                "description": "Row field(s) for values. Auto-detected."
+              }
+            }
+          }
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Heading shown above the chart. Leave it out when the block's container already has its own heading."
+          },
+          "height": {
+            "type": "number",
+            "description": "Height in pixels. By default the chart fills its container's height (at least 160px)."
+          },
+          "showLegend": {
+            "type": "boolean",
+            "description": "Show the legend."
+          },
+          "colors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Series colors (CSS colors); defaults to the theme palette."
+          },
+          "ariaLabel": {
+            "type": "string"
+          },
+          "orientation": {
+            "enum": ["vertical", "horizontal"],
+            "description": "Default vertical."
+          },
+          "smooth": {
+            "type": "boolean"
+          },
+          "showSymbol": {
+            "type": "boolean"
+          }
+        }
+      },
+      "example": {
+        "title": "Revenue",
+        "x": ["Jan", "Feb", "Mar"],
+        "series": [
+          {
+            "name": "2025",
+            "data": [10, 14, 13]
+          },
+          {
+            "name": "2026",
+            "data": [12, 18, 21]
+          }
+        ]
+      }
+    },
+    "AreaChart": {
+      "description": "Area chart (appkit-ui AreaChart).",
+      "schema": {
+        "type": "object",
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["x", "series"],
+            "properties": {
+              "x": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": ["string", "number"]
+                },
+                "description": "Category or x-axis labels."
+              },
+              "series": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["name", "data"],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": ["number", "null"]
+                      },
+                      "description": "One value per x label (same length as x)."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["data"],
+            "properties": {
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                },
+                "description": "Rows, e.g. [{\"day\":\"Mon\",\"trips\":12}]."
+              },
+              "xKey": {
+                "type": "string",
+                "description": "Row field for x / categories. Auto-detected."
+              },
+              "yKey": {
+                "type": ["string", "array"],
+                "items": {
+                  "type": "string"
+                },
+                "description": "Row field(s) for values. Auto-detected."
+              }
+            }
+          }
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Heading shown above the chart. Leave it out when the block's container already has its own heading."
+          },
+          "height": {
+            "type": "number",
+            "description": "Height in pixels. By default the chart fills its container's height (at least 160px)."
+          },
+          "showLegend": {
+            "type": "boolean",
+            "description": "Show the legend."
+          },
+          "colors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Series colors (CSS colors); defaults to the theme palette."
+          },
+          "ariaLabel": {
+            "type": "string"
+          },
+          "orientation": {
+            "enum": ["vertical", "horizontal"],
+            "description": "Default vertical."
+          },
+          "smooth": {
+            "type": "boolean"
+          },
+          "showSymbol": {
+            "type": "boolean"
+          },
+          "stacked": {
+            "type": "boolean"
+          }
+        }
+      },
+      "example": {
+        "title": "Signups",
+        "data": [
+          {
+            "week": "W1",
+            "signups": 40
+          },
+          {
+            "week": "W2",
+            "signups": 55
+          }
+        ],
+        "xKey": "week",
+        "yKey": "signups"
+      }
+    },
+    "PieChart": {
+      "description": "Pie chart (appkit-ui PieChart). One series; x are the slice names.",
+      "schema": {
+        "type": "object",
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["x", "series"],
+            "properties": {
+              "x": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": ["string", "number"]
+                },
+                "description": "Category or x-axis labels."
+              },
+              "series": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["name", "data"],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": ["number", "null"]
+                      },
+                      "description": "One value per x label (same length as x)."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["data"],
+            "properties": {
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                },
+                "description": "Rows, e.g. [{\"day\":\"Mon\",\"trips\":12}]."
+              },
+              "xKey": {
+                "type": "string",
+                "description": "Row field for x / categories. Auto-detected."
+              },
+              "yKey": {
+                "type": ["string", "array"],
+                "items": {
+                  "type": "string"
+                },
+                "description": "Row field(s) for values. Auto-detected."
+              }
+            }
+          }
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Heading shown above the chart. Leave it out when the block's container already has its own heading."
+          },
+          "height": {
+            "type": "number",
+            "description": "Height in pixels. By default the chart fills its container's height (at least 160px)."
+          },
+          "showLegend": {
+            "type": "boolean",
+            "description": "Show the legend."
+          },
+          "colors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Series colors (CSS colors); defaults to the theme palette."
+          },
+          "ariaLabel": {
+            "type": "string"
+          },
+          "innerRadius": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Inner radius in %."
+          },
+          "showLabels": {
+            "type": "boolean",
+            "description": "Labels on slices. Default true."
+          },
+          "labelPosition": {
+            "enum": ["outside", "inside", "center"]
+          }
+        }
+      },
+      "example": {
+        "title": "Trips by city",
+        "x": ["Madrid", "Rome", "Paris"],
+        "series": [
+          {
+            "name": "Trips",
+            "data": [320, 280, 150]
+          }
+        ]
+      }
+    },
+    "DonutChart": {
+      "description": "Donut chart (appkit-ui DonutChart). One series; x are the slice names.",
+      "schema": {
+        "type": "object",
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["x", "series"],
+            "properties": {
+              "x": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": ["string", "number"]
+                },
+                "description": "Category or x-axis labels."
+              },
+              "series": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["name", "data"],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": ["number", "null"]
+                      },
+                      "description": "One value per x label (same length as x)."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["data"],
+            "properties": {
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                },
+                "description": "Rows, e.g. [{\"day\":\"Mon\",\"trips\":12}]."
+              },
+              "xKey": {
+                "type": "string",
+                "description": "Row field for x / categories. Auto-detected."
+              },
+              "yKey": {
+                "type": ["string", "array"],
+                "items": {
+                  "type": "string"
+                },
+                "description": "Row field(s) for values. Auto-detected."
+              }
+            }
+          }
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Heading shown above the chart. Leave it out when the block's container already has its own heading."
+          },
+          "height": {
+            "type": "number",
+            "description": "Height in pixels. By default the chart fills its container's height (at least 160px)."
+          },
+          "showLegend": {
+            "type": "boolean",
+            "description": "Show the legend."
+          },
+          "colors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Series colors (CSS colors); defaults to the theme palette."
+          },
+          "ariaLabel": {
+            "type": "string"
+          },
+          "innerRadius": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Inner radius in %."
+          },
+          "showLabels": {
+            "type": "boolean",
+            "description": "Labels on slices. Default true."
+          },
+          "labelPosition": {
+            "enum": ["outside", "inside", "center"]
+          }
+        }
+      },
+      "example": {
+        "title": "Trips by city",
+        "x": ["Madrid", "Rome", "Paris"],
+        "series": [
+          {
+            "name": "Trips",
+            "data": [320, 280, 150]
+          }
+        ]
+      }
+    },
+    "DataTable": {
+      "description": "Static table (appkit-ui Table).",
+      "schema": {
+        "type": "object",
+        "required": ["columns", "rows"],
+        "properties": {
+          "columns": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "description": "Field name, also used as the header."
+                },
+                {
+                  "type": "object",
+                  "required": ["key"],
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "description": "Row field."
+                    },
+                    "label": {
+                      "type": "string",
+                      "description": "Header; defaults to key."
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "description": "Keyed by column key."
+                },
+                {
+                  "type": "array",
+                  "description": "Values in column order."
+                }
+              ]
+            }
+          }
+        }
+      },
+      "example": {
+        "columns": [
+          {
+            "key": "city",
+            "label": "City"
+          },
+          {
+            "key": "trips",
+            "label": "Trips"
+          }
+        ],
+        "rows": [
+          {
+            "city": "Madrid",
+            "trips": 320
+          },
+          ["Rome", 280]
+        ]
+      }
+    },
+    "KpiCard": {
+      "description": "KPI card (appkit-ui Card).",
+      "schema": {
+        "type": "object",
+        "required": ["label", "value"],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "type": ["string", "number"]
+          },
+          "delta": {
+            "type": ["string", "number"],
+            "description": "E.g. \"+4% vs last week\"."
+          },
+          "hint": {
+            "type": "string"
+          }
+        }
+      },
+      "example": {
+        "label": "Total trips",
+        "value": "1,204",
+        "delta": "+4% vs last week"
+      }
+    }
+  }
+}

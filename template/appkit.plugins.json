@@ -196,6 +196,17 @@
         }
       }
     },
+    "design": {
+      "name": "design",
+      "displayName": "Design Plugin",
+      "description": "Dev-only design pages: /design renders client/src/design/index.tsx and /design/<name> renders client/src/design/pages/<name>.tsx, with a readiness signal for an embedding app builder; 404 in production",
+      "package": "@databricks/appkit",
+      "resources": {
+        "required": [],
+        "optional": []
+      },
+      "stability": "beta"
+    },
     "files": {
       "name": "files",
       "displayName": "Files Plugin",

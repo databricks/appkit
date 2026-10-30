@@ -1,0 +1,563 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, test, vi } from "vitest";
+
+import { normalizeBlock, runHydrator } from "../drafts";
+
+// jsdom globals; this package compiles without the DOM typings.
+const win = globalThis as unknown as {
+  document: {
+    body: { innerHTML: string };
+    querySelector(s: string): { textContent: string | null } | null;
+    querySelectorAll(
+      s: string,
+    ): Iterable<{ getAttribute(n: string): string | null }>;
+  };
+};
+const doc = win.document;
+
+const UI = Object.fromEntries(
+  [
+    "Card",
+    "CardHeader",
+    "CardDescription",
+    "CardTitle",
+    "CardContent",
+    "Table",
+    "TableHeader",
+    "TableRow",
+    "TableHead",
+    "TableBody",
+    "TableCell",
+    "BarChart",
+  ].map((name) => [name, name]),
+);
+
+function setup(html: string) {
+  doc.body.innerHTML = html;
+  const postMessage = vi.fn();
+  const parent = Object.getOwnPropertyDescriptor(win, "parent");
+  Object.defineProperty(win, "parent", {
+    configurable: true,
+    value: { postMessage },
+  });
+  const fetch = vi.fn(async () => ({}));
+  const rendered: { type: unknown; props: Record<string, unknown> }[] = [];
+  runHydrator({
+    draft: "dash",
+    origins: ["https://builder.example.com"],
+    statusPath: "/design/__status",
+    mockPath: "/m",
+    css: ":root { --chart-1: red; }",
+    h: (
+      type: unknown,
+      props: Record<string, unknown>,
+      ...children: unknown[]
+    ) =>
+      children.length
+        ? { type, props: { ...props, children: children[0] } }
+        : { type, props },
+    createRoot: () => ({
+      render: (node: unknown) =>
+        rendered.push(node as (typeof rendered)[number]),
+    }),
+    UI,
+    normalizeBlock,
+    fetch,
+  });
+  const restore = () => {
+    if (parent) Object.defineProperty(win, "parent", parent);
+  };
+  return { postMessage, fetch, rendered, restore };
+}
+
+// Lets the hydrator's queued status reports go out.
+const flush = () => new Promise((r) => setTimeout(r, 0));
+
+let restore = () => {};
+afterEach(() => {
+  restore();
+  delete (globalThis as { __appkitShownBlocks?: unknown }).__appkitShownBlocks;
+});
+
+const BLOCKS = `
+  <script type="application/json" data-appkit="KpiCard">{"label":"Trips","value":12}</script>
+  <script type="application/json" data-appkit="Sparkline">{"data":[1]}</script>
+  <script type="application/json" data-appkit="LineChart">{"x":["a"],"series":[</script>
+  <script type="application/json" data-appkit="BarChart">{"x":["a"],"series":[{"name":"s","data":[1]}]}</script>
+`;
+
+describe("runHydrator", () => {
+  test("sends every block that can't render to the builder as appkit:draft-error v1", () => {
+    const t = setup(BLOCKS);
+    restore = t.restore;
+
+    expect(t.postMessage).toHaveBeenCalledTimes(2);
+    expect(t.postMessage).toHaveBeenCalledWith(
+      {
+        type: "appkit:draft-error",
+        version: 1,
+        draft: "dash",
+        block: 1,
+        component: "Sparkline",
+        error: expect.stringContaining(
+          'Unknown data-appkit component "Sparkline"',
+        ),
+      },
+      "https://builder.example.com",
+    );
+    expect(t.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "appkit:draft-error",
+        block: 2,
+        component: "LineChart",
+        error: expect.stringMatching(/^invalid JSON: /),
+      }),
+      "https://builder.example.com",
+    );
+  });
+
+  test("reports them to /design/__status, after resetting this draft's earlier errors", async () => {
+    const t = setup(BLOCKS);
+    restore = t.restore;
+    await flush();
+
+    const bodies = t.fetch.mock.calls.map((c) => {
+      const [url, init] = c as unknown as [string, { body: string }];
+      expect(url).toBe("/design/__status");
+      return JSON.parse(init.body);
+    });
+    expect(bodies[0]).toEqual({ draft: "dash", reset: true });
+    // Then each error, and last that every block was handled.
+    expect(bodies.at(-1)).toEqual({ draft: "dash", checked: true });
+    expect(bodies.slice(1, -1)).toEqual([
+      expect.objectContaining({
+        draft: "dash",
+        block: 1,
+        component: "Sparkline",
+      }),
+      expect.objectContaining({
+        draft: "dash",
+        block: 2,
+        component: "LineChart",
+      }),
+    ]);
+  });
+
+  test("renders the valid blocks and shows a placeholder for the others", () => {
+    const t = setup(BLOCKS);
+    restore = t.restore;
+
+    const hosts = [...doc.querySelectorAll("[data-appkit-block]")].map((h) =>
+      h.getAttribute("data-appkit-block"),
+    );
+    expect(hosts).toEqual(["KpiCard", "Sparkline", "LineChart", "BarChart"]);
+    const placeholders = t.rendered.filter(
+      (n) => "data-appkit-error" in (n.props ?? {}),
+    );
+    expect(placeholders).toHaveLength(2);
+    // A chart renders in its wrapper: [heading or null, chart box].
+    const chart = t.rendered.find(Array.isArray) as unknown as [
+      unknown,
+      { props: { children: { type: unknown; props: unknown } } },
+    ];
+    expect(chart[1].props.children).toEqual({
+      type: "BarChart",
+      props: expect.objectContaining({ xKey: "x", yKey: "s" }),
+    });
+  });
+
+  test("never posts without a builder win", async () => {
+    doc.body.innerHTML = BLOCKS;
+    const fetch = vi.fn(async () => ({}));
+    expect(() =>
+      runHydrator({
+        draft: "dash",
+        origins: [],
+        statusPath: "/design/__status",
+        mockPath: "/m",
+        css: "",
+        h: () => null,
+        createRoot: () => ({ render() {} }),
+        UI,
+        normalizeBlock,
+        fetch,
+      }),
+    ).not.toThrow();
+    // The status endpoint still gets the errors (reset, 2 errors, checked).
+    await flush();
+    expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
+  test("sends one status report at a time, in order, even when requests finish out of order", async () => {
+    doc.body.innerHTML = BLOCKS;
+    const pending: {
+      body: { reset?: true; checked?: true; block?: number };
+      done: () => void;
+    }[] = [];
+    const fetch = vi.fn(
+      (_url: string, init: { body: string }) =>
+        new Promise((done) =>
+          pending.push({ body: JSON.parse(init.body), done: () => done({}) }),
+        ),
+    );
+    runHydrator({
+      draft: "dash",
+      origins: [],
+      statusPath: "/s",
+      mockPath: "/m",
+      css: "",
+      h: () => null,
+      createRoot: () => ({ render() {} }),
+      UI,
+      normalizeBlock,
+      fetch: fetch as never,
+    });
+    const sent: unknown[] = [];
+    // Each report starts only once the one before it has finished; finish
+    // the newest first, as a slow network might.
+    for (;;) {
+      await flush();
+      const open = pending.splice(0);
+      if (open.length === 0) break;
+      expect(open).toHaveLength(1);
+      sent.push(open[0].body);
+      open.reverse().forEach((p) => p.done());
+    }
+    expect(sent).toEqual([
+      { draft: "dash", reset: true },
+      expect.objectContaining({ block: 1 }),
+      expect.objectContaining({ block: 2 }),
+      { draft: "dash", checked: true },
+    ]);
+  });
+
+  test("scopes compound :root selectors as valid :host() selectors", () => {
+    doc.body.innerHTML =
+      '<script type="application/json" data-appkit="KpiCard">{"label":"a","value":1}</script>';
+    runHydrator({
+      draft: "d",
+      origins: [],
+      statusPath: "/s",
+      mockPath: "/m",
+      css: ":root{--x:1}@media (prefers-color-scheme: dark){:root:not(.light){--x:2}}",
+      h: () => null,
+      createRoot: () => ({ render() {} }),
+      UI,
+      normalizeBlock,
+      fetch: async () => ({}),
+    });
+    const host = [
+      ...doc.querySelectorAll("[data-appkit-block]"),
+    ][0] as unknown as {
+      shadowRoot: { querySelector(s: string): { textContent: string } };
+    };
+    expect(
+      host.shadowRoot
+        .querySelector("style")
+        .textContent.startsWith(
+          ":host{--x:1}@media (prefers-color-scheme: dark){:host(:not(.light)){--x:2}}",
+        ),
+    ).toBe(true);
+  });
+
+  test("a block still streaming shows a skeleton, replaced in place when its JSON completes", () => {
+    doc.body.innerHTML = "";
+    const rendered: unknown[] = [];
+    const { scan } = runHydrator({
+      draft: "d",
+      origins: [],
+      statusPath: "/s",
+      mockPath: "/m",
+      css: "",
+      h: (type: unknown) => ({ type }),
+      createRoot: () => ({ render: (n: unknown) => rendered.push(n) }),
+      UI,
+      normalizeBlock,
+      fetch: async () => ({}),
+    });
+    doc.body.innerHTML =
+      '<script type="application/json" data-appkit="KpiCard">{"label":"Trips","va</script>';
+    scan(false);
+    const host = [
+      ...doc.querySelectorAll("[data-appkit-block]"),
+    ][0] as unknown as {
+      shadowRoot: {
+        querySelector(
+          s: string,
+        ): { getAttribute(n: string): string | null; className: string } | null;
+        querySelector(s: "style"): { textContent: string };
+      };
+    };
+    const bone = host.shadowRoot.querySelector(".appkit-skeleton");
+    expect(bone?.getAttribute("data-kind")).toBe("KpiCard");
+    expect(rendered).toHaveLength(0);
+
+    (
+      doc as unknown as { querySelector(s: string): { textContent: string } }
+    ).querySelector("script[data-appkit]").textContent =
+      '{"label":"Trips","value":12}';
+    scan(false);
+    expect([...doc.querySelectorAll("[data-appkit-block]")]).toHaveLength(1); // same host
+    expect(host.shadowRoot.querySelector(".appkit-skeleton")).toBeNull();
+    expect(host.shadowRoot.querySelector(".appkit-fade")).not.toBeNull();
+    expect(rendered).toHaveLength(1);
+    // The fade and the pulse are off with prefers-reduced-motion.
+    expect(host.shadowRoot.querySelector("style").textContent).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{[^}]*animation: none;[^}]*\}\s*\.appkit-fade \{ animation: none; \}/,
+    );
+  });
+
+  test("the fade-in never hides a block: no opacity is held back for an animation frame", () => {
+    doc.body.innerHTML = BAR;
+    const raf = vi.fn();
+    (globalThis as { requestAnimationFrame?: unknown }).requestAnimationFrame =
+      raf;
+    try {
+      hydrate();
+    } finally {
+      delete (globalThis as { requestAnimationFrame?: unknown })
+        .requestAnimationFrame;
+    }
+    expect(raf).not.toHaveBeenCalled();
+    const css = (
+      hosts()[0].shadowRoot.querySelector("style") as { textContent: string }
+    ).textContent;
+    // Only the keyframes start at 0; the block's own style is fully opaque.
+    expect(css).toMatch(
+      /\.appkit-fade \{ animation: appkit-fade-in 200ms ease-out; \}/,
+    );
+    expect(css).not.toMatch(/\.appkit-fade \{[^}]*opacity/);
+  });
+
+  test("exposes the theme tokens on the document root at the lowest priority", () => {
+    const t = setup("");
+    restore = t.restore;
+    const tokens = doc.querySelector("style[data-appkit-tokens]");
+    expect(tokens?.textContent?.startsWith(":where(:root){")).toBe(true);
+  });
+
+  const hydrate = (render: (n: unknown) => void = () => {}) =>
+    runHydrator({
+      draft: "d",
+      origins: [],
+      statusPath: "/s",
+      mockPath: "/m",
+      css: "",
+      h: (type: unknown, props: unknown, ...children: unknown[]) => ({
+        type,
+        props,
+        children,
+      }),
+      createRoot: () => ({ render }),
+      UI,
+      normalizeBlock,
+      fetch: async () => ({}),
+    });
+  type Host = {
+    style: { height: string };
+    shadowRoot: { querySelector(s: string): unknown };
+  };
+  const hosts = () =>
+    [...doc.querySelectorAll("[data-appkit-block]")] as unknown as Host[];
+  const BAR =
+    '<script type="application/json" data-appkit="BarChart">{"title":"Fares","x":["a"],"series":[{"name":"s","data":[1]}]}</script>';
+
+  test("a chart's title is a heading above the chart, not drawn inside it", () => {
+    doc.body.innerHTML = BAR;
+    const rendered: any[] = [];
+    hydrate((n) => rendered.push(n));
+    const [heading, box] = rendered[0];
+    expect(heading).toMatchObject({
+      type: "div",
+      props: { className: "appkit-title" },
+      children: ["Fares"],
+    });
+    const chart = box.children[0];
+    expect(chart.type).toBe("BarChart");
+    expect(chart.props).not.toHaveProperty("title");
+  });
+
+  test("a block fills its container only when it's all the container holds", () => {
+    doc.body.innerHTML = `<div style="height:20rem">${BAR}</div><div class="card"><h2>Fares</h2>${BAR}</div>`;
+    hydrate();
+    expect(hosts().map((h) => h.style.height)).toEqual(["100%", ""]);
+  });
+
+  test("running again never doubles, remounts or re-fades a block", () => {
+    doc.body.innerHTML = `<div>${BAR}</div>`;
+    const first: unknown[] = [];
+    hydrate((n) => first.push(n));
+    const again: unknown[] = [];
+    hydrate((n) => again.push(n));
+    expect(hosts()).toHaveLength(1);
+    expect(first).toHaveLength(1);
+    expect(again).toHaveLength(0);
+
+    // The same block parsed again (a fresh node, e.g. the builder re-set the
+    // page): rendered, but without the fade-in.
+    doc.body.innerHTML = `<div>${BAR}</div>`;
+    hydrate();
+    expect(hosts()[0].shadowRoot.querySelector(".appkit-root")).not.toBeNull();
+    expect(hosts()[0].shadowRoot.querySelector(".appkit-fade")).toBeNull();
+  });
+
+  describe('data-src="mock#<key>"', () => {
+    afterEach(() => vi.useRealTimers());
+
+    // fetch for drafts/mock.json: a 404 `missing` times, then this mock.
+    const serveMock = (mock: unknown, missing = 0) => {
+      const calls: string[] = [];
+      const fetch = vi.fn(async (url: string, init?: { method?: string }) => {
+        if (init?.method !== "GET") return {};
+        calls.push(url);
+        return calls.length <= missing
+          ? { ok: false, status: 404 }
+          : { ok: true, text: async () => JSON.stringify(mock) };
+      });
+      return { fetch, calls };
+    };
+    const run = (fetch: unknown, render: (n: any) => void) =>
+      runHydrator({
+        draft: "d",
+        origins: [],
+        statusPath: "/s",
+        mockPath: "/design/drafts/mock.json",
+        css: "",
+        h: (type: unknown, props: unknown, ...children: unknown[]) => ({
+          type,
+          props,
+          children,
+        }),
+        createRoot: () => ({ render }),
+        UI,
+        normalizeBlock,
+        fetch: fetch as never,
+      });
+    const settle = () => vi.advanceTimersByTimeAsync(0);
+
+    test("waits as a skeleton until mock.json is there, then mounts once with its data", async () => {
+      vi.useFakeTimers();
+      doc.body.innerHTML = `
+        <div><script type="application/json" data-appkit="BarChart" data-src="mock#trips">{"xKey":"day","yKey":"n"}</script></div>
+        <div><script type="application/json" data-appkit="KpiCard" data-src="mock#kpi"></script></div>`;
+      const { fetch, calls } = serveMock(
+        {
+          trips: [{ day: "Mon", n: 3 }],
+          kpi: { label: "Trips", value: 12 },
+        },
+        2,
+      );
+      const rendered: any[] = [];
+      run(fetch, (n) => rendered.push(n));
+      await settle();
+      expect(rendered).toHaveLength(0);
+      const shadows = () =>
+        [...doc.querySelectorAll("[data-appkit-block]")].map(
+          (h) =>
+            (
+              h as unknown as {
+                shadowRoot: { querySelector(s: string): unknown };
+              }
+            ).shadowRoot,
+        );
+      expect(shadows().every((s) => s.querySelector(".appkit-skeleton"))).toBe(
+        true,
+      );
+
+      await vi.advanceTimersByTimeAsync(2_000); // two retries
+      expect(calls).toHaveLength(3); // one request at a time, for both blocks
+      expect(rendered).toHaveLength(2);
+      const chart = rendered[0][1].children[0];
+      expect(chart).toMatchObject({
+        type: "BarChart",
+        props: { data: [{ day: "Mon", n: 3 }], xKey: "day", yKey: "n" },
+      });
+      expect(shadows().some((s) => s.querySelector(".appkit-skeleton"))).toBe(
+        false,
+      );
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(calls).toHaveLength(3); // cached: no more requests
+      expect(rendered).toHaveLength(2); // mounted once
+    });
+
+    test("inline props win, and a DataTable gets the rows", async () => {
+      vi.useFakeTimers();
+      doc.body.innerHTML = `
+        <div><script type="application/json" data-appkit="DataTable" data-src="mock#t">{"columns":["city"]}</script></div>
+        <div><script type="application/json" data-appkit="KpiCard" data-src="mock#k">{"label":"Own label"}</script></div>`;
+      const { fetch } = serveMock({
+        t: [{ city: "Rome" }],
+        k: { label: "Mock label", value: 5 },
+      });
+      const rendered: any[] = [];
+      run(fetch, (n) => rendered.push(n));
+      await settle();
+      const [table, kpi] = rendered.map((n) => JSON.stringify(n));
+      expect(table).toContain('"Rome"'); // the mock rows, in the table body
+      expect(kpi).toContain('"Own label"');
+      expect(kpi).not.toContain("Mock label");
+      expect(kpi).toContain('"5"'); // the value still comes from the mock
+    });
+
+    test('finds the key in "datasets" first, then at the top level', async () => {
+      vi.useFakeTimers();
+      doc.body.innerHTML = `
+        <div><script type="application/json" data-appkit="BarChart" data-src="mock#trips">{"xKey":"day"}</script></div>
+        <div><script type="application/json" data-appkit="KpiCard" data-src="mock#total"></script></div>`;
+      // The drafts skill's shape: { mock, datasets: { <name>: rows } }, with
+      // a same-named top-level key that must lose to datasets.
+      const { fetch } = serveMock({
+        mock: true,
+        trips: [{ day: "top-level", n: 0 }],
+        datasets: { trips: [{ day: "Mon", n: 3 }] },
+        total: { label: "Trips", value: 12 },
+      });
+      const rendered: any[] = [];
+      run(fetch, (n) => rendered.push(n));
+      await settle();
+      expect(rendered).toHaveLength(2);
+      expect(rendered[0][1].children[0].props.data).toEqual([
+        { day: "Mon", n: 3 },
+      ]);
+      expect(JSON.stringify(rendered[1])).toContain('"Trips"');
+    });
+
+    test("reports the draft checked only once blocks waiting on mock.json are handled", async () => {
+      vi.useFakeTimers();
+      doc.body.innerHTML = `<div><script type="application/json" data-appkit="KpiCard" data-src="mock#k"></script></div>`;
+      const { fetch } = serveMock(
+        { datasets: { k: { label: "a", value: 1 } } },
+        1,
+      );
+      run(fetch, () => {});
+      const checked = () =>
+        fetch.mock.calls.filter((c) =>
+          (c[1] as { body?: string } | undefined)?.body?.includes(
+            '"checked":true',
+          ),
+        ).length;
+      await settle();
+      expect(checked()).toBe(0); // still waiting on mock.json
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(checked()).toBe(1);
+    });
+
+    test("a missing key fails just that block, with a clear error", async () => {
+      vi.useFakeTimers();
+      doc.body.innerHTML = `<div><script type="application/json" data-appkit="BarChart" data-src="mock#nope"></script></div>`;
+      const { fetch } = serveMock({ trips: [] });
+      const rendered: any[] = [];
+      run(fetch, (n) => rendered.push(n));
+      await settle();
+      expect(rendered).toHaveLength(1);
+      expect(rendered[0].children[0]).toContain(
+        'drafts/mock.json has no "nope"',
+      );
+      const reports = fetch.mock.calls
+        .map((c) => c[1] as { method?: string; body?: string } | undefined)
+        .filter((i) => i?.method === "POST" && i.body?.includes("nope"));
+      expect(reports).toHaveLength(1);
+    });
+  });
+});

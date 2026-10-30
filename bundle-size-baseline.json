@@ -3,25 +3,25 @@
     {
       "name": "@databricks/appkit",
       "tarball": {
-        "packed": 1297373,
-        "unpacked": 4453717
+        "packed": 1305660,
+        "unpacked": 4479207
       },
       "dist": {
         "total": {
-          "raw": 4438327,
-          "gzip": 1520942
+          "raw": 4463817,
+          "gzip": 1532201
         },
         "js": {
-          "raw": 1320443,
-          "gzip": 468638
+          "raw": 1329187,
+          "gzip": 472766
         },
         "types": {
-          "raw": 474763,
-          "gzip": 172113
+          "raw": 476377,
+          "gzip": 172880
         },
         "maps": {
-          "raw": 2632326,
-          "gzip": 876373
+          "raw": 2647458,
+          "gzip": 882737
         },
         "css": {
           "raw": 0,
@@ -31,22 +31,22 @@
           "raw": 10795,
           "gzip": 3818
         },
-        "fileCount": 895
+        "fileCount": 905
       },
       "entries": [
         {
           "id": ".",
-          "gzip": 111090,
+          "gzip": 111138,
           "composition": {
-            "initialGzip": 108517,
-            "lazyGzip": 2573,
-            "totalGzip": 111090,
-            "own": 351738,
+            "initialGzip": 108564,
+            "lazyGzip": 2574,
+            "totalGzip": 111138,
+            "own": 351871,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "index.js",
-                "gzip": 103847,
+                "gzip": 103894,
                 "kind": "initial"
               },
               {
@@ -56,7 +56,7 @@
               },
               {
                 "label": "remote-tunnel-manager.js",
-                "gzip": 2573,
+                "gzip": 2574,
                 "kind": "lazy"
               }
             ]
@@ -64,17 +64,17 @@
         },
         {
           "id": "./beta",
-          "gzip": 105499,
+          "gzip": 106566,
           "composition": {
-            "initialGzip": 105014,
+            "initialGzip": 106081,
             "lazyGzip": 485,
-            "totalGzip": 105499,
-            "own": 316145,
+            "totalGzip": 106566,
+            "own": 318767,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "beta.js",
-                "gzip": 84463,
+                "gzip": 85530,
                 "kind": "initial"
               },
               {
@@ -127,12 +127,12 @@
         },
         {
           "id": "./testing",
-          "gzip": 79051,
+          "gzip": 79096,
           "composition": {
-            "initialGzip": 45993,
-            "lazyGzip": 33058,
-            "totalGzip": 79051,
-            "own": 228781,
+            "initialGzip": 45992,
+            "lazyGzip": 33104,
+            "totalGzip": 79096,
+            "own": 228914,
             "nodeModules": null,
             "chunks": [
               {
@@ -142,7 +142,7 @@
               },
               {
                 "label": "index.js",
-                "gzip": 10286,
+                "gzip": 10285,
                 "kind": "initial"
               },
               {
@@ -152,12 +152,12 @@
               },
               {
                 "label": "index.js",
-                "gzip": 28625,
+                "gzip": 28673,
                 "kind": "lazy"
               },
               {
                 "label": "remote-tunnel-manager.js",
-                "gzip": 2587,
+                "gzip": 2585,
                 "kind": "lazy"
               },
               {
@@ -209,13 +209,13 @@
     {
       "name": "@databricks/appkit-ui",
       "tarball": {
-        "packed": 406741,
+        "packed": 406746,
         "unpacked": 1606513
       },
       "dist": {
         "total": {
           "raw": 1602568,
-          "gzip": 546534
+          "gzip": 546536
         },
         "js": {
           "raw": 439037,
@@ -223,7 +223,7 @@
         },
         "types": {
           "raw": 273603,
-          "gzip": 100719
+          "gzip": 100721
         },
         "maps": {
           "raw": 873530,

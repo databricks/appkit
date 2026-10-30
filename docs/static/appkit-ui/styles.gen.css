@@ -404,6 +404,9 @@
   .m-1 {
     margin: calc(var(--spacing) * 1);
   }
+  .m-10 {
+    margin: calc(var(--spacing) * 10);
+  }
   .-mx-1 {
     margin-inline: calc(var(--spacing) * -1);
   }
@@ -1978,6 +1981,9 @@
   }
   .\[animation-duration\:2\.5s\] {
     animation-duration: 2.5s;
+  }
+  .fade-in {
+    --tw-enter-opacity: 0;
   }
   .running {
     animation-play-state: running;
