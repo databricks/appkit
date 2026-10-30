@@ -121,6 +121,7 @@ export type {
   SearchResult,
 } from "./plugins/ai-search/types";
 export * from "./plugins/beta-exports.generated";
+export { database } from "./plugins/database";
 export type {
   DatabaseApiConfig,
   DatabaseApiWriteOperation,

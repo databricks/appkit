@@ -4,6 +4,7 @@
   "displayName": "Database (Beta)",
   "description": "Schema-driven typed access to Databricks Lakebase PostgreSQL",
   "stability": "beta",
+  "hidden": true,
   "resources": {
     "required": [
       {
