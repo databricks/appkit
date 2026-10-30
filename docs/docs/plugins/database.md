@@ -367,8 +367,9 @@ exits 1 when:
 - a migration is listed after one generated later, which a branch that ran the
   later one never runs;
 - two migrations were generated from the same snapshot on parallel git branches;
-- a migration's `.sql` or snapshot is not committed, or a `.sql` is not in the
-  journal.
+- an entry's `idx` is not its position in the journal;
+- a migration's `.sql` or snapshot is not committed, a snapshot is not a
+  drizzle-kit snapshot, or a `.sql` is not in the journal.
 
 Two pull requests that each add a migration conflict in
 `config/database/migrations` once one of them is merged, and keeping both sides

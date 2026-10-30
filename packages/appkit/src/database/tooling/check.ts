@@ -91,11 +91,20 @@ export async function runCheck(ctx: DbContext): Promise<CheckReport> {
   const entries = readJournal(folder)?.entries ?? [];
   const problems = orderProblems(entries);
 
-  const links = entries.map((entry) => {
+  const links = entries.map((entry): SnapshotLink | null => {
     const file = snapshotFile(folder, entry.idx);
-    if (fs.existsSync(file)) return readJsonFile<SnapshotLink>(file);
+    if (!fs.existsSync(file)) {
+      problems.push(
+        `${shown(file)}, the snapshot of ${entry.tag}, is not committed. Restore it from version control: the next migration is generated from it.`,
+      );
+      return null;
+    }
+    const link = readJsonFile<Partial<SnapshotLink> | null>(file);
+    if (typeof link?.id === "string" && typeof link.prevId === "string") {
+      return { id: link.id, prevId: link.prevId };
+    }
     problems.push(
-      `${shown(file)}, the snapshot of ${entry.tag}, is not committed. Restore it from version control: the next migration is generated from it.`,
+      `${shown(file)}, the snapshot of ${entry.tag}, is not a drizzle-kit snapshot. Restore it from version control.`,
     );
     return null;
   });

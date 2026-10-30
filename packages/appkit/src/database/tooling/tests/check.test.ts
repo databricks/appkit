@@ -257,6 +257,30 @@ describe("runCheck", () => {
     ]);
   });
 
+  test.each([
+    ["null", "null"],
+    ["an object without id and prevId", "{}"],
+  ])(
+    "a latest snapshot that holds %s fails, and the schema is not compared from it",
+    async (_label, content) => {
+      // schema.ts has a change with no migration; check must not pass it.
+      const ctx = app({ ...notes, extra: { id: "id" } });
+      await generate(migrations(ctx), notes);
+      await generate(migrations(ctx), withTags);
+      fs.writeFileSync(
+        path.join(migrations(ctx), "meta/0001_snapshot.json"),
+        content,
+      );
+
+      const report = await runCheck(ctx);
+
+      expect(report.problems).toEqual([
+        `${path.join("config/database/migrations/meta/0001_snapshot.json")}, the snapshot of 0001_migration, is not a drizzle-kit snapshot. Restore it from version control.`,
+      ]);
+      expect(report.ok).toBe(false);
+    },
+  );
+
   test("without schema.ts it points to introspect", async () => {
     const ctx = app({});
     fs.rmSync(path.join(ctx.root, "config/database/schema.ts"));
