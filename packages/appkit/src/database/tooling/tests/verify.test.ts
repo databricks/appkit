@@ -370,9 +370,9 @@ function deployedApp(
     yml?: string;
     spRole?: boolean;
     migrations?: Migration[];
-    /** The deployed snapshot's journal: its entries, its raw text, or "unreadable" when its export fails. */
+    /** The deployed snapshot's journal: its entries, its raw text, "unreadable" when its export fails, or "missing" when it does not exist. */
     deployedJournal?: Migration[] | string;
-    /** The deployed SQL by tag, else the committed SQL; "unreadable" when its export fails. */
+    /** The deployed SQL by tag, else the committed SQL; "unreadable" or "missing" as for the journal. */
     deployedSql?: Record<string, string>;
     authenticatedHost?: string;
   } = {},
@@ -424,6 +424,11 @@ function deployedApp(
           if (content === "unreadable") {
             throw Object.assign(new Error("Permission denied"), {
               statusCode: 403,
+            });
+          }
+          if (content === "missing") {
+            throw Object.assign(new Error("Path does not exist."), {
+              statusCode: 404,
             });
           }
           return Response.json({
@@ -637,15 +642,88 @@ describe("runVerify --deployed", () => {
     expect(lakebase.calls).toEqual([]);
   });
 
-  test("without committed migrations nothing is compared, and schema.ts is not needed", async () => {
-    const { ctx, requests } = deployedApp();
-    fs.rmSync(path.join(ctx.root, "config/database/schema.ts"));
+  test.each([
+    ["has no journal", "missing"],
+    ["has a journal without entries", []],
+  ] as const)(
+    "without committed migrations, a snapshot that %s passes, and schema.ts is not needed",
+    async (_label, deployedJournal) => {
+      const { ctx, requests } = deployedApp({
+        deployedJournal: deployedJournal as Migration[] | string,
+      });
+      fs.rmSync(path.join(ctx.root, "config/database/schema.ts"));
+
+      expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+        migrations: null,
+        ok: true,
+      });
+      expect(requests).toEqual([
+        "apps.get my-app",
+        `workspace.export ${JOURNAL}`,
+      ]);
+    },
+  );
+
+  test("without committed migrations, a snapshot with migrations fails, naming them: verify ran outside the app's root, or the checkout is behind", async () => {
+    const { ctx } = deployedApp({
+      deployedJournal: [{ tag: "0000_migration", when: 1000 }],
+    });
 
     expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
-      migrations: null,
-      ok: true,
+      migrations: {
+        evidence: "unavailable",
+        reason:
+          "the deployment has 0000_migration, and this checkout commits no migration: run verify from the app's root, or pull them",
+      },
+      problems: [
+        "verify cannot tell whether app my-app's active deployment has the committed migrations: the deployment has 0000_migration, and this checkout commits no migration: run verify from the app's root, or pull them",
+      ],
+      ok: false,
     });
-    expect(requests).toEqual(["apps.get my-app"]);
+  });
+
+  test("a migration the deployment has and this checkout does not commit fails it", async () => {
+    const migrations = [{ tag: "0000_migration", when: 1000 }];
+    const { ctx } = deployedApp({
+      migrations,
+      deployedJournal: [...migrations, { tag: "0001_migration", when: 2000 }],
+    });
+
+    expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+      migrations: {
+        evidence: "differs",
+        missing: [],
+        changed: [],
+        unknown: ["0001_migration"],
+      },
+      problems: [
+        "app my-app's active deployment has 0001_migration, which this checkout does not commit: pull it, then run verify again",
+      ],
+      ok: false,
+    });
+  });
+
+  test("a snapshot without a journal lacks every committed migration: deploy them", async () => {
+    const { ctx } = deployedApp({
+      migrations: [
+        { tag: "0000_migration", when: 1000 },
+        { tag: "0001_migration", when: 2000 },
+      ],
+      deployedJournal: "missing",
+    });
+
+    expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+      migrations: {
+        evidence: "differs",
+        missing: ["0000_migration", "0001_migration"],
+        changed: [],
+        unknown: [],
+      },
+      problems: [
+        "app my-app's active deployment does not have 0000_migration, 0001_migration, which this checkout commits: `databricks apps deploy` deploys them, and the app applies them on start",
+      ],
+      ok: false,
+    });
   });
 
   test("--target checks that target's app, branch and host", async () => {
