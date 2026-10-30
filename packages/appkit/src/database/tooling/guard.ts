@@ -27,27 +27,55 @@ interface Classification {
 
 /**
  * Why databricks.yml makes a branch one it deploys to; null when it does not.
- * A reference the files cannot resolve may name any branch, so it refuses all.
+ * A reference the files cannot resolve may name any branch, so it refuses all;
+ * everyBranchRefusal names the references.
  */
 export function deployRefusal(
   boundary: DeployBoundary,
   branch: string,
 ): string | null {
   if (boundary.unresolved.length > 0) {
-    const references = boundary.unresolved
-      .map(
-        ({ target, at, written, file }) =>
-          `${at} in target ${target}${file ? ` with ${file}` : ""} (${written ? JSON.stringify(written) : "no value"})`,
-      )
-      .join(", ");
-    const where = boundary.unresolved.some(({ file }) => file)
-      ? "databricks.yml or the variable-overrides.json named"
-      : "databricks.yml";
-    return `databricks.yml may deploy to it: the files do not resolve ${references}; give ${boundary.unresolved.length > 1 ? "them values" : "it a value"} in ${where}`;
+    return "databricks.yml may deploy to it through a reference this checkout's files do not resolve";
   }
   return boundary.branches.has(branch)
     ? "it is a branch databricks.yml deploys to"
     : null;
+}
+
+/**
+ * While databricks.yml has a reference this checkout's files cannot resolve,
+ * any branch may be one it deploys to: `migrate` applies migrations to no
+ * branch, and `init`, `introspect`, `clean` and `seed` refuse every branch.
+ * This says so, names the references and where to give them values; null when
+ * every reference resolves.
+ */
+export function everyBranchRefusal(boundary: DeployBoundary): string | null {
+  if (boundary.unresolved.length === 0) return null;
+  const references = boundary.unresolved
+    .map(
+      ({ target, at, written, file }) =>
+        `${at} in target ${target}${file ? ` with ${file}` : ""} (${written ? JSON.stringify(written) : "no value"})`,
+    )
+    .join(", ");
+  const where = boundary.unresolved.some(({ file }) => file)
+    ? "databricks.yml or the variable-overrides.json named"
+    : "databricks.yml";
+  return `The files do not resolve ${references}, so \`appkit db migrate\` applies migrations to no branch, and \`init\`, \`introspect\`, \`clean\` and \`seed\` refuse every branch. Give ${boundary.unresolved.length > 1 ? "them values" : "it a value"} in ${where}`;
+}
+
+/**
+ * Why a command writes nothing to a branch: `why`, then `advice` when it
+ * applies. While every branch is refused (see everyBranchRefusal), advice that
+ * leads to `appkit db init` or another branch cannot help, so the text names
+ * the references to resolve instead.
+ */
+export function writeRefusal(
+  why: string,
+  boundary: DeployBoundary,
+  advice?: string,
+): string {
+  const next = everyBranchRefusal(boundary) ?? advice;
+  return next ? `${why}. ${next}` : why;
 }
 
 export function classifyBranch(input: {
@@ -92,9 +120,13 @@ interface EnvBranch extends Classification {
   readonly boundary: DeployBoundary;
 }
 
-/** Why a command does not write to the branch. */
-export function notYourBranch(env: EnvBranch): string {
-  return `${resourceId(env.branch.name)} is not your dev or session branch (${env.reason})`;
+/** Why a command does not write to the .env branch, then `advice` when it applies (see writeRefusal). */
+export function notYourBranch(env: EnvBranch, advice?: string): string {
+  return writeRefusal(
+    `${resourceId(env.branch.name)} is not your dev or session branch (${env.reason})`,
+    env.boundary,
+    advice,
+  );
 }
 
 /**
@@ -114,7 +146,11 @@ export async function resolveEnvBranch(
   ]);
   if (!branch) {
     throw new Error(
-      `The .env branch ${name} does not exist (deleted or expired). Run \`appkit db init\` to create or pick one.`,
+      `${writeRefusal(
+        `The .env branch ${name} does not exist (deleted or expired)`,
+        boundary,
+        "Run `appkit db init` to create or pick one",
+      )}.`,
     );
   }
   return {

@@ -584,9 +584,11 @@ describe("runInit — branches it never sets up", () => {
     );
     const before = fs.readFileSync(path.join(ctx.root, ".env"), "utf-8");
 
-    await expect(init(ctx)).rejects.toThrow(
-      `Refusing to set up ${devBranchId(USER)}: databricks.yml may deploy to it: the files do not resolve resources.apps.app.resources[0].postgres.branch in target default`,
+    const error: Error = await init(ctx).catch((caught) => caught);
+    expect(error.message).toContain(
+      `Refusing to set up ${devBranchId(USER)}: databricks.yml may deploy to it through a reference this checkout's files do not resolve. The files do not resolve resources.apps.app.resources[0].postgres.branch in target default`,
     );
+    expect(error.message).not.toContain("only sets up");
     expect(lakebase.calls).toEqual([]);
     expect(fs.readFileSync(path.join(ctx.root, ".env"), "utf-8")).toBe(before);
   });

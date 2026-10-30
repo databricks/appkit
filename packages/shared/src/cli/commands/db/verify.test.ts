@@ -33,7 +33,7 @@ const local = {
   kind: "local" as const,
   branch: "projects/p/branches/dev-alice-3f9a2c",
   notYours: null,
-  refusesEveryBranch: false,
+  refusesEveryBranch: null,
   schemaProblems: [],
   pendingMigrations: [],
   strandedMigrations: [],
@@ -104,22 +104,38 @@ describe("appkit db verify", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  test("while databricks.yml leaves a reference unresolved, the warning says every branch refuses writes, not to run init", async () => {
-    runVerify.mockResolvedValue({
-      ...local,
-      notYours:
-        "databricks.yml may deploy to it: the files do not resolve variables.postgres_branch in target default (no value); give it a value in databricks.yml",
-      refusesEveryBranch: true,
-    });
+  test.each([
+    [
+      "dev-alice-3f9a2c",
+      "projects/p/branches/dev-alice-3f9a2c",
+      "databricks.yml may deploy to it through a reference this checkout's files do not resolve",
+    ],
+    [
+      "production",
+      "projects/p/branches/production",
+      "it is the project's default branch",
+    ],
+  ])(
+    "while databricks.yml leaves a reference unresolved, the warning on %s names it and gives no init advice",
+    async (shown, branch, notYours) => {
+      const refusesEveryBranch =
+        "The files do not resolve variables.postgres_branch in target default with .databricks/bundle/default/variable-overrides.json (no value), so `appkit db migrate` applies migrations to no branch, and `init`, `introspect`, `clean` and `seed` refuse every branch. Give it a value in databricks.yml or the variable-overrides.json named";
+      runVerify.mockResolvedValue({
+        ...local,
+        branch,
+        notYours,
+        refusesEveryBranch,
+      });
 
-    await dbCommand.parseAsync(["verify"], { from: "user" });
+      await dbCommand.parseAsync(["verify"], { from: "user" });
 
-    expect(output(log)).toContain(
-      "dev-alice-3f9a2c takes no writes (databricks.yml may deploy to it: the files do not resolve variables.postgres_branch in target default (no value); give it a value in databricks.yml). Until databricks.yml's references have values, `appkit db migrate`, `clean`, `seed` and `init` refuse every branch.",
-    );
-    expect(output(log)).not.toContain("npx appkit db init");
-    expect(process.exitCode).toBeUndefined();
-  });
+      expect(output(log)).toContain(
+        `${shown} takes no writes (${notYours}). ${refusesEveryBranch}.`,
+      );
+      expect(output(log)).not.toContain("npx appkit db init");
+      expect(process.exitCode).toBeUndefined();
+    },
+  );
 
   test("prints every schema problem and pending migration, and exits 1", async () => {
     runVerify.mockResolvedValue({

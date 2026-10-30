@@ -67,9 +67,11 @@ export const schema = defineSchema(({ table }) => {
 });
 `;
 
-const onDevBranch = { branch: { name: DEV }, kind: "dev" };
+const RESOLVED = { branches: new Set<string>(), unresolved: [] };
+const onDevBranch = { branch: { name: DEV }, boundary: RESOLVED, kind: "dev" };
 const onProduction = {
   branch: { name: PRODUCTION, status: { default: true } },
+  boundary: RESOLVED,
   kind: "default",
   reason: "it is the project's default branch",
 };
@@ -283,6 +285,37 @@ describe("runIntrospect", () => {
       expect(tree(root)).toEqual(before);
     },
   );
+
+  test("while databricks.yml leaves a reference unresolved, the refusal names it instead of pointing to appkit db init", async () => {
+    resolveEnvBranch.mockResolvedValue({
+      branch: { name: DEV },
+      boundary: {
+        branches: new Set<string>(),
+        unresolved: [
+          {
+            target: "default",
+            at: "variables.postgres_branch",
+            written: "",
+          },
+        ],
+      },
+      kind: "deploy-target",
+      reason:
+        "databricks.yml may deploy to it through a reference this checkout's files do not resolve",
+    });
+    const root = tempApp({ [SCHEMA]: previousSchema });
+    const before = tree(root);
+
+    const error = await refusal(root);
+
+    expect(error).toBeInstanceOf(IntrospectRefusedError);
+    expect(error.message).toBe(
+      "Refusing to introspect: dev-alice-3f9a2c is not your dev or session branch (databricks.yml may deploy to it through a reference this checkout's files do not resolve). " +
+        "The files do not resolve variables.postgres_branch in target default (no value), so `appkit db migrate` applies migrations to no branch, and `init`, `introspect`, `clean` and `seed` refuse every branch. Give it a value in databricks.yml.",
+    );
+    expect(withBranchPool).not.toHaveBeenCalled();
+    expect(tree(root)).toEqual(before);
+  });
 
   test("with history: writes and records the next NNNN_introspect", async () => {
     const root = tempApp({ [SCHEMA]: declaredSchema });

@@ -182,7 +182,8 @@ dev branch, or this checkout's session branch). A session branch name includes a
 hash of the user who created it, so a `.env` copied from another developer does
 not make their session branch yours. On any other branch, including the
 project's default branch, a protected branch, or a branch `databricks.yml`
-deploys to, `clean` and `seed` refuse and `migrate` only writes the migration files.
+deploys to, `clean` and `seed` refuse, and `migrate` only writes the migration
+files and `shared/appkit-types/database.d.ts`.
 
 A typical change:
 
@@ -207,11 +208,11 @@ checkout uses the file's value.
 If a branch or database reference has no value in those files, `migrate` cannot
 tell which branch the reference names. Examples are a target that leaves
 `postgres_branch` unset and `${workspace.current_user.short_name}`. While any such
-reference exists, `migrate` applies migrations to no branch, and `init`, `clean`
-and `seed` refuse every branch. The message names the target and where the
-reference is. To continue, give the reference a value in `databricks.yml`, or in
-the `variable-overrides.json` the message names. A `variable-overrides.json`
-that is not a JSON object stops these commands too.
+reference exists, `migrate` applies migrations to no branch, and `init`,
+`introspect`, `clean` and `seed` refuse every branch. The message names the
+target and where the reference is. To continue, give the reference a value in
+`databricks.yml`, or in the `variable-overrides.json` the message names. A
+`variable-overrides.json` that is not a JSON object stops these commands too.
 
 The check reads only this checkout's files. It does not see values passed at
 deploy time with `--var` or `BUNDLE_VAR_*`, or resources defined in Python. It
@@ -336,9 +337,13 @@ databricks postgres delete-role projects/<project>/branches/<branch>/roles/<old-
 `npx appkit db verify --deployed` checks a `databricks.yml` target's app through
 the Databricks API: the app exists, its `postgres` resource names the target's
 branch and database with `CAN_CONNECT_AND_CREATE`, its service principal has a role
-on the branch, and the app is running. It also reads the source the app's active
-deployment runs: every committed migration must be there with the same journal
-entry and SQL. When verify cannot read that source, it fails and says why.
+on the branch, and the app is running. When the checkout has
+`.databricks/bundle/<target>/variable-overrides.json`, the branch and database
+come from it, as a deploy from this checkout uses them. It also reads the source
+the app's active deployment runs: every committed migration must be there with
+the same journal entry and SQL, and the deployment must have no migration this
+checkout does not commit. When verify cannot read that source, it fails and
+says why.
 `-t, --target` picks the target; without it, verify uses the bundle's default
 target. When the target's `workspace.host` is not the workspace your shell is
 authenticated against, verify refuses and names the profile to set. It needs no
@@ -379,9 +384,9 @@ databricks apps deploy -t prod
 npx appkit db verify --deployed -t prod
 ```
 
-It exits 1 when the app is not running or is bound to another branch, and when
+It exits 1 when the app is not running or is bound to another branch, when
 verify cannot confirm that its deployment has every committed migration with the
-same SQL.
+same SQL, and when the deployment has a migration this checkout does not commit.
 
 ## Schema discovery and overrides
 

@@ -80,7 +80,10 @@ async function applyBlocker(ctx: DbContext): Promise<string | undefined> {
   const env = await resolveEnvBranch(ctx);
   if (!env) return NO_ENV_BRANCH;
   if (takesWrites(env.kind)) return undefined;
-  return `${notYourBranch(env)}. Migrations are applied only to branches \`appkit db init\` created for you; the deployed app applies committed migrations to its own branch`;
+  return notYourBranch(
+    env,
+    "Migrations are applied only to branches `appkit db init` created for you; the deployed app applies committed migrations to its own branch",
+  );
 }
 
 /** Apply pending migrations to the `.env` branch, or say why they were not. */

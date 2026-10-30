@@ -184,7 +184,7 @@ describe("runVerify", () => {
   ];
   const clean = {
     notYours: null,
-    refusesEveryBranch: false,
+    refusesEveryBranch: null,
     schemaProblems: [],
     pendingMigrations: [],
     strandedMigrations: [],
@@ -302,43 +302,57 @@ describe("runVerify", () => {
     expect(await runVerify(ctx)).toMatchObject({
       branch: "projects/p/branches/production",
       notYours: "it is the project's default branch",
-      refusesEveryBranch: false,
+      refusesEveryBranch: null,
       ok: true,
     });
   });
 
-  test("a reference databricks.yml leaves unresolved refuses every branch, and the report says so", async () => {
-    const ctx = app(two);
-    branch({
-      columns: { notes: ["id", "body"] },
-      recorded: recordedAs(ctx, two),
-    });
-    const reason =
-      'databricks.yml may deploy to it: the files do not resolve resources.apps.app.resources[0].postgres.branch in target default ("projects/p/branches/dev-${workspace.current_user.short_name}"); give it a value in databricks.yml';
-    resolveEnvBranch.mockResolvedValue({
-      branch: { name: BRANCH },
-      boundary: {
-        branches: new Set<string>(),
-        unresolved: [
-          {
-            target: "default",
-            at: "resources.apps.app.resources[0].postgres.branch",
-            written:
-              "projects/p/branches/dev-${workspace.current_user.short_name}",
-          },
-        ],
+  test.each([
+    [
+      "your dev branch",
+      {
+        kind: "deploy-target",
+        reason:
+          "databricks.yml may deploy to it through a reference this checkout's files do not resolve",
       },
-      kind: "deploy-target",
-      reason,
-    });
+    ],
+    [
+      "the default branch",
+      { kind: "default", reason: "it is the project's default branch" },
+    ],
+  ] as const)(
+    "a reference databricks.yml leaves unresolved refuses every branch, and the report names it, on %s",
+    async (_label, classification) => {
+      const ctx = app(two);
+      branch({
+        columns: { notes: ["id", "body"] },
+        recorded: recordedAs(ctx, two),
+      });
+      resolveEnvBranch.mockResolvedValue({
+        branch: { name: BRANCH },
+        boundary: {
+          branches: new Set<string>(),
+          unresolved: [
+            {
+              target: "default",
+              at: "variables.postgres_branch",
+              written: "",
+              file: ".databricks/bundle/default/variable-overrides.json",
+            },
+          ],
+        },
+        ...classification,
+      });
 
-    expect(await runVerify(ctx)).toMatchObject({
-      branch: BRANCH,
-      notYours: reason,
-      refusesEveryBranch: true,
-      ok: true,
-    });
-  });
+      expect(await runVerify(ctx)).toMatchObject({
+        branch: BRANCH,
+        notYours: classification.reason,
+        refusesEveryBranch:
+          "The files do not resolve variables.postgres_branch in target default with .databricks/bundle/default/variable-overrides.json (no value), so `appkit db migrate` applies migrations to no branch, and `init`, `introspect`, `clean` and `seed` refuse every branch. Give it a value in databricks.yml or the variable-overrides.json named",
+        ok: true,
+      });
+    },
+  );
 
   test("no committed migrations: only the schema is checked", async () => {
     const ctx = app();
@@ -445,6 +459,8 @@ function deployedApp(
     deployedJournal?: Migration[] | string;
     /** The deployed SQL by tag, else the committed SQL; "unreadable" or "missing" as for the journal. */
     deployedSql?: Record<string, string>;
+    /** The deployed snapshot folder's status: "unreadable" or "missing" as for the journal; it exists otherwise. */
+    snapshot?: "unreadable" | "missing";
     authenticatedHost?: string;
   } = {},
 ) {
@@ -505,6 +521,21 @@ function deployedApp(
           return Response.json({
             content: Buffer.from(content).toString("base64"),
           });
+        }
+        if (method === "GET" && apiPath === "/api/2.0/workspace/get-status") {
+          const file = String(query?.path);
+          requests.push(`workspace.get-status ${file}`);
+          if (options.snapshot === "unreadable") {
+            throw Object.assign(new Error("Permission denied"), {
+              statusCode: 403,
+            });
+          }
+          if (options.snapshot === "missing" || file !== SNAPSHOT) {
+            throw Object.assign(new Error("Path does not exist."), {
+              statusCode: 404,
+            });
+          }
+          return Response.json({ object_type: "DIRECTORY", path: file });
         }
         throw new Error(
           `--deployed only reads the app and its journal, not ${method} ${apiPath}`,
@@ -730,11 +761,11 @@ describe("runVerify --deployed", () => {
   });
 
   test.each([
-    ["has no journal", "missing"],
-    ["has a journal without entries", []],
+    ["has no journal", "missing", [`workspace.get-status ${SNAPSHOT}`]],
+    ["has a journal without entries", [], []],
   ] as const)(
     "without committed migrations, a snapshot that %s passes, and schema.ts is not needed",
-    async (_label, deployedJournal) => {
+    async (_label, deployedJournal, statusRequests) => {
       const { ctx, requests } = deployedApp({
         deployedJournal: deployedJournal as Migration[] | string,
       });
@@ -747,11 +778,38 @@ describe("runVerify --deployed", () => {
       expect(requests).toEqual([
         "apps.get my-app",
         `workspace.export ${JOURNAL}`,
+        ...statusRequests,
       ]);
     },
   );
 
-  test("without committed migrations, a snapshot with migrations fails, naming them: verify ran outside the app's root, or the checkout is behind", async () => {
+  test.each([
+    [
+      "does not exist",
+      "missing",
+      `the source snapshot ${SNAPSHOT} does not exist`,
+    ],
+    [
+      "has a status verify cannot read",
+      "unreadable",
+      `reading the status of ${SNAPSHOT} failed: Permission denied`,
+    ],
+  ] as const)(
+    "without committed migrations, a journal 404 in a snapshot that %s is unavailable, not a pass",
+    async (_label, snapshot, reason) => {
+      const { ctx } = deployedApp({ deployedJournal: "missing", snapshot });
+
+      expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+        migrations: { evidence: "unavailable", reason },
+        problems: [
+          `verify cannot tell whether app my-app's active deployment has the committed migrations: ${reason}`,
+        ],
+        ok: false,
+      });
+    },
+  );
+
+  test("without committed migrations, a snapshot with migrations fails, naming them: the checkout is behind", async () => {
     const { ctx } = deployedApp({
       deployedJournal: [{ tag: "0000_migration", when: 1000 }],
     });
@@ -760,10 +818,10 @@ describe("runVerify --deployed", () => {
       migrations: {
         evidence: "unavailable",
         reason:
-          "the deployment has 0000_migration, and this checkout commits no migration: run verify from the app's root, or pull them",
+          "the deployment has 0000_migration, and this checkout commits none in config/database/migrations next to databricks.yml: pull it, then run verify again",
       },
       problems: [
-        "verify cannot tell whether app my-app's active deployment has the committed migrations: the deployment has 0000_migration, and this checkout commits no migration: run verify from the app's root, or pull them",
+        "verify cannot tell whether app my-app's active deployment has the committed migrations: the deployment has 0000_migration, and this checkout commits none in config/database/migrations next to databricks.yml: pull it, then run verify again",
       ],
       ok: false,
     });
@@ -903,6 +961,34 @@ describe("runVerify --deployed", () => {
       branch: PRODUCTION,
       problems: [],
       ok: true,
+    });
+  });
+
+  test("a branch variable-overrides.json sets is credited to that file when it is missing or the app is bound elsewhere", async () => {
+    const staging = "projects/p/branches/staging";
+    const { ctx, lakebase } = deployedApp();
+    const overrides = path.join(
+      ctx.root,
+      ".databricks/bundle/default/variable-overrides.json",
+    );
+    fs.mkdirSync(path.dirname(overrides), { recursive: true });
+    fs.writeFileSync(overrides, JSON.stringify({ postgres_branch: staging }));
+    const source =
+      "databricks.yml with .databricks/bundle/default/variable-overrides.json";
+
+    expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+      branch: staging,
+      problems: [`${source} deploys to ${staging}, which does not exist`],
+      ok: false,
+    });
+
+    lakebase.addBranch(staging);
+    expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+      branch: staging,
+      problems: expect.arrayContaining([
+        `app my-app uses branch ${PRODUCTION}, not ${staging} from ${source}: \`databricks apps deploy\` applies ${source}`,
+      ]),
+      ok: false,
     });
   });
 

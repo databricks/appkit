@@ -123,7 +123,7 @@ function printLocalVerifyReport(report: LocalVerifyReport): void {
   if (report.notYours) {
     warn(
       report.refusesEveryBranch
-        ? `${branch} takes no writes (${report.notYours}). Until databricks.yml's references have values, \`appkit db migrate\`, \`clean\`, \`seed\` and \`init\` refuse every branch.`
+        ? `${branch} takes no writes (${report.notYours}). ${report.refusesEveryBranch}.`
         : `.env points at ${branch}, not a branch \`appkit db init\` set up for you: ${report.notYours}. \`npx appkit db init\` points it at a branch of your own.`,
     );
   }

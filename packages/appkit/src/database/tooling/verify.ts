@@ -17,7 +17,7 @@ import {
 } from "../migrations/paths";
 import type { DataPath } from "../runtime";
 import { type DbContext, NO_ENV_BRANCH, withBranchPool } from "./context";
-import { resolveEnvBranch, takesWrites } from "./guard";
+import { everyBranchRefusal, resolveEnvBranch, takesWrites } from "./guard";
 import { requireSchemaFile } from "./migrate";
 import {
   type BundleTarget,
@@ -40,10 +40,13 @@ interface LocalVerifyReport {
   /** Why the branch is not your dev or session branch, e.g. "it is the project's default branch"; null when it is. */
   readonly notYours: string | null;
   /**
-   * databricks.yml has a reference this checkout's files do not resolve, so
-   * migrate, clean, seed and init refuse every branch until it has a value.
+   * While databricks.yml has a reference this checkout's files do not
+   * resolve, `migrate` applies migrations to no branch, and `init`,
+   * `introspect`, `clean` and `seed` refuse every branch: this says so and
+   * names the references and where to give them values. null when every
+   * reference resolves.
    */
-  readonly refusesEveryBranch: boolean;
+  readonly refusesEveryBranch: string | null;
   /** Declared tables or columns the branch lacks (the plugin's startup check). */
   readonly schemaProblems: readonly string[];
   /** Committed migrations the branch has not run yet, newer than every one it ran. */
@@ -132,7 +135,7 @@ async function verifyLocal(ctx: DbContext): Promise<LocalVerifyReport> {
         kind: "local",
         branch,
         notYours: takesWrites(env.kind) ? null : (env.reason ?? null),
-        refusesEveryBranch: env.boundary.unresolved.length > 0,
+        refusesEveryBranch: everyBranchRefusal(env.boundary),
         schemaProblems,
         pendingMigrations: drift.pending,
         strandedMigrations: drift.stranded,
@@ -225,6 +228,29 @@ async function exportFile(
   return Buffer.from(content, "base64");
 }
 
+/** Whether a workspace path exists. Throws with the reason when its status cannot be read. */
+async function workspacePathExists(
+  ctx: DbContext,
+  file: string,
+): Promise<boolean> {
+  try {
+    await ctx.workspace().request({
+      method: "GET",
+      path: "/api/2.0/workspace/get-status",
+      query: { path: file },
+    });
+    return true;
+  } catch (error) {
+    if ((error as { statusCode?: unknown } | null)?.statusCode === 404) {
+      return false;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`reading the status of ${file} failed: ${message}`, {
+      cause: error,
+    });
+  }
+}
+
 /** A committed migration's journal entry and the bytes of its SQL file. */
 interface CommittedMigration {
   readonly entry: JournalEntry;
@@ -247,9 +273,10 @@ function readCommitted(folder: string): CommittedMigration[] {
  * The committed migrations against the snapshot of the source the active
  * deployment runs: each needs the same journal entry (idx, when,
  * breakpoints) and byte-identical SQL there, and the snapshot may have no
- * migration the checkout does not commit. A snapshot without a journal has no
- * migration. Only that snapshot is evidence. Anything verify cannot read in it
- * makes the result unavailable, never a match.
+ * migration the checkout does not commit. A snapshot that exists without a
+ * journal has no migration. Only that snapshot is evidence. Anything verify
+ * cannot read in it, or a snapshot that does not exist, makes the result
+ * unavailable, never a match.
  */
 async function readDeployedMigrations(
   ctx: DbContext,
@@ -279,7 +306,11 @@ async function readDeployedMigrations(
     const journalPath = deployedPath(journalFile(folder));
     const journal = await exportFile(ctx, journalPath);
     let deployed: JournalEntry[] = [];
-    // A snapshot without a journal has no migration.
+    // A snapshot without a journal has no migration, but a 404 proves that
+    // only for a snapshot that exists.
+    if (!journal && !(await workspacePathExists(ctx, snapshot))) {
+      throw new Error(`the source snapshot ${snapshot} does not exist`);
+    }
     if (journal) {
       let json: unknown;
       try {
@@ -300,9 +331,10 @@ async function readDeployedMigrations(
     );
     if (committed.length === 0) {
       if (deployed.length === 0) return null;
+      const them = unknown.length === 1 ? "it" : "them";
       return {
         evidence: "unavailable",
-        reason: `the deployment has ${unknown.join(", ")}, and this checkout commits no migration: run verify from the app's root, or pull them`,
+        reason: `the deployment has ${unknown.join(", ")}, and this checkout commits none in config/database/migrations next to databricks.yml: pull ${them}, then run verify again`,
       };
     }
     const compared = await Promise.all(
@@ -377,13 +409,19 @@ function migrationsProblems(
   return problems;
 }
 
-/** The app's postgres resource against databricks.yml: same branch and database, and the permission to create its schema. */
+/**
+ * The app's postgres resource against databricks.yml: same branch and
+ * database, and the permission to create its schema. `source` is where the
+ * branch and database come from: `file`, with variable-overrides.json when
+ * the checkout has one.
+ */
 function bindingProblems(
   app: DeployedApp,
   name: string,
   branch: string,
   database: string | null,
   file: string,
+  source: string,
 ): string[] {
   const bound = (app.resources ?? []).flatMap((resource) =>
     resource.postgres ? [resource.postgres] : [],
@@ -392,14 +430,14 @@ function bindingProblems(
   if (!binding) {
     return [
       bound.length > 0
-        ? `app ${name} uses branch ${bound.map((postgres) => postgres.branch).join(", ")}, not ${branch} from ${file}: ${DEPLOY} applies ${file}`
+        ? `app ${name} uses branch ${bound.map((postgres) => postgres.branch).join(", ")}, not ${branch} from ${source}: ${DEPLOY} applies ${source}`
         : `app ${name} has no postgres resource: ${DEPLOY} adds the one ${file} declares`,
     ];
   }
   const problems: string[] = [];
   if (database && binding.database !== database) {
     problems.push(
-      `app ${name} uses database ${binding.database ?? "(none)"}, not ${database} from ${file}: ${DEPLOY} applies ${file}`,
+      `app ${name} uses database ${binding.database ?? "(none)"}, not ${database} from ${source}: ${DEPLOY} applies ${source}`,
     );
   }
   if (binding.permission !== POSTGRES_PERMISSION) {
@@ -528,6 +566,8 @@ async function verifyDeploy(
   // when it has the file, as the deploy guard reads them.
   const deploy = target.overridden ?? target;
   const withFile = target.overridden ? ` with ${target.overridden.file}` : "";
+  // Where the branch and database come from.
+  const source = `${file}${withFile}`;
   const bound = deploy.apps.filter((app) => app.postgres.length > 0);
   if (bound.length > 1) {
     throw new Error(
@@ -606,13 +646,13 @@ async function verifyDeploy(
   const branchId = resourceId(branch);
   if (!branchFound) {
     return stopped(name, [
-      `${file} deploys to ${branch}, which does not exist`,
+      `${source} deploys to ${branch}, which does not exist`,
     ]);
   }
   const problems: string[] = [];
   if (database && !databaseFound) {
     problems.push(
-      `${file} binds database ${database}, which does not exist on ${branchId}`,
+      `${source} binds database ${database}, which does not exist on ${branchId}`,
     );
   }
   if (!deployed) {
@@ -622,7 +662,14 @@ async function verifyDeploy(
     return stopped(name, problems);
   }
 
-  const binding = bindingProblems(deployed, name, branch, database, file);
+  const binding = bindingProblems(
+    deployed,
+    name,
+    branch,
+    database,
+    file,
+    source,
+  );
   problems.push(...binding, ...runningProblems(deployed, name));
   const sp = deployed.service_principal_client_id;
   const [roles, migrations] = await Promise.all([
