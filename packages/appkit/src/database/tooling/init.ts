@@ -13,7 +13,7 @@ import {
   runCommand,
 } from "./drizzle-kit-install";
 import { refuseSymlink, updateEnvFile } from "./env-file";
-import { classifyBranch, takesWrites } from "./guard";
+import { classifyBranch, deployRefusal, takesWrites } from "./guard";
 import { handOffAppSchema } from "./hand-off";
 import { currentIdentity, type Identity } from "./identity";
 import { type IntrospectReport, runIntrospect } from "./introspect";
@@ -43,10 +43,11 @@ import {
 } from "./naming";
 import {
   type BranchMode,
+  type DeployBoundary,
   type DeployTarget,
   type LocalTarget,
   parseResourceName,
-  readDeployBranches,
+  readDeployBoundary,
   readDeployTarget,
   readLocalTarget,
   resourceId,
@@ -167,7 +168,7 @@ interface BranchRequest {
   readonly session: string | null;
   /** The API's duration ("3600s"), and how the developer wrote it. */
   readonly ttl: { readonly api: string; readonly label: string };
-  readonly deployBranches: readonly string[];
+  readonly boundary: DeployBoundary;
   readonly envFile: string;
   readonly onStep: (message: string) => void;
 }
@@ -210,7 +211,7 @@ async function findOrCreateBranch(
   ctx: DbContext,
   request: BranchRequest,
 ): Promise<FoundBranch> {
-  const { project, mode, identity, deployBranches, onStep } = request;
+  const { project, mode, identity, boundary, onStep } = request;
   const api = ctx.api();
   let session = mode === "session" ? (request.session ?? newSessionId()) : null;
   let rotated = false;
@@ -226,7 +227,7 @@ async function findOrCreateBranch(
       branch,
       userName: identity.userName,
       sessionId: session,
-      deployBranches,
+      boundary,
     });
     if (!takesWrites(verdict.kind)) {
       throw new Error(
@@ -253,9 +254,10 @@ async function findOrCreateBranch(
 
   for (;;) {
     const name = branchName();
-    if (deployBranches.includes(name)) {
+    const refusal = deployRefusal(boundary, name);
+    if (refusal) {
       throw new Error(
-        `Refusing to set up ${resourceId(name)}: it is a branch databricks.yml deploys to, and the deployed app migrates it itself.`,
+        `Refusing to set up ${resourceId(name)}: ${refusal}. \`appkit db init\` only sets up your dev branch or this checkout's session branch.`,
       );
     }
     const existing = await api.getBranch(name);
@@ -475,7 +477,7 @@ export async function runInit(
     identity,
     session: local.session,
     ttl,
-    deployBranches: readDeployBranches(ctx.root),
+    boundary: readDeployBoundary(ctx.root),
     envFile,
     onStep,
   });

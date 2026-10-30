@@ -126,11 +126,15 @@ interface TargetBindings {
   readonly apps: readonly BundleApp[];
   /** The target's postgres_branch variable; null when the bundle declares none. */
   readonly postgresBranch: BundleValue | null;
+  /** The target's postgres_database variable; null when the bundle declares none. */
+  readonly postgresDatabase: BundleValue | null;
 }
 
 /** One target of databricks.yml, with what the files alone can resolve resolved. */
 interface BundleTarget extends TargetBindings {
   readonly name: string;
+  /** `default: true`, or the one target of a bundle that declares none. */
+  readonly isDefault: boolean;
   /**
    * The same bindings with this checkout's variable-overrides.json applied,
    * which a deploy from here uses ahead of the target's own values; null
@@ -351,26 +355,28 @@ function bundleApps(
   });
 }
 
-/** Default target's postgres_branch / postgres_database variables; null without databricks.yml or binding. */
+/**
+ * The branch and database the default target deploys to: its first app
+ * binding the files resolve, else its postgres_branch and postgres_database
+ * variables. null without databricks.yml or a branch the files resolve.
+ */
 export function readDeployTarget(root: string): DeployTarget | null {
-  const bundle = readBundle(root);
-  if (!bundle) return null;
-  const targets = record(bundle.targets) ?? {};
+  const targets = readBundle(root)?.targets ?? [];
   const target =
-    Object.values(targets)
-      .map(record)
-      .find((candidate) => candidate?.default === true) ??
-    record(targets.default);
-
-  const branch = parseResourceName(
-    variableOf(bundle, target, "postgres_branch") ?? undefined,
-  )?.branch;
+    targets.find((candidate) => candidate.isDefault) ??
+    targets.find((candidate) => candidate.name === "default");
+  if (!target) return null;
+  const resolved = (value: BundleValue | null) =>
+    value?.kind === "resolved" ? value.name : null;
+  const binding = target.apps
+    .flatMap((app) => app.postgres)
+    .find((candidate) => candidate.branch.kind === "resolved");
+  const branch = resolved(binding?.branch ?? target.postgresBranch);
   if (!branch) return null;
-  const database =
-    parseResourceName(
-      variableOf(bundle, target, "postgres_database") ?? undefined,
-    )?.database ?? null;
-  return { branch, database };
+  return {
+    branch,
+    database: resolved(binding ? binding.database : target.postgresDatabase),
+  };
 }
 
 /**
@@ -407,27 +413,34 @@ function readBundle(root: string): Bundle | null {
           record(record(target?.resources)?.apps) ?? {},
         ),
       );
-      const declaresBranch =
-        "postgres_branch" in (record(bundle.variables) ?? {}) ||
-        "postgres_branch" in (record(target?.variables) ?? {});
+      const declares = (variable: string) =>
+        variable in (record(bundle.variables) ?? {}) ||
+        variable in (record(target?.variables) ?? {});
       const bindings = (
         overrides: Record<string, unknown> | null,
       ): TargetBindings => {
         const resolve = resolverFor(bundle, target, name, overrides);
+        const variable = (
+          variableName: string,
+          kind: "branch" | "database",
+        ): BundleValue | null =>
+          declares(variableName)
+            ? bundleValue(
+                variableOf(bundle, target, variableName, overrides),
+                resolve,
+                kind,
+              )
+            : null;
         return {
           apps: bundleApps(apps ?? {}, resolve),
-          postgresBranch: declaresBranch
-            ? bundleValue(
-                variableOf(bundle, target, "postgres_branch", overrides),
-                resolve,
-                "branch",
-              )
-            : null,
+          postgresBranch: variable("postgres_branch", "branch"),
+          postgresDatabase: variable("postgres_database", "database"),
         };
       };
       const overrides = readVariableOverrides(root, name);
       return {
         name,
+        isDefault: target?.default === true,
         ...bindings(null),
         overridden: overrides
           ? { file: overrides.file, ...bindings(overrides.values) }

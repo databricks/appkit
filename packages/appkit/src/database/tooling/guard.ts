@@ -29,7 +29,7 @@ interface Classification {
  * Why databricks.yml makes a branch one it deploys to; null when it does not.
  * A reference the files cannot resolve may name any branch, so it refuses all.
  */
-function deployRefusal(
+export function deployRefusal(
   boundary: DeployBoundary,
   branch: string,
 ): string | null {

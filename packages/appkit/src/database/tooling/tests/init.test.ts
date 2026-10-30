@@ -527,7 +527,30 @@ describe("runInit — branches it never sets up", () => {
     const before = fs.readFileSync(path.join(ctx.root, ".env"), "utf-8");
 
     await expect(init(ctx)).rejects.toThrow(
-      `Refusing to set up ${devBranchId(USER)}: it is a branch databricks.yml deploys to, and the deployed app migrates it itself.`,
+      `Refusing to set up ${devBranchId(USER)}: it is a branch databricks.yml deploys to. \`appkit db init\` only sets up your dev branch or this checkout's session branch.`,
+    );
+    expect(lakebase.calls).toEqual([]);
+    expect(fs.readFileSync(path.join(ctx.root, ".env"), "utf-8")).toBe(before);
+  });
+
+  test("a databricks.yml binding the files cannot resolve refuses init before any API call or .env write", async () => {
+    const lakebase = project();
+    const ctx = appOn(
+      lakebase,
+      {},
+      {
+        files: {
+          "databricks.yml": databricksYml(
+            `\${resources.postgres_branches.main.name}`,
+            `${PRODUCTION}/databases/databricks-postgres`,
+          ),
+        },
+      },
+    );
+    const before = fs.readFileSync(path.join(ctx.root, ".env"), "utf-8");
+
+    await expect(init(ctx)).rejects.toThrow(
+      `Refusing to set up ${devBranchId(USER)}: databricks.yml may deploy to it: the files do not resolve resources.apps.app.resources[0].postgres.branch in target default`,
     );
     expect(lakebase.calls).toEqual([]);
     expect(fs.readFileSync(path.join(ctx.root, ".env"), "utf-8")).toBe(before);
