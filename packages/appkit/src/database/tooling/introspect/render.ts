@@ -33,6 +33,14 @@ export interface Unexpressed {
   readonly reason: string;
 }
 
+/** A foreign key schema.ts gets that the schema.ts it replaces does not declare. */
+interface NewRelation {
+  /** e.g. "app.notes.author_id → app.users.id". */
+  readonly edge: string;
+  /** Its tables the replaced schema.ts does not declare, e.g. "app.users". */
+  readonly undeclaredTables: readonly string[];
+}
+
 interface SchemaSource {
   readonly source: string;
   /** Tables written to schema.ts. */
@@ -43,11 +51,8 @@ interface SchemaSource {
   readonly warnings: readonly string[];
   /** What schema.ts declares differently from the database, which keeps it as it is. */
   readonly approximated: readonly string[];
-  /**
-   * Foreign keys schema.ts gets that `previous` does not declare, as
-   * "app.notes.author_id → app.users.id". Each one is an API include.
-   */
-  readonly newRelations: readonly string[];
+  /** Kept foreign keys `previous` does not declare. Each one is an API include. */
+  readonly newRelations: readonly NewRelation[];
 }
 
 interface RenderOptions {
@@ -333,7 +338,7 @@ export function renderSchemaSource(
   const tableComments: string[] = [];
   /** Columns rendered private because `previous` does not declare them. */
   const privatized: string[] = [];
-  const newRelations: string[] = [];
+  const newRelations: NewRelation[] = [];
   const qualified = (table: string, column?: string) =>
     `${schemaName}.${table}${column ? `.${column}` : ""}`;
   const skipTable = (table: string, reason: string) => {
@@ -760,9 +765,14 @@ export function renderSchemaSource(
       out.add(foreignKey.table);
       edges.set(plan.table.name, out);
       if (previous && !declaresForeignKey(plan.table.name, foreignKey)) {
-        newRelations.push(
-          `${qualified(plan.table.name, sourceColumn.column.name)} → ${qualified(foreignKey.table, targetColumn.column.name)}`,
-        );
+        newRelations.push({
+          edge: shown(
+            `${qualified(plan.table.name, sourceColumn.column.name)} → ${qualified(foreignKey.table, targetColumn.column.name)}`,
+          ),
+          undeclaredTables: [plan.table.name, foreignKey.table]
+            .filter((table) => !previousTables.has(table))
+            .map((table) => shown(qualified(table))),
+        });
       }
     }
   }
@@ -857,7 +867,7 @@ export function renderSchemaSource(
     unexpressed,
     warnings: warnings.map(shown),
     approximated: approximated.map(shown),
-    newRelations: newRelations.map(shown),
+    newRelations,
   });
   if (ordered.length === 0) {
     lines.push(...tableComments);

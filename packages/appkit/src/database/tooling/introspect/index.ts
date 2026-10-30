@@ -145,7 +145,7 @@ async function readPreviousSchema(root: string): Promise<Schema | null> {
     return await loadDefaultDatabaseSchema(root, { showImportError: true });
   } catch (error) {
     throw new IntrospectRefusedError(
-      `Refusing to introspect: ${DEFAULT_SCHEMA_FILE} does not load, so introspect cannot keep the columns it marks private. Fix it, or move it out of config/database to start again from the catalog.`,
+      `Refusing to introspect: ${DEFAULT_SCHEMA_FILE} does not load, so introspect cannot keep the columns it marks private. Fix it, then rerun.`,
       { cause: error },
     );
   }
@@ -252,8 +252,20 @@ async function introspectHolding(
     }
     if (rendered.newRelations.length > 0) {
       const one = rendered.newRelations.length === 1;
+      const edges = rendered.newRelations.map((relation) => relation.edge);
+      const tables = [
+        ...new Set(
+          rendered.newRelations.flatMap(
+            (relation) => relation.undeclaredTables,
+          ),
+        ),
+      ];
+      const declareTables =
+        tables.length === 0
+          ? ""
+          : ` and declare ${tables.length === 1 ? "the table" : "the tables"} ${tables.join(", ")}`;
       throw new IntrospectRefusedError(
-        `Refusing to replace ${DEFAULT_SCHEMA_FILE}: the branch has ${one ? "a foreign key" : "foreign keys"} it does not declare (${rendered.newRelations.join(", ")}). A foreign key lets the API include the related rows. Declare ${one ? "it" : "them"} with fk() in ${DEFAULT_SCHEMA_FILE}, then rerun, or move the file out of config/database to start again from the catalog.`,
+        `Refusing to replace ${DEFAULT_SCHEMA_FILE}: the branch has ${one ? "a foreign key" : "foreign keys"} it does not declare (${edges.join(", ")}). A foreign key lets the API include the related rows. Declare ${one ? "it" : "them"} with fk() in schema.ts${declareTables}, then rerun.`,
       );
     }
 

@@ -717,7 +717,7 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
     expect(dropped.newRelations).toEqual([]);
   });
 
-  test("a foreign key it does not declare is listed, on an existing table or a new one", () => {
+  test("a foreign key it does not declare is listed with the tables it does not declare either", () => {
     const plain = defineSchema(({ table }) => ({
       boards: table("boards", { id: id(), title: text().notNull() }),
       notes: table("notes", {
@@ -731,7 +731,11 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
     const out = renderSchemaSource(
       [
         boards,
-        notes(),
+        notes(
+          [col("reviewer_id", "integer")],
+          [fk("board_id", "boards"), fk("reviewer_id", "users")],
+        ),
+        keyed("users"),
         keyed("tags", [col("note_id", "integer")], [fk("note_id", "notes")]),
       ],
       "app",
@@ -739,8 +743,15 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
     );
 
     expect(out.newRelations).toEqual([
-      "app.notes.board_id → app.boards.id",
-      "app.tags.note_id → app.notes.id",
+      { edge: "app.notes.board_id → app.boards.id", undeclaredTables: [] },
+      {
+        edge: "app.notes.reviewer_id → app.users.id",
+        undeclaredTables: ["app.users"],
+      },
+      {
+        edge: "app.tags.note_id → app.notes.id",
+        undeclaredTables: ["app.tags"],
+      },
     ]);
   });
 
@@ -790,7 +801,10 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
       "sales.boards.id, sales.boards.title, sales.notes.id, sales.notes.board_id, sales.notes.author_email, sales.notes.body are new to schema.ts, so they are private: the API does not return or accept them until you remove .private().",
     );
     expect(out.newRelations).toEqual([
-      "sales.notes.board_id → sales.boards.id",
+      {
+        edge: "sales.notes.board_id → sales.boards.id",
+        undeclaredTables: ["sales.notes", "sales.boards"],
+      },
     ]);
   });
 
