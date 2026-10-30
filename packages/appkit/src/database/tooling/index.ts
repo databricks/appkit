@@ -7,4 +7,9 @@
  * the CLI of the same AppKit release should import it.
  */
 export { createDbContext, type DbContext } from "./context";
+export {
+  type IntrospectOptions,
+  type IntrospectReport,
+  runIntrospect,
+} from "./introspect";
 export { type MigrateOptions, type MigrateReport, runMigrate } from "./migrate";

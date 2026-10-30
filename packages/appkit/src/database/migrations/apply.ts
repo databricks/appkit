@@ -147,7 +147,7 @@ export class MigrationBaselineMismatchError extends Error {
   constructor(schemaName: string, problems: readonly string[]) {
     super(
       `Cannot adopt ${BASELINE_TAG}: schema "${schemaName}" has no recorded migrations and only part of the baseline: ${problems.join("; ")}. ` +
-        "Create the missing tables and columns (or drop the partial ones), or regenerate the baseline against this database.",
+        "Create the missing tables and columns (or drop the partial ones), or regenerate the baseline with `appkit db introspect` against this database.",
     );
     this.name = "MigrationBaselineMismatchError";
     this.problems = Object.freeze([...problems]);
@@ -573,6 +573,124 @@ function duration(ms: number): string {
   }
   if (ms >= 1_000) return `${Math.round(ms / 1_000)}s`;
   return `${ms}ms`;
+}
+
+/** How the branch's recorded migrations differ from the committed ones. */
+interface MigrationDrift {
+  /** Committed, not recorded, newer than every recorded one. */
+  readonly pending: readonly string[];
+  /** Committed, not recorded, older than the last recorded one. */
+  readonly stranded: readonly string[];
+  /** Recorded rows no committed migration matches: the branch is ahead of the checkout. */
+  readonly unknown: number;
+}
+
+function driftOf(
+  history: ReturnType<typeof reconcileMigrations>,
+): MigrationDrift {
+  return {
+    pending: tags(history.pending),
+    stranded: tags(history.stranded),
+    unknown: history.unknown.length,
+  };
+}
+
+function committedMigrations(folder: string): MigrationFile[] {
+  const journal = readJournal(folder);
+  return journal ? readMigrations(folder, journal) : [];
+}
+
+/** Read without the lock; markMigrationsApplied checks again under it. */
+export async function readMigrationDrift(
+  client: QueryClient,
+  options: ApplyMigrationsOptions,
+): Promise<MigrationDrift> {
+  return driftOf(
+    reconcileMigrations(
+      committedMigrations(options.migrationsFolder),
+      await readRecordedMigrations(client, options.schemaName),
+    ),
+  );
+}
+
+/** Why the branch's history is not the committed one plus toRecord; undefined when it is. */
+function driftReason(
+  drift: MigrationDrift,
+  toRecord: readonly string[],
+): string | undefined {
+  const notApplied = drift.pending.filter((tag) => !toRecord.includes(tag));
+  const recorded = toRecord.filter((tag) => !drift.pending.includes(tag));
+  const reasons = [
+    drift.unknown > 0
+      ? `it records ${drift.unknown} migration${drift.unknown === 1 ? "" : "s"} this checkout does not have`
+      : "",
+    drift.stranded.length > 0 ? `it skipped ${drift.stranded.join(", ")}` : "",
+    notApplied.length > 0 ? `it has not applied ${notApplied.join(", ")}` : "",
+    recorded.length > 0 ? `it already records ${recorded.join(", ")}` : "",
+  ].filter(Boolean);
+  return reasons.length > 0 ? reasons.join("; ") : undefined;
+}
+
+/**
+ * Record migrations as applied without running them: the branch already holds
+ * what they describe. Under the migration lock, and only when they are exactly
+ * the branch's pending migrations, so DDL the branch never ran is not recorded.
+ */
+export async function markMigrationsApplied(
+  pool: Pick<Pool, "connect">,
+  options: ApplyMigrationsOptions,
+  toRecord: readonly string[],
+): Promise<void> {
+  const files = committedMigrations(options.migrationsFolder);
+  const missing = toRecord.filter(
+    (tag) => !files.some((file) => file.tag === tag),
+  );
+  if (missing.length > 0) {
+    throw new MigrationFilesError(
+      `Cannot record ${missing.join(", ")} as applied: not in ${options.migrationsFolder}/meta/_journal.json.`,
+    );
+  }
+  const { schemaName } = options;
+  const client = await pool.connect();
+  const reset: string[] = [];
+  let locked = false;
+  try {
+    await prepareMigrationSession(client, reset);
+    await acquireMigrationLock(
+      client,
+      schemaName,
+      options.lockWaitMs ?? LOCK_WAIT_MS,
+    );
+    locked = true;
+    const history = reconcileMigrations(
+      files,
+      await readRecordedMigrations(client, schemaName),
+    );
+    const reason = driftReason(driftOf(history), toRecord);
+    if (reason) {
+      throw new Error(
+        `Schema "${schemaName}" changed while this ran (${reason}), so nothing was recorded.`,
+      );
+    }
+    await inTransaction(client, async () => {
+      await ensureJournalTable(client, schemaName);
+      for (const file of history.pending) {
+        await recordMigration(client, schemaName, file);
+      }
+    });
+  } catch (error) {
+    if (!(error instanceof MigrationLockWaitError)) throw error;
+    throw new Error(
+      `${error.holder ? `Session ${error.holder}` : "Another session"} held the migration lock of schema "${schemaName}" for over ${duration(options.lockWaitMs ?? LOCK_WAIT_MS)}, so nothing was recorded. Rerun once it finishes.`,
+      { cause: error },
+    );
+  } finally {
+    await releaseMigrationClient(
+      client,
+      locked ? migrationLockKey(schemaName) : undefined,
+      reset,
+    );
+  }
 }
 
 /**

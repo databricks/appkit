@@ -37,7 +37,7 @@ function requireSchemaFile(root: string): void {
   );
 }
 
-const DATABASE_TYPES_PATH = path.join(
+export const DATABASE_TYPES_PATH = path.join(
   "shared/appkit-types",
   DATABASE_TYPES_FILE,
 );

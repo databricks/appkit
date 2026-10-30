@@ -16,8 +16,11 @@ import {
   applyPendingMigrations,
   MigrationApplyError,
   MigrationHistoryError,
+  markMigrationsApplied,
   migrationLockKey,
+  readMigrationDrift,
 } from "../apply";
+import { MigrationFilesError } from "../paths";
 import { hashOf, removeMigrationFolders, writeMigrations } from "./fixtures";
 
 // A real server, for what a fake cannot show: transactions, enum rules, locks
@@ -404,5 +407,131 @@ describe.skipIf(!url)("applyPendingMigrations against Postgres", () => {
       applied: ["0001_body"],
     });
     expect(await columns("notes")).toEqual(["id", "body"]);
+  });
+
+  describe("recording migrations the branch already has", () => {
+    const withTags = () =>
+      writeMigrations([
+        {
+          tag: "0000_notes",
+          when: 1000,
+          sql: [`CREATE TABLE ${q("notes")} ("id" integer PRIMARY KEY);`],
+        },
+        {
+          tag: "0001_introspect",
+          when: 3000,
+          sql: [`ALTER TABLE ${q("notes")} ADD COLUMN "body" text;`],
+        },
+      ]);
+    /** The branch applied 0000_notes and recorded a 2000 migration this checkout lacks. */
+    const aheadOfCheckout = async (folder: string) => {
+      await applyPendingMigrations(newPool(), {
+        ...options(folder),
+        migrationsFolder: notes(),
+      });
+      await admin.query(
+        `delete from ${q("__drizzle_migrations")} where created_at <> 1000`,
+      );
+      await admin.query(
+        `insert into ${q("__drizzle_migrations")} (hash, created_at) values ('teammate', 2000)`,
+      );
+    };
+
+    test("the drift lists unrecorded committed migrations and recorded ones the checkout lacks", async () => {
+      const folder = withTags();
+      expect(await readMigrationDrift(newPool(), options(folder))).toEqual({
+        pending: ["0000_notes", "0001_introspect"],
+        stranded: [],
+        unknown: 0,
+      });
+
+      await aheadOfCheckout(folder);
+
+      expect(await readMigrationDrift(newPool(), options(folder))).toEqual({
+        pending: ["0001_introspect"],
+        stranded: [],
+        unknown: 1,
+      });
+    });
+
+    test("records exactly the pending migrations, without running them", async () => {
+      await admin.query(`create schema "${schema}"`);
+      const folder = withTags();
+
+      await markMigrationsApplied(newPool(), options(folder), [
+        "0000_notes",
+        "0001_introspect",
+      ]);
+
+      expect(await recorded()).toEqual([
+        { hash: hashOf(folder, "0000_notes"), createdAt: 1000 },
+        { hash: hashOf(folder, "0001_introspect"), createdAt: 3000 },
+      ]);
+      expect(await columns("notes")).toEqual([]);
+    });
+
+    test.each([
+      [
+        "records a migration the checkout lacks",
+        aheadOfCheckout,
+        ["0001_introspect"],
+        "it records 1 migration this checkout does not have",
+      ],
+      [
+        "has not applied an earlier one",
+        async () => {
+          await admin.query(`create schema "${schema}"`);
+        },
+        ["0001_introspect"],
+        "it has not applied 0000_notes",
+      ],
+    ])(
+      "refuses when the branch %s, and records nothing",
+      async (_label, arrange, toRecord, reason) => {
+        const folder = withTags();
+        await arrange(folder);
+        const before = await recorded().catch(() => []);
+
+        await expect(
+          markMigrationsApplied(newPool(), options(folder), toRecord),
+        ).rejects.toThrow(
+          `Schema "${schema}" changed while this ran (${reason}), so nothing was recorded.`,
+        );
+        expect(await recorded().catch(() => [])).toEqual(before);
+      },
+    );
+
+    test("a tag missing from the journal fails before connecting", async () => {
+      const pool = newPool();
+      const connect = vi.spyOn(pool, "connect");
+
+      await expect(
+        markMigrationsApplied(pool, options(withTags()), ["0002_introspect"]),
+      ).rejects.toBeInstanceOf(MigrationFilesError);
+      expect(connect).not.toHaveBeenCalled();
+    });
+
+    test("the wait for the migration lock has a limit, and nothing is recorded", async () => {
+      await admin.query(`create schema "${schema}"`);
+      const holder = await admin.connect();
+      held.push(holder);
+      await holder.query("set application_name = 'another-deploy'");
+      await holder.query("select pg_advisory_lock($1::bigint)", [
+        migrationLockKey(schema),
+      ]);
+
+      await expect(
+        markMigrationsApplied(
+          newPool(),
+          { ...options(withTags()), lockWaitMs: 300 },
+          ["0000_notes", "0001_introspect"],
+        ),
+      ).rejects.toThrow(
+        new RegExp(
+          `^Session pid \\d+ \\(another-deploy, idle\\) held the migration lock of schema "${schema}" for over 300ms, so nothing was recorded\\. Rerun once it finishes\\.$`,
+        ),
+      );
+      expect(await recorded().catch(() => [])).toEqual([]);
+    });
   });
 });

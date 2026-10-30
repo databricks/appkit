@@ -1,5 +1,6 @@
 import { Command } from "commander";
 
+import { dbIntrospectCommand } from "./introspect";
 import { dbMigrateCommand } from "./migrate";
 
 /**
@@ -8,4 +9,5 @@ import { dbMigrateCommand } from "./migrate";
  */
 export const dbCommand = new Command("db")
   .description("Lakebase database lifecycle")
-  .addCommand(dbMigrateCommand);
+  .addCommand(dbMigrateCommand)
+  .addCommand(dbIntrospectCommand);
