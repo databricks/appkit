@@ -184,7 +184,7 @@ describe("runVerify", () => {
   ];
   const clean = {
     notYours: null,
-    refusesEveryBranch: false,
+    refusesEveryBranch: null,
     schemaProblems: [],
     pendingMigrations: [],
     strandedMigrations: [],
@@ -302,43 +302,57 @@ describe("runVerify", () => {
     expect(await runVerify(ctx)).toMatchObject({
       branch: "projects/p/branches/production",
       notYours: "it is the project's default branch",
-      refusesEveryBranch: false,
+      refusesEveryBranch: null,
       ok: true,
     });
   });
 
-  test("a reference databricks.yml leaves unresolved refuses every branch, and the report says so", async () => {
-    const ctx = app(two);
-    branch({
-      columns: { notes: ["id", "body"] },
-      recorded: recordedAs(ctx, two),
-    });
-    const reason =
-      'databricks.yml may deploy to it: the files do not resolve resources.apps.app.resources[0].postgres.branch in target default ("projects/p/branches/dev-${workspace.current_user.short_name}"); give it a value in databricks.yml';
-    resolveEnvBranch.mockResolvedValue({
-      branch: { name: BRANCH },
-      boundary: {
-        branches: new Set<string>(),
-        unresolved: [
-          {
-            target: "default",
-            at: "resources.apps.app.resources[0].postgres.branch",
-            written:
-              "projects/p/branches/dev-${workspace.current_user.short_name}",
-          },
-        ],
+  test.each([
+    [
+      "your dev branch",
+      {
+        kind: "deploy-target",
+        reason:
+          "databricks.yml may deploy to it through a reference this checkout's files do not resolve",
       },
-      kind: "deploy-target",
-      reason,
-    });
+    ],
+    [
+      "the default branch",
+      { kind: "default", reason: "it is the project's default branch" },
+    ],
+  ] as const)(
+    "a reference databricks.yml leaves unresolved refuses every branch, and the report names it, on %s",
+    async (_label, classification) => {
+      const ctx = app(two);
+      branch({
+        columns: { notes: ["id", "body"] },
+        recorded: recordedAs(ctx, two),
+      });
+      resolveEnvBranch.mockResolvedValue({
+        branch: { name: BRANCH },
+        boundary: {
+          branches: new Set<string>(),
+          unresolved: [
+            {
+              target: "default",
+              at: "variables.postgres_branch",
+              written: "",
+              file: ".databricks/bundle/default/variable-overrides.json",
+            },
+          ],
+        },
+        ...classification,
+      });
 
-    expect(await runVerify(ctx)).toMatchObject({
-      branch: BRANCH,
-      notYours: reason,
-      refusesEveryBranch: true,
-      ok: true,
-    });
-  });
+      expect(await runVerify(ctx)).toMatchObject({
+        branch: BRANCH,
+        notYours: classification.reason,
+        refusesEveryBranch:
+          "The files do not resolve variables.postgres_branch in target default with .databricks/bundle/default/variable-overrides.json (no value), so `appkit db migrate` applies migrations to no branch, and `init`, `introspect`, `clean` and `seed` refuse every branch. Give it a value in databricks.yml or the variable-overrides.json named",
+        ok: true,
+      });
+    },
+  );
 
   test("no committed migrations: only the schema is checked", async () => {
     const ctx = app();

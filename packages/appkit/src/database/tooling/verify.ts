@@ -17,7 +17,7 @@ import {
 } from "../migrations/paths";
 import type { DataPath } from "../runtime";
 import { type DbContext, NO_ENV_BRANCH, withBranchPool } from "./context";
-import { resolveEnvBranch, takesWrites } from "./guard";
+import { everyBranchRefusal, resolveEnvBranch, takesWrites } from "./guard";
 import { requireSchemaFile } from "./migrate";
 import {
   type BundleTarget,
@@ -40,10 +40,13 @@ interface LocalVerifyReport {
   /** Why the branch is not your dev or session branch, e.g. "it is the project's default branch"; null when it is. */
   readonly notYours: string | null;
   /**
-   * databricks.yml has a reference this checkout's files do not resolve, so
-   * migrate, clean, seed and init refuse every branch until it has a value.
+   * While databricks.yml has a reference this checkout's files do not
+   * resolve, `migrate` applies migrations to no branch, and `init`,
+   * `introspect`, `clean` and `seed` refuse every branch: this says so and
+   * names the references and where to give them values. null when every
+   * reference resolves.
    */
-  readonly refusesEveryBranch: boolean;
+  readonly refusesEveryBranch: string | null;
   /** Declared tables or columns the branch lacks (the plugin's startup check). */
   readonly schemaProblems: readonly string[];
   /** Committed migrations the branch has not run yet, newer than every one it ran. */
@@ -132,7 +135,7 @@ async function verifyLocal(ctx: DbContext): Promise<LocalVerifyReport> {
         kind: "local",
         branch,
         notYours: takesWrites(env.kind) ? null : (env.reason ?? null),
-        refusesEveryBranch: env.boundary.unresolved.length > 0,
+        refusesEveryBranch: everyBranchRefusal(env.boundary),
         schemaProblems,
         pendingMigrations: drift.pending,
         strandedMigrations: drift.stranded,
