@@ -270,7 +270,7 @@ export function dataAppkitSchema() {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     title: "data-appkit blocks",
     description:
-      'Props for <script type="application/json" data-appkit="<Component>">…</script> blocks in drafts. Each block is one JSON object matching its component\'s schema. A block with data-src="mock#<key>" takes its data from drafts/mock.json (one JSON object, keyed by name): an array becomes the block\'s data (rows for a DataTable), an object is merged into its props. Props written in the block win; the block may hold no JSON at all.',
+      'Props for <script type="application/json" data-appkit="<Component>">…</script> blocks in drafts. Each block is one JSON object matching its component\'s schema. A block with data-src="mock#<key>" takes its data from drafts/mock.json (one JSON object; the key is looked up in its "datasets" object first, then at the top level): an array becomes the block\'s data (rows for a DataTable), an object is merged into its props. Props written in the block win; the block may hold no JSON at all.',
     components: {
       BarChart: chart(
         "Bar chart (appkit-ui BarChart).",
@@ -688,12 +688,12 @@ export function runHydrator(deps: HydratorDeps): {
 .appkit-root { height: 100%; display: flex; flex-direction: column; }
 .appkit-title { margin: 0 0 8px; font: 600 14px/1.4 system-ui, sans-serif; color: var(--card-foreground, inherit); }
 .appkit-chart { flex: 1 1 auto; min-height: 0; }
-.appkit-fade { opacity: 0; transition: opacity 200ms ease-out; }
-.appkit-fade.appkit-in { opacity: 1; }
+.appkit-fade { animation: appkit-fade-in 200ms ease-out; }
+@keyframes appkit-fade-in { from { opacity: 0; } }
 @keyframes appkit-pulse { 50% { opacity: 0.55; } }
 @media (prefers-reduced-motion: reduce) {
   .appkit-skeleton { animation: none; }
-  .appkit-fade { transition: none; }
+  .appkit-fade { animation: none; }
 }`;
 
   // One host per block, right after its script in the block's own container:
@@ -747,11 +747,11 @@ export function runHydrator(deps: HydratorDeps): {
     const key = (script.dataset.appkit ?? "") + "\0" + script.textContent;
     if (!shown.has(key)) {
       shown.add(key);
+      // A CSS animation, not a class set on an animation frame: frames
+      // don't run in a background tab or hidden frame, and the block must
+      // still show (the animation is timed by the clock, so it has ended by
+      // the first frame that does render).
       root.classList.add("appkit-fade");
-      // Two frames so the initial opacity is painted before the transition.
-      win.requestAnimationFrame?.(() =>
-        win.requestAnimationFrame?.(() => root.classList.add("appkit-in")),
-      );
     }
     return root;
   };
@@ -854,9 +854,17 @@ export function runHydrator(deps: HydratorDeps): {
         "drafts/mock.json didn't load (missing, or not a JSON object).",
       );
     }
-    if (!(key in mock))
-      throw new Error('drafts/mock.json has no "' + key + '".');
-    const value = mock[key];
+    // UNV-4's drafts skill writes { mock, datasets: { <name>: rows } }.
+    const datasets = (mock as { datasets?: unknown }).datasets;
+    const source =
+      datasets && typeof datasets === "object" && key in datasets
+        ? (datasets as Record<string, unknown>)
+        : mock;
+    if (!(key in source))
+      throw new Error(
+        'drafts/mock.json has no "' + key + '" (in "datasets" or at the top).',
+      );
+    const value = source[key];
     const own = (props ?? {}) as Record<string, unknown>;
     if (Array.isArray(value)) {
       const prop = script.dataset.appkit === "DataTable" ? "rows" : "data";
@@ -867,8 +875,18 @@ export function runHydrator(deps: HydratorDeps): {
   };
 
   // final: the document is complete, so JSON that still doesn't parse never will.
+  let reportedChecked = false;
   const scan = (final: boolean) => {
     if (final) finalSeen = true;
+    scanBlocks(final);
+    // Every block of the complete page is handled: tell the status endpoint
+    // this version's errors are known (until then it reports them as null).
+    if (final && !reportedChecked && blocks().every((b) => handled.has(b))) {
+      reportedChecked = true;
+      post({ draft, checked: true });
+    }
+  };
+  const scanBlocks = (final: boolean) => {
     for (const script of blocks()) {
       if (handled.has(script)) continue;
       // Rendered by an earlier run of the hydrator in this page.

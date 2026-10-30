@@ -380,9 +380,15 @@ describe("draft errors in /design/__status", () => {
     fs.writeFileSync(file, text);
   };
 
-  test("errors the hydrator POSTs are listed for the draft, and a reload resets them", async () => {
+  test("errors the hydrator POSTs are listed once it has checked every block, and a reload resets them", async () => {
     const { handler } = start();
     const S = "/design/__status";
+    // No page has rendered the draft (e.g. right after a restart): unknown,
+    // not "no errors".
+    expect((await call(handler, "GET", S)).json.drafts[0]).toMatchObject({
+      checked: false,
+      errors: null,
+    });
     await call(handler, "POST", S, { draft: "dash", reset: true });
     await call(handler, "POST", S, {
       draft: "dash",
@@ -390,12 +396,16 @@ describe("draft errors in /design/__status", () => {
       component: "DataTable",
       error: 'DataTable: "columns" must be a non-empty array.',
     });
+    // Still rendering: not known yet.
+    expect((await call(handler, "GET", S)).json.drafts[0].errors).toBeNull();
+    await call(handler, "POST", S, { draft: "dash", checked: true });
 
     const { json } = await call(handler, "GET", S);
     expect(json.drafts).toEqual([
       {
         name: "dash",
         path: "/design/drafts/dash",
+        checked: true,
         errors: [
           {
             block: 2,
@@ -407,6 +417,8 @@ describe("draft errors in /design/__status", () => {
     ]);
 
     await call(handler, "POST", S, { draft: "dash", reset: true });
+    expect((await call(handler, "GET", S)).json.drafts[0].errors).toBeNull();
+    await call(handler, "POST", S, { draft: "dash", checked: true });
     expect((await call(handler, "GET", S)).json.drafts[0].errors).toEqual([]);
   });
 
@@ -476,10 +488,12 @@ describe("draft errors in /design/__status", () => {
       component: "Sparkline",
       error: "Unknown",
     });
+    await call(handler, "POST", S, { draft: "live", checked: true });
     expect((await call(handler, "GET", S)).json.drafts).toContainEqual({
       name: "live",
       path: null,
       streamed: true,
+      checked: true,
       errors: [{ block: 0, component: "Sparkline", error: "Unknown" }],
     });
   });
@@ -555,6 +569,10 @@ describe("draft errors in /design/__status", () => {
     });
     const file = path.join(app, "drafts", "dash.html");
     fs.utimesSync(file, new Date(), new Date(Date.now() + 5000));
-    expect((await call(handler, "GET", S)).json.drafts[0].errors).toEqual([]);
+    // The new version hasn't been rendered yet: unknown.
+    expect((await call(handler, "GET", S)).json.drafts[0]).toMatchObject({
+      checked: false,
+      errors: null,
+    });
   });
 });

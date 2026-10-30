@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "data-appkit blocks",
-  "description": "Props for <script type=\"application/json\" data-appkit=\"<Component>\">…</script> blocks in drafts. Each block is one JSON object matching its component's schema. A block with data-src=\"mock#<key>\" takes its data from drafts/mock.json (one JSON object, keyed by name): an array becomes the block's data (rows for a DataTable), an object is merged into its props. Props written in the block win; the block may hold no JSON at all.",
+  "description": "Props for <script type=\"application/json\" data-appkit=\"<Component>\">…</script> blocks in drafts. Each block is one JSON object matching its component's schema. A block with data-src=\"mock#<key>\" takes its data from drafts/mock.json (one JSON object; the key is looked up in its \"datasets\" object first, then at the top level): an array becomes the block's data (rows for a DataTable), an object is merged into its props. Props written in the block win; the block may hold no JSON at all.",
   "components": {
     "BarChart": {
       "description": "Bar chart (appkit-ui BarChart).",

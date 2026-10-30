@@ -524,11 +524,13 @@ export function designVitePlugin({
   const draftsDir = path.join(projectRoot, "drafts");
   // mtime of the index page when a browser last reported painting it.
   let paintedVersion: number | undefined;
-  // Render errors reported by the hydrator, per draft, for one version of it.
+  // Render errors reported by the hydrator, per draft, for one version of it;
+  // `checked` once a page has handled every block of that version.
   const draftErrors = new Map<
     string,
     {
       version: number;
+      checked: boolean;
       errors: { block: number; component: string; error: string }[];
     }
   >();
@@ -693,6 +695,7 @@ export function designVitePlugin({
             const report = body as {
               draft?: unknown;
               reset?: unknown;
+              checked?: unknown;
               block?: unknown;
               component?: unknown;
               error?: unknown;
@@ -701,9 +704,10 @@ export function designVitePlugin({
               const version = draftVersion(report.draft);
               let entry = draftErrors.get(report.draft);
               if (report.reset === true || entry?.version !== version) {
-                entry = { version, errors: [] };
+                entry = { version, checked: false, errors: [] };
                 draftErrors.set(report.draft, entry);
               }
+              if (report.checked === true) entry.checked = true;
               if (typeof report.error === "string") {
                 entry.errors.push({
                   block: typeof report.block === "number" ? report.block : -1,
@@ -729,14 +733,16 @@ export function designVitePlugin({
             name: string;
             path: string | null;
             streamed?: true;
-            errors: { block: number; component: string; error: string }[];
+            checked: boolean;
+            // null: not known yet (no page has rendered this version).
+            errors:
+              | { block: number; component: string; error: string }[]
+              | null;
           }[] = files.map((d) => {
             const entry = draftErrors.get(d.name);
-            return {
-              ...d,
-              errors:
-                entry?.version === draftVersion(d.name) ? entry.errors : [],
-            };
+            const checked =
+              entry?.version === draftVersion(d.name) && entry.checked;
+            return { ...d, checked, errors: checked ? entry.errors : null };
           });
           // Drafts streamed from elsewhere (no file here) report errors too.
           for (const [name, entry] of draftErrors) {
@@ -747,7 +753,8 @@ export function designVitePlugin({
               name,
               path: null,
               streamed: true,
-              errors: entry.errors,
+              checked: entry.checked,
+              errors: entry.checked ? entry.errors : null,
             });
           }
           const status = designStatus(server.config.root, paintedVersion);
