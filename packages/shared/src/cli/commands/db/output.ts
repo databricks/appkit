@@ -158,11 +158,9 @@ function printDeployVerifyReport(report: DeployVerifyReport): void {
     ok(
       `${app} (${where}) is running, bound to ${branch} with CAN_CONNECT_AND_CREATE, and its service principal has a role there`,
     );
-    if (report.migrations?.checked === "deployed code") {
-      ok("Its active deployment has every committed migration");
-    } else if (report.migrations) {
+    if (report.migrations?.evidence === "verified") {
       ok(
-        "Every committed migration was generated before its active deployment; its code could not be read, so verify compared times",
+        "Its active deployment has every committed migration, with the same SQL",
       );
     }
     return;

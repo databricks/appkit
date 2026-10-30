@@ -89,10 +89,15 @@ export interface DeployVerifyReport {
   readonly host: string | null;
   readonly branch: string;
   readonly app: string | null;
-  readonly migrations: {
-    readonly checked: "deployed code" | "deploy time";
-    readonly missing: readonly string[];
-  } | null;
+  readonly migrations:
+    | { readonly evidence: "verified" }
+    | {
+        readonly evidence: "differs";
+        readonly missing: readonly string[];
+        readonly changed: readonly string[];
+      }
+    | { readonly evidence: "unavailable"; readonly reason: string }
+    | null;
   readonly problems: readonly string[];
   readonly ok: boolean;
 }
