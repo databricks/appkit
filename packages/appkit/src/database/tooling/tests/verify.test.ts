@@ -582,15 +582,6 @@ describe("runVerify --deployed", () => {
       { deployedSql: { "0000_migration": "unreadable" } },
       `exporting ${SNAPSHOT}/${MIGRATIONS}/0000_migration.sql failed: Permission denied`,
     ],
-    [
-      "the deployment names no source snapshot",
-      {
-        app: runningApp({
-          active_deployment: { status: { state: "SUCCEEDED" } },
-        }),
-      },
-      "its active deployment names no source snapshot",
-    ],
   ] as const)(
     "when %s, the migrations are unavailable and verify fails",
     async (_label, options, reason) => {
@@ -613,6 +604,30 @@ describe("runVerify --deployed", () => {
       });
     },
   );
+
+  test("a deployment that names no snapshot is unavailable, and its live source folder is never read", async () => {
+    const { ctx, requests } = deployedApp({
+      migrations: [{ tag: "0000_migration", when: 1000 }],
+      app: runningApp({
+        active_deployment: {
+          // The live folder the deployment came from, which can change after it.
+          source_code_path: "/Workspace/Users/alice@example.com/my-app",
+          status: { state: "SUCCEEDED" },
+        },
+      }),
+    });
+
+    expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+      migrations: {
+        evidence: "unavailable",
+        reason: "its active deployment names no source snapshot",
+      },
+      ok: false,
+    });
+    expect(
+      requests.filter((request) => request.startsWith("workspace.export")),
+    ).toEqual([]);
+  });
 
   test("with committed migrations, a report that stops before reading the deployment leaves them unverified", async () => {
     const { ctx } = deployedApp({
