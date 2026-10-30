@@ -287,6 +287,7 @@ describe("hydratorModule", () => {
     "dash",
     ["https://builder.example.com"],
     "/design/__status",
+    "/design/drafts/mock.json",
   );
 
   test("renders with the real appkit-ui components, no CDN", () => {
@@ -503,6 +504,33 @@ describe("draft errors in /design/__status", () => {
       },
     );
     expect(other.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
+  test("serves drafts/mock.json next to the drafts, to the builder origins too", async () => {
+    const { app, handler } = start(undefined, ["https://builder.example.com"]);
+    const M = "/design/drafts/mock.json";
+    expect((await call(handler, "GET", "/design/__status")).json.mock).toBe(M);
+    expect((await call(handler, "GET", M)).status).toBe(404);
+
+    fs.writeFileSync(
+      path.join(app, "drafts", "mock.json"),
+      '{"trips":[{"day":"Mon","n":3}]}',
+    );
+    const r = await call(handler, "GET", M, undefined, {
+      origin: "https://builder.example.com",
+    });
+    expect(r.status).toBe(200);
+    expect(r.json).toEqual({ trips: [{ day: "Mon", n: 3 }] });
+    expect(r.headers["access-control-allow-origin"]).toBe(
+      "https://builder.example.com",
+    );
+    expect(r.headers["cache-control"]).toBe("no-store");
+    // Never listed as a draft.
+    expect(
+      (await call(handler, "GET", "/design/__status")).json.drafts.map(
+        (d: { name: string }) => d.name,
+      ),
+    ).toEqual(["dash"]);
   });
 
   test("serves the block schema and links it from the status", async () => {

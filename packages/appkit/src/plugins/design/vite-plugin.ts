@@ -39,6 +39,8 @@ const DESIGN_ROUTE = /^\/design(?:\/([A-Za-z0-9_-]+))?\/?$/;
 const STATUS_PATH = "/design/__status";
 const BLOCK_SCHEMA_PATH = "/design/__data-appkit.schema.json";
 const DRAFT_THEME_PATH = "/design/drafts/theme.css";
+/** drafts/mock.json, the data `data-src="mock#<key>"` blocks read. */
+const DRAFT_MOCK_PATH = "/design/drafts/mock.json";
 /** Stable URL of the draft hydrator, for drafts streamed from elsewhere. */
 const HYDRATOR_PATH = "/design/drafts/__hydrator.js";
 /** Vite's default dev CORS origins (localhost), kept when builders are added. */
@@ -588,7 +590,12 @@ export function designVitePlugin({
           -ENTRY_SUFFIX.length,
         );
         if (/^[A-Za-z0-9_-]+$/.test(draft)) {
-          return hydratorModule(draft, builderOrigins, STATUS_PATH);
+          return hydratorModule(
+            draft,
+            builderOrigins,
+            STATUS_PATH,
+            DRAFT_MOCK_PATH,
+          );
         }
         return;
       }
@@ -642,6 +649,7 @@ export function designVitePlugin({
           (pathname === STATUS_PATH ||
             pathname === HYDRATOR_PATH ||
             pathname === DRAFT_THEME_PATH ||
+            pathname === DRAFT_MOCK_PATH ||
             pathname === BLOCK_SCHEMA_PATH)
         ) {
           res.setHeader("Access-Control-Allow-Origin", origin);
@@ -774,6 +782,7 @@ export function designVitePlugin({
               drafts,
               blockSchema: BLOCK_SCHEMA_PATH,
               theme: DRAFT_THEME_PATH,
+              mock: DRAFT_MOCK_PATH,
               hydrator: HYDRATOR_PATH,
             }),
           );
@@ -793,6 +802,22 @@ export function designVitePlugin({
           res.setHeader("Content-Type", "text/css; charset=utf-8");
           res.setHeader("Cache-Control", "no-store");
           res.end(themeCss(css));
+          return;
+        }
+
+        if (pathname === DRAFT_MOCK_PATH) {
+          // Served as written: while the agent is still writing it, the
+          // hydrator fails to parse it and asks again.
+          const file = path.join(draftsDir, "mock.json");
+          res.setHeader("Cache-Control", "no-store");
+          if (!fs.existsSync(file)) {
+            res.statusCode = 404;
+            res.setHeader("Content-Type", "text/plain");
+            res.end("No drafts/mock.json yet.");
+            return;
+          }
+          res.setHeader("Content-Type", "application/json");
+          res.end(fs.readFileSync(file, "utf-8"));
           return;
         }
 

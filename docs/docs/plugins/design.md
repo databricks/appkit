@@ -225,6 +225,15 @@ Costly parts of a draft (charts, tables, KPI cards) are written as JSON blocks i
 </script>
 ```
 
+Data the drafts share can live in one `drafts/mock.json` instead of inline: a JSON object keyed by name, served at `GET /design/drafts/mock.json` (linked from `/design/__status` as `mock`). A block with `data-src="mock#<key>"` takes `mock[<key>]`: an array becomes its `data` (`rows` for a `DataTable`), an object is merged into its props. Props written in the block win, and the block may hold no JSON at all:
+
+```html
+<script type="application/json" data-appkit="LineChart" data-src="mock#tripsPerDay">{"xKey": "day", "yKey": "trips"}</script>
+<script type="application/json" data-appkit="KpiCard" data-src="mock#totalTrips"></script>
+```
+
+The page fetches `mock.json` once. Until it's there and parses (the agent may write it after the drafts), those blocks show their skeleton and the page asks again every second; after 30 seconds they show an error. A key that isn't in the file fails just that block, reported like any other draft error.
+
 The exact props of each component are published as JSON Schema (2020-12), with an example per component, in the package as `@databricks/appkit-ui/design/components.schema.json` (`node_modules/@databricks/appkit-ui/dist/design/components.schema.json`), and served at `GET /design/__data-appkit.schema.json` (linked from `/design/__status` as `blockSchema`). Read it to write valid blocks. In short:
 
 | Component | Required | Optional |
