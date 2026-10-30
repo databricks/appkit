@@ -258,7 +258,7 @@ describe("runInit — dev branch", () => {
       schemaSource("sales"),
     );
 
-    const { steps } = await init(ctx, { schema: "none" });
+    const { steps } = await init(ctx);
 
     expect(pool.query).toHaveBeenCalledWith(
       expect.stringContaining("nspowner"),
@@ -267,6 +267,36 @@ describe("runInit — dev branch", () => {
     expect(steps).toContain(
       `Handing schema sales in database databricks_postgres on ${devBranchId(USER)} to you: deleting this branch's copy of role ${SP}, which owns it, with its objects reassigned to you`,
     );
+  });
+
+  test("--schema none leaves the schema's owner alone: no hand-off, no role deleted", async () => {
+    const lakebase = project();
+
+    const { report } = await init(appOn(lakebase), { schema: "none" });
+
+    expect(report.handedOff).toBeNull();
+    expect(lakebase.calls.some((call) => call.startsWith("deleteRole"))).toBe(
+      false,
+    );
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  test("schema public is never handed off: its owner belongs to the database, not to an app", async () => {
+    const lakebase = project();
+    const ctx = appOn(
+      lakebase,
+      {},
+      { files: { "config/database/schema.ts": schemaSource("public") } },
+    );
+    schemaOwner = "pg_database_owner";
+
+    const { report } = await init(ctx);
+
+    expect(report.handedOff).toBeNull();
+    expect(lakebase.calls.some((call) => call.startsWith("deleteRole"))).toBe(
+      false,
+    );
+    expect(pool.query).not.toHaveBeenCalled();
   });
 
   test("creates a read-write endpoint that scales to zero after 5 idle minutes when the branch has none", async () => {

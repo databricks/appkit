@@ -98,7 +98,10 @@ export interface InitReport {
   readonly database: string;
   readonly user: string;
   readonly role: { readonly name: string; readonly action: RoleAction };
-  /** The Postgres role whose copy of the app schema was handed to you; null when you owned it. */
+  /**
+   * The Postgres role whose copy of the app schema was handed to you; null when
+   * you owned it, the schema is public, or `--schema none` left it alone.
+   */
   readonly handedOff: string | null;
   readonly envFile: string;
   /** The drizzle-kit install init ran; null when it was installed. */
@@ -425,10 +428,11 @@ function readEnvValues(file: string): Record<string, string> {
 /**
  * `appkit db init`: find or create your dev branch or this checkout's session
  * branch, ensure a read-write endpoint and your DATABRICKS_SUPERUSER role,
- * point `.env` at the branch, hand the app schema the fork copied to you, then
- * start the schema. No prompts: every choice has a default. It refuses the
- * project's default branch, protected branches and branches databricks.yml
- * deploys to before changing anything, and never touches the deploy bundle.
+ * point `.env` at the branch, hand the app schema the fork copied to you
+ * (except with `--schema none`), then start the schema. No prompts: every
+ * choice has a default. It refuses the project's default branch, protected
+ * branches and branches databricks.yml deploys to before changing anything,
+ * and never touches the deploy bundle.
  * One lock on the checkout's history covers the whole run, so no other
  * `appkit db` command runs between its clean and migrate; `--schema none`
  * changes no history and takes none.
@@ -528,14 +532,18 @@ async function initHolding(
   updateEnvFile(envFile, values);
   const branchCtx: DbContext = { ...ctx, env: { ...ctx.env, ...values } };
 
-  const handedOff = await handOffAppSchema(branchCtx, {
-    branch: branch.name,
-    database,
-    schemaName,
-    developer: role,
-    roles,
-    onStep,
-  });
+  // --schema none leaves the schema as the fork has it, owner included.
+  const handedOff =
+    startKind === "none"
+      ? null
+      : await handOffAppSchema(branchCtx, {
+          branch: branch.name,
+          database,
+          schemaName,
+          developer: role,
+          roles,
+          onStep,
+        });
 
   const installed =
     startKind === "migrate" || startKind === "introspect"
