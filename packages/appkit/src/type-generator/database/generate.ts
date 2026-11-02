@@ -119,6 +119,14 @@ async function writeIfChanged(outFile: string, content: string): Promise<void> {
   }
 }
 
+/** Write the registry types for a schema the caller already loaded. */
+export function writeDatabaseTypes(
+  schema: Schema,
+  outFile: string,
+): Promise<void> {
+  return writeIfChanged(outFile, render(schema));
+}
+
 /** Disable Jiti's module cache so watch-mode runs observe schema edits. */
 async function importSchema(schemaFile: string): Promise<unknown> {
   const { createJiti } = await import("jiti");

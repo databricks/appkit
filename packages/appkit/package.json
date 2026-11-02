@@ -42,6 +42,11 @@
       "development": "./src/type-generator/index.ts",
       "default": "./dist/type-generator/index.js"
     },
+    "./beta/database-tooling": {
+      "types": "./dist/database/tooling/index.d.ts",
+      "development": "./src/database/tooling/index.ts",
+      "default": "./dist/database/tooling/index.js"
+    },
     "./testing": {
       "types": "./dist/testing/index.d.ts",
       "development": "./src/testing/index.ts",
@@ -126,6 +131,7 @@
   "peerDependencies": {
     "@mlflow/core": "0.4.0",
     "autoevals": "0.3.0",
+    "drizzle-kit": "0.31.10",
     "vitest": ">=3"
   },
   "peerDependenciesMeta": {
@@ -133,6 +139,9 @@
       "optional": true
     },
     "autoevals": {
+      "optional": true
+    },
+    "drizzle-kit": {
       "optional": true
     },
     "vitest": {
@@ -149,6 +158,7 @@
     "@types/ws": "8.18.1",
     "@vitejs/plugin-react": "5.1.1",
     "autoevals": "0.3.0",
+    "drizzle-kit": "0.31.10",
     "vitest": "3.2.4"
   },
   "overrides": {
@@ -161,6 +171,7 @@
       "./beta": "./dist/beta.js",
       "./dist/shared/src/plugin": "./dist/shared/src/plugin.d.ts",
       "./type-generator": "./dist/type-generator/index.js",
+      "./beta/database-tooling": "./dist/database/tooling/index.js",
       "./testing": {
         "types": "./dist/testing/index.d.ts",
         "default": "./dist/testing/index.js"
