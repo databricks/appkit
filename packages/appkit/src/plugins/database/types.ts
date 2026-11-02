@@ -85,10 +85,11 @@ export type DatabaseHooks = Readonly<Record<string, EntityHooks | undefined>>;
  */
 export interface DatabasePoolConfig {
   /**
-   * Maximum connections held by the pool. Must stay below the Lakebase
-   * compute's connection limit shared by every app instance.
+   * Maximum connections held by the pool. The Lakebase compute's connection
+   * limit is shared with other pools such as `lakebase()`, every replica, and
+   * any other client, so keep the sum below it.
    *
-   * @defaultValue 105, the limit of the smallest (0.5 CU) compute
+   * @defaultValue 105, the whole budget of the smallest (0.5 CU) compute
    */
   readonly max?: number;
   /** Milliseconds an idle connection stays open. @defaultValue 30000 */

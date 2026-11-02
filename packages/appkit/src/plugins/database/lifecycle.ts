@@ -1,7 +1,8 @@
 import { initializeLakebasePool } from "../../connectors/lakebase";
 import {
+  createPoolSaturationWatch,
   DEFAULT_POOL_MAX,
-  watchPoolSaturation,
+  RAISE_POOL_MAX_HINT,
 } from "../../connectors/lakebase/pool-saturation";
 import {
   classifyDatabaseError,
@@ -197,7 +198,12 @@ export async function createDatabaseState<TSchema extends Schema>(
       statement_timeout: STATEMENT_TIMEOUT_MS,
       idle_in_transaction_session_timeout: IDLE_IN_TRANSACTION_TIMEOUT_MS,
     });
-    watchPoolSaturation(pool, { name: "database", max, logger });
+    createPoolSaturationWatch({
+      name: "database",
+      max,
+      hint: RAISE_POOL_MAX_HINT,
+      logger,
+    })(pool);
     const db = createDrizzleDb(pool, schema);
     const dataPath = createDrizzleDataPath(db, schema, {
       columnAccess: "trusted",

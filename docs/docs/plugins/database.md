@@ -116,9 +116,10 @@ names.
 
 ## Connection pool
 
-The plugin keeps one pool of up to 105 connections, the limit of the smallest
-Lakebase compute (0.5 CU). Every app instance shares the compute's limit, so
-lower `max` when you run several replicas. Larger computes allow more. Check
+The plugin keeps one pool of up to 105 connections, the whole direct-connection
+budget of a 0.5 CU compute, the smallest size. Other pools on the same compute,
+such as `lakebase()`, every replica of the app, and any other client share that
+budget, so lower `max` until the sum fits. Larger computes allow more. Check
 **Max Connections** in the compute's *Edit compute* drawer.
 
 ```ts

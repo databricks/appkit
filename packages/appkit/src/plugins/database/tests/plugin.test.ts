@@ -21,7 +21,17 @@ vi.mock("../load-schema", () => ({
   loadDefaultDatabaseSchema: mocks.loadDefaultDatabaseSchema,
 }));
 
+import { DatabasePluginError } from "../../../database/errors";
 import { DatabasePlugin, database } from "../database";
+
+function thrownBy(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return undefined;
+}
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -144,6 +154,7 @@ describe("DatabasePlugin", () => {
         routedSchema,
         expect.any(Function),
         undefined,
+        undefined,
       );
     },
   );
@@ -160,7 +171,51 @@ describe("DatabasePlugin", () => {
       routedSchema,
       expect.any(Function),
       hooks,
+      undefined,
     );
+  });
+
+  test("passes the pool configuration to the lifecycle", async () => {
+    const pool = { max: 20, connectionTimeoutMillis: 5_000 };
+    await registerRoutes({ schema: routedSchema, pool });
+    expect(mocks.createDatabaseState).toHaveBeenCalledWith(
+      routedSchema,
+      expect.any(Function),
+      undefined,
+      pool,
+    );
+  });
+
+  test("accepts timeouts up to Node's timer limit", async () => {
+    const pool = {
+      idleTimeoutMillis: 2_147_483_647,
+      connectionTimeoutMillis: 2_147_483_647,
+    };
+    await registerRoutes({ schema: routedSchema, pool });
+    expect(mocks.createDatabaseState).toHaveBeenCalledWith(
+      routedSchema,
+      expect.any(Function),
+      undefined,
+      pool,
+    );
+  });
+
+  test.each([
+    ["an unknown key", { size: 10 }],
+    ["zero", { max: 0 }],
+    ["a non-integer", { max: 1.5 }],
+    [
+      "a timeout above Node's timer limit",
+      { idleTimeoutMillis: 2_147_483_648 },
+    ],
+    ["a non-plain object", Object.create({ max: 10 })],
+  ])("rejects a pool configuration with %s", (_case, pool) => {
+    const error = thrownBy(
+      () => new DatabasePlugin({ schema: routedSchema, pool } as never),
+    );
+    expect(error).toBeInstanceOf(DatabasePluginError);
+    expect(error).toMatchObject({ category: "SETUP_FAILED", phase: "setup" });
+    expect(mocks.createDatabaseState).not.toHaveBeenCalled();
   });
 
   test("keeps the default schema's typed client available when HTTP is disabled", async () => {
@@ -682,6 +737,7 @@ describe("DatabasePlugin", () => {
     expect(mocks.createDatabaseState).toHaveBeenCalledWith(
       internalSchema,
       expect.any(Function),
+      undefined,
       undefined,
     );
   });

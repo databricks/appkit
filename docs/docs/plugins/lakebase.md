@@ -115,6 +115,12 @@ await createApp({
 });
 ```
 
+The default `max` of 105 is the whole direct-connection budget of a 0.5 CU
+compute. The SP pool, the legacy per-user OBO pools (3 connections each), a
+`database()` pool, every replica of the app, and any other client share that
+budget. Lower `max` until the sum fits the compute. When callers queue because
+every connection is in use, the plugin logs a warning at most once a minute.
+
 ## On-Behalf-Of (OBO) {#on-behalf-of-obo--per-user-connections}
 
 Lakebase is app-only through the new `appkit.asUser` and `runInCallerContext`
