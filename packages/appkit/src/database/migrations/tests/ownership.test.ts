@@ -25,6 +25,9 @@ describe("ownership: one owner per branch", () => {
     expect(hint).toContain(
       "the app's database resource was removed and added again, or the app was recreated",
     );
+    expect(hint).toContain(
+      `If "old-app-sp" belonged to a deleted app, someone with CAN MANAGE on the Lakebase project moves its objects with \`databricks postgres delete-role <its role> --reassign-owned-to <the role of "new-app-sp">\``,
+    );
     expect(hint).toContain("set another schemaName in schema.ts");
     expect(hint).toContain(
       "On your dev or session branch, rerun `appkit db init`, which hands you the schema.",

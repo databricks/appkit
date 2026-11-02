@@ -5,11 +5,18 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-const { withBranchPool } = vi.hoisted(() => ({ withBranchPool: vi.fn() }));
+const { withBranchPool, resolveEnvBranch } = vi.hoisted(() => ({
+  withBranchPool: vi.fn(),
+  resolveEnvBranch: vi.fn(),
+}));
 
 vi.mock("../context", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../context")>()),
   withBranchPool,
+}));
+vi.mock("../guard", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../guard")>()),
+  resolveEnvBranch,
 }));
 
 import type { WorkspaceRequest } from "../../../workspace-client";
@@ -153,8 +160,15 @@ function branch(state: {
 
 const WRITES = /\b(insert|update|delete|create|drop|alter|grant|truncate)\b/i;
 
+const RESOLVED = { branches: new Set<string>(), unresolved: [] };
+
 beforeEach(() => {
   withBranchPool.mockReset();
+  resolveEnvBranch.mockReset().mockResolvedValue({
+    branch: { name: BRANCH },
+    boundary: RESOLVED,
+    kind: "dev",
+  });
 });
 
 afterEach(() => {
@@ -169,6 +183,8 @@ describe("runVerify", () => {
     { tag: "0001_migration", when: 2000 },
   ];
   const clean = {
+    notYours: null,
+    refusesEveryBranch: null,
     schemaProblems: [],
     pendingMigrations: [],
     strandedMigrations: [],
@@ -270,6 +286,74 @@ describe("runVerify", () => {
     });
   });
 
+  test("a branch that is not your dev or session branch is named, and still verified", async () => {
+    const ctx = app(two);
+    branch({
+      columns: { notes: ["id", "body"] },
+      recorded: recordedAs(ctx, two),
+    });
+    resolveEnvBranch.mockResolvedValue({
+      branch: { name: "projects/p/branches/production" },
+      boundary: RESOLVED,
+      kind: "default",
+      reason: "it is the project's default branch",
+    });
+
+    expect(await runVerify(ctx)).toMatchObject({
+      branch: "projects/p/branches/production",
+      notYours: "it is the project's default branch",
+      refusesEveryBranch: null,
+      ok: true,
+    });
+  });
+
+  test.each([
+    [
+      "your dev branch",
+      {
+        kind: "deploy-target",
+        reason:
+          "databricks.yml may deploy to it through a reference this checkout's files do not resolve",
+      },
+    ],
+    [
+      "the default branch",
+      { kind: "default", reason: "it is the project's default branch" },
+    ],
+  ] as const)(
+    "a reference databricks.yml leaves unresolved refuses every branch, and the report names it, on %s",
+    async (_label, classification) => {
+      const ctx = app(two);
+      branch({
+        columns: { notes: ["id", "body"] },
+        recorded: recordedAs(ctx, two),
+      });
+      resolveEnvBranch.mockResolvedValue({
+        branch: { name: BRANCH },
+        boundary: {
+          branches: new Set<string>(),
+          unresolved: [
+            {
+              target: "default",
+              at: "variables.postgres_branch",
+              written: "",
+              file: ".databricks/bundle/default/variable-overrides.json",
+            },
+          ],
+        },
+        ...classification,
+      });
+
+      expect(await runVerify(ctx)).toMatchObject({
+        branch: BRANCH,
+        notYours: classification.reason,
+        refusesEveryBranch:
+          "The files do not resolve variables.postgres_branch in target default with .databricks/bundle/default/variable-overrides.json (no value), so `appkit db migrate` applies migrations to no branch, and `init`, `introspect`, `clean` and `seed` refuse every branch. Give it a value in databricks.yml or the variable-overrides.json named",
+        ok: true,
+      });
+    },
+  );
+
   test("no committed migrations: only the schema is checked", async () => {
     const ctx = app();
     branch({ columns: { notes: ["id", "body"] }, recorded: "absent" });
@@ -307,6 +391,7 @@ describe("runVerify", () => {
   });
 
   test("without a configured branch it points to init before connecting", async () => {
+    resolveEnvBranch.mockResolvedValue(null);
     await expect(runVerify(app([], {}))).rejects.toThrow(
       "Did not verify: no branch is configured in .env (PGHOST, PGDATABASE and LAKEBASE_ENDPOINT); run `appkit db init`.",
     );
@@ -509,6 +594,7 @@ describe("runVerify --deployed", () => {
       `workspace.export ${SNAPSHOT}/${MIGRATIONS}/0000_migration.sql`,
     ]);
     expect(withBranchPool).not.toHaveBeenCalled();
+    expect(resolveEnvBranch).not.toHaveBeenCalled();
     expect(lakebase.calls.sort()).toEqual([
       `getBranch ${PRODUCTION}`,
       `getDatabase ${DATABASE}`,

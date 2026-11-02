@@ -63,8 +63,9 @@ export function ownershipHint(
     return (
       `Schema "${ownership.schemaName}" is owned by "${ownership.owner}", but the app connects as "${ownership.currentUser}". ` +
       "This happens when the app's database resource was removed and added again, or the app was recreated with a new service principal: " +
-      `Lakebase hands the objects to another role. Have "${ownership.owner}" transfer the schema and its tables to "${ownership.currentUser}" ` +
-      "(ALTER … OWNER TO), or set another schemaName in schema.ts. " +
+      `Lakebase hands the objects to another role. If "${ownership.owner}" belonged to a deleted app, someone with CAN MANAGE on the Lakebase project moves its objects with ` +
+      `\`databricks postgres delete-role <its role> --reassign-owned-to <the role of "${ownership.currentUser}">\` (\`databricks postgres list-roles <branch>\` names both), which also deletes its role. ` +
+      `Otherwise have "${ownership.owner}" transfer the schema and its tables to "${ownership.currentUser}" (ALTER … OWNER TO), or set another schemaName in schema.ts. ` +
       "On your dev or session branch, rerun `appkit db init`, which hands you the schema."
     );
   }

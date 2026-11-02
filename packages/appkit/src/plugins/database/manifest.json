@@ -17,6 +17,7 @@
           "project": {
             "description": "Lakebase project resource name",
             "examples": ["projects/{project-id}"],
+            "bundleIgnore": true,
             "discovery": {
               "type": "kind",
               "resourceKind": "postgres_project",
