@@ -7,7 +7,15 @@
     "docs"
   ],
   "workspaces": {
+    ".": {
+      "entry": [
+        "tools/bundle-size.ts",
+        "tools/generate-json-schema.ts",
+        "tools/playground/deploy-playground.ts"
+      ]
+    },
     "packages/appkit": {
+      "entry": ["bin/appkit.js"],
       "ignoreDependencies": [
         "vitest",
         "@databricks/sdk-apps",

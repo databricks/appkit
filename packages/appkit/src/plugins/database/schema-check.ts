@@ -10,10 +10,10 @@ interface CatalogColumn {
 
 /**
  * Confirm every declared table and column exists before routes are published.
- * The plugin never migrates, so drift would otherwise surface on each request
- * as an undefined-table or undefined-column failure. pg_catalog is read rather
- * than information_schema, which hides objects the role cannot access and
- * would report a privilege gap as a missing column.
+ * Even after a deployed app applies its migrations, drift would surface on each
+ * request as an undefined-table or undefined-column failure, so check up front.
+ * pg_catalog is read rather than information_schema, which hides objects the
+ * role cannot access and would report a privilege gap as a missing column.
  */
 export async function assertSchemaMatchesDatabase(
   dataPath: DataPath,
@@ -76,7 +76,7 @@ export async function assertSchemaMatchesDatabase(
   }
   if (problems.length > 0) {
     throw databaseSetupFailed(
-      `the declared schema does not match the database: ${problems.join("; ")}. Create or migrate these before starting the app; the plugin does not.`,
+      `the declared schema does not match the database: ${problems.join("; ")}. Create them, or commit migrations under config/database/migrations and set APPKIT_DB_MIGRATE_ON_START=true in app.yaml so the deployed app applies them on start.`,
     );
   }
 }
