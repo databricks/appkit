@@ -319,6 +319,17 @@ describe("generateMigrationFiles", () => {
     expect(listFiles(folder)).toEqual(before);
   });
 
+  test("rejects a tag that is not a safe file name", async () => {
+    await expect(
+      generate({
+        folder: tempFolder(),
+        schema: blog(),
+        tag: "../escape",
+        interactive: false,
+      }),
+    ).rejects.toThrow(/lowercase letters/);
+  });
+
   test("refuses to diff when the latest snapshot is missing", async () => {
     const folder = tempFolder();
     await generate({
@@ -357,6 +368,26 @@ describe("generateMigrationFiles", () => {
         `^Cannot read ${snapshot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: .+\\. Restore it from version control\\.$`,
       ),
     );
+  });
+
+  test("beforeWrite sees the SQL first, and throwing from it writes nothing", async () => {
+    const folder = tempFolder();
+    const seen: string[][] = [];
+
+    const error = await generate({
+      folder,
+      schema: blog(),
+      interactive: false,
+      beforeWrite: (statements) => {
+        seen.push([...statements]);
+        throw new Error("refused");
+      },
+    }).catch((caught: unknown) => caught);
+
+    expect((error as Error).message).toBe("refused");
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.join("\n")).toContain('CREATE TABLE "app"."authors"');
+    expect(listFiles(folder)).toEqual([]);
   });
 });
 

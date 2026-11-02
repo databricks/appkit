@@ -10,6 +10,7 @@ const exports: DatabaseTooling<DbContext> = tooling;
 
 const contractKeys = {
   createDbContext: true,
+  runIntrospect: true,
   runMigrate: true,
 } satisfies Record<keyof DatabaseTooling, true>;
 

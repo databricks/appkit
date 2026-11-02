@@ -26,8 +26,12 @@ export const DRIZZLE_KIT_VERSION = "0.31.10";
 
 interface GenerateOptions {
   readonly schema: Schema;
+  /** Default "migration" → "NNNN_migration". */
+  readonly tag?: string;
   /** false: an ambiguous rename throws instead of prompting. */
   readonly interactive: boolean;
+  /** Sees the SQL before anything is written; throwing writes nothing. */
+  readonly beforeWrite?: (statements: readonly string[]) => void;
 }
 
 export interface GeneratedMigration {
@@ -61,7 +65,7 @@ export class MigrationRenameAmbiguityError extends Error {
       kind === "column" ? `columns of table "${table}"` : `${kind}s`;
     super(
       `Cannot tell whether ${scope} were renamed: removed ${deleted.join(", ")}; added ${created.join(", ")}. ` +
-        "Run `appkit db migrate` in an interactive terminal to choose between a rename and a drop plus create.",
+        "Run the command in an interactive terminal to choose between a rename and a drop plus create.",
     );
     this.name = "MigrationRenameAmbiguityError";
     this.kind = kind;
@@ -74,6 +78,7 @@ export class MigrationRenameAmbiguityError extends Error {
 /** drizzle-kit's statement separator in v7 migration files. */
 const BREAKPOINT = "--> statement-breakpoint\n";
 const ORIGIN_ID = "00000000-0000-0000-0000-000000000000";
+const TAG_NAME = /^[a-z0-9_]+$/;
 
 /** The parts of a drizzle-kit PostgreSQL snapshot this module reads. */
 interface Snapshot {
@@ -291,13 +296,19 @@ function writeFileAtomic(file: string, content: string): void {
 
 /**
  * Diff the schema against the latest committed snapshot with drizzle-kit and
- * write the next v7 migration: `NNNN_migration.sql`, `meta/NNNN_snapshot.json`,
+ * write the next v7 migration: `NNNN_<tag>.sql`, `meta/NNNN_snapshot.json`,
  * and the appended `meta/_journal.json`. null when nothing changed.
  */
 export async function generateMigrationFiles(
   lock: HistoryLock,
   options: GenerateOptions,
 ): Promise<GeneratedMigration | null> {
+  const name = options.tag ?? "migration";
+  if (!TAG_NAME.test(name)) {
+    throw new Error(
+      `Migration tag "${name}" must use lowercase letters, digits and underscores`,
+    );
+  }
   const { generateDrizzleJson, generateMigration } = await loadDrizzleKit();
   const { folder } = lock;
 
@@ -322,11 +333,12 @@ export async function generateMigrationFiles(
     cur as unknown as KitSnapshot,
   );
   if (statements.length === 0) return null;
+  options.beforeWrite?.(statements);
 
   const entries = journal?.entries ?? [];
   const last = entries.at(-1);
   const idx = last ? last.idx + 1 : 0;
-  const tag = `${migrationPrefix(idx)}_migration`;
+  const tag = `${migrationPrefix(idx)}_${name}`;
   const entry: JournalEntry = {
     idx,
     version: "7",

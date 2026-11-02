@@ -3,7 +3,7 @@ import process from "node:process";
 
 import pc from "picocolors";
 
-import type { MigrateReport } from "./tooling-contract";
+import type { IntrospectReport, MigrateReport } from "./tooling-contract";
 
 /** Prompts only when a human can answer them. */
 export function isInteractive(): boolean {
@@ -12,6 +12,11 @@ export function isInteractive(): boolean {
 
 export function relative(file: string): string {
   return path.relative(process.cwd(), file) || file;
+}
+
+/** The last segment of a Lakebase resource name: projects/p/branches/dev-a → dev-a. */
+function shortName(name: string): string {
+  return name.slice(name.lastIndexOf("/") + 1);
 }
 
 export const ok = (message: string) =>
@@ -71,5 +76,46 @@ export function printMigrateReport(report: MigrateReport): void {
     info("The .env branch is up to date");
   }
 
+  ok(`Generated ${relative(report.typesFile)}`);
+}
+
+export function printIntrospectReport(report: IntrospectReport): void {
+  const count = report.tables.length;
+  ok(
+    `Wrote ${relative(report.schemaFile)} from schema ${report.schemaName} on ${shortName(report.branch)} (${count} table${count === 1 ? "" : "s"})${report.backupFile ? `; the previous file is ${relative(report.backupFile)}` : ""}`,
+  );
+  for (const skip of report.skipped) {
+    warn(
+      `Skipped ${skip.column ? `${skip.table}.${skip.column}` : `table ${skip.table}`}: ${skip.reason}`,
+    );
+  }
+  for (const warning of report.warnings) {
+    console.log(`${pc.bold(pc.red("!"))} ${pc.bold(warning)}`);
+  }
+  for (const difference of report.approximated) {
+    info(`Approximated ${difference}`);
+  }
+  if (report.approximated.length > 0) {
+    info(
+      "This branch keeps the approximated objects as they are; a database the migrations create gets what schema.ts declares.",
+    );
+  }
+  if (report.migration) {
+    const statements = report.migration.statements.length;
+    ok(
+      `Generated ${relative(report.migration.file)} (${statements} statement${statements === 1 ? "" : "s"})`,
+    );
+  } else {
+    info(
+      report.tables.length === 0
+        ? "No migration needed: schema.ts has no tables"
+        : "No migration needed: the migrations already describe this schema",
+    );
+  }
+  if (report.recorded.length > 0) {
+    ok(
+      `Recorded ${report.recorded.join(", ")} as applied on ${shortName(report.branch)}: the branch already has ${report.recorded.length === 1 ? "what it describes" : "what they describe"}`,
+    );
+  }
   ok(`Generated ${relative(report.typesFile)}`);
 }
