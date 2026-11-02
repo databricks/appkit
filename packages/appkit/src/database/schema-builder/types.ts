@@ -157,6 +157,7 @@ export type TableHandle<C extends Record<string, unknown>> = AppKitTable & {
 };
 
 export interface DefineSchemaOptions {
+  /** Postgres schema of every table. Default: `"app"`. */
   readonly schemaName?: string;
 }
 

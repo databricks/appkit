@@ -50,6 +50,15 @@ export function ownershipHint(
       "On the deploy branch that role is the app's service principal: bind the database to the app with CAN_CONNECT_AND_CREATE."
     );
   }
+  if (
+    ownership?.schemaName === "public" &&
+    ownership.owner !== ownership.currentUser
+  ) {
+    return (
+      `Schema public belongs to "${ownership.owner}", and the app's role "${ownership.currentUser}" has no CREATE on it. ` +
+      `Grant it once with GRANT CREATE ON SCHEMA public TO "${ownership.currentUser}", or drop schemaName from defineSchema() to use the default schema app, which the app creates and owns.`
+    );
+  }
   if (ownership && ownership.owner !== ownership.currentUser) {
     return (
       `Schema "${ownership.schemaName}" is owned by "${ownership.owner}", but the app connects as "${ownership.currentUser}". ` +

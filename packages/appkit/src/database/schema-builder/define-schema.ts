@@ -340,6 +340,13 @@ export function assertFinalizedSchema(value: unknown): asserts value is Schema {
 }
 
 /**
+ * Postgres schema of every table when `schemaName` is omitted. Not `public`:
+ * the deployed app's service principal can create and own a schema of its
+ * own, but has no CREATE on `public`.
+ */
+const DEFAULT_SCHEMA_NAME = "app";
+
+/**
  * Compile one declared schema. The returned type keeps the table names the
  * builder returned, so `api.tables` and `hooks` can name only real tables.
  */
@@ -347,7 +354,7 @@ export function defineSchema<TTables extends Record<string, AppKitTable>>(
   builder: (context: SchemaBuilderContext) => TTables,
   options?: DefineSchemaOptions,
 ): Schema<Extract<keyof TTables, string>> {
-  const schemaName = options?.schemaName ?? "public";
+  const schemaName = options?.schemaName ?? DEFAULT_SCHEMA_NAME;
   if (!schemaName) throw new SchemaBuildError("Schema name cannot be empty");
 
   const state: DeclarationState = {

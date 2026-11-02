@@ -23,22 +23,26 @@ import {
 } from "../engine/drizzle-data-path";
 import { returningColumns } from "../engine/translate";
 
-const schema = defineSchema((builder) => {
-  const users = builder.table("users", {
-    id: id(),
-    email: text().unique(),
-    name: text(),
-    active: boolean(),
-    secret: text().private(),
-  });
-  const posts = builder.table("posts", {
-    id: id(),
-    authorId: fk(() => users.id),
-    title: text(),
-    secret: text().private(),
-  });
-  return { users, posts };
-});
+// Explicitly public: the order-by assertion expects unqualified SQL ("users"."secret").
+const schema = defineSchema(
+  (builder) => {
+    const users = builder.table("users", {
+      id: id(),
+      email: text().unique(),
+      name: text(),
+      active: boolean(),
+      secret: text().private(),
+    });
+    const posts = builder.table("posts", {
+      id: id(),
+      authorId: fk(() => users.id),
+      title: text(),
+      secret: text().private(),
+    });
+    return { users, posts };
+  },
+  { schemaName: "public" },
+);
 
 const users = schema.$tables.users;
 const naturalKeySchema = defineSchema((builder) => ({

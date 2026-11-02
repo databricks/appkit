@@ -20,10 +20,10 @@ import { MigrationFilesError } from "../../../database/migrations/paths";
 import { defineSchema, id } from "../../../database/schema-builder";
 import { migrateOnStart, shouldMigrateOnStart } from "../migrate-on-start";
 
-const schema = defineSchema(
-  ({ table }) => ({ notes: table("notes", { id: id() }) }),
-  { schemaName: "app" },
-);
+// The default schema, app, holds the journal too.
+const schema = defineSchema(({ table }) => ({
+  notes: table("notes", { id: id() }),
+}));
 const roots: string[] = [];
 const pool = { connect: vi.fn() };
 const deployEnv = {

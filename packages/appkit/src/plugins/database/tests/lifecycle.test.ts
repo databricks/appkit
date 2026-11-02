@@ -209,7 +209,7 @@ describe("createDatabaseState", () => {
     const drift = new DatabasePluginError(
       "SETUP_FAILED",
       "setup",
-      "Database setup failed: table public.tags does not exist",
+      "Database setup failed: table app.tags does not exist",
     );
     mocks.assertSchemaMatchesDatabase.mockRejectedValueOnce(drift);
 
@@ -223,7 +223,7 @@ describe("createDatabaseState", () => {
       schema,
     );
     expect(error).toBe(drift);
-    expect(error.message).toContain("table public.tags does not exist");
+    expect(error.message).toContain("table app.tags does not exist");
     expect(pool.end).toHaveBeenCalledTimes(1);
   });
 
