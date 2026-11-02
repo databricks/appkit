@@ -13,7 +13,12 @@ import {
   runCommand,
 } from "./drizzle-kit-install";
 import { refuseSymlink, updateEnvFile } from "./env-file";
-import { classifyBranch, deployRefusal, takesWrites } from "./guard";
+import {
+  classifyBranch,
+  deployRefusal,
+  takesWrites,
+  writeRefusal,
+} from "./guard";
 import { handOffAppSchema } from "./hand-off";
 import { type HistoryLock, withHistoryLock } from "./history-lock";
 import { currentIdentity, type Identity } from "./identity";
@@ -205,6 +210,10 @@ function branchLimitError(
   return new Error(message, { cause });
 }
 
+/** What init says after refusing a branch, unless every branch is refused. */
+const INIT_SETS_UP =
+  "`appkit db init` only sets up your dev branch or this checkout's session branch";
+
 /**
  * Your dev branch or this checkout's session branch: found with one GET, or
  * forked from the project's default branch. The branch id is resolved and
@@ -235,7 +244,7 @@ async function findOrCreateBranch(
     });
     if (!takesWrites(verdict.kind)) {
       throw new Error(
-        `Refusing to set up ${resourceId(branch.name)}: ${verdict.reason}. \`appkit db init\` only sets up your dev branch or this checkout's session branch.`,
+        `Refusing to set up ${writeRefusal(`${resourceId(branch.name)}: ${verdict.reason}`, boundary, INIT_SETS_UP)}.`,
       );
     }
     onStep(`Using ${resourceId(branch.name)}`);
@@ -261,7 +270,7 @@ async function findOrCreateBranch(
     const refusal = deployRefusal(boundary, name);
     if (refusal) {
       throw new Error(
-        `Refusing to set up ${resourceId(name)}: ${refusal}. \`appkit db init\` only sets up your dev branch or this checkout's session branch.`,
+        `Refusing to set up ${writeRefusal(`${resourceId(name)}: ${refusal}`, boundary, INIT_SETS_UP)}.`,
       );
     }
     const existing = await api.getBranch(name);

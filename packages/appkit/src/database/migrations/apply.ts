@@ -582,6 +582,8 @@ interface MigrationDrift {
   readonly pending: readonly string[];
   /** Committed, not recorded, older than the last recorded one. */
   readonly stranded: readonly string[];
+  /** Recorded, but the committed file changed since. */
+  readonly edited: readonly string[];
   /** Recorded rows no committed migration matches: the branch is ahead of the checkout. */
   readonly unknown: number;
 }
@@ -592,6 +594,7 @@ function driftOf(
   return {
     pending: tags(history.pending),
     stranded: tags(history.stranded),
+    edited: tags(history.edited),
     unknown: history.unknown.length,
   };
 }

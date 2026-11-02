@@ -189,8 +189,11 @@ export async function introspectHolding(
   if (!env) throw new Error(`Did not introspect: ${NO_ENV_BRANCH}.`);
   if (!takesWrites(env.kind)) {
     throw new IntrospectRefusedError(
-      `Refusing to introspect: ${notYourBranch(env)}. Introspect records the migration it writes as applied, so it runs only on branches \`appkit db init\` created for you. ` +
-        `Run \`appkit db init\`: it creates your dev branch from the project's default branch, and introspects it when there is no ${DEFAULT_SCHEMA_FILE}.`,
+      `Refusing to introspect: ${notYourBranch(
+        env,
+        "Introspect records the migration it writes as applied, so it runs only on branches `appkit db init` created for you. " +
+          `Run \`appkit db init\`: it creates your dev branch from the project's default branch, and introspects it when there is no ${DEFAULT_SCHEMA_FILE}`,
+      )}.`,
     );
   }
   const branchId = resourceId(env.branch.name);

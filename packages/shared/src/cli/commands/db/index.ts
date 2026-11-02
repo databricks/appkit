@@ -5,6 +5,7 @@ import { dbInitCommand } from "./init";
 import { dbIntrospectCommand } from "./introspect";
 import { dbMigrateCommand } from "./migrate";
 import { dbSeedCommand } from "./seed";
+import { dbVerifyCommand } from "./verify";
 
 /**
  * Lakebase database lifecycle for the DatabasePlugin. The logic lives in
@@ -16,4 +17,5 @@ export const dbCommand = new Command("db")
   .addCommand(dbMigrateCommand)
   .addCommand(dbIntrospectCommand)
   .addCommand(dbCleanCommand)
-  .addCommand(dbSeedCommand);
+  .addCommand(dbSeedCommand)
+  .addCommand(dbVerifyCommand);

@@ -67,6 +67,44 @@ export type InitStart =
       readonly migrate: MigrateReport;
     };
 
+export interface VerifyOptions {
+  readonly deployed?: boolean;
+  readonly target?: string;
+}
+
+export interface LocalVerifyReport {
+  readonly kind: "local";
+  readonly branch: string;
+  readonly schemaProblems: readonly string[];
+  readonly pendingMigrations: readonly string[];
+  readonly strandedMigrations: readonly string[];
+  readonly editedMigrations: readonly string[];
+  readonly unknownMigrations: number;
+  readonly ok: boolean;
+}
+
+export interface DeployVerifyReport {
+  readonly kind: "deploy";
+  readonly target: string;
+  readonly host: string | null;
+  readonly branch: string;
+  readonly app: string | null;
+  readonly migrations:
+    | { readonly evidence: "verified" }
+    | {
+        readonly evidence: "differs";
+        readonly missing: readonly string[];
+        readonly changed: readonly string[];
+        readonly unknown: readonly string[];
+      }
+    | { readonly evidence: "unavailable"; readonly reason: string }
+    | null;
+  readonly problems: readonly string[];
+  readonly ok: boolean;
+}
+
+export type VerifyReport = LocalVerifyReport | DeployVerifyReport;
+
 export interface InitReport {
   readonly mode: BranchMode;
   readonly branch: string;
@@ -117,4 +155,8 @@ export interface DatabaseTooling<Ctx extends DbContext = DbContext> {
   readonly runSeed: (
     ctx: Ctx,
   ) => Promise<{ readonly branch: string; readonly file: string }>;
+  readonly runVerify: (
+    ctx: Ctx,
+    options?: VerifyOptions,
+  ) => Promise<VerifyReport>;
 }

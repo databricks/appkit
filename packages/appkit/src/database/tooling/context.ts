@@ -28,7 +28,7 @@ export interface ToolingWorkspaceClient {
   readonly currentUser: {
     me(request: { attributes?: string }): Promise<{ userName?: string }>;
   };
-  /** The resolved workspace host, which init writes to a new .env. */
+  /** The resolved workspace host, which init writes to a new .env and verify compares with a target's host. */
   getHost(): Promise<string>;
 }
 
