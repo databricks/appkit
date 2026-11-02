@@ -81,6 +81,10 @@ sets `APPKIT_DB_MIGRATE_ON_START=true`. To adopt tables that already exist, run
 `npx appkit db clean` drops the app schema on your branch, and `npx appkit db seed`
 runs `config/database/seed.sql` on it; both refuse any branch `db init` did not
 create for you, such as the deployed one.
+
+In CI, `npx appkit db check` fails a pull request whose `schema.ts` change has no
+migration, or whose migrations are out of order or missing files. It reads only the
+checkout, so it needs no Databricks credentials.
 {{- end}}
 
 ### CLI Authentication

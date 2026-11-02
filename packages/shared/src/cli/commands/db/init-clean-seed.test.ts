@@ -107,7 +107,7 @@ afterEach(() => {
 });
 
 describe("appkit db init", () => {
-  test("registers init, migrate, introspect, clean, seed and verify", () => {
+  test("registers init, migrate, introspect, clean, seed, verify and check", () => {
     expect(dbCommand.commands.map((c) => c.name())).toEqual([
       "init",
       "migrate",
@@ -115,6 +115,7 @@ describe("appkit db init", () => {
       "clean",
       "seed",
       "verify",
+      "check",
     ]);
   });
 

@@ -6,6 +6,7 @@
  * Beta and internal to the AppKit CLI: it has no semver guarantee, and only
  * the CLI of the same AppKit release should import it.
  */
+export { type CheckReport, runCheck } from "./check";
 export {
   type CleanReport,
   deleteSessionBranch,

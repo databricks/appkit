@@ -310,6 +310,51 @@ function writeFileAtomic(file: string, content: string): void {
   }
 }
 
+/** The SQL from the latest committed snapshot to the schema, and the schema's snapshot. */
+async function diffSchema(
+  folder: string,
+  journal: Journal | null,
+  schema: Schema,
+  interactive: boolean,
+): Promise<{ cur: Snapshot; statements: string[] }> {
+  const { generateDrizzleJson, generateMigration } = await loadDrizzleKit();
+  const prev = latestSnapshot(folder, journal);
+  const cur = generateDrizzleJson(drizzleKitImports(schema), prev.id, [
+    schema.$schemaName,
+  ]) as unknown as Snapshot;
+
+  if (!interactive) {
+    const ambiguity = findRenameAmbiguity(prev, cur, schema.$schemaName);
+    if (ambiguity) throw ambiguity;
+  }
+
+  type KitSnapshot = Parameters<typeof generateMigration>[0];
+  const statements = await generateMigration(
+    prev as unknown as KitSnapshot,
+    cur as unknown as KitSnapshot,
+  );
+  return { cur, statements };
+}
+
+/** Whether `appkit db migrate` would write a migration for the schema. Writes nothing. */
+export async function hasUnmigratedChanges(
+  folder: string,
+  schema: Schema,
+): Promise<boolean> {
+  try {
+    const { statements } = await diffSchema(
+      folder,
+      readJournal(folder),
+      schema,
+      false,
+    );
+    return statements.length > 0;
+  } catch (error) {
+    if (error instanceof MigrationRenameAmbiguityError) return true;
+    throw error;
+  }
+}
+
 /**
  * Diff the schema against the latest committed snapshot with drizzle-kit and
  * write the next v7 migration: `NNNN_<tag>.sql`, `meta/NNNN_snapshot.json`,
@@ -325,28 +370,13 @@ export async function generateMigrationFiles(
       `Migration tag "${name}" must use lowercase letters, digits and underscores`,
     );
   }
-  const { generateDrizzleJson, generateMigration } = await loadDrizzleKit();
   const { folder } = lock;
-
   const journal = readJournal(folder);
-  const prev = latestSnapshot(folder, journal);
-  const cur = generateDrizzleJson(drizzleKitImports(options.schema), prev.id, [
-    options.schema.$schemaName,
-  ]) as unknown as Snapshot;
-
-  if (!options.interactive) {
-    const ambiguity = findRenameAmbiguity(
-      prev,
-      cur,
-      options.schema.$schemaName,
-    );
-    if (ambiguity) throw ambiguity;
-  }
-
-  type KitSnapshot = Parameters<typeof generateMigration>[0];
-  const statements = await generateMigration(
-    prev as unknown as KitSnapshot,
-    cur as unknown as KitSnapshot,
+  const { cur, statements } = await diffSchema(
+    folder,
+    journal,
+    options.schema,
+    options.interactive,
   );
   if (statements.length === 0) return null;
   options.beforeWrite?.(statements);

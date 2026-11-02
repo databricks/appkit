@@ -175,6 +175,7 @@ project whose default branch holds only data every developer may see.
 | `npx appkit db clean` | Drops the app schema on your branch; `migrate` then rebuilds it from the migrations. `--delete-branch` deletes your session branch instead. |
 | `npx appkit db seed` | Runs `config/database/seed.sql` on your branch in one transaction. |
 | `npx appkit db verify` | Read-only check of your branch: missing tables or columns, pending migrations, migrations that will never run there, and migrations it ran that this checkout does not commit. `--deployed` checks a target's deployed app instead. |
+| `npx appkit db check` | Offline check of the committed migrations, for CI: their order and files, and no `schema.ts` change without a migration. |
 
 `migrate`, `clean` and `seed` change only branches `db init` created for you (your
 dev branch, or this checkout's session branch). A session branch name includes a
@@ -222,11 +223,11 @@ protected branches.
 
 While `migrate`, `introspect`, `clean` or `init` runs, it holds
 `config/database/.appkit-db.lock`. Another of these commands in the same
-checkout fails and names the process that holds the lock. `seed`, `verify` and
-`clean --delete-branch` change no migration history and take no lock. The lock
-goes when the command finishes or exits. `init` holds it for its whole run,
-including the clean and migrate it starts. `init --schema none` changes no
-migration history, so it takes no lock.
+checkout fails and names the process that holds the lock. `seed`, `verify`,
+`check` and `clean --delete-branch` change no migration history and take no
+lock. The lock goes when the command finishes or exits. `init` holds it for its
+whole run, including the clean and migrate it starts. `init --schema none`
+changes no migration history, so it takes no lock.
 
 A command stopped by a signal, such as SIGKILL, can leave the file behind. The
 next command then names the holder. When that process no longer runs, the
@@ -351,8 +352,33 @@ access to the deploy branch's database and changes nothing. A failed check names
 
 ### CI
 
-`appkit db init` sets up branches for developers, and CI does not need one. After
-a deploy, check the deployed app with workspace credentials:
+`appkit db init` sets up branches for developers, and CI does not need one. On
+every pull request, run the offline check after installing the app's
+dependencies:
+
+```bash
+npx appkit db check
+```
+
+It reads only the checkout, so it needs no Databricks or Lakebase credentials. It
+exits 1 when:
+
+- `schema.ts` changed and no committed migration has the change;
+- a migration is listed after one generated later, which a branch that ran the
+  later one never runs;
+- two migrations were generated from the same snapshot on parallel git branches;
+- an entry's `idx` is not its position in the journal;
+- a migration's `.sql` or snapshot is not committed, a snapshot is not a
+  drizzle-kit snapshot, or a `.sql` is not in the journal.
+
+Two pull requests that each add a migration conflict in
+`config/database/migrations` once one of them is merged, and keeping both sides
+fails the check. Resolve the conflict with the base branch's migrations instead:
+merge the base branch, reset `config/database/migrations` to the base branch's,
+then run `npx appkit db clean` and `npx appkit db migrate`. `migrate` writes your
+change again after the base branch's migrations.
+
+After a deploy, check the deployed app with workspace credentials:
 
 ```bash
 databricks apps deploy -t prod

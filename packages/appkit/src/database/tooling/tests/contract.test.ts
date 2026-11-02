@@ -10,6 +10,7 @@ const exports: DatabaseTooling<DbContext> = tooling;
 
 const contractKeys = {
   createDbContext: true,
+  runCheck: true,
   deleteSessionBranch: true,
   previewClean: true,
   runClean: true,
