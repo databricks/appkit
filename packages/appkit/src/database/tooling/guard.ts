@@ -1,4 +1,4 @@
-import { type DbContext, hasEnvBranch } from "./context";
+import { type DbContext, hasEnvBranch, NO_ENV_BRANCH } from "./context";
 import { currentIdentity } from "./identity";
 import type { LakebaseBranch } from "./lakebase-api";
 import { devBranchId, sessionBranchId } from "./naming";
@@ -29,7 +29,7 @@ interface Classification {
  * Why databricks.yml makes a branch one it deploys to; null when it does not.
  * A reference the files cannot resolve may name any branch, so it refuses all.
  */
-function deployRefusal(
+export function deployRefusal(
   boundary: DeployBoundary,
   branch: string,
 ): string | null {
@@ -125,4 +125,17 @@ export async function resolveEnvBranch(
       boundary,
     }),
   };
+}
+
+/** The .env branch, for a command that only runs on your dev or session branch. */
+export async function writableEnvBranch(
+  ctx: DbContext,
+  action: string,
+): Promise<LakebaseBranch> {
+  const env = await resolveEnvBranch(ctx);
+  if (!env) throw new Error(`Did not ${action}: ${NO_ENV_BRANCH}.`);
+  if (!takesWrites(env.kind)) {
+    throw new Error(`Refusing to ${action}: ${notYourBranch(env)}.`);
+  }
+  return env.branch;
 }

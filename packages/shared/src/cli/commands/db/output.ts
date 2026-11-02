@@ -3,7 +3,11 @@ import process from "node:process";
 
 import pc from "picocolors";
 
-import type { IntrospectReport, MigrateReport } from "./tooling-contract";
+import type {
+  CleanReport,
+  IntrospectReport,
+  MigrateReport,
+} from "./tooling-contract";
 
 /** Prompts only when a human can answer them. */
 export function isInteractive(): boolean {
@@ -15,7 +19,7 @@ export function relative(file: string): string {
 }
 
 /** The last segment of a Lakebase resource name: projects/p/branches/dev-a → dev-a. */
-function shortName(name: string): string {
+export function shortName(name: string): string {
   return name.slice(name.lastIndexOf("/") + 1);
 }
 
@@ -77,6 +81,19 @@ export function printMigrateReport(report: MigrateReport): void {
   }
 
   ok(`Generated ${relative(report.typesFile)}`);
+}
+
+export function printCleanReport(report: CleanReport): void {
+  ok(
+    report.schemaName === "public"
+      ? `Removed your objects in schema public on ${shortName(report.branch)}`
+      : `Dropped schema ${report.schemaName} on ${shortName(report.branch)}`,
+  );
+  if (report.dependents.length > 0) {
+    warn(
+      `Also removed, because they depended on it: ${report.dependents.join(", ")}`,
+    );
+  }
 }
 
 export function printIntrospectReport(report: IntrospectReport): void {

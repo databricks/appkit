@@ -156,10 +156,12 @@ protected branches.
 
 ### One command at a time
 
-While `migrate` or `introspect` runs, it holds
+While `migrate`, `introspect`, `clean` or `init` runs, it holds
 `config/database/.appkit-db.lock`. A second `appkit db` command in the same
 checkout fails and names the process that holds the lock. The lock goes when
-the command finishes or exits.
+the command finishes or exits. `init` holds it for its whole run, including the
+clean and migrate it starts. `init --schema none` changes no migration history,
+so it takes no lock.
 
 A command stopped by a signal, such as SIGKILL, can leave the file behind. The
 next command then names the holder. When that process no longer runs, the

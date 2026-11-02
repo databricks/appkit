@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, test } from "vitest";
 
-import { classifyBranch, resolveEnvBranch, takesWrites } from "../guard";
+import {
+  classifyBranch,
+  resolveEnvBranch,
+  takesWrites,
+  writableEnvBranch,
+} from "../guard";
 import { devBranchId, sessionBranchId } from "../naming";
 import type { DeployBoundary } from "../targets";
 import {
@@ -224,5 +229,60 @@ describe("resolveEnvBranch", () => {
         fakeContext({ root: tempApp(), env: envFor(dev), api: lakebase.api() }),
       ),
     ).rejects.toThrow(/does not exist.*appkit db init/);
+  });
+});
+
+describe("writableEnvBranch", () => {
+  const envFor = (branch: string, sessionId?: string) => ({
+    PGHOST: "primary.example.com",
+    PGDATABASE: "databricks_postgres",
+    LAKEBASE_ENDPOINT: `${branch}/endpoints/primary`,
+    ...(sessionId ? { APPKIT_DB_SESSION: sessionId } : {}),
+  });
+
+  test("returns your dev or session branch", async () => {
+    const lakebase = new FakeLakebase();
+    lakebase.addBranch(dev);
+    lakebase.addBranch(session);
+
+    await expect(
+      writableEnvBranch(
+        fakeContext({ root: tempApp(), env: envFor(dev), api: lakebase.api() }),
+        "seed",
+      ),
+    ).resolves.toMatchObject({ name: dev });
+    await expect(
+      writableEnvBranch(
+        fakeContext({
+          root: tempApp(),
+          env: envFor(session, "k2x9q0ab"),
+          api: lakebase.api(),
+        }),
+        "seed",
+      ),
+    ).resolves.toMatchObject({ name: session });
+  });
+
+  test("refuses another branch, and says what to run without one", async () => {
+    const lakebase = new FakeLakebase();
+    lakebase.addBranch(`${P}/branches/production`, { default: true });
+
+    await expect(
+      writableEnvBranch(
+        fakeContext({
+          root: tempApp(),
+          env: envFor(`${P}/branches/production`),
+          api: lakebase.api(),
+        }),
+        "clean",
+      ),
+    ).rejects.toThrow(
+      "Refusing to clean: production is not your dev or session branch (it is the project's default branch).",
+    );
+    await expect(
+      writableEnvBranch(fakeContext({ root: tempApp() }), "seed"),
+    ).rejects.toThrow(
+      "Did not seed: no branch is configured in .env (PGHOST, PGDATABASE and LAKEBASE_ENDPOINT); run `appkit db init`.",
+    );
   });
 });

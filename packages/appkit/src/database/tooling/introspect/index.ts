@@ -172,7 +172,8 @@ export async function runIntrospect(
   );
 }
 
-async function introspectHolding(
+/** runIntrospect for a caller that already holds the checkout's history lock. */
+export async function introspectHolding(
   ctx: DbContext,
   lock: HistoryLock,
   options: IntrospectOptions,

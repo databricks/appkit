@@ -182,6 +182,29 @@ describe("runMigrate", () => {
     expect(fs.existsSync(report.typesFile)).toBe(true);
   });
 
+  test("generate: false applies the committed migrations without writing new ones", async () => {
+    const ctx = app(`notes: table("notes", { id: id() })`);
+    resolveEnvBranch.mockResolvedValue(null);
+    await runMigrate(ctx, { interactive: false });
+    writeSchema(ctx.root, `notes: table("notes", { id: id(), body: text() })`);
+
+    resolveEnvBranch.mockResolvedValue(devBranch);
+    applyPendingMigrations.mockResolvedValue({
+      applied: ["0000_migration"],
+      adopted: [],
+    });
+    const report = await runMigrate(ctx, {
+      interactive: false,
+      generate: false,
+    });
+
+    expect(report.generated).toBeNull();
+    expect(report.applied).toEqual(["0000_migration"]);
+    expect(
+      fs.readdirSync(path.join(ctx.root, "config/database/migrations")),
+    ).toEqual(["0000_migration.sql", "meta"]);
+  });
+
   test("reports a baseline adopted without running it", async () => {
     const ctx = app(`notes: table("notes", { id: id() })`);
     resolveEnvBranch.mockResolvedValue(null);
