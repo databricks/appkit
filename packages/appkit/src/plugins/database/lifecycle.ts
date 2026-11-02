@@ -1,5 +1,9 @@
 import { initializeLakebasePool } from "../../connectors/lakebase";
 import {
+  DEFAULT_POOL_MAX,
+  watchPoolSaturation,
+} from "../../connectors/lakebase/pool-saturation";
+import {
   classifyDatabaseError,
   DatabasePluginError,
 } from "../../database/errors";
@@ -25,7 +29,7 @@ import type {
 } from "./entity-types";
 import { assertSchemaMatchesDatabase } from "./schema-check";
 import { createMutationScope, type MutationScope } from "./scope";
-import type { DatabaseHooks } from "./types";
+import type { DatabaseHooks, DatabasePoolConfig } from "./types";
 
 const logger = createLogger("database");
 
@@ -170,6 +174,7 @@ export async function createDatabaseState<TSchema extends Schema>(
   schema: TSchema,
   execute: EntityExecute,
   hooks?: DatabaseHooks,
+  poolConfig?: DatabasePoolConfig,
 ): Promise<DatabaseState> {
   try {
     assertFinalizedSchema(schema);
@@ -184,10 +189,15 @@ export async function createDatabaseState<TSchema extends Schema>(
     if (!active) throw new DatabasePluginError("INTERNAL", "runtime");
   };
   try {
+    const max = poolConfig?.max ?? DEFAULT_POOL_MAX;
     pool = await initializeLakebasePool({
+      idleTimeoutMillis: poolConfig?.idleTimeoutMillis,
+      connectionTimeoutMillis: poolConfig?.connectionTimeoutMillis,
+      max,
       statement_timeout: STATEMENT_TIMEOUT_MS,
       idle_in_transaction_session_timeout: IDLE_IN_TRANSACTION_TIMEOUT_MS,
     });
+    watchPoolSaturation(pool, { name: "database", max, logger });
     const db = createDrizzleDb(pool, schema);
     const dataPath = createDrizzleDataPath(db, schema, {
       columnAccess: "trusted",

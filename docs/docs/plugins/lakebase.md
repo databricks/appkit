@@ -106,7 +106,7 @@ await createApp({
   plugins: [
     lakebase({
       pool: {
-        max: 10,                      // Max pool connections (default: 10)
+        max: 105,                     // Max pool connections (default: 105)
         connectionTimeoutMillis: 5000, // Connection timeout ms (default: 10000)
         idleTimeoutMillis: 30000,      // Idle connection timeout ms (default: 30000)
       },

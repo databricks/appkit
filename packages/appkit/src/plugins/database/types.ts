@@ -79,6 +79,24 @@ export type EntityHooks<TTable extends string = string> =
 /** Hooks addressed by runtime table name, once the typed keys are erased. */
 export type DatabaseHooks = Readonly<Record<string, EntityHooks | undefined>>;
 
+/**
+ * Connection pool overrides. Statement and idle-in-transaction timeouts are
+ * fixed by the plugin and cannot be changed here.
+ */
+export interface DatabasePoolConfig {
+  /**
+   * Maximum connections held by the pool. Must stay below the Lakebase
+   * compute's connection limit shared by every app instance.
+   *
+   * @defaultValue 105, the limit of the smallest (0.5 CU) compute
+   */
+  readonly max?: number;
+  /** Milliseconds an idle connection stays open. @defaultValue 30000 */
+  readonly idleTimeoutMillis?: number;
+  /** Milliseconds to wait for a free connection. @defaultValue 10000 */
+  readonly connectionTimeoutMillis?: number;
+}
+
 /** Configuration for one schema-bound DatabasePlugin instance. */
 export type IDatabaseConfig<TSchema extends Schema = DefaultDatabaseSchema> = {
   /**
@@ -103,4 +121,9 @@ export type IDatabaseConfig<TSchema extends Schema = DefaultDatabaseSchema> = {
   readonly hooks?: {
     readonly [TTable in SchemaTableName<TSchema>]?: EntityHooks<TTable>;
   };
+  /**
+   * Overrides for the connection pool. A warning is logged when callers queue
+   * because every connection is in use.
+   */
+  readonly pool?: DatabasePoolConfig;
 };
