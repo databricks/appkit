@@ -18,6 +18,7 @@ import {
 } from "./session";
 import type {
   DatabaseOperationInput,
+  DatabaseOperationArgs,
   DatabaseOperationName,
   DatabaseOperationOutput,
 } from "./types";
@@ -41,7 +42,8 @@ export interface DatabaseApi extends DatabaseEntityApi {
    * answer, or `undefined` when it answers without a body. The name, input,
    * and output come from the generated `database-operations.d.ts`; the URL and method
    * come from what the server published at boot. A name the server did not
-   * publish rejects with `NOT_EXPOSED` without a request.
+   * publish rejects with `NOT_EXPOSED` without a request. Operations without
+   * parameters need only their name; pass `undefined` before request options.
    *
    * @example
    * ```typescript
@@ -51,8 +53,10 @@ export interface DatabaseApi extends DatabaseEntityApi {
    */
   execute<N extends DatabaseOperationName>(
     name: N,
-    input: DatabaseOperationInput<N>,
-    options?: DatabaseRequestOptions,
+    ...args: DatabaseOperationArgs<
+      DatabaseOperationInput<N>,
+      DatabaseRequestOptions
+    >
   ): Promise<DatabaseOperationOutput<N>>;
 }
 
@@ -185,9 +189,10 @@ export function prepareDatabaseOperation(
   kind?: DatabaseOperationKind,
 ): DatabaseOperationCall {
   const { url: path, method } = resolve(name, kind);
-  const json = encode(input);
+  const json = input === undefined ? undefined : encode(input);
   if (method === "GET") {
-    const url = `${path}?input=${encodeURIComponent(json)}`;
+    const url =
+      json === undefined ? path : `${path}?input=${encodeURIComponent(json)}`;
     const init: RequestInit = {
       method,
       cache: "no-store",
@@ -402,11 +407,14 @@ export const databaseApi: DatabaseApi = {
   ...databaseEntityApi,
   async execute<N extends DatabaseOperationName>(
     name: N,
-    input: DatabaseOperationInput<N>,
-    options: DatabaseRequestOptions = {},
+    ...args: DatabaseOperationArgs<
+      DatabaseOperationInput<N>,
+      DatabaseRequestOptions
+    >
   ): Promise<DatabaseOperationOutput<N>> {
+    const [input, options] = args;
     const answer = await prepareDatabaseOperation(name, input).send(
-      options.signal,
+      options?.signal,
     );
     // Generation describes the JSON this operation's route answers with.
     return answer as DatabaseOperationOutput<N>;

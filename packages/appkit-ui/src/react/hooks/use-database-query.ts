@@ -20,6 +20,7 @@ import {
 } from "@/js/database/session";
 import type {
   DatabaseOperationInput,
+  DatabaseOperationArgs,
   DatabaseOperationOutput,
   DatabaseQueryName,
 } from "@/js/database/types";
@@ -106,7 +107,7 @@ function prepare(name: string, input: unknown): Prepared {
  * {@link useDatabaseMutation} restarts every mounted query.
  *
  * @param name - A GET operation the generated registry declares
- * @param input - The operation's JSON input; an equal value on a later render
+ * @param input - Omit for parameterless operations, or pass their JSON input; an equal value on a later render
  *   keeps the request in flight
  * @param options - `enabled: false` holds the query idle
  * @returns The data, loading and error state, and `refetch`
@@ -120,9 +121,16 @@ function prepare(name: string, input: unknown): Prepared {
  */
 export function useDatabaseQuery<N extends DatabaseQueryName>(
   name: N,
-  input: DatabaseOperationInput<N>,
+  ...args: DatabaseOperationArgs<
+    DatabaseOperationInput<N>,
+    UseDatabaseQueryOptions
+  >
+): UseDatabaseQueryResult<DatabaseOperationOutput<N>>;
+export function useDatabaseQuery(
+  name: string,
+  input?: unknown,
   options: UseDatabaseQueryOptions = {},
-): UseDatabaseQueryResult<DatabaseOperationOutput<N>> {
+): UseDatabaseQueryResult<unknown> {
   const enabled = options.enabled ?? true;
   // Preparation encodes the input every render, so its URL is the identity
   // of a request whatever the input object's identity.
@@ -192,8 +200,7 @@ export function useDatabaseQuery<N extends DatabaseQueryName>(
     view = state;
   }
   return {
-    // Generation describes the JSON this operation's route answers with.
-    data: view.data as DatabaseOperationOutput<N> | undefined,
+    data: view.data,
     isLoading: view.isLoading,
     error: view.error,
     refetch,

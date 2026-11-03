@@ -255,3 +255,35 @@ export async function Unbound() {
 }
 `);
 });
+
+test("parameterless calls omit input while parameterized operations require it", () => {
+  expectEachProbeRejected(`${IMPORTS}
+${GENERATED}
+declare global {
+  interface DatabricksAppKitDatabaseOperations {
+    "notes.all": { method: "GET"; input: void; output: { id: number }[] };
+    "notes.purge": { method: "DELETE"; input: void; output: void };
+  }
+}
+export async function Calls() {
+  const all = useDatabaseQuery("notes.all");
+  useDatabaseQuery("notes.all", undefined, { enabled: false });
+  await databaseApi.execute("notes.all");
+  await databaseApi.execute("notes.purge", undefined, { signal: new AbortController().signal });
+  const purge = useDatabaseMutation("notes.purge");
+  await purge.mutate();
+  await purge.mutate(undefined);
+  const _: { id: number }[] | undefined = all.data;
+  // @ts-expect-error TS2345 a parameterless query accepts no object
+  useDatabaseQuery("notes.all", { id: 1 });
+  // @ts-expect-error TS2345 a parameterless mutation accepts no object
+  await purge.mutate({ id: 1 });
+  // @ts-expect-error TS2345 a parameterless call accepts no object
+  await databaseApi.execute("notes.all", {});
+  // @ts-expect-error TS2554 parameterized client calls still require input
+  await databaseApi.execute("notes.get");
+  // @ts-expect-error TS2554 parameterized mutations still require input
+  await useDatabaseMutation("notes.delete").mutate();
+}
+`);
+});

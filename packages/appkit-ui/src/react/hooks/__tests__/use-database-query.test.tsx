@@ -19,7 +19,7 @@ import {
 // here. The typed surface is compiled in use-database.types.test.ts.
 const useDatabaseQuery = typedUseDatabaseQuery as unknown as (
   name: string,
-  input: unknown,
+  input?: unknown,
   options?: UseDatabaseQueryOptions,
 ) => UseDatabaseQueryResult<unknown>;
 
@@ -66,6 +66,14 @@ function renderQuery(
 }
 
 describe("useDatabaseQuery", () => {
+  test("a parameterless query sends no input", async () => {
+    const { result } = renderHook(() => useDatabaseQuery("notes.get"));
+    expect(server.request(0).url).toBe("/api/database/operations/notes.get");
+    expect(server.request(0).input).toBeUndefined();
+    await answer(server.request(0), []);
+    expect(result.current.data).toEqual([]);
+  });
+
   test("reads on mount and moves from loading to the answer", async () => {
     const { result } = renderQuery();
 

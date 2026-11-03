@@ -18,7 +18,7 @@ import {
 const databaseApi = typedApi as unknown as {
   execute(
     name: string,
-    input: unknown,
+    input?: unknown,
     options?: DatabaseRequestOptions,
   ): Promise<unknown>;
 };
@@ -145,6 +145,20 @@ describe("resolving an operation", () => {
 });
 
 describe("sending input", () => {
+  test.each(Object.entries(OPERATIONS))(
+    "%s can send no input using %s",
+    async (name, method) => {
+      const pending = databaseApi.execute(name);
+      const request = server.request(0);
+      expect(request.url).toBe(operationPath(name));
+      expect(request.method).toBe(method);
+      expect(request.input).toBeUndefined();
+      expect(request.body).toBeUndefined();
+      request.respond({ ok: true });
+      await expect(pending).resolves.toEqual({ ok: true });
+    },
+  );
+
   test("a GET carries its input as one JSON query value and no body", async () => {
     const pending = databaseApi.execute("notes.get", {
       id: 9007199254740993n,
@@ -216,7 +230,7 @@ describe("sending input", () => {
       },
     };
 
-    for (const input of [undefined, cyclic, throwing, () => 1]) {
+    for (const input of [cyclic, throwing, () => 1]) {
       const error = await rejection(databaseApi.execute("notes.create", input));
       expect(error).toMatchObject({ code: "INVALID_REQUEST", status: null });
       expect(JSON.stringify(error)).not.toContain("sentinel-value");
