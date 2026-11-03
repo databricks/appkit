@@ -11,6 +11,7 @@ import {
 import {
   type DatabaseApiError,
   type DatabaseOperationOutput,
+  skipToken,
   useDatabaseMutation,
   useDatabaseQuery,
 } from "@databricks/appkit-ui/react/beta";
@@ -52,8 +53,7 @@ export function BoardExplorer() {
     boards.data?.find((entry) => entry.id === selected) ?? boards.data?.[0];
   const notes = useDatabaseQuery(
     "notes.list",
-    { board_id: board?.id ?? 0 },
-    { enabled: board !== undefined },
+    board === undefined ? skipToken : { board_id: board.id },
   );
 
   const createBoard = useDatabaseMutation("boards.create");
