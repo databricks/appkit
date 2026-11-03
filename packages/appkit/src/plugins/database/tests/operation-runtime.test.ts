@@ -696,6 +696,35 @@ describe("authorization", () => {
 });
 
 describe("execution and output", () => {
+  test("invalid schema input answers safe field details before authorization", async () => {
+    const authorize = vi.fn(() => true);
+    const execute = vi.fn(() => "ok");
+    const app = await boot([
+      define({
+        name: "notes.validate",
+        entity: "notes",
+        method: "POST",
+        input: z.object({ content: z.string().trim().min(1) }),
+        output: z.string(),
+        authorize,
+        execute,
+      }),
+    ]);
+    const reply = await app.call(
+      "POST",
+      "notes.validate",
+      { content: " " },
+      asAda,
+    );
+    expect(reply.status).toBe(400);
+    expect(json(reply)).toEqual({
+      error: "Invalid database request",
+      details: [{ path: ["content"], message: "Must not be empty" }],
+    });
+    expect(authorize).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   test("default replies project public columns and answer missing rows with 404", async () => {
     const wireBigint = z.union([z.string(), z.number()]).transform(BigInt);
     const fields = z.object({
