@@ -247,6 +247,7 @@ function ownedNoteGet(
       name: "notes.get",
       entity: "notes",
       method: "GET",
+      input: z.object({ id: z.number().int() }).strict(),
       authorize: policy({
         resource: (ctx: Ctx) => {
           spies.lookup(ctx);
@@ -285,6 +286,7 @@ describe("authentication comes first", () => {
         name: "notes.create",
         entity: "notes",
         method: "POST",
+        input: z.object({ title: z.string() }).strict(),
         authorize: () => true,
         execute: create,
       }),
@@ -473,6 +475,7 @@ describe("input", () => {
         name: "notes.create",
         entity: "notes",
         method: "POST",
+        input: z.object({ title: z.string() }).strict(),
         authorize: () => true,
         execute,
       }),
@@ -515,6 +518,7 @@ describe("input", () => {
           name: "notes.create",
           entity: "notes",
           method: "POST",
+          input: z.object({ title: z.string() }).strict(),
           authorize: () => true,
           execute,
         }),
@@ -528,109 +532,36 @@ describe("input", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  test("default inputs accept only the public contract of each method", async () => {
-    const seen: unknown[] = [];
-    const execute = (ctx: Ctx) => {
-      seen.push(ctx.input);
-      return null;
-    };
-    const app = await boot([
-      define({
-        name: "notes.create",
-        entity: "notes",
-        method: "POST",
-        authorize: () => true,
-        execute: (ctx: Ctx) => {
-          seen.push(ctx.input);
-          return { id: 1, title: "t" };
-        },
-      }),
-      define({
-        name: "notes.patch",
-        entity: "notes",
-        method: "PATCH",
-        authorize: () => true,
-        execute,
-      }),
-      define({
-        name: "notes.put",
-        entity: "notes",
-        method: "PUT",
-        authorize: () => true,
-        execute,
-      }),
-    ]);
-
-    const missing = await app.call(
-      "POST",
-      "notes.create",
-      { ownerId: "x" },
-      asAda,
-    );
-    const privateField = await app.call(
-      "POST",
-      "notes.create",
-      { title: "t", secret: "s" },
-      asAda,
-    );
-    const incomplete = await app.call(
-      "PUT",
-      "notes.put",
-      { id: 1, values: { title: "t" } },
-      asAda,
-    );
-    const readOnly = await app.call(
-      "PATCH",
-      "notes.patch",
-      { id: 1, changes: { id: 2 } },
-      asAda,
-    );
-    const bigintPatch = await app.call(
-      "PATCH",
-      "notes.patch",
-      { id: "1", changes: { views: "9007199254740993" } },
-      asAda,
-    );
-    const noChanges = await app.call(
-      "PATCH",
-      "notes.patch",
-      { id: 1, changes: {} },
-      asAda,
-    );
-    const notAnObject = await app.call(
-      "PATCH",
-      "notes.patch",
-      { id: 1, changes: "title" },
-      asAda,
-    );
-
-    expect(missing.status).toBe(400);
-    expect(json(missing).details).toEqual([
-      { path: ["title"], message: "Required" },
-    ]);
-    expect(privateField.status).toBe(400);
-    expect(JSON.stringify(json(privateField))).not.toContain("secret");
-    // Details name the field inside the member it belongs to.
-    expect([incomplete.status, json(incomplete).details]).toEqual([
-      400,
-      [{ path: ["values", "ownerId"], message: "Required" }],
-    ]);
-    expect([readOnly.status, json(readOnly).details]).toEqual([
-      400,
-      [{ path: ["changes", "id"], message: "Unknown or read-only field" }],
-    ]);
-    expect([noChanges.status, json(noChanges).details]).toEqual([
-      400,
-      [{ path: ["changes"], message: "Expected at least one change" }],
-    ]);
-    expect([notAnObject.status, json(notAnObject).details]).toEqual([
-      400,
-      [{ path: ["changes"], message: "Expected a JSON object" }],
-    ]);
-    // A missing row is a 404 even though the input decoded.
-    expect(bigintPatch.status).toBe(404);
-    expect(seen).toEqual([{ id: 1, changes: { views: 9007199254740993n } }]);
-  });
+  test.each(["GET", "POST", "PATCH", "PUT", "DELETE"])(
+    "%s without an input schema accepts no parameters and rejects unexpected input before policy execution",
+    async (method) => {
+      const authorize = vi.fn((_ctx: Ctx) => true);
+      const execute = vi.fn((_ctx: Ctx) => "ok");
+      const app = await boot([
+        define({
+          name: "notes.noInput",
+          entity: "notes",
+          method,
+          output: z.literal("ok"),
+          authorize,
+          execute,
+        }),
+      ]);
+      for (const input of [undefined, {}]) {
+        const reply = await app.call(method, "notes.noInput", input, asAda);
+        expect(reply.status).toBe(method === "POST" ? 201 : 200);
+        expect(authorize.mock.calls.at(-1)?.[0].input).toBeUndefined();
+        expect(execute.mock.calls.at(-1)?.[0].input).toBeUndefined();
+      }
+      for (const input of [{ id: 1 }, { title: "unexpected" }, null, [], 1]) {
+        expect(
+          (await app.call(method, "notes.noInput", input, asAda)).status,
+        ).toBe(400);
+      }
+      expect(authorize).toHaveBeenCalledTimes(2);
+      expect(execute).toHaveBeenCalledTimes(2);
+    },
+  );
 });
 
 describe("authorization", () => {
@@ -652,6 +583,7 @@ describe("authorization", () => {
         name: "notes.create",
         entity: "notes",
         method: "POST",
+        input: z.object({ title: z.string() }).strict(),
         authorize: () => {
           if (next instanceof Error) throw next;
           return next;
@@ -765,12 +697,31 @@ describe("authorization", () => {
 
 describe("execution and output", () => {
   test("default replies project public columns and answer missing rows with 404", async () => {
+    const wireBigint = z.union([z.string(), z.number()]).transform(BigInt);
+    const fields = z.object({
+      title: z.string(),
+      ownerId: z.string().nullable(),
+      views: wireBigint.nullable(),
+    });
+    const inputs: Record<string, z.ZodType> = {
+      POST: fields.partial().required({ title: true }),
+      PATCH: z.object({ id: z.number(), changes: fields.partial() }),
+      PUT: z.object({ id: z.number(), values: fields }),
+      DELETE: z.object({ id: z.number() }),
+    };
     const owned = (
       method: string,
       name: string,
       execute: (ctx: Ctx) => unknown,
     ) =>
-      define({ name, entity: "notes", method, authorize: () => true, execute });
+      define({
+        name,
+        entity: "notes",
+        method,
+        input: inputs[method],
+        authorize: () => true,
+        execute,
+      });
     const get = ownedNoteGet();
     const app = await boot([
       get.operation,
@@ -868,7 +819,6 @@ describe("execution and output", () => {
         name: "notes.summary",
         entity: "notes",
         method: "GET",
-        input: z.object({}),
         output: z.object({ count: z.number() }),
         authorize: () => true,
         execute: () => null,
@@ -877,7 +827,6 @@ describe("execution and output", () => {
         name: "notes.broken",
         entity: "notes",
         method: "POST",
-        input: z.object({}),
         output: z.object({ count: z.number() }),
         authorize: () => true,
         execute: () => ({ count: SENTINEL.row }),
@@ -886,7 +835,6 @@ describe("execution and output", () => {
         name: "notes.purge",
         entity: "notes",
         method: "DELETE",
-        input: z.object({}),
         output: z.void(),
         authorize: () => true,
         execute: () => undefined,
@@ -918,6 +866,9 @@ describe("execution and output", () => {
         name: "notes.rename",
         entity: "notes",
         method: "PATCH",
+        input: z
+          .object({ id: z.number(), changes: z.object({ title: z.string() }) })
+          .strict(),
         authorize: () => true,
         execute: () => null,
       }),
@@ -925,6 +876,7 @@ describe("execution and output", () => {
         name: "notes.drop",
         entity: "notes",
         method: "DELETE",
+        input: z.object({ id: z.number() }).strict(),
         authorize: () => true,
         execute: () => "deleted",
       }),
@@ -932,7 +884,6 @@ describe("execution and output", () => {
         name: "notes.peek",
         entity: "notes",
         method: "GET",
-        input: z.object({}),
         output: z.object({ count: z.number() }),
         authorize: () => true,
         execute: () => ({ count: SENTINEL.row }),
@@ -1012,6 +963,7 @@ describe("execution and output", () => {
         name: "notes.create",
         entity: "notes",
         method: "POST",
+        input: z.object({ title: z.string() }).strict(),
         authorize: () => true,
         execute,
       }),
@@ -1042,6 +994,7 @@ describe("execution and output", () => {
         name: "notes.publish",
         entity: "notes",
         method: "POST",
+        input: z.object({ title: z.string() }).strict(),
         authorize: () => true,
         execute: ({ db, input, actor }: Ctx) =>
           db.transaction(async (tx: any) => {
@@ -1096,6 +1049,7 @@ describe("browser origin", () => {
         name: "notes.create",
         entity: "notes",
         method: "POST",
+        input: z.object({ title: z.string() }).strict(),
         authorize: () => true,
         execute,
       }),
@@ -1153,6 +1107,7 @@ describe("telemetry", () => {
         name: "notes.create",
         entity: "notes",
         method: "POST",
+        input: z.object({ title: z.string() }).strict(),
         authorize: policy({
           allow: () => ({ deny: "forbidden", reason: SENTINEL.reason }),
         }),
@@ -1162,6 +1117,7 @@ describe("telemetry", () => {
         name: "notes.explode",
         entity: "notes",
         method: "POST",
+        input: z.object({ title: z.string() }).strict(),
         authorize: () => true,
         execute: ({ db }: Ctx) =>
           db.notes.create({ title: "explode", secret: SENTINEL.row }),
@@ -1264,7 +1220,7 @@ describe("local development boundary", () => {
           name: "me.get",
           entity: "notes",
           method: "GET",
-          input: z.object({}),
+
           output: z.object({ term: z.string() }),
           authorize: () => true,
           execute,
@@ -1353,10 +1309,10 @@ describe("setup", () => {
     };
   const base = { authorize: () => true, execute: () => null };
 
-  test("refuses a default contract the table cannot honor", () => {
+  test("accepts omitted input regardless of primary keys or writable columns", () => {
     expect(
       handler({ ...base, name: "tags.get", entity: "tags", method: "GET" }),
-    ).toThrow(/routes\.ts#op0 needs an explicit input/);
+    ).not.toThrow();
     expect(
       handler({
         ...base,
@@ -1364,10 +1320,10 @@ describe("setup", () => {
         entity: "stamps",
         method: "PATCH",
       }),
-    ).toThrow(/needs an explicit input/);
+    ).not.toThrow();
     expect(
       handler({ ...base, name: "stamps.put", entity: "stamps", method: "PUT" }),
-    ).toThrow(/needs an explicit input/);
+    ).not.toThrow();
     expect(
       handler({
         ...base,
