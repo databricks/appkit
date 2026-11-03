@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { inspect } from "node:util";
@@ -422,6 +422,46 @@ const asAda = { "x-forwarded-access-token": SENTINEL.token };
 const asBob = { "x-forwarded-access-token": "token-bob" };
 const discriminator = (actorId: string) =>
   createHash("sha256").update(`${workspace.url}\0${actorId}`).digest("hex");
+
+test("database() discovers conventional operations and serves them over HTTP", async () => {
+  const root = mkdtempSync(
+    path.join(tmpdir(), "appkit-discovered-operations-"),
+  );
+  try {
+    const builder = path.resolve(
+      import.meta.dirname,
+      "../../../database/schema-builder/index.ts",
+    );
+    const operations = path.resolve(import.meta.dirname, "../operations.ts");
+    mkdirSync(path.join(root, "server/database"), { recursive: true });
+    writeFileSync(
+      path.join(root, "server/database/routes.gen.ts"),
+      `
+      import { defineSchema, id, text } from ${JSON.stringify(builder)};
+      import { defineOperation } from ${JSON.stringify(operations)};
+      const schema = defineSchema(({ table }) => ({ notes: table("notes", { id: id(), title: text().notNull() }) }));
+      export const databaseRoutes = {
+        schema: async () => ({ schema }),
+        modules: [{ file: "server/database/routes/notes.ts", load: async () => ({
+          getNote: defineOperation({ name: "notes.get", entity: "notes", method: "GET", authorize: () => true,
+            execute: ({ db, input }) => db.notes.find(input.id) }),
+        }) }],
+      };
+    `,
+    );
+    vi.spyOn(process, "cwd").mockReturnValue(root);
+    const { call, edge, payload } = await boot(undefined);
+    edge.committed.notes.push({ id: 1, title: "Discovered note" });
+    expect(payload.plugins.database?.operations).toEqual({
+      "notes.get": "GET",
+    });
+    const reply = await call("notes.get", { id: 1 }, asAda);
+    expect(reply.status).toBe(200);
+    expect(JSON.parse(reply.body)).toEqual({ id: 1, title: "Discovered note" });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 describe("a database plugin without routes", () => {
   test.each([
