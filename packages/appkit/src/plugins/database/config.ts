@@ -1,11 +1,12 @@
 import { databaseSetupFailed } from "../../database/errors";
+import type { DatabaseRoutes } from "./operations";
 
 function isCallable(value: unknown): boolean {
   return typeof value === "function";
 }
 
 /** The shape of the generated `databaseRoutes` registry. */
-function isDatabaseRoutes(value: unknown): boolean {
+export function isDatabaseRoutes(value: unknown): value is DatabaseRoutes {
   if (typeof value !== "object" || value === null) return false;
   const modules: unknown = Reflect.get(value, "modules");
   return (

@@ -14,7 +14,6 @@ import {
 } from "@databricks/appkit";
 import { agents, aiSearch, database } from "@databricks/appkit/beta";
 
-import { databaseRoutes } from "./database/routes.gen";
 import { lakebaseExamples } from "./lakebase-examples-plugin";
 import { reconnect } from "./reconnect-plugin";
 import { telemetryExamples } from "./telemetry-example-plugin";
@@ -73,9 +72,7 @@ createApp({
     // Setup queries the database before publishing anything, so the plugin
     // only joins the app once an instance is actually configured. It serves
     // the named operations in server/database/routes/ over HTTP.
-    ...(process.env.LAKEBASE_ENDPOINT
-      ? [database({ routes: databaseRoutes })]
-      : []),
+    ...(process.env.LAKEBASE_ENDPOINT ? [database()] : []),
     files({
       volumes: {
         // Smart Dashboard saved views land here. Backed by

@@ -88,13 +88,15 @@ and hints are omitted because they may contain row values.
 
 ## Schema discovery and overrides
 
-During setup, `database()` loads the named `schema` export from
-`config/database/schema.ts`, relative to the application's working directory.
+During setup, `database()` loads the discovered routes registry's schema. Without
+a registry, it loads the named `schema` export from `config/database/schema.ts`,
+relative to the application's working directory.
 The file must export a finalized `defineSchema()` result. Missing files, import
 failures, and invalid exports fail setup before the plugin creates a connection
 pool; they never fall back to an empty schema.
 
-Keep `config/database/schema.ts` and its local imports in your deployment. The
+Without a compiled routes registry or an explicit schema, keep
+`config/database/schema.ts` and its local imports in your deployment. The
 plugin loads TypeScript through Jiti, so a plain Node production process does not
 need a separate TypeScript loader. The schema module should only declare tables,
 not connect to the database or start the app.
@@ -108,9 +110,10 @@ import { schema } from "../config/database/schema";
 database({ schema });
 ```
 
-An explicit schema skips file discovery. With [`routes`](#serve-the-operations),
-the registry loads the schema itself; a `schema` passed beside it must be that
-same object, or setup fails.
+An explicit schema skips schema file discovery. Operations in the conventional
+directory still load unless `routes: false` disables them. With an explicit
+[`routes` registry](#serve-the-operations), a `schema` passed beside it must be
+the same object the registry loads, or setup fails.
 
 ## Connection pool
 
@@ -292,26 +295,42 @@ The Vite plugin runs when the dev server starts, and whenever a file in
 - `shared/appkit-types/database-operations.d.ts`, the browser contract: each
   operation's method and the JSON types of its input and output.
 
-Commit both. Then register the plugin with the registry:
+Commit both. The plugin discovers the registry automatically:
 
 ```ts
 // server/index.ts
 import { createApp, server } from "@databricks/appkit";
 import { database } from "@databricks/appkit/beta";
 
-import { databaseRoutes } from "./database/routes.gen";
-
 await createApp({
-  plugins: [server(), database({ routes: databaseRoutes })],
+  plugins: [server(), database()],
 });
 ```
+
+There are three ways to configure operation discovery:
+
+```ts
+database(); // discover server/database/routes/ through routes.gen.ts
+database({ routes: false }); // server-side database access only
+database({ routes: customRoutes }); // use an explicit registry instead
+```
+
+Without any routes, the plugin serves no HTTP endpoint. If the directory exists
+but its generated registry is missing, setup fails with instructions to run
+`appkit generate-types`.
+
+The standard `appkitServerConfig()` server build includes the generated
+registry, schema, and operation modules automatically. Plain Node loads the
+compiled registry beside the server entry, such as `dist/database/routes.gen.js`,
+without TypeScript sources. A custom server build must include the registry as
+an entry beside its server, using the same file extension, or import it and pass
+it explicitly with `database({ routes: databaseRoutes })`.
 
 Setup loads every listed module and validates each operation before the plugin
 opens a connection. A malformed declaration or a repeated name fails setup. An
 operation without `authorize` is not served; setup logs a warning that names
 its file and export, and a production build (`NODE_ENV=production`) fails
-generation instead. With `routes` omitted or `false`, the plugin registers no
-HTTP endpoint at all.
+generation instead. With `routes: false`, the plugin registers no HTTP endpoint.
 
 An explicit schema must have an exact JSON type. Strings, numbers, booleans,
 `null`, literals, enums, arrays, objects, records with string keys, unions, and

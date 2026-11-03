@@ -15,6 +15,7 @@ import type { PluginManifest } from "../../registry";
 import { assertDatabaseConfig } from "./config";
 import type { DatabaseExports } from "./entity-types";
 import { createDatabaseState, type DatabaseState } from "./lifecycle";
+import { loadDefaultDatabaseRoutes } from "./load-routes";
 import { loadDefaultDatabaseSchema } from "./load-schema";
 import manifest from "./manifest.json";
 import { createActorResolver, selectActorBoundary } from "./operation-actor";
@@ -121,12 +122,17 @@ export class DatabasePlugin<
     if (this.draining || this.state) throw databaseSetupFailed();
     if (!this.setupPromise) {
       const attempt = (async () => {
-        const routes = this.config.routes || undefined;
-        const schema = routes
-          ? await this.routesSchema(routes)
-          : this.config.schema === undefined
-            ? await loadDefaultDatabaseSchema()
-            : this.config.schema;
+        const routes =
+          this.config.routes === undefined
+            ? await loadDefaultDatabaseRoutes()
+            : this.config.routes || undefined;
+        const schema = this.config.routes
+          ? await this.routesSchema(this.config.routes)
+          : this.config.schema !== undefined
+            ? this.config.schema
+            : routes
+              ? await this.routesSchema(routes)
+              : await loadDefaultDatabaseSchema();
         try {
           assertFinalizedSchema(schema);
         } catch {
@@ -354,11 +360,11 @@ export function database<TSchema extends Schema>(
   config: IDatabaseConfig<TSchema> & { readonly schema: TSchema };
 };
 /**
- * Register the database plugin. Pass `routes: databaseRoutes` to serve the
- * generated named operations over HTTP; without it, no database endpoint is
- * registered. Without `routes` or `schema`, setup loads the named `schema`
- * export from the application's `config/database/schema.ts`. Registration
- * itself performs no file or database I/O.
+ * Register the database plugin. By default, setup discovers operations from
+ * `server/database/routes/` through its generated registry. Pass `routes: false`
+ * for server-only access, or a registry to override discovery. Without a schema
+ * override, setup loads the registry's schema or `config/database/schema.ts`.
+ * Registration itself performs no file or database I/O.
  */
 export function database<TSchema extends Schema = DefaultDatabaseSchema>(
   config?: IDatabaseConfig<TSchema>,

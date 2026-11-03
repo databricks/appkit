@@ -119,17 +119,11 @@ export const updateNote = defineOperation({
   execute: ({ db, input }) => /* ... */,
 });`;
 
-const REGISTRATION = `// server/database/routes.gen.ts, written by the AppKit Vite plugin
-export const databaseRoutes = {
-  schema: () => import("../../config/database/schema"),
-  modules: [
-    { file: "server/database/routes/boards.ts", load: () => import("./routes/boards") },
-    { file: "server/database/routes/notes.ts", load: () => import("./routes/notes") },
-  ],
-} satisfies DatabaseRoutes;
+const REGISTRATION = `// server/index.ts, inside createApp({ plugins: [...] })
+database() // discovers server/database/routes/ automatically
 
-// server/index.ts, inside createApp({ plugins: [...] })
-database({ routes: databaseRoutes })`;
+database({ routes: false }) // server-side database access only
+database({ routes: customRoutes }) // explicit registry override`;
 
 const HOOKS_EXAMPLE = `import {
   useDatabaseMutation,
@@ -256,13 +250,14 @@ function DatabaseRoute() {
 
           <Card className="md:col-span-2">
             <CardHeader>
-              <CardTitle>4. Serve the generated registry</CardTitle>
+              <CardTitle>4. Discover the operations</CardTitle>
               <CardDescription>
                 The AppKit Vite plugin lists every module in{" "}
                 <code className="text-xs">server/database/routes/</code> and
-                writes the browser contract of each operation. Without{" "}
-                <code className="text-xs">routes</code>, the plugin serves no
-                HTTP endpoint at all.
+                writes the browser contract of each operation. The database
+                plugin discovers the generated registry automatically. Set{" "}
+                <code className="text-xs">routes: false</code> for server-only
+                database access.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">

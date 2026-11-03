@@ -31,23 +31,27 @@ export interface DatabasePoolConfig {
 /** Configuration for one schema-bound DatabasePlugin instance. */
 export type IDatabaseConfig<TSchema extends Schema = DefaultDatabaseSchema> = {
   /**
-   * Explicit schema override. Without `routes`, setup otherwise loads the
-   * named `schema` export from `config/database/schema.ts` under the
-   * application's working directory. With `routes`, setup uses the schema the
-   * registry loads, and a different `schema` here fails setup. Missing or
-   * invalid declarations fail setup before pool creation.
+   * Explicit schema override. Otherwise, setup loads the discovered registry's
+   * schema or the named `schema` export from `config/database/schema.ts` under
+   * the application's working directory. With an explicit `routes` registry,
+   * this must be the same schema object the registry loads. Missing or invalid
+   * declarations fail setup before pool creation.
    */
   readonly schema?: TSchema;
   /**
-   * The generated registry of named operations: `database({ routes: databaseRoutes })`.
+   * By default, discover `server/database/routes/` through the generated
+   * `server/database/routes.gen.ts` registry. The standard server build includes
+   * its compiled entry automatically. Without any route sources, serve nothing.
+   * Pass `false` to disable discovery and HTTP operations, or a generated
+   * registry to override the convention.
+   *
    * Setup loads its schema and every module it lists, then serves each
    * authorized operation at `/api/database/operations/:name` with its
    * declared method. An operation without `authorize` is skipped with a
    * warning. A malformed or duplicate operation, or a module that fails to
    * load, fails setup.
    *
-   * Absent or `false` serves no database endpoint over HTTP; `appkit.database`
-   * stays available to server code either way.
+   * `appkit.database` stays available to server code in all three cases.
    */
   readonly routes?: DatabaseRoutes | false;
   /**

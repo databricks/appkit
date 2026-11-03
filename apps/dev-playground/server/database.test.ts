@@ -66,11 +66,8 @@ describe("playground database registration", () => {
     ]);
   });
 
-  test("serves the generated operations registry and configures nothing else", async () => {
-    // Imported after loadApp so it is the module instance index.ts received.
-    const { databaseRoutes } = await import("./database/routes.gen");
-    expect(databaseConfig).toEqual({ routes: databaseRoutes });
-    expect(databaseConfig.routes).toBe(databaseRoutes);
+  test("uses conventional operation discovery without explicit registration", () => {
+    expect(databaseConfig).toEqual({});
   });
 
   test("lists every routes module and loads the playground schema", async () => {

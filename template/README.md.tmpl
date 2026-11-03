@@ -59,8 +59,9 @@ tables through `appkit.database`.
 
 The plugin serves no HTTP endpoint until you add operations. Write each one with
 `defineOperation` in a module under `server/database/routes/`, run `{{or .packageManager "pnpm"}} run typegen`
-or start the dev server to generate `server/database/routes.gen.ts`, and pass it to the plugin as
-`database({ routes: databaseRoutes })`. To learn how, see the
+or start the dev server to generate `server/database/routes.gen.ts`.
+`database()` discovers that registry automatically; use `routes: false` for server-only access.
+To learn how, see the
 [Database plugin documentation](https://developers.databricks.com/docs/appkit/v0/plugins/database).
 {{- end}}
 

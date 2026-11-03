@@ -6,12 +6,16 @@ import { defineSchema, fk, id, text } from "../../../database/schema-builder";
 const mocks = vi.hoisted(() => ({
   createDatabaseState: vi.fn(),
   loadDefaultDatabaseSchema: vi.fn(),
+  loadDefaultDatabaseRoutes: vi.fn(),
 }));
 vi.mock("../lifecycle", () => ({
   createDatabaseState: mocks.createDatabaseState,
 }));
 vi.mock("../load-schema", () => ({
   loadDefaultDatabaseSchema: mocks.loadDefaultDatabaseSchema,
+}));
+vi.mock("../load-routes", () => ({
+  loadDefaultDatabaseRoutes: mocks.loadDefaultDatabaseRoutes,
 }));
 
 import { DatabasePluginError } from "../../../database/errors";
@@ -112,6 +116,7 @@ describe("DatabasePlugin", () => {
   beforeEach(() => {
     mocks.createDatabaseState.mockReset();
     mocks.loadDefaultDatabaseSchema.mockReset();
+    mocks.loadDefaultDatabaseRoutes.mockReset().mockResolvedValue(undefined);
   });
 
   test("retains schema and declares the fixed beta postgres manifest", () => {
@@ -149,7 +154,7 @@ describe("DatabasePlugin", () => {
   });
 
   test.each([undefined, {}, { schema: undefined }, { routes: false }] as const)(
-    "loads the conventional schema and serves nothing over HTTP with config=%j",
+    "loads the conventional schema and serves nothing when no routes are found with config=%j",
     async (config) => {
       mocks.loadDefaultDatabaseSchema.mockResolvedValue(routedSchema);
       const { plugin, routes } = await registerRoutes(config);
@@ -208,9 +213,69 @@ describe("DatabasePlugin", () => {
     expect(mocks.createDatabaseState).not.toHaveBeenCalled();
   });
 
-  test("never loads the convention when an explicit schema is supplied", async () => {
+  test("never loads the schema convention when an explicit schema is supplied", async () => {
     await registerRoutes({ schema: routedSchema });
     expect(mocks.loadDefaultDatabaseSchema).not.toHaveBeenCalled();
+  });
+
+  test("discovers and serves the conventional registry with database()", async () => {
+    mocks.loadDefaultDatabaseRoutes.mockResolvedValue({
+      schema: async () => ({ schema: routedSchema }),
+      modules: [
+        {
+          file: "server/database/routes/users.ts",
+          load: async () => ({ readUser }),
+        },
+      ],
+    });
+    const { plugin, routes } = await registerRoutes(undefined);
+    expect(routes).toEqual(["use /operations"]);
+    expect(plugin.getEndpoints()).toEqual({
+      "users.get": "/api/database/operations/users.get",
+    });
+    expect(mocks.loadDefaultDatabaseSchema).not.toHaveBeenCalled();
+  });
+
+  test("uses an explicit schema for conventionally discovered operations", async () => {
+    const loadSchema = vi.fn();
+    mocks.loadDefaultDatabaseRoutes.mockResolvedValue({
+      schema: loadSchema,
+      modules: [
+        {
+          file: "server/database/routes/users.ts",
+          load: async () => ({ readUser }),
+        },
+      ],
+    });
+    const { routes } = await registerRoutes({ schema: routedSchema });
+    expect(routes).toEqual(["use /operations"]);
+    expect(loadSchema).not.toHaveBeenCalled();
+    expect(mocks.createDatabaseState).toHaveBeenCalledWith(
+      routedSchema,
+      expect.any(Function),
+      undefined,
+    );
+  });
+
+  test.each([
+    false,
+    { schema: async () => ({ schema: routedSchema }), modules: [] },
+  ] as const)("explicit routes bypass discovery", async (routes) => {
+    mocks.loadDefaultDatabaseRoutes.mockRejectedValue(
+      new Error("broken convention"),
+    );
+    await registerRoutes({ schema: routedSchema, routes });
+    expect(mocks.loadDefaultDatabaseRoutes).not.toHaveBeenCalled();
+  });
+
+  test("does not create a pool when default route discovery fails", async () => {
+    mocks.loadDefaultDatabaseRoutes.mockRejectedValue(
+      new Error("invalid registry"),
+    );
+    await expect(new DatabasePlugin().setup()).rejects.toThrow(
+      "invalid registry",
+    );
+    expect(mocks.createDatabaseState).not.toHaveBeenCalled();
   });
 
   test.each([null, false, 0, "", [], new Date()])(
@@ -268,7 +333,9 @@ describe("DatabasePlugin", () => {
     const plugin = new DatabasePlugin();
     const first = plugin.setup();
     const second = plugin.setup();
-    expect(mocks.loadDefaultDatabaseSchema).toHaveBeenCalledOnce();
+    await vi.waitFor(() =>
+      expect(mocks.loadDefaultDatabaseSchema).toHaveBeenCalledOnce(),
+    );
     expect(mocks.createDatabaseState).not.toHaveBeenCalled();
     loaded.resolve(routedSchema);
     await Promise.all([first, second]);
@@ -280,6 +347,9 @@ describe("DatabasePlugin", () => {
     mocks.loadDefaultDatabaseSchema.mockReturnValue(loaded.promise);
     const plugin = new DatabasePlugin();
     const setup = plugin.setup();
+    await vi.waitFor(() =>
+      expect(mocks.loadDefaultDatabaseSchema).toHaveBeenCalledOnce(),
+    );
     const shutdown = plugin.shutdown();
     loaded.resolve(routedSchema);
     await expect(setup).rejects.toMatchObject({ category: "SETUP_FAILED" });
@@ -295,7 +365,9 @@ describe("DatabasePlugin", () => {
     const first = plugin.setup();
     const second = plugin.setup();
     expect(() => plugin.exports()).toThrow();
-    expect(mocks.createDatabaseState).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() =>
+      expect(mocks.createDatabaseState).toHaveBeenCalledTimes(1),
+    );
     const state = candidate();
     construction.resolve(state);
     await Promise.all([first, second]);
@@ -317,6 +389,9 @@ describe("DatabasePlugin", () => {
     mocks.createDatabaseState.mockReturnValue(construction.promise);
     const plugin = new DatabasePlugin({ schema });
     const setup = plugin.setup();
+    await vi.waitFor(() =>
+      expect(mocks.createDatabaseState).toHaveBeenCalledOnce(),
+    );
     const shutdown = plugin.shutdown();
     const state = candidate();
     construction.resolve(state);
