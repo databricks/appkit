@@ -146,6 +146,12 @@ pnpm clean:full       # Remove build artifacts + node_modules
 
 This project uses a two-stage release pipeline. Both packages (`appkit` and `appkit-ui`) are always released together with the same version. `@databricks/lakebase` is released independently.
 
+Release eligibility, version calculation, and changelog generation include changes in
+`packages/appkit/`, `packages/appkit-ui/`, `packages/shared/`, and `template/`.
+Releasable template-only commits (such as `feat(template): ...` or `fix(template): ...`)
+trigger the shared `appkit`/`appkit-ui` release, including template artifacts and
+template sync, through the same pipeline.
+
 #### Stage 1: Prepare (this repo)
 
 The `prepare-release` workflow runs automatically on push to `main`:

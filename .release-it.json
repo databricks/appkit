@@ -10,7 +10,7 @@
     "requireCommitsFail": false,
     "tagMatch": "v*",
     "getLatestTagFromAllRefs": true,
-    "commitsPath": "packages/appkit packages/appkit-ui packages/shared"
+    "commitsPath": "packages/appkit packages/appkit-ui packages/shared template"
   },
   "github": {
     "release": false
@@ -30,10 +30,20 @@
       },
       "infile": "changelog-diff.md",
       "gitRawCommitsOpts": {
-        "path": ["packages/appkit", "packages/appkit-ui", "packages/shared"]
+        "path": [
+          "packages/appkit",
+          "packages/appkit-ui",
+          "packages/shared",
+          "template"
+        ]
       },
       "commitsOpts": {
-        "path": ["packages/appkit", "packages/appkit-ui", "packages/shared"]
+        "path": [
+          "packages/appkit",
+          "packages/appkit-ui",
+          "packages/shared",
+          "template"
+        ]
       }
     }
   }
