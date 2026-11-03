@@ -9,11 +9,19 @@ The [Google Doc](https://docs.google.com/document/d/1bsMsYsTfoFBSYS3YbXn3FvOOUQl
 
 ## Background and Motivation
 
-The DatabasePlugin (`@databricks/appkit/beta`, shipped in v0.87 and v0.88) turns `config/database/schema.ts` into
-typed server access and generated CRUD routes over Lakebase Postgres. It reads tables. It never creates them. Today a
-developer gets from an idea to a deployed table by hand:
+The DatabasePlugin (`@databricks/appkit/beta`, shipped in v0.87 and v0.88) provides typed server access to Lakebase
+Postgres from `config/database/schema.ts`. The earlier beta exposed generated CRUD routes. The operation design in
+[#687–#692](https://github.com/databricks/appkit/pull/692) replaces those routes with explicitly authorized, named
+operations. Table declarations alone expose no HTTP endpoint.
 
-| Step | Today on `main` |
+This design covers branch ownership, migrations and deployment. Its application-facing examples target that operation
+design. The migration implementation in #654–#678 and the operation implementation in #687–#692 are separate PR
+chains; integrating them is required before both flows ship together. The operation stack alone checks existing tables
+at startup and never creates or migrates them. This design adds the opt-in migration step before that check.
+
+The migration problem starts with the manual workflow of the earlier beta:
+
+| Step | Earlier beta workflow |
 |---|---|
 | Pick a database | `databricks apps init` asks for a Lakebase project, branch and database. The plugin is `hidden: true`, so only apps that add it by hand get this far. |
 | Develop locally | `.env` points at the branch the app deploys to. Every developer reads and writes production rows. |
@@ -64,7 +72,8 @@ Its PR descriptions record the live results.
 ## Out of Scope
 
 - Down migrations and automatic schema rollback. Fixes go forward.
-- Per-user database identities (OBO). The plugin runs as the app's service principal.
+- Per-user Postgres connections (OBO). Operations verify the caller and authorize access in application code; the
+  database connection and migrations still run as the app's service principal.
 - Several apps sharing one Postgres schema.
 - drizzle-kit v1's migration folder format. This design ships on drizzle-kit 0.31 (journal v7).
 - Seeding or copying data into the deploy branch.
@@ -77,6 +86,134 @@ Its PR descriptions record the live results.
 `config/database/schema.ts` stays the source of truth. `appkit db migrate` writes drizzle-kit output under
 `config/database/migrations/`: one `NNNN_<name>.sql` per change, a `meta/NNNN_snapshot.json` per migration and
 `meta/_journal.json`. The SQL is what reviewers read and what the deployed app runs.
+
+### Browser access is an authored operation contract
+
+A table declaration describes storage and typed server access. Each browser capability is a `defineOperation` export
+in `server/database/routes/*.ts`, with a name, entity, HTTP method, authorization and an execute callback. The plugin
+serves it at `/api/database/operations/<name>`. An operation without authorization is skipped with a warning in
+normal generation and fails production generation. Malformed or duplicate operations fail setup.
+
+```ts
+// server/database/routes/notes.ts
+import { defineOperation } from "@databricks/appkit/beta";
+import { z } from "zod";
+
+export const listNotes = defineOperation({
+  name: "notes.list",
+  entity: "notes",
+  method: "GET",
+  output: z.array(z.object({ id: z.number(), body: z.string() })),
+  authorize: () => true, // Any verified caller; use a policy for narrower access.
+  execute: ({ db }) => db.notes.select(["id", "body"]).toArray(),
+});
+
+export const getNote = defineOperation({
+  name: "notes.get",
+  entity: "notes",
+  method: "GET",
+  input: z.object({ id: z.number().int() }),
+  authorize: () => true,
+  execute: ({ db, input }) => db.notes.find(input.id),
+});
+```
+
+Omitting `input` means the operation accepts no parameters and authorization/execute receive `undefined`. The client
+calls `useDatabaseQuery("notes.list")`; it needs no empty `z.object({})` or placeholder argument. Explicit input
+schemas determine required caller input, such as `useDatabaseQuery("notes.get", { id: 123 })`. No input is inferred
+from a method, primary key or table's writable columns.
+
+Output defaults stay independent of input:
+
+| Method | Output when `output` is omitted |
+|---|---|
+| `GET` | One public row, or 404 when the callback returns `null`. |
+| `POST` | The created public row, with status 201. |
+| `PATCH`, `PUT` | The updated public row, or 404 for `null`. |
+| `DELETE` | Status 204 with no body when the callback returns `true`. |
+
+A list, aggregate, nullable result or joined response declares its output schema. An `{ id }` input does not determine
+whether the result is one row or an array. Private columns are omitted by default; explicit outputs project only the
+fields they declare, so developers review them as part of the public contract.
+
+### Conventional routes need no server-entry import
+
+The usual setup is `database()`. It discovers the generated registry for `server/database/routes/`; the developer
+does not import `routes.gen.ts` in the server entry. Two explicit alternatives cover the other cases:
+
+```ts
+database();                        // Conventional schema and operation discovery.
+database({ routes: false });       // Server-side database access only.
+database({ routes: customRoutes }); // An explicit registry.
+```
+
+The app commits these generated files with its declarations:
+
+| File | Purpose |
+|---|---|
+| `shared/appkit-types/database.d.ts` | Typed server entity access. |
+| `server/database/routes.gen.ts` | Lazy schema and operation imports for the server build. |
+| `shared/appkit-types/database-operations.d.ts` | Browser-safe operation names, methods, inputs and outputs. |
+
+`appkit generate-types` and the AppKit Vite plugin generate the operation registry and browser contracts. A declared
+schema with no operation files gets an empty registry, so adding the first operation and removing the last one remain
+part of the same development flow. With neither schema nor routes, no operation files are created.
+
+In development, setup regenerates the source registry before importing it. Vite watches `config/database/` and all of
+`server/database/`, including shared row schemas, helpers and policies outside `routes/`. Generated `.gen.ts` and
+`.d.ts` files do not trigger generation loops. Native source imports let `tsx watch` reload backend changes and route
+additions/deletions. This is code and type generation; it never applies a database migration.
+
+`appkitServerConfig()` includes the registry, schema and operation modules in the server build. Production loads the
+compiled registry beside the server entry and generates nothing at runtime. A custom build includes those entries or
+imports and passes its own registry. A missing or malformed registry fails setup before the pool opens.
+
+### Policies admit requests; transactions enforce mutable rules
+
+Operations verify the caller before reading input or running authorization. `execute` receives `{ actor, input, db,
+appkit, resource }`, without request headers or access tokens. A verified actor is distinct from the service principal
+that owns the database connection. The operation's policy is responsible for which rows that caller may use.
+
+A policy resource is a snapshot loaded before `execute`, not a lock or a transaction-scoped guarantee. A business
+condition that can change during a write must be checked atomically inside the transaction, through a locked read,
+a conditional update, or a database constraint. For example, adding a note to an open case must serialize with case
+closure. A uniqueness constraint enforces one open case per subject across every writer, and a sequence or other
+database-generated identifier avoids the race in `count() + 1`.
+
+The business write and its audit entry belong in one `db.transaction()` callback. Use the verified actor for audit
+attribution, and persist fields the operation accepts, such as a dismissal reason, with the state change. Migration
+SQL installs the constraints, sequences or triggers needed for these rules; a policy does not replace them.
+
+### React reads and writes share operation-aware state
+
+Use `useDatabaseQuery` for rendered data and `useDatabaseMutation` for writes. They are exported from
+`@databricks/appkit-ui/react/beta` and typed by the generated operation contracts. The imperative
+`databaseApi.execute` remains available from `@databricks/appkit-ui/js/beta`; callers that store its result in React
+state must handle cancellation, request identity, session changes and refresh themselves.
+
+```tsx
+import { skipToken, useDatabaseQuery } from "@databricks/appkit-ui/react/beta";
+
+const notes = useDatabaseQuery("notes.list");
+const selectedNote = useDatabaseQuery(
+  "notes.get",
+  selectedId === null ? skipToken : { id: selectedId },
+);
+```
+
+`skipToken` holds a dependent query idle until its complete typed input exists. It sends nothing, aborts an old read,
+clears its displayed result, and makes `refetch()` a no-op. Only query hooks accept it; imperative calls and mutations
+still require their declared input.
+
+Changing a query's name, input or session clears its old result and ignores late answers. Changing a mutation's
+operation name or session clears its displayed state, including A → B → A switches. Earlier writes still finish. In
+the same session, their success or unknown outcome refreshes queries without populating a renamed hook.
+
+A mutation is sent at most once and is never retried or aborted. Its hook resolves each call with `{ data, error }`.
+Mounted queries refresh after success or an unknown write outcome; a hook-based write needs no duplicate manual
+refetch. Clear a draft only after success, and keep it visible with field feedback on a validation failure. Invalid explicit inputs return bounded
+`details: [{ path, message }]` with schema-declared property names, array indices and standard messages. Raw Zod or
+custom refinement text, submitted values and undeclared property names are never exposed.
 
 ### Every developer gets a Lakebase branch
 
@@ -111,11 +248,15 @@ extra resource to deploy. See the architecture decision below.
 start, so the first deploy needs no grant. `{ schemaName: "public" }` keeps working for apps that already use it, but
 migrations on start cannot create objects there without a manual `GRANT CREATE ON SCHEMA public`.
 
-### Existing beta apps keep working after the upgrade
+### Migration opt-in preserves existing beta startup behavior
 
 An app that upgrades from v0.88 does not start migrating, because the deploy flag below is off unless the app's
 `app.yaml` sets it. If the startup check finds every missing table in `public`, its error says the default moved to
 `app` and offers `{ schemaName: "public" }`. The release notes carry an upgrade section.
+
+That compatibility covers migration opt-in and the schema location. The operation stack separately replaces the beta
+AutoCRUD HTTP surface and entity hooks. Applications migrate those calls to named operations and regenerate their
+contracts; it provides no compatibility layer for the removed HTTP API.
 
 ### Seven commands, each with one job
 
@@ -331,12 +472,12 @@ U+2028, U+2029, `*/`, backtick and `${`, loaded without running code.
 Introspect records its migration as applied only if the branch's last recorded migration is the one just before it,
 checked under the schema's advisory lock. A branch ahead of the checkout would otherwise record DDL it never ran.
 
-Introspect keeps what an existing `schema.ts` hides from the API. A column the old file declares keeps its
-`.private()`, or stays without one. Introspect writes a column the old file does not declare with `.private()`, and a
-warning names it. When the catalog has a foreign key the old file does not declare, introspect refuses before it
-changes any file, because each foreign key is a relation the API can include. When `schema.ts` does not load,
-introspect refuses before it reads the branch, because it could not keep the private columns. Without a `schema.ts`,
-introspect writes no column private.
+Introspect keeps what an existing `schema.ts` marks private for default operation outputs. A column the old file
+declares keeps its `.private()`, or stays without one. Introspect writes a column the old file does not declare with
+`.private()`, and a warning names it. When the catalog has a foreign key the old file does not declare, introspect
+refuses before it changes any file, because each foreign key adds a relation that authored operations can include.
+When `schema.ts` does not load, introspect refuses before it reads the branch, because it could not keep the private
+columns. Without a `schema.ts`, introspect writes no column private.
 
 ### Flag Strategy
 
@@ -362,7 +503,8 @@ Not flagged:
 does not offer the plugin yet, because #675 keeps the manifest `hidden: true` and `appkit plugin sync` leaves hidden
 plugins out of `template/appkit.plugins.json`. The reveal removes `hidden: true`, so the synced file lists the plugin.
 It also moves the `database` export from `beta.ts` into the generated barrel `beta-exports.generated.ts`, and it shows
-`appkit db` in `appkit --help`. After the reveal, a new app goes from scaffold to deploy in five steps:
+`appkit db` in `appkit --help`. After the reveal and integration with the operation stack, a new app goes from
+scaffold to deploy in six steps:
 
 1. `databricks apps init` scaffolds the app with the plugin. It asks for the Lakebase project and the deploy branch
    and database. The branch and database go into `databricks.yml`, and their resource names include the project. The
@@ -374,9 +516,15 @@ It also moves the `database` export from `beta.ts` into the generated barrel `be
    `--schema none`, init stops after it writes `.env`.
 3. The developer declares a table in `schema.ts` and runs `appkit db migrate`. It writes `0000_migration.sql`,
    regenerates `shared/appkit-types/database.d.ts`, and applies the migration to the dev branch.
-4. The developer commits `config/database/` and runs `databricks apps deploy`.
-5. The app starts with `APPKIT_DB_MIGRATE_ON_START=true`. Under the lock it reconciles, applies `0000`, creates and
-   owns schema `app`, checks the declared tables, and listens.
+4. The developer adds authorized operations in `server/database/routes/` and uses the query and mutation hooks in
+   the UI. Development saves regenerate the registry and contracts and reload the backend. Changes to storage still
+   require `appkit db migrate`; editing an operation never applies DDL.
+5. The developer commits `config/database/`, operation declarations and policies, the generated registry and type
+   contracts, and the UI changes. `appkit generate-types` regenerates operation artifacts for a build or CI check;
+   `NODE_ENV=production` makes missing authorization a generation error. They run `databricks apps deploy`.
+6. The app starts with `APPKIT_DB_MIGRATE_ON_START=true`. Operation metadata is checked before the pool opens; under
+   the migration lock it reconciles, applies `0000`, creates and owns schema `app`, checks the declared tables, and
+   listens. Applying a migration alone never publishes a browser operation.
 
 Until the CLI release that runs `appkit db init` ships, the developer runs it once after scaffolding, as the README
 says. Before that run, `.env` points at the branch picked in the prompts, usually the deploy branch, and
@@ -404,6 +552,12 @@ and column already exists. A partial match fails start and changes nothing.
 ### API Changes
 
 - CLI: `appkit db init | migrate | introspect | clean | seed | verify | check`.
+- Backend operations: `defineOperation`, `definePolicy` and `database()` discovery, with explicit `routes: false`
+  or `routes: customRoutes` alternatives. These replace AutoCRUD and its `api` configuration.
+- Generated contracts: `server/database/routes.gen.ts` and `shared/appkit-types/database-operations.d.ts`, alongside
+  `database.d.ts`. Omitted inputs generate `void`; explicit schemas determine the wire types. Output defaults stay.
+- UI: `databaseApi.execute`, `useDatabaseQuery`, `useDatabaseMutation`, and query-only `skipToken`. Entity CRUD hooks
+  and `databaseApi.list/get/create/update/remove` are removed by the operation cutover.
 - `defineSchema()` defaults `schemaName` to `"app"`.
 - Package export `@databricks/appkit/beta/database-tooling`. It is beta and internal to the AppKit CLI. It has no semver
   guarantee, and only the CLI of the same AppKit release imports it.
@@ -442,6 +596,18 @@ the `applied`, `adopted`, `edited` and `unknown` (the `ahead` rows) counts, `loc
   whose `DATABRICKS_HOST` is a placeholder.
 - **Session branches are bound to a user.** With the user hash in the name, a copied `.env` fails the guard for
   everyone but its creator.
+
+## Validation of the operation integration
+
+The operation stack is exercised through runtime, generation, hook and playground tests, including a real
+`tsx watch` + Vite lifecycle test and a production build that loads operations after all TypeScript sources are
+removed. Application scenarios cover reordered read responses, refresh after writes, field-validation feedback,
+concurrent investigation creation, audit rollback and note/closure ordering in disposable PostgreSQL.
+
+These checks validate the operation design and application experience. They do not establish that the two PR chains
+have been integrated or repeat the migration stack's live Lakebase validation. Before release, combine both stacks
+and verify registry validation, startup migrations and schema checks in one deployment, and keep the expand/contract
+migration checks for mixed-version rollouts.
 
 ## Platform Dependencies
 
@@ -511,6 +677,19 @@ the `applied`, `adopted`, `edited` and `unknown` (the `ahead` rows) counts, `loc
    reveal is a later, separate change.
 9. [#678](https://github.com/databricks/appkit/pull/678) `appkit db check`: the offline check of the committed
    migrations that CI runs, the CI section of the plugin docs, and a CI note in the template README.
+
+### Related operation PRs
+
+The application contract above is implemented in a separate chain:
+
+| PR | Responsibility |
+|---|---|
+| [#687](https://github.com/databricks/appkit/pull/687) | Remove the earlier database lifecycle hooks and read serializers. |
+| [#688](https://github.com/databricks/appkit/pull/688) | Define operations and policies; inputs are explicit or absent. |
+| [#689](https://github.com/databricks/appkit/pull/689) | Verify callers, authorize execution and return safe field validation details. |
+| [#690](https://github.com/databricks/appkit/pull/690) | Generate registries/contracts and watch shared database modules. |
+| [#691](https://github.com/databricks/appkit/pull/691) | Typed clients/hooks, operation/session state and dependent-query `skipToken`. |
+| [#692](https://github.com/databricks/appkit/pull/692) | Serve operations, remove AutoCRUD, discover/build/reload conventional routes, and update the usage guidelines. |
 
 ## Open Questions
 
