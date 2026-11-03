@@ -41,6 +41,7 @@ export const getNote = defineOperation({
   name: "notes.get",
   entity: "notes",
   method: "GET",
+  input: z.object({ id: z.number() }),
   authorize: ({ actor }) => actor.id !== "",
   execute: ({ input, db }) => db.notes.find(input.id),
 });
@@ -60,7 +61,6 @@ export const countNotes = defineOperation({
   name: "notes.count",
   entity: "notes",
   method: "GET",
-  input: z.object({}),
   output: z.number(),
   authorize: () => true,
   execute: ({ db }) => db.notes.count(),

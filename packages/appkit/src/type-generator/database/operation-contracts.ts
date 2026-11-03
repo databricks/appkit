@@ -88,8 +88,8 @@ function object(properties: readonly TsProperty[], readonly = false): TsType {
 // Default contracts, from the same capability predicates the runtime compiles.
 // ---------------------------------------------------------------------------
 
-/** JSON carries a bigint as a decimal string out, and a string or safe integer in. */
-function columnType(meta: ColumnMeta, direction: "input" | "output"): TsType {
+/** Default outputs carry bigint columns as decimal strings. */
+function columnType(meta: ColumnMeta): TsType {
   const scalar = ((): TsType => {
     switch (meta.kind) {
       case "string":
@@ -99,7 +99,7 @@ function columnType(meta: ColumnMeta, direction: "input" | "output"): TsType {
       case "number":
         return NUMBER;
       case "bigint":
-        return direction === "input" ? union([STRING, NUMBER]) : STRING;
+        return STRING;
       case "boolean":
         return BOOLEAN;
       case "enum":
@@ -114,55 +114,12 @@ function columnType(meta: ColumnMeta, direction: "input" | "output"): TsType {
   return meta.notNull ? scalar : union([scalar, NULL]);
 }
 
-function column(
-  meta: ColumnMeta,
-  direction: "input" | "output",
-  optional: boolean,
-): TsProperty {
+function column(meta: ColumnMeta): TsProperty {
   return {
     name: meta.columnName,
-    optional,
-    type: columnType(meta, direction),
+    optional: false,
+    type: columnType(meta),
   };
-}
-
-function noDefault(table: AppKitTable, method: OperationMethod): never {
-  throw new ContractProblem(
-    `needs an explicit schema: ${JSON.stringify(table.$name)} has no default ${method} input`,
-  );
-}
-
-/** `{ id }`, `{ id, changes }`, `{ id, values }`, or the public create body. */
-function defaultInput(table: AppKitTable, method: OperationMethod): TsType {
-  const columns = Object.values(table.$columns).map((meta) => ({
-    meta,
-    can: columnHttpCapabilities(meta),
-  }));
-  const key = columns.find(({ can }) => can.publicKey)?.meta;
-  const updatable = columns.filter(({ can }) => can.updatable);
-  if (method === "POST") {
-    return object(
-      columns
-        .filter(({ can }) => can.creatable)
-        .map(({ meta }) =>
-          column(meta, "input", !meta.notNull || meta.hasDefault),
-        ),
-    );
-  }
-  if (!key) return noDefault(table, method);
-  const id: TsProperty = { ...column(key, "input", false), name: "id" };
-  if (method === "GET" || method === "DELETE") return object([id]);
-  if (updatable.length === 0) return noDefault(table, method);
-  // PATCH changes any subset; PUT replaces every mutable public column.
-  const patch = method === "PATCH";
-  return object([
-    id,
-    {
-      name: patch ? "changes" : "values",
-      optional: false,
-      type: object(updatable.map(({ meta }) => column(meta, "input", patch))),
-    },
-  ]);
 }
 
 /** Every public scalar column; a delete answers without a body. */
@@ -171,7 +128,7 @@ function defaultOutput(table: AppKitTable, method: OperationMethod): TsType {
   return object(
     Object.values(table.$columns)
       .filter((meta) => columnHttpCapabilities(meta).selectable)
-      .map((meta) => column(meta, "output", false)),
+      .map((meta) => column(meta)),
   );
 }
 
@@ -496,7 +453,7 @@ export function operationContract(
       return undefined;
     }
   };
-  const input = slot("input", operation.input, defaultInput);
+  const input = slot("input", operation.input, () => keyword("void"));
   const output = slot("output", operation.output, defaultOutput);
   if (!input || !output) return { ok: false, problems };
   return {

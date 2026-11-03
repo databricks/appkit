@@ -49,6 +49,7 @@ const getNote = `export const getNote = defineOperation({
   name: "notes.get",
   entity: "notes",
   method: "GET",
+  input: z.object({ id: z.number() }),
   authorize: () => true,
   execute: ({ input, db }) => db.notes.find(input.id),
 });`;
@@ -59,6 +60,7 @@ const getBoard = (
   name: "boards.get",
   entity: "boards",
   method: "GET",
+  input: z.object({ id: z.string() }),
   authorize: () => true,
   execute: ({ input, db }) => db.boards.find(input.id),
 });`;
@@ -341,13 +343,31 @@ export const headless = defineOperation({ name: "notes.head", entity: "notes", m
     expect(error.message).toContain(
       "server/database/routes/invalid.ts#headless must use GET, POST, PATCH, PUT, or DELETE.",
     );
-    expect(error.message).toContain(
-      'server/database/routes/invalid.ts#keyless input needs an explicit schema: "events" has no default GET input.',
-    );
-    expect(error.message).toContain(
-      'server/database/routes/invalid.ts#frozen input needs an explicit schema: "stamps" has no default PATCH input.',
-    );
     expect(await read(root, TYPES_FILE)).toBe(NEUTRAL_DATABASE_OPERATION_TYPES);
+  });
+
+  test("renders omitted input as void for every method, including keyless and read-only entities", async () => {
+    const root = await app({
+      [`${ROUTES}/no-input.ts`]: route(
+        [
+          ["GET", "events"],
+          ["POST", "events"],
+          ["PATCH", "stamps"],
+          ["PUT", "stamps"],
+          ["DELETE", "events"],
+        ]
+          .map(
+            ([method, entity]) =>
+              `export const op${method} = defineOperation({ name: "empty.${method}", entity: "${entity}", method: "${method}", authorize: () => true, execute: () => null });`,
+          )
+          .join("\n"),
+      ),
+    });
+    await generate(root);
+    const types = await read(root, TYPES_FILE);
+    expect(types.match(/input: void;/g)).toHaveLength(5);
+    for (const method of ["GET", "POST", "PATCH", "PUT", "DELETE"])
+      expect(types).toContain(`"empty.${method}": {`);
   });
 
   test("requires the schema the routes are declared against", async () => {
