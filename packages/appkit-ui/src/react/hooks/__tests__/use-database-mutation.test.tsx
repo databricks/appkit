@@ -73,6 +73,26 @@ function start(
 }
 
 describe("useDatabaseMutation", () => {
+  test("a parameterless mutation can run without an argument", async () => {
+    const { result } = renderHook(
+      () =>
+        useDatabaseMutation("notes.create") as UseDatabaseMutationResult<
+          void,
+          unknown
+        >,
+    );
+    let pending!: Promise<Outcome>;
+    act(() => {
+      pending = result.current.mutate();
+    });
+    expect(server.request(0).body).toBeUndefined();
+    await answer(server.request(0), { ok: true });
+    await expect(pending).resolves.toEqual({
+      data: { ok: true },
+      error: null,
+    });
+  });
+
   test("mounting sends nothing; mutate sends the write once and resolves its outcome", async () => {
     const { result, rerender } = renderHook(() =>
       useDatabaseMutation("notes.create"),

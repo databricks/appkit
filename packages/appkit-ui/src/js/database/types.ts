@@ -114,3 +114,13 @@ export type DatabaseOperationInput<N extends DatabaseOperationName> =
  */
 export type DatabaseOperationOutput<N extends DatabaseOperationName> =
   Operations[N] extends { readonly output: infer Output } ? Output : never;
+
+/** @internal Call arguments: parameterless operations may omit their input. */
+export type DatabaseOperationInputArgs<Input> = [Input] extends [void]
+  ? [input?: Input]
+  : [input: Input];
+
+/** @internal Call arguments with a fixed options position after the input. */
+export type DatabaseOperationArgs<Input, Options> = [Input] extends [void]
+  ? [input?: Input, options?: Options]
+  : [input: Input, options?: Options];

@@ -12,6 +12,7 @@ import {
 import type {
   DatabaseMutationName,
   DatabaseOperationInput,
+  DatabaseOperationInputArgs,
   DatabaseOperationOutput,
 } from "@/js/database/types";
 
@@ -28,7 +29,9 @@ export interface UseDatabaseMutationResult<Input, T> {
    * Send the write once and resolve with its outcome. It never rejects and
    * is never retried or aborted, since a write may commit before its reply.
    */
-  readonly mutate: (input: Input) => Promise<DatabaseMutationOutcome<T>>;
+  readonly mutate: (
+    ...args: DatabaseOperationInputArgs<Input>
+  ) => Promise<DatabaseMutationOutcome<T>>;
   /** The latest call's answer, or `undefined` until it succeeds. */
   readonly data: T | undefined;
   /** Whether the latest call is in flight. */
@@ -94,7 +97,7 @@ export function useDatabaseMutation<N extends DatabaseMutationName>(
 
   const mutate = useCallback(
     async (
-      input: DatabaseOperationInput<N>,
+      input?: DatabaseOperationInput<N>,
     ): Promise<DatabaseMutationOutcome<Output>> => {
       const call = Symbol(name);
       latest.current = call;
