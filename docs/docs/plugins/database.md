@@ -114,6 +114,22 @@ configuration without an explicit schema still infers table names and hook paylo
 An explicitly supplied schema also checks configuration keys against its own table
 names.
 
+## Connection pool
+
+The plugin keeps one pool of up to 105 connections, the whole direct-connection
+budget of a 0.5 CU compute, the smallest size. Other pools on the same compute,
+such as `lakebase()`, every replica of the app, and any other client share that
+budget, so lower `max` until the sum fits. Larger computes allow more. Check
+**Max Connections** in the compute's *Edit compute* drawer.
+
+```ts
+database({ pool: { max: 20, connectionTimeoutMillis: 5000 } });
+```
+
+Only `max`, `idleTimeoutMillis`, and `connectionTimeoutMillis` can be set.
+When callers queue because every connection is in use, the plugin logs a
+warning at most once a minute.
+
 ## Restrict the generated API
 
 Omitting `api`, or setting it to `true` or `{}`, enables full CRUD. Restrictions

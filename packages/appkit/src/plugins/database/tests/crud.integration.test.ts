@@ -130,6 +130,7 @@ function fakeResponse() {
 async function mount(hooks: Record<string, EntityHooks>) {
   const database = memoryDataPath();
   mocks.initializeLakebasePool.mockResolvedValue({
+    connect: vi.fn(),
     end: vi.fn(async () => undefined),
   });
   mocks.createDrizzleDb.mockReturnValue({});
