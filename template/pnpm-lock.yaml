@@ -18,11 +18,11 @@ importers:
   .:
     dependencies:
       '@databricks/appkit':
-        specifier: 0.89.0
-        version: 0.89.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.0))(@types/node@22.20.5)(@types/pg@8.15.6)(esbuild@0.25.12)(tsx@4.20.6)(vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@22.20.5)(rolldown-vite@7.1.14(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@22.20.5)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.2)))
+        specifier: 0.90.0
+        version: 0.90.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.0))(@types/node@22.20.5)(@types/pg@8.15.6)(esbuild@0.25.12)(tsx@4.20.6)(vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@22.20.5)(rolldown-vite@7.1.14(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@22.20.5)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.2)))
       '@databricks/appkit-ui':
-        specifier: 0.89.0
-        version: 0.89.0(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        specifier: 0.90.0
+        version: 0.90.0(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       clsx:
         specifier: 2.1.1
         version: 2.1.1
@@ -316,8 +316,8 @@ packages:
   '@clack/prompts@1.0.1':
     resolution: {integrity: sha512-/42G73JkuYdyWZ6m8d/CJtBrGl1Hegyc7Fy78m5Ob+jF85TOUmLR5XLce/U3LxYAw0kJ8CT5aI99RIvPHcGp/Q==}
 
-  '@databricks/appkit-ui@0.89.0':
-    resolution: {integrity: sha512-YbgZNI4Gd8mJ5qKnCh/lLEgGMEoBpucOBxPq3+bhOcGaNQpz6BoyBW9j7teaZegrrC5uKRwcQYtRzbZyEyYzfA==}
+  '@databricks/appkit-ui@0.90.0':
+    resolution: {integrity: sha512-LIfTyLmfK0SQF3tIPwhcMMlRzWNWxwZKh0JBgv5Ol7QF2xpZsj+Kll92JTU6+yhpHoSZBNR+EQpWOw4wJfW14Q==}
     hasBin: true
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
@@ -327,8 +327,8 @@ packages:
       - '@databricks/sdk-statementexecution'
       - '@databricks/sdk-vectorsearch'
 
-  '@databricks/appkit@0.89.0':
-    resolution: {integrity: sha512-lGOuXPUMRJgdk+a/QEM3ON2m399UdXNyPp27ESH3Q5P6JLUndl0gdnPFNMpUZb5pMefpTFO8R7Ca5Z6iiiKP1w==}
+  '@databricks/appkit@0.90.0':
+    resolution: {integrity: sha512-YdGRqpHfHTjXsI1lgDsT4ua5BbD1+JC3ECcuJyNnoaFUGXcH9FPMJhgzlsSGxIWlnTkJ3TKnERJyMZ6V3S1PyA==}
     hasBin: true
     peerDependencies:
       '@mlflow/core': 0.4.0
@@ -1081,6 +1081,7 @@ packages:
   '@opentelemetry/propagator-jaeger@2.8.0':
     resolution: {integrity: sha512-Xnz9zZvvQzUw+9DrOn0MomR7BxFCkA2pcfXBQuHC28ndJpSbjLs7knzYb05kw5SyCjSsEWombkZMgGcJSk8JVg==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Package no longer supported. See https://github.com/open-telemetry/opentelemetry-js/pull/7077
     peerDependencies:
       '@opentelemetry/api': '>=1.0.0 <1.10.0'
 
@@ -1145,12 +1146,14 @@ packages:
   '@opentelemetry/sdk-trace-base@2.8.0':
     resolution: {integrity: sha512-mhU4jp+vW0mGbFRd+GeXHvmfA4aDqWjBjLC3pE5XMpLs0IE2ryYb019Ts2AQrOq67gaTF25D91+fgvEHDZEnuQ==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Use @opentelemetry/sdk-trace package
     peerDependencies:
       '@opentelemetry/api': '>=1.3.0 <1.10.0'
 
   '@opentelemetry/sdk-trace-node@2.8.0':
     resolution: {integrity: sha512-nZt9OGufioAc3AfoLTqA9bsAeaMJAictYDdI2VcNQ+PmT+3rfKjAZDZvgPfd8VPX0O5Bw1hdQF6kDK8VSpZiWg==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Use @opentelemetry/sdk-trace package
     peerDependencies:
       '@opentelemetry/api': '>=1.0.0 <1.10.0'
 
@@ -4636,7 +4639,7 @@ snapshots:
       picocolors: 1.1.1
       sisteransi: 1.0.5
 
-  '@databricks/appkit-ui@0.89.0(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
+  '@databricks/appkit-ui@0.90.0(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
     dependencies:
       '@ast-grep/napi': 0.37.0
       '@clack/prompts': 1.0.1
@@ -4718,7 +4721,7 @@ snapshots:
       - '@types/react'
       - '@types/react-dom'
 
-  '@databricks/appkit@0.89.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.0))(@types/node@22.20.5)(@types/pg@8.15.6)(esbuild@0.25.12)(tsx@4.20.6)(vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@22.20.5)(rolldown-vite@7.1.14(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@22.20.5)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.2)))':
+  '@databricks/appkit@0.90.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.0))(@types/node@22.20.5)(@types/pg@8.15.6)(esbuild@0.25.12)(tsx@4.20.6)(vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@22.20.5)(rolldown-vite@7.1.14(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@22.20.5)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.8.2)))':
     dependencies:
       '@ast-grep/napi': 0.37.0
       '@clack/prompts': 1.0.1
@@ -6976,7 +6979,7 @@ snapshots:
 
   '@types/bunyan@1.8.11':
     dependencies:
-      '@types/node': 24.6.0
+      '@types/node': 22.20.5
 
   '@types/chai@5.2.3':
     dependencies:
@@ -7016,13 +7019,13 @@ snapshots:
 
   '@types/memcached@2.2.10':
     dependencies:
-      '@types/node': 24.6.0
+      '@types/node': 22.20.5
 
   '@types/mime@1.3.5': {}
 
   '@types/mysql@2.15.27':
     dependencies:
-      '@types/node': 24.6.0
+      '@types/node': 22.20.5
 
   '@types/node@22.20.5':
     dependencies:
@@ -7034,7 +7037,7 @@ snapshots:
 
   '@types/oracledb@6.5.2':
     dependencies:
-      '@types/node': 24.6.0
+      '@types/node': 22.20.5
 
   '@types/pg-pool@2.0.7':
     dependencies:
@@ -7042,7 +7045,7 @@ snapshots:
 
   '@types/pg@8.15.6':
     dependencies:
-      '@types/node': 24.6.0
+      '@types/node': 22.20.5
       pg-protocol: 1.16.0
       pg-types: 2.2.0
 
@@ -7077,7 +7080,7 @@ snapshots:
 
   '@types/tedious@4.0.14':
     dependencies:
-      '@types/node': 24.6.0
+      '@types/node': 22.20.5
 
   '@types/trusted-types@2.0.7':
     optional: true
@@ -8205,7 +8208,7 @@ snapshots:
       '@protobufjs/path': 1.1.2
       '@protobufjs/pool': 1.1.0
       '@protobufjs/utf8': 1.1.2
-      '@types/node': 24.6.0
+      '@types/node': 22.20.5
       long: 5.3.2
 
   proxy-addr@2.0.8:
