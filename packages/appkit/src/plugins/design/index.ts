@@ -7,6 +7,13 @@ import { designVitePlugin } from "./vite-plugin";
 
 const isDev = () => process.env.NODE_ENV === "development";
 
+/**
+ * Builder origin(s) when `builderOrigin` isn't passed: set by the builder's
+ * runtime, so a scaffolded `design()` with no options still posts to it.
+ * One origin, or several separated by commas.
+ */
+const BUILDER_ORIGIN_ENV = "APPKIT_DESIGN_BUILDER_ORIGIN";
+
 interface DesignConfig extends BasePluginConfig {
   /**
    * Origin(s) of the app builder that embeds the app, e.g.
@@ -14,19 +21,28 @@ interface DesignConfig extends BasePluginConfig {
    * `appkit:design-ready` message is posted to the embedding window
    * (`window.parent`, else `window.opener`), targeted at exactly these
    * origins. `"*"` and anything that isn't a bare origin are rejected.
+   * Defaults to the `APPKIT_DESIGN_BUILDER_ORIGIN` environment variable (one
+   * origin, or several separated by commas).
    */
   builderOrigin?: string | string[];
 }
 
 function parseOrigins(value: DesignConfig["builderOrigin"]): string[] {
-  return (value === undefined ? [] : [value].flat()).map((origin) => {
+  const fromEnv = value === undefined;
+  const origins = fromEnv
+    ? (process.env[BUILDER_ORIGIN_ENV] ?? "")
+        .split(",")
+        .map((o) => o.trim())
+        .filter(Boolean)
+    : [value].flat();
+  return origins.map((origin) => {
     let parsed: URL | undefined;
     try {
       parsed = new URL(origin);
     } catch {}
     if (!parsed || parsed.origin === "null" || parsed.origin !== origin) {
       throw new Error(
-        `design(): builderOrigin "${origin}" must be a bare origin like "https://builder.example.com" ("*" is not allowed)`,
+        `design(): ${fromEnv ? BUILDER_ORIGIN_ENV : "builderOrigin"} "${origin}" must be a bare origin like "https://builder.example.com" ("*" is not allowed)`,
       );
     }
     return origin;
