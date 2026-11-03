@@ -53,26 +53,27 @@ import { z } from "zod";
 import { defineOperation, definePolicy, type PolicyContext } from ${JSON.stringify(operationsModule)};
 `;
 
-/** Every method's default contract, inferred from the entity alone. */
+/** Explicit inputs and every method's default output. */
 const defaults = `${header}
-export const getPost = defineOperation({ name: "posts.get", entity: "posts", method: "GET", authorize: () => true, execute: ({ input, db }) => db.posts.find(input.id) });
-export const getUser = defineOperation({ name: "users.get", entity: "users", method: "GET", authorize: () => true, execute: ({ input, db }) => db.users.find(input.id) });
-export const getEntry = defineOperation({ name: "ledger.get", entity: "ledger", method: "GET", authorize: () => true, execute: ({ input, db }) => db.ledger.find(input.id) });
-export const createUser = defineOperation({ name: "users.create", entity: "users", method: "POST", authorize: () => true, execute: ({ input, db, actor }) => db.users.create({ ...input, secret: actor.id }) });
-export const createPost = defineOperation({ name: "posts.create", entity: "posts", method: "POST", authorize: () => true, execute: ({ input, db }) => db.posts.create(input) });
-export const logEvent = defineOperation({ name: "events.log", entity: "events", method: "POST", authorize: () => true, execute: ({ input, db }) => db.events.create(input) });
-export const stamp = defineOperation({ name: "stamps.create", entity: "stamps", method: "POST", authorize: () => true, execute: ({ input, db }) => db.stamps.create(input) });
-export const patchPost = defineOperation({ name: "posts.patch", entity: "posts", method: "PATCH", authorize: () => true, execute: ({ input, db }) => db.posts.update(input.id, input.changes) });
-export const patchEntry = defineOperation({ name: "ledger.patch", entity: "ledger", method: "PATCH", authorize: () => true, execute: ({ input, db }) => db.ledger.update(input.id, input.changes) });
-export const replaceUser = defineOperation({ name: "users.replace", entity: "users", method: "PUT", authorize: () => true, execute: ({ input, db }) => db.users.update(input.id, input.values) });
-export const replacePost = defineOperation({ name: "posts.replace", entity: "posts", method: "PUT", authorize: () => true, execute: ({ input, db }) => db.posts.update(input.id, input.values) });
-export const deletePost = defineOperation({ name: "posts.delete", entity: "posts", method: "DELETE", authorize: () => true, execute: ({ input, db }) => db.posts.delete(input.id) });
-export const deleteUser = defineOperation({ name: "users.delete", entity: "users", method: "DELETE", authorize: () => true, execute: ({ input, db }) => db.users.delete(input.id) });
+const wireBigint = z.union([z.string(), z.number()]).transform(BigInt);
+export const getPost = defineOperation({ name: "posts.get", entity: "posts", method: "GET", input: z.object({ id: z.number() }), authorize: () => true, execute: ({ input, db }) => db.posts.find(input.id) });
+export const getUser = defineOperation({ name: "users.get", entity: "users", method: "GET", input: z.object({ id: z.string() }), authorize: () => true, execute: ({ input, db }) => db.users.find(input.id) });
+export const getEntry = defineOperation({ name: "ledger.get", entity: "ledger", method: "GET", input: z.object({ id: wireBigint }), authorize: () => true, execute: ({ input, db }) => db.ledger.find(input.id) });
+export const createUser = defineOperation({ name: "users.create", entity: "users", method: "POST", input: z.object({ slug: z.string(), name: z.string() }), authorize: () => true, execute: ({ input, db, actor }) => db.users.create({ ...input, secret: actor.id }) });
+export const createPost = defineOperation({ name: "posts.create", entity: "posts", method: "POST", input: z.object({ user_slug: z.string(), title: z.string(), total: wireBigint, status: z.enum(["draft", "live"]) }), authorize: () => true, execute: ({ input, db }) => db.posts.create(input) });
+export const logEvent = defineOperation({ name: "events.log", entity: "events", method: "POST", input: z.object({ message: z.string() }), authorize: () => true, execute: ({ input, db }) => db.events.create(input) });
+export const stamp = defineOperation({ name: "stamps.create", entity: "stamps", method: "POST", authorize: () => true, execute: ({ db }) => db.stamps.create({}) });
+export const patchPost = defineOperation({ name: "posts.patch", entity: "posts", method: "PATCH", input: z.object({ id: z.number(), changes: z.object({ title: z.string().optional(), total: wireBigint.optional() }) }), authorize: () => true, execute: ({ input, db }) => db.posts.update(input.id, input.changes) });
+export const patchEntry = defineOperation({ name: "ledger.patch", entity: "ledger", method: "PATCH", input: z.object({ id: wireBigint, changes: z.object({ note: z.string().optional(), amount: wireBigint.nullable().optional() }) }), authorize: () => true, execute: ({ input, db }) => db.ledger.update(input.id, input.changes) });
+export const replaceUser = defineOperation({ name: "users.replace", entity: "users", method: "PUT", input: z.object({ id: z.string(), values: z.object({ name: z.string(), nickname: z.string().nullable() }) }), authorize: () => true, execute: ({ input, db }) => db.users.update(input.id, input.values) });
+export const replacePost = defineOperation({ name: "posts.replace", entity: "posts", method: "PUT", input: z.object({ id: z.number(), values: z.object({ title: z.string() }) }), authorize: () => true, execute: ({ input, db }) => db.posts.update(input.id, input.values) });
+export const deletePost = defineOperation({ name: "posts.delete", entity: "posts", method: "DELETE", input: z.object({ id: z.number() }), authorize: () => true, execute: ({ input, db }) => db.posts.delete(input.id) });
+export const deleteUser = defineOperation({ name: "users.delete", entity: "users", method: "DELETE", input: z.object({ id: z.string() }), authorize: () => true, execute: ({ input, db }) => db.users.delete(input.id) });
 const ownPost = definePolicy({
   resource: ({ input, db }: PolicyContext<{ id: number }>) => db.posts.find(input.id),
   allow: ({ resource, actor }) => resource.user_slug === actor.id,
 });
-export const readOwnPost = defineOperation({ name: "posts.readOwn", entity: "posts", method: "GET", authorize: ownPost, execute: ({ resource }) => resource });
+export const readOwnPost = defineOperation({ name: "posts.readOwn", entity: "posts", method: "GET", input: z.object({ id: z.number() }), authorize: ownPost, execute: ({ resource }) => resource });
 `;
 
 /** Every construct the Zod renderer supports, on both sides of the wire. */
@@ -170,11 +171,11 @@ export const resetStamp = defineOperation({
   authorize: () => true,
   execute: () => null,
 });
+export const resetWithoutInput = defineOperation({ name: "stamps.noInput", entity: "stamps", method: "PUT", authorize: () => true, execute: () => null });
 export const touch = defineOperation({
   name: "events.touch",
   entity: "events",
   method: "PATCH",
-  input: z.object({}),
   output: z.object({ touched: z.number() }).readonly(),
   authorize: () => true,
   execute: () => ({ touched: 1 }),
@@ -203,6 +204,7 @@ const operations: Record<string, string> = {
   "posts.archive": "archive",
   "stamps.reset": "resetStamp",
   "events.touch": "touch",
+  "stamps.noInput": "resetWithoutInput",
 };
 
 /** The generated entry of every operation equals the server's own wire types. */
