@@ -32,6 +32,20 @@ export async function loadDefaultDatabaseRoutes(
     if (await exists(built)) file = built;
   }
   if (!file) {
+    if (process.env.NODE_ENV === "development") {
+      // Setup precedes Vite. Refresh the registry before importing it so an
+      // added/deleted route cannot restart into an out-of-date module list.
+      const { generateDatabaseOperations, DATABASE_OPERATIONS_TYPES_FILE } =
+        await import("../../type-generator/database");
+      await generateDatabaseOperations({
+        appRoot: root,
+        outFile: path.join(
+          root,
+          "shared/appkit-types",
+          DATABASE_OPERATIONS_TYPES_FILE,
+        ),
+      });
+    }
     const source = path.join(root, SOURCE_REGISTRY);
     if (await exists(source)) file = source;
     else if (await exists(path.join(root, "server/database/routes"))) {
@@ -43,12 +57,14 @@ export async function loadDefaultDatabaseRoutes(
 
   let module: unknown;
   try {
-    if (file.endsWith(".ts")) {
+    if (file.endsWith(".ts") && process.env.NODE_ENV !== "development") {
       const { createJiti } = await import("jiti");
       module = await createJiti(import.meta.url, { moduleCache: false }).import(
         file,
       );
     } else {
+      // The standard development runtime (tsx watch) must see the registry
+      // and its transitive imports to restart for operation/policy edits.
       module = await import(pathToFileURL(file).href);
     }
   } catch {

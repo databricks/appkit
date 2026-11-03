@@ -285,6 +285,14 @@ Annotate the `resource` context with the input fields the policy reads. Any
 operation whose input has those fields can use the policy, and one that lacks
 them is a type error.
 
+A policy's resource is a snapshot loaded before `execute`; it does not lock
+the row or make a later write atomic. Enforce conditions that can change during
+a write, such as a case remaining open or an account retaining its balance,
+inside the write transaction using a locked read, a conditional write, or a
+database constraint. Related writes and their audit record belong in the same
+transaction. Use database-generated identifiers instead of `count() + 1` when
+multiple callers can create records concurrently.
+
 | The rule | The plugin answers |
 | --- | --- |
 | Returns `true` | Runs `execute`. Only the literal `true` admits |
@@ -329,9 +337,18 @@ database({ routes: false }); // server-side database access only
 database({ routes: customRoutes }); // use an explicit registry instead
 ```
 
-Without any routes, the plugin serves no HTTP endpoint. If the directory exists
-but its generated registry is missing, setup fails with instructions to run
+Without any routes, the plugin serves no HTTP endpoint. Outside development,
+if the directory exists but its generated registry is missing, setup fails with instructions to run
 `appkit generate-types`.
+
+An app with a declared database schema gets an empty registry and empty operation
+contracts before its first operation. In the standard `pnpm dev` workflow, setup
+regenerates the source registry before loading it, and `tsx watch` tracks its
+imports. Saving an operation, policy, schema, or shared DTO under
+`server/database/` or `config/database/` updates the generated contracts and
+reloads the backend. Adding or removing the first or last operation works the
+same way. Generated files do not trigger their own type-generation pass.
+Production startup never runs generation.
 
 The standard `appkitServerConfig()` server build includes the generated
 registry, schema, and operation modules automatically. Plain Node loads the
@@ -370,7 +387,11 @@ Each operation answers one method at `/api/database/operations/<name>`:
 
 A failure answers `{ "error": "<stable message>" }`. An input that fails its
 schema also carries `details`, a list of `{ path, message }` pairs that name the
-input field without its value.
+input field without its value. Paths include declared property names and array
+indices; dictionary keys and unknown fields are not echoed. Messages use stable
+descriptions such as `Must not be empty` or `Invalid format`, rather than raw
+Zod or custom refinement messages. A form can associate these details with its
+fields without displaying submitted values from an error.
 
 ### Caller identity
 
@@ -487,6 +508,22 @@ and `refetch()`. `data` is `undefined` until the first answer arrives. Pass
 `{ enabled: false }` to hold the request, for example until a value the input
 needs has loaded.
 
+For dependent queries, pass `skipToken` until the complete typed input exists:
+
+```tsx
+import { skipToken, useDatabaseQuery } from "@databricks/appkit-ui/react/beta";
+
+const alert = useDatabaseQuery(
+  "alerts.get",
+  selectedId === null ? skipToken : { id: selectedId },
+);
+```
+
+A skipped query has no data or error, is not loading, and `refetch()` does
+nothing. Switching to `skipToken` aborts an in-flight read and ignores its late
+answer. `skipToken` is accepted only by the query hook; client calls and
+mutations still require their declared payloads.
+
 - An equal input on a later render keeps the request in flight. A new input
   aborts it and clears `data` and `error`.
 - `refetch()` sends the request again and keeps `data` visible while it loads.
@@ -531,8 +568,16 @@ returns `mutate`, `data`, `isLoading`, `error`, and `reset()`.
   query restarts.
 - Only the latest call updates `data`, `isLoading`, and `error`. `reset()`
   returns the hook to idle.
+- Changing the operation name returns the hook to idle too. Earlier writes
+  finish and refresh queries, but their results never populate the newly
+  selected operation, including when switching back to the original name.
 - Writes are not queued or deduplicated. Disable the submit control while
   `isLoading`.
+
+Use the query and mutation hooks for database state rendered by React. They
+handle input changes, session changes, cancellation of reads, and refresh after
+writes. Use `databaseApi.execute()` for imperative callers; a response stored
+in your own component state needs its own request-identity and refresh handling.
 
 ### Session changes
 
