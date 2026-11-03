@@ -20,6 +20,9 @@ export default defineConfig([
     format: "esm",
     platform: "node",
     minify: false,
+    // Strip JSDoc from the JS output (rolldown 1.2 keeps it by default). The
+    // .d.ts files keep their JSDoc; legal comments and annotations stay.
+    outputOptions: { comments: { jsdoc: false } },
     dts: {
       resolver: "oxc",
     },
@@ -29,12 +32,14 @@ export default defineConfig([
     outExtensions: () => ({
       js: ".js",
     }),
-    noExternal: ["shared"],
-    external: (id) => {
-      // Bundle "shared" workspace package and @/ path aliases
-      if (id === "shared" || id.startsWith("shared/")) return false;
-      if (id.startsWith("@/")) return false;
-      return /^[^./]/.test(id) || id.includes("/node_modules/");
+    deps: {
+      alwaysBundle: ["shared"],
+      neverBundle: (id) => {
+        // Bundle "shared" workspace package and @/ path aliases
+        if (id === "shared" || id.startsWith("shared/")) return false;
+        if (id.startsWith("@/")) return false;
+        return /^[^./]/.test(id) || id.includes("/node_modules/");
+      },
     },
     tsconfig: "./tsconfig.json",
     copy: [

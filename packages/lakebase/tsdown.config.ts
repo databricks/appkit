@@ -14,21 +14,25 @@ export default defineConfig([
     format: ["esm", "cjs"],
     platform: "node",
     minify: false,
+    // Strip JSDoc from the JS output (rolldown 1.2 keeps it by default). The
+    // .d.ts files keep their JSDoc; legal comments and annotations stay.
+    outputOptions: { comments: { jsdoc: false } },
     dts: {
       resolver: "oxc",
     },
     sourcemap: false,
     clean: false,
     unbundle: true,
-    noExternal: [],
     outExtensions: ({ format }) => ({
       js: format === "cjs" ? ".cjs" : ".js",
     }),
-    external: (id) => {
-      // Bundle all internal modules
-      if (id.startsWith("@/")) return false;
-      // Externalize all npm packages
-      return /^[^./]/.test(id) || id.includes("/node_modules/");
+    deps: {
+      neverBundle: (id) => {
+        // Bundle all internal modules
+        if (id.startsWith("@/")) return false;
+        // Externalize all npm packages
+        return /^[^./]/.test(id) || id.includes("/node_modules/");
+      },
     },
     tsconfig: "./tsconfig.json",
   },
