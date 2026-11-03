@@ -76,7 +76,7 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
   let metricViewsFolder: string | undefined;
   let appRoot: string;
   let databaseFolder: string;
-  let routesFolder: string;
+  let serverDatabaseFolder: string;
 
   // Single-flight state for runGenerate(). `inFlight` is the promise of the
   // currently-running drain (null when idle); `queued` records that a trigger
@@ -421,7 +421,7 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
       );
       appRoot = process.cwd();
       databaseFolder = path.join(appRoot, "config", "database");
-      routesFolder = path.join(appRoot, "server", "database", "routes");
+      serverDatabaseFolder = path.join(appRoot, "server", "database");
       watchFolders = options?.watchFolders ?? [
         defaultQueryFolder,
         defaultMetricViewsFolder,
@@ -460,15 +460,16 @@ export function appKitTypesPlugin(options?: AppKitTypesPluginOptions): Plugin {
 
     configureServer(server) {
       server.watcher.add(watchFolders);
-      server.watcher.add([databaseFolder, routesFolder]);
+      server.watcher.add([databaseFolder, serverDatabaseFolder]);
 
-      // A route module may import helpers beside it, so any source under
-      // either folder regenerates; `routes.gen.ts` itself sits outside both.
+      // Shared schemas and policies commonly live beside routes/. Generated
+      // outputs must not trigger their own generation again.
       const isDatabaseSource = (changedFile: string): boolean => {
         const normalizedFile = path.resolve(changedFile);
         return (
           /\.(?:[cm]?ts|tsx)$/.test(normalizedFile) &&
-          [databaseFolder, routesFolder].some((folder) => {
+          !/\.(?:gen|d)\.[cm]?tsx?$/.test(normalizedFile) &&
+          [databaseFolder, serverDatabaseFolder].some((folder) => {
             const relative = path.relative(folder, normalizedFile);
             return !relative.startsWith("..") && !path.isAbsolute(relative);
           })
