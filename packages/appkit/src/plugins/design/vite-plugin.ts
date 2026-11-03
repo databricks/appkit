@@ -231,8 +231,9 @@ new MutationObserver(() => (lastMutation = performance.now())).observe(document.
 });
 
 // Resolves once the page shows its real content: fonts loaded, no fetch in
-// flight, no DOM change for QUIET_MS, then two frames (painted).
-async function settled(isCurrent) {
+// flight, no DOM change for QUIET_MS, then two frames (painted). \`paint\`
+// replaces the frame wait.
+async function settled(isCurrent, paint) {
   await document.fonts?.ready;
   const start = performance.now();
   while (isCurrent()) {
@@ -241,6 +242,7 @@ async function settled(isCurrent) {
     if (host.blockers === 0 && (capped || (pendingFetches === 0 && quiet))) break;
     await sleep(50);
   }
+  if (paint) return paint();
   await frame();
   await frame();
 }
@@ -404,10 +406,15 @@ export function appReadyModule(builderOrigins: string[]): string {
 const ORIGINS = ${JSON.stringify(builderOrigins)};
 ${SETTLE_SNIPPET}
 
+// A builder may load the app in a hidden frame to reveal it when ready, and
+// hidden frames get no animation frames: two frames, or 100 ms without them.
+const painted = () =>
+  Promise.race([frame().then(frame), sleep(100)]);
+
 let run = 0;
 function schedule() {
   const mine = ++run;
-  settled(() => mine === run).then(() => {
+  settled(() => mine === run, painted).then(() => {
     if (mine !== run || host.blockers > 0) return;
     if (document.querySelector("[${TEMPLATE_HOME_ATTR}]")) return;
     const target = window.parent !== window ? window.parent : window.opener;
