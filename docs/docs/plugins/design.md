@@ -169,6 +169,8 @@ interface AppReadyMessage {
 }
 ```
 
+This is the signal for an app that skips `/design` (e.g. one that needs no data): the builder can load the app's `/` in a hidden frame and reveal it when `appkit:app-ready` arrives. Hidden frames get no animation frames, so on the app's pages the final wait for a paint gives up after 100 ms instead of waiting for frames forever. `/design` keeps its two-frame wait.
+
 It isn't posted while an element with the `data-appkit-template-home` attribute is on screen. The app template's default home page (`HomePage` in `client/src/App.tsx`) carries it; a builder can also look for it directly. Remove the attribute, or the page, when the app gets its real home page, and the next settle (a hot update counts) posts `appkit:app-ready`.
 
 ```ts

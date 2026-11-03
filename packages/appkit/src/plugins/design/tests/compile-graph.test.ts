@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { createServer, type ViteDevServer } from "vite";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { compileGraph, designVitePlugin } from "../vite-plugin";
 
@@ -152,16 +152,23 @@ describe("compileGraph on a real Vite server", () => {
     server.environments.client.hot.send = (p: unknown) => sent.push(p);
     server.ws.send = (p: unknown) => sent.push(p);
 
-    fs.appendFileSync(path.join(app, "drafts/dash.html"), "b</p>");
-    await new Promise((r) => setTimeout(r, 500));
+    // macOS's file events can miss writes made just after a watch starts
+    // (an app's watcher starts long before an agent writes): write again on
+    // each retry until the notice comes.
+    await vi.waitFor(
+      () => {
+        fs.appendFileSync(path.join(app, "drafts/dash.html"), "b");
+        expect(sent).toContainEqual(
+          expect.objectContaining({
+            event: "appkit:draft-changed",
+            data: { draft: "dash" },
+          }),
+        );
+      },
+      { timeout: 5000, interval: 200 },
+    );
     expect(sent).not.toContainEqual(
       expect.objectContaining({ type: "full-reload" }),
-    );
-    expect(sent).toContainEqual(
-      expect.objectContaining({
-        event: "appkit:draft-changed",
-        data: { draft: "dash" },
-      }),
     );
   });
 
