@@ -1,4 +1,5 @@
 import { defineConfig } from "tsdown";
+import typescriptNext from "typescript-next";
 
 export default defineConfig([
   {
@@ -25,6 +26,10 @@ export default defineConfig([
     outputOptions: { comments: { jsdoc: false } },
     dts: {
       resolver: "oxc",
+      // TypeScript 7.0 lacks the declaration-emit API; emit .d.ts with the pinned
+      // 7.1 beta until 7.1.0 is stable.
+      generator: "tsgo",
+      tsgo: { moduleUrl: typescriptNext },
     },
     sourcemap: false,
     clean: false,
