@@ -17,7 +17,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Origins of the app builder that embeds the app (e.g. [\"https://builder.example.com\"]; a single string is also accepted). After a design page first paints, an appkit:design-ready message is posted to that window, only to these origins. '*' is not allowed."
+          "description": "Origins of the app builder that embeds the app (e.g. [\"https://builder.example.com\"]; a single string is also accepted). After a design page first paints, an appkit:design-ready message is posted to that window, only to these origins. '*' is not allowed. Defaults to the APPKIT_DESIGN_BUILDER_ORIGIN environment variable (comma-separated origins)."
         }
       }
     }

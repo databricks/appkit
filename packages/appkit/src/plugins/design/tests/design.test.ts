@@ -264,6 +264,64 @@ describe("builderOrigin", () => {
     return new DesignPlugin(config);
   };
 
+  describe("APPKIT_DESIGN_BUILDER_ORIGIN, when builderOrigin isn't passed", () => {
+    const ENV = "APPKIT_DESIGN_BUILDER_ORIGIN";
+    afterEach(() => {
+      delete process.env[ENV];
+    });
+    // What the plugin posts to and allows CORS for.
+    const originsOf = (config: Parameters<typeof design>[0] = {}) => {
+      const { plugin: DesignPlugin, config: c } = design(config);
+      return (new DesignPlugin(c) as unknown as { builderOrigins: string[] })
+        .builderOrigins;
+    };
+
+    test("is the builder origin of a bare design(), as scaffolded", () => {
+      process.env[ENV] = "https://builder.example.com";
+      expect(originsOf()).toEqual(["https://builder.example.com"]);
+    });
+
+    test("takes several origins, comma-separated", () => {
+      process.env[ENV] = " https://a.example.com , http://localhost:3000,";
+      expect(originsOf()).toEqual([
+        "https://a.example.com",
+        "http://localhost:3000",
+      ]);
+    });
+
+    test("an explicit builderOrigin wins", () => {
+      process.env[ENV] = "https://env.example.com";
+      expect(originsOf({ builderOrigin: "https://own.example.com" })).toEqual([
+        "https://own.example.com",
+      ]);
+    });
+
+    test("unset or empty means no builder", () => {
+      expect(originsOf()).toEqual([]);
+      process.env[ENV] = "";
+      expect(originsOf()).toEqual([]);
+    });
+
+    test("is checked like the option, and the error names the variable", () => {
+      process.env[ENV] = "*";
+      expect(() => originsOf()).toThrow(
+        /APPKIT_DESIGN_BUILDER_ORIGIN "\*" must be a bare origin/,
+      );
+    });
+
+    test("turns on the app-ready script, which needs a builder origin", () => {
+      process.env[ENV] = "https://builder.example.com";
+      const plugin = designVitePlugin({ builderOrigins: originsOf() });
+      const tags = (
+        plugin.transformIndexHtml as (
+          html: string,
+          ctx: { path: string },
+        ) => { attrs?: { src?: string } }[] | undefined
+      )("", { path: "/index.html" });
+      expect(JSON.stringify(tags)).toContain("virtual:appkit-app-ready.mjs");
+    });
+  });
+
   test("accepts bare origins", () => {
     expect(() =>
       construct(["https://builder.example.com", "http://localhost:3000"]),

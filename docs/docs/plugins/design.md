@@ -27,7 +27,7 @@ await createApp({
 
 | Option | Type | Description |
 | ------ | ---- | ----------- |
-| `builderOrigin` | `string \| string[]` | Origin(s) of the app builder that embeds the app. The [design](#readiness) and [app](#app-readiness) ready messages and [draft errors](#draft-errors) are posted only to these origins. Must be a bare origin like `"https://builder.example.com"`; `"*"` is rejected. Optional: without it no message is posted, and `/design/__status` still works. |
+| `builderOrigin` | `string \| string[]` | Origin(s) of the app builder that embeds the app. The [design](#readiness) and [app](#app-readiness) ready messages and [draft errors](#draft-errors) are posted only to these origins. Must be a bare origin like `"https://builder.example.com"`; `"*"` is rejected. Defaults to the `APPKIT_DESIGN_BUILDER_ORIGIN` environment variable (one origin, or several separated by commas), so a builder's runtime can set it for a scaffolded `design()` with no options; an explicit `builderOrigin` wins. Optional: without either, no message is posted, and `/design/__status` still works. |
 
 ## Pages
 
