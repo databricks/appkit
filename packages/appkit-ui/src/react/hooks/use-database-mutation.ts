@@ -1,4 +1,10 @@
-import { useCallback, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import { prepareDatabaseOperation } from "@/js/database/client";
 import {
@@ -47,6 +53,7 @@ export interface UseDatabaseMutationResult<Input, T> {
 }
 
 interface MutationState {
+  readonly operation: symbol | null;
   readonly epoch: number;
   readonly data: unknown;
   readonly error: DatabaseApiError | null;
@@ -54,6 +61,7 @@ interface MutationState {
 }
 
 const IDLE: MutationState = Object.freeze({
+  operation: null,
   epoch: -1,
   data: undefined,
   error: null,
@@ -64,7 +72,8 @@ const IDLE: MutationState = Object.freeze({
  * Run one named write operation, only when `mutate` is called; mounting the
  * hook sends nothing. The name, input, and answer are typed from the
  * generated `database-operations.d.ts`. Only the latest call reports in the hook's
- * state, and a session change clears it. A successful call restarts every
+ * state. Changing the operation name or session returns the hook to idle;
+ * earlier writes still finish without reporting in the new operation. A successful call restarts every
  * mounted {@link useDatabaseQuery}.
  *
  * @param name - A POST, PATCH, PUT, or DELETE operation the registry declares
@@ -87,6 +96,7 @@ export function useDatabaseMutation<N extends DatabaseMutationName>(
   DatabaseOperationOutput<N>
 > {
   type Output = DatabaseOperationOutput<N>;
+  const operation = useMemo(() => Symbol(name), [name]);
   const epoch = useSyncExternalStore(
     subscribeDatabaseSession,
     getDatabaseSessionEpoch,
@@ -105,10 +115,10 @@ export function useDatabaseMutation<N extends DatabaseMutationName>(
       // An answer, even a 401 or a new actor's reply that opens an epoch,
       // belongs to the epoch it was accepted in; a stale one stays in the old.
       const settle = (
-        next: Omit<MutationState, "epoch">,
+        next: Omit<MutationState, "epoch" | "operation">,
         epoch = getDatabaseSessionEpoch(),
       ) => {
-        if (latest.current === call) setState({ ...next, epoch });
+        if (latest.current === call) setState({ ...next, epoch, operation });
       };
       settle({ data: undefined, error: null, isLoading: true }, started);
       try {
@@ -137,7 +147,7 @@ export function useDatabaseMutation<N extends DatabaseMutationName>(
         return { data: undefined, error };
       }
     },
-    [name],
+    [name, operation],
   );
 
   const reset = useCallback(() => {
@@ -145,7 +155,8 @@ export function useDatabaseMutation<N extends DatabaseMutationName>(
     setState(IDLE);
   }, []);
 
-  const view = state.epoch === epoch ? state : IDLE;
+  const view =
+    state.epoch === epoch && state.operation === operation ? state : IDLE;
   return {
     mutate,
     // Generation describes the JSON this operation's route answers with.

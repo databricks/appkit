@@ -10,6 +10,7 @@ import {
 } from "@/js/database/test-utils";
 
 import {
+  skipToken,
   type UseDatabaseQueryOptions,
   type UseDatabaseQueryResult,
   useDatabaseQuery as typedUseDatabaseQuery,
@@ -66,6 +67,37 @@ function renderQuery(
 }
 
 describe("useDatabaseQuery", () => {
+  test("skipToken holds a query idle and refetch is a no-op until input exists", async () => {
+    const { result, rerender } = renderQuery({ input: skipToken });
+    expect(result.current).toMatchObject({
+      data: undefined,
+      error: null,
+      isLoading: false,
+    });
+    act(() => result.current.refetch());
+    await act(flush);
+    expect(server.requests).toHaveLength(0);
+    rerender({ input: { id: 7 } });
+    expect(server.requests).toHaveLength(1);
+    await answer(server.request(0), { id: 7 });
+    expect(result.current.data).toEqual({ id: 7 });
+    rerender({ input: skipToken });
+    expect(result.current).toMatchObject({
+      data: undefined,
+      error: null,
+      isLoading: false,
+    });
+  });
+
+  test("skipping aborts an in-flight query and ignores its late answer", async () => {
+    const { result, rerender } = renderQuery();
+    rerender({ input: skipToken });
+    expect(server.request(0).signal?.aborted).toBe(true);
+    await answer(server.request(0), { id: 1 });
+    expect(result.current.data).toBeUndefined();
+    expect(server.requests).toHaveLength(1);
+  });
+
   test("a parameterless query sends no input", async () => {
     const { result } = renderHook(() => useDatabaseQuery("notes.get"));
     expect(server.request(0).url).toBe("/api/database/operations/notes.get");

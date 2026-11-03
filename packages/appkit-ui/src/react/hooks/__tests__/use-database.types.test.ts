@@ -128,6 +128,7 @@ const IMPORTS = `
     type DatabaseQueryName,
     useDatabaseMutation,
     useDatabaseQuery,
+    skipToken,
   } from "@databricks/appkit-ui/react/beta";
 `;
 
@@ -157,8 +158,7 @@ test("names, inputs, and answers come from the generated operations", () => {
       const found = useDatabaseQuery("notes.find", { id: 1 });
       const search = useDatabaseQuery(
         "notes.search",
-        { board_id: selected ?? 0 },
-        { enabled: selected !== undefined },
+        selected === undefined ? skipToken : { board_id: selected },
       );
       const bodies: string[] | undefined = search.data?.map((row) => row.body);
       void [loading, error, bodies];
@@ -268,6 +268,8 @@ declare global {
 export async function Calls() {
   const all = useDatabaseQuery("notes.all");
   useDatabaseQuery("notes.all", undefined, { enabled: false });
+  useDatabaseQuery("notes.all", skipToken);
+  useDatabaseQuery("notes.get", skipToken, { enabled: false });
   await databaseApi.execute("notes.all");
   await databaseApi.execute("notes.purge", undefined, { signal: new AbortController().signal });
   const purge = useDatabaseMutation("notes.purge");
@@ -284,6 +286,10 @@ export async function Calls() {
   await databaseApi.execute("notes.get");
   // @ts-expect-error TS2554 parameterized mutations still require input
   await useDatabaseMutation("notes.delete").mutate();
+  // @ts-expect-error TS2345 skipToken belongs only to query hooks
+  await databaseApi.execute("notes.get", skipToken);
+  // @ts-expect-error TS2345 skipToken cannot be a mutation payload
+  await useDatabaseMutation("notes.delete").mutate(skipToken);
 }
 `);
 });
