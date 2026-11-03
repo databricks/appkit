@@ -158,9 +158,9 @@ export class TelemetryManager {
       this.loggerProvider = new LoggerProvider({
         resource: this.resource,
         processors: [
-          new BatchLogRecordProcessor(
-            new OTLPLogExporter({ headers: config.headers }),
-          ),
+          new BatchLogRecordProcessor({
+            exporter: new OTLPLogExporter({ headers: config.headers }),
+          }),
         ],
       });
       logs.setGlobalLoggerProvider(this.loggerProvider);
