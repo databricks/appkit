@@ -47,7 +47,7 @@ export function BoardExplorer() {
   // The latest write's outcome. Each mutation restarts the queries on success.
   const [failure, setFailure] = useState<DatabaseApiError | null>(null);
 
-  const boards = useDatabaseQuery("boards.list", {});
+  const boards = useDatabaseQuery("boards.list");
   const board =
     boards.data?.find((entry) => entry.id === selected) ?? boards.data?.[0];
   const notes = useDatabaseQuery(

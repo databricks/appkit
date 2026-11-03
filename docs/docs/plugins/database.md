@@ -189,37 +189,51 @@ export const updateNote = defineOperation({
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `name` | Yes | The name the browser calls, one URL segment. Parts of letters, digits, `_`, and `-`, each starting with a letter, joined by dots. At most 64 characters per part and 255 in total. `constructor` and `prototype` are reserved |
-| `entity` | Yes | The declared table the operation works on. It types the default input and output |
+| `entity` | Yes | The declared table the operation works on. It types the default output |
 | `method` | Yes | `GET`, `POST`, `PATCH`, `PUT`, or `DELETE`. The operation answers only this method |
-| `input` | No | A Zod schema for the input. `execute` receives the parsed value |
+| `input` | No | A Zod schema for accepted parameters. Omit it for no parameters; callbacks receive `undefined` |
 | `output` | No | A Zod schema for the answer. The plugin parses what `execute` returns and sends only that |
 | `authorize` | Yes | A function or a [policy](#authorize-an-operation) that admits the caller |
 | `execute` | Yes | Does the work and returns the answer |
 
-Without `input` or `output`, the entity and method decide them:
+Omitting `input` means the operation accepts no parameters. Declare a schema
+whenever it needs an ID, filters, or write values. There is no input inferred
+from the entity or HTTP method, and no need for `input: z.object({})` on lists.
+Unexpected parameters are rejected before authorization; an empty object is
+also accepted and normalized to `undefined`.
 
-| Method | Default input | Default output |
-| --- | --- | --- |
-| `GET` | `{ id }` | The public row, or 404 when `execute` returns `null` |
-| `POST` | The row's insertable public columns | The created public row, with status 201 |
-| `PATCH` | `{ id, changes }`, with every updatable column optional and at least one present | The updated public row, or 404 for `null` |
-| `PUT` | `{ id, values }`, with every updatable column required | The updated public row, or 404 for `null` |
-| `DELETE` | `{ id }` | No body, status 204. `false` from `execute` answers 404 |
+```ts
+export const countNotes = defineOperation({
+  name: "notes.count",
+  entity: "notes",
+  method: "GET",
+  output: z.number(),
+  authorize: signedIn,
+  execute: ({ db }) => db.notes.count(),
+});
+```
+
+Without `output`, the entity and method determine the response:
+
+| Method | Default output |
+| --- | --- |
+| `GET` | The public row, or 404 when `execute` returns `null` |
+| `POST` | The created public row, with status 201 |
+| `PATCH` | The updated public row, or 404 for `null` |
+| `PUT` | The updated public row, or 404 for `null` |
+| `DELETE` | No body, status 204. `false` from `execute` answers 404 |
 
 A default output carries a `bigint` as a decimal string and a timestamp as
-RFC 3339 text, such as `2024-01-01T10:00:00+00:00`, which a default input
-accepts back.
-
-Keyed defaults need a public primary key. Server-controlled columns, such as an
-author taken from the caller, need an explicit `input` that leaves them out;
-otherwise the default `POST` and `PATCH` inputs accept them from the browser.
+RFC 3339 text, such as `2024-01-01T10:00:00+00:00`. Explicit input schemas
+control how incoming values are validated and converted. Keep server-owned
+values, such as the caller's identity, out of those schemas.
 
 `execute` and `authorize` receive one context:
 
 | Field | Meaning |
 | --- | --- |
 | `actor` | The verified caller, `{ id, email? }`. See [Caller identity](#caller-identity) |
-| `input` | The parsed input |
+| `input` | The parsed input, or `undefined` when there is no input schema |
 | `db` | The same client as `appkit.database` |
 | `appkit` | Every plugin's exports, as `createApp` returns them |
 | `resource` | The value a resource policy loaded, otherwise `undefined` |
@@ -427,6 +441,7 @@ operation by name:
 ```ts
 import { databaseApi } from "@databricks/appkit-ui/js/beta";
 
+const count = await databaseApi.execute("notes.count");
 const notes = await databaseApi.execute("notes.list", { limit: 20 });
 await databaseApi.execute("notes.update", { id: 7, body: "Shipped" });
 ```
@@ -438,7 +453,9 @@ the page, so a name the server does not serve fails with `NOT_EXPOSED` and
 sends no request. A failed call rejects with a [`DatabaseApiError`](#errors).
 An optional third argument, `{ signal }`, cancels the request, and the promise
 then rejects with the abort reason. Cancelling a write does not undo it if the
-server already committed it.
+server already committed it. For an operation without parameters, call
+`execute(name)` or `useDatabaseQuery(name)`, and `mutate()` for a mutation.
+Pass `undefined` in the input position when supplying request or query options.
 
 ## React hooks (beta)
 
