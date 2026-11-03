@@ -25,6 +25,9 @@ import type {
   DatabaseQueryName,
 } from "@/js/database/types";
 
+/** Hold a dependent database query idle until its typed input is available. */
+export const skipToken = Symbol.for("@databricks/appkit-ui/database/skip");
+
 /** Options for {@link useDatabaseQuery}. */
 export interface UseDatabaseQueryOptions {
   /** `false` holds the query idle and sends nothing. Default true. */
@@ -107,8 +110,9 @@ function prepare(name: string, input: unknown): Prepared {
  * {@link useDatabaseMutation} restarts every mounted query.
  *
  * @param name - A GET operation the generated registry declares
- * @param input - Omit for parameterless operations, or pass their JSON input; an equal value on a later render
- *   keeps the request in flight
+ * @param input - Omit for parameterless operations, pass their JSON input, or
+ *   pass `skipToken` until a dependent input is available. Equal input on a
+ *   later render keeps the request in flight.
  * @param options - `enabled: false` holds the query idle
  * @returns The data, loading and error state, and `refetch`
  *
@@ -123,7 +127,8 @@ export function useDatabaseQuery<N extends DatabaseQueryName>(
   name: N,
   ...args: DatabaseOperationArgs<
     DatabaseOperationInput<N>,
-    UseDatabaseQueryOptions
+    UseDatabaseQueryOptions,
+    typeof skipToken
   >
 ): UseDatabaseQueryResult<DatabaseOperationOutput<N>>;
 export function useDatabaseQuery(
@@ -131,7 +136,7 @@ export function useDatabaseQuery(
   input?: unknown,
   options: UseDatabaseQueryOptions = {},
 ): UseDatabaseQueryResult<unknown> {
-  const enabled = options.enabled ?? true;
+  const enabled = (options.enabled ?? true) && input !== skipToken;
   // Preparation encodes the input every render, so its URL is the identity
   // of a request whatever the input object's identity.
   const fresh = enabled ? prepare(name, input) : null;

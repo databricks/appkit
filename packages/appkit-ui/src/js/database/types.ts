@@ -121,6 +121,8 @@ export type DatabaseOperationInputArgs<Input> = [Input] extends [void]
   : [input: Input];
 
 /** @internal Call arguments with a fixed options position after the input. */
-export type DatabaseOperationArgs<Input, Options> = [Input] extends [void]
-  ? [input?: Input, options?: Options]
-  : [input: Input, options?: Options];
+export type DatabaseOperationArgs<Input, Options, Skipped = never> = [
+  Input,
+] extends [void]
+  ? [input?: Input | Skipped, options?: Options]
+  : [input: Input | Skipped, options?: Options];

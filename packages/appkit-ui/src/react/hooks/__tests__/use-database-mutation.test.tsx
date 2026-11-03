@@ -73,6 +73,55 @@ function start(
 }
 
 describe("useDatabaseMutation", () => {
+  test("changing operation names drops completed data and errors", async () => {
+    const { result, rerender } = renderHook(
+      ({ name }) => useDatabaseMutation(name),
+      { initialProps: { name: "notes.create" } },
+    );
+    const pending = start(result, { body: "hi" });
+    await answer(server.request(0), { id: 7, body: "hi" });
+    await pending;
+    rerender({ name: "notes.delete" });
+    expect(result.current).toMatchObject({
+      data: undefined,
+      error: null,
+      isLoading: false,
+    });
+    const deletion = start(result, { id: 7 });
+    await answer(server.request(1), { error: "No" }, { status: 403 });
+    await deletion;
+    rerender({ name: "notes.create" });
+    expect(result.current).toMatchObject({
+      data: undefined,
+      error: null,
+      isLoading: false,
+    });
+  });
+
+  test("old writes finish and refresh queries without populating a renamed hook", async () => {
+    renderHook(() => useDatabaseQuery("notes.get", { id: 7 }));
+    await answer(server.request(0), { id: 7 });
+    const { result, rerender } = renderHook(
+      ({ name }) => useDatabaseMutation(name),
+      { initialProps: { name: "notes.create" } },
+    );
+    const pending = start(result, { body: "hi" });
+    rerender({ name: "notes.delete" });
+    rerender({ name: "notes.create" });
+    await answer(server.request(1), { id: 8, body: "hi" });
+    await expect(pending).resolves.toMatchObject({
+      data: { id: 8 },
+      error: null,
+    });
+    expect(result.current).toMatchObject({
+      data: undefined,
+      error: null,
+      isLoading: false,
+    });
+    expect(server.requests).toHaveLength(3);
+    expect(server.request(1).signal).toBeUndefined();
+  });
+
   test("a parameterless mutation can run without an argument", async () => {
     const { result } = renderHook(
       () =>
