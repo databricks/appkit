@@ -18,7 +18,7 @@ One immutable operation descriptor. Nothing in it runs until a request does.
 ### authorize
 
 ```ts
-readonly authorize: Authorize<ParsedInput<E, M, I>, R>;
+readonly authorize: Authorize<ParsedInput<I>, R>;
 ```
 
 ***
@@ -34,14 +34,14 @@ readonly entity: E;
 ### execute()
 
 ```ts
-readonly execute: (context: OperationContext<ParsedInput<E, M, I>, [R] extends [undefined] ? undefined : NonNullable<Awaited<R>>>) => Awaitable<ExecuteResult<E, M, O>>;
+readonly execute: (context: OperationContext<ParsedInput<I>, [R] extends [undefined] ? undefined : NonNullable<Awaited<R>>>) => Awaitable<ExecuteResult<E, M, O>>;
 ```
 
 #### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
-| `context` | [`OperationContext`](Interface.OperationContext.md)\<`ParsedInput`\<`E`, `M`, `I`\>, \[`R`\] *extends* \[`undefined`\] ? `undefined` : `NonNullable`\<`Awaited`\<`R`\>\>\> |
+| `context` | [`OperationContext`](Interface.OperationContext.md)\<`ParsedInput`\<`I`\>, \[`R`\] *extends* \[`undefined`\] ? `undefined` : `NonNullable`\<`Awaited`\<`R`\>\>\> |
 
 #### Returns
 

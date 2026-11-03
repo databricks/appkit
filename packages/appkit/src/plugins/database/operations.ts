@@ -1,9 +1,4 @@
-import type {
-  DatabaseOperationMethod,
-  PluginMap,
-  WireInput,
-  WireOutput,
-} from "shared";
+import type { DatabaseOperationMethod, PluginMap, WireOutput } from "shared";
 import type { z } from "zod";
 
 import type {
@@ -105,62 +100,28 @@ type Entry<E extends EntityName> =
     ? DatabaseRegistry[E]
     : never;
 type PublicRow<E extends EntityName> = Entry<E>["publicRow"];
-type Http<E extends EntityName> = Entry<E>["api"];
-type Id<E extends EntityName> = PublicRow<E>[Http<E>["key"] &
-  keyof PublicRow<E>];
-/** A keyless entity has no id to default to, so its input must be explicit. */
-type Keyed<E extends EntityName, T> = [Http<E>["key"]] extends [never]
-  ? never
-  : T;
-
-/** The generated facet for a table with no writable public columns. */
-type EmptyObject = Record<string, never>;
-type HasUpdateField<T> = T extends EmptyObject
-  ? false
-  : [keyof T] extends [never]
-    ? false
-    : true;
-
 /**
- * The inferred contract of each method: the parsed `input`, what `execute`
- * returns, and the successful response body before JSON encoding. Inputs come
- * from the HTTP facets, never from the trusted insert or update shapes. A
- * `null` result is a missing record; DELETE answers `false` for one.
- * PATCH and PUT have no default when the public update facet is empty.
+ * Default results and responses come from the entity and method. Inputs are
+ * explicit schemas; an operation without one accepts no parameters.
  */
 interface DefaultContract<E extends EntityName> {
   GET: {
-    input: Keyed<E, { id: Id<E> }>;
     result: PublicRow<E> | null;
     output: PublicRow<E>;
   };
   POST: {
-    input: Http<E>["insert"];
     result: PublicRow<E>;
     output: PublicRow<E>;
   };
   PATCH: {
-    input: HasUpdateField<Http<E>["update"]> extends true
-      ? Keyed<E, { id: Id<E>; changes: Http<E>["update"] }>
-      : never;
     result: PublicRow<E> | null;
     output: PublicRow<E>;
   };
   PUT: {
-    input: HasUpdateField<Http<E>["update"]> extends true
-      ? Keyed<
-          E,
-          {
-            id: Id<E>;
-            values: Required<Exclude<Http<E>["update"], EmptyObject>>;
-          }
-        >
-      : never;
     result: PublicRow<E> | null;
     output: PublicRow<E>;
   };
   DELETE: {
-    input: Keyed<E, { id: Id<E> }>;
     result: boolean;
     output: void;
   };
@@ -174,11 +135,9 @@ type Contract<
 /** Methods whose `null` result means a missing record, whatever the output schema. */
 type NullableMethod = "GET" | "PATCH" | "PUT";
 
-type ParsedInput<
-  E extends EntityName,
-  M extends OperationMethod,
-  I extends SchemaSlot,
-> = [I] extends [Schema] ? z.output<I> : Contract<E, M>["input"];
+type ParsedInput<I extends SchemaSlot> = [I] extends [Schema]
+  ? z.output<I>
+  : undefined;
 
 type ExecuteResult<
   E extends EntityName,
@@ -188,11 +147,9 @@ type ExecuteResult<
   ? z.input<O> | (M extends NullableMethod ? null : never)
   : Contract<E, M>["result"];
 
-type WireInputOf<
-  E extends EntityName,
-  M extends OperationMethod,
-  I extends SchemaSlot,
-> = [I] extends [Schema] ? z.input<I> : WireInput<Contract<E, M>["input"]>;
+type WireInputOf<I extends SchemaSlot> = [I] extends [Schema]
+  ? z.input<I>
+  : void;
 
 /**
  * A default body encodes bigint as a decimal string. An explicit output uses
@@ -211,11 +168,7 @@ type WireOutputOf<
       : z.output<O>
   : WireOutput<Contract<E, M>["output"]>;
 
-/**
- * Everything `defineOperation` accepts besides its callbacks. Both overloads
- * intersect it directly: inference cannot see `input` through an `Omit` of
- * this conditional type, so an explicit input would silently become the default.
- */
+/** Fields shared by the decision and resource-policy overloads. */
 type OperationFields<
   E extends EntityName,
   M extends OperationMethod,
@@ -226,10 +179,9 @@ type OperationFields<
   readonly name: Name & string;
   readonly entity: E;
   readonly method: M;
+  readonly input?: I;
   readonly output?: O;
-} & ([Contract<E, M>["input"]] extends [never]
-  ? { readonly input: I & Schema }
-  : { readonly input?: I });
+};
 
 /** What `defineOperation` accepts for one entity and method. */
 type OperationOptions<
@@ -240,10 +192,10 @@ type OperationOptions<
   R,
   Name extends string,
 > = OperationFields<E, M, I, O, Name> & {
-  readonly authorize: Authorize<ParsedInput<E, M, I>, R>;
+  readonly authorize: Authorize<ParsedInput<I>, R>;
   readonly execute: (
     context: OperationContext<
-      ParsedInput<E, M, I>,
+      ParsedInput<I>,
       [R] extends [undefined] ? undefined : NonNullable<Awaited<R>>
     >,
   ) => Awaitable<ExecuteResult<E, M, O>>;
@@ -263,10 +215,10 @@ export interface OperationDefinition<
   readonly method: M;
   readonly input: I;
   readonly output: O;
-  readonly authorize: Authorize<ParsedInput<E, M, I>, R>;
+  readonly authorize: Authorize<ParsedInput<I>, R>;
   readonly execute: (
     context: OperationContext<
-      ParsedInput<E, M, I>,
+      ParsedInput<I>,
       [R] extends [undefined] ? undefined : NonNullable<Awaited<R>>
     >,
   ) => Awaitable<ExecuteResult<E, M, O>>;
@@ -275,14 +227,14 @@ export interface OperationDefinition<
 /** The JSON a caller sends to an operation; a bigint travels as a string or safe integer. */
 export type OperationWireInput<Operation> =
   Operation extends OperationDefinition<
-    infer E extends EntityName,
-    infer M extends OperationMethod,
+    infer _E extends EntityName,
+    infer _M extends OperationMethod,
     infer I extends SchemaSlot,
     infer _O extends SchemaSlot,
     infer _R,
     infer _Name extends string
   >
-    ? WireInputOf<E, M, I>
+    ? WireInputOf<I>
     : never;
 
 /** The JSON a successful call answers with; a bigint travels as a decimal string. */
@@ -316,9 +268,9 @@ const OPERATION = Symbol.for("@databricks/appkit/database/operation");
 
 /**
  * Declare one database operation. `name` is its public identifier. The entity
- * and method infer the default input and output; `input` and `output` Zod
- * schemas override them. Definition is pure: it freezes a descriptor and
- * calls nothing.
+ * and method infer the default output. Declare an `input` Zod schema to accept
+ * parameters; without one, callbacks receive `undefined`. An `output` schema
+ * overrides the default response. Definition only freezes a descriptor.
  */
 export function defineOperation<
   const Name extends string,
@@ -329,9 +281,9 @@ export function defineOperation<
   R extends NonNullable<unknown>,
 >(
   definition: OperationFields<E, M, I, O, Name> & {
-    readonly authorize: ResourcePolicy<ParsedInput<E, M, I>, R>;
+    readonly authorize: ResourcePolicy<ParsedInput<I>, R>;
     readonly execute: (
-      context: OperationContext<ParsedInput<E, M, I>, NonNullable<Awaited<R>>>,
+      context: OperationContext<ParsedInput<I>, NonNullable<Awaited<R>>>,
     ) => Awaitable<ExecuteResult<E, M, O>>;
   },
 ): OperationDefinition<E, M, I, O, R, Name>;
