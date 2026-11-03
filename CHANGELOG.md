@@ -188,6 +188,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.90.0](https://github.com/databricks/appkit/compare/v0.89.0...v0.90.0) (2026-11-03)
+
+### appkit
+
+* **appkit:** warn on Lakebase pool saturation and add a database pool option ([#700](https://github.com/databricks/appkit/issues/700)) ([4148306](https://github.com/databricks/appkit/commit/41483062d4df9e3518413882cba6649efb864123))
+
+
 ## [0.89.0](https://github.com/databricks/appkit/compare/v0.88.1...v0.89.0) (2026-10-19)
 
 * actionable hint when an OBO agent tool lacks its scope ([#634](https://github.com/databricks/appkit/issues/634)) ([d406d8a](https://github.com/databricks/appkit/commit/d406d8ac64a015263fe609f0be9e7508a5db6f6a))
