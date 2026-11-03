@@ -181,10 +181,11 @@ async function contractsOf(
 /**
  * Discover `server/database/routes/*.ts`, write the lazy `routes.gen.ts` entry
  * that lists every module, and write the browser contract of each published
- * operation. Any malformed or duplicate declaration fails generation and
+ * operation. A schema-only app gets an empty registry so development can
+ * discover its first operation without restarting manually. Any malformed or duplicate declaration fails generation and
  * neutralizes the contracts; a declaration without authorization is skipped
  * with a warning, or fails in strict mode. Both files are created only while
- * the routes directory exists, and emptied once it is gone.
+ * a schema or routes directory exists, and emptied once routes are gone.
  */
 export async function generateDatabaseOperations(
   options: GenerateDatabaseOperationsOptions,
@@ -197,11 +198,14 @@ export async function generateDatabaseOperations(
       })
       ?.isDirectory() ?? false;
   const files = routesPresent ? discoverRouteModules(options.appRoot) : [];
-  if (routesPresent || fsSync.existsSync(routesFile)) {
+  const schemaPresent = fsSync.existsSync(
+    fromRoot(options.appRoot, SCHEMA_FILE),
+  );
+  if (schemaPresent || routesPresent || fsSync.existsSync(routesFile)) {
     await writeIfChanged(routesFile, renderDatabaseRoutes(files));
   }
   if (!routesPresent) {
-    if (fsSync.existsSync(options.outFile)) {
+    if (schemaPresent || fsSync.existsSync(options.outFile)) {
       await writeIfChanged(options.outFile, NEUTRAL_DATABASE_OPERATION_TYPES);
     }
     return;

@@ -181,8 +181,16 @@ export const databaseRoutes = {
     expect(types).not.toMatch(/^\s*import\b/m);
   });
 
-  test("creates nothing for an app without operation routes", async () => {
+  test("creates a canonical empty registry and contracts for a schema-only app", async () => {
     const root = await app();
+    await generate(root);
+    expect(await read(root, ROUTES_FILE)).toContain("modules: []");
+    expect(await read(root, TYPES_FILE)).toBe(NEUTRAL_DATABASE_OPERATION_TYPES);
+  });
+
+  test("creates nothing for an app without a schema or operation routes", async () => {
+    const root = await app();
+    await fs.rm(path.join(root, "config"), { recursive: true });
     await generate(root);
     expect(await exists(root, ROUTES_FILE)).toBe(false);
     expect(await exists(root, TYPES_FILE)).toBe(false);
