@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { inspect } from "node:util";
@@ -134,6 +135,7 @@ function notesModule(ran: Executions): Record<string, unknown> {
     name: "notes.get",
     entity: "notes",
     method: "GET",
+    input: z.object({ id: z.number().int() }).strict(),
     authorize: policy({
       resource: ({ db, input }: Ctx<{ id: number }>) => db.notes.find(input.id),
       allow: ({ actor, resource }: Ctx<{ id: number }, NoteRow>) =>
@@ -167,10 +169,9 @@ function notesModule(ran: Executions): Record<string, unknown> {
     name: "notes.titles",
     entity: "notes",
     method: "GET",
-    input: z.object({}),
     output: z.array(z.object({ id: z.number(), title: z.string() })),
-    authorize: ({ actor }: Ctx<object>) => actor.email !== undefined,
-    execute: async ({ db, actor }: Ctx<object>) => {
+    authorize: ({ actor }: Ctx<undefined>) => actor.email !== undefined,
+    execute: async ({ db, actor }: Ctx<undefined>) => {
       ran.titles();
       const rows = await db.notes.toArray();
       return rows.filter((row) => row.ownerId === actor.id);
@@ -406,7 +407,9 @@ async function boot(
     return method === "GET"
       ? request(
           method,
-          `${endpoint}?input=${encodeURIComponent(JSON.stringify(input))}`,
+          input === undefined
+            ? endpoint
+            : `${endpoint}?input=${encodeURIComponent(JSON.stringify(input))}`,
           { headers: browser },
         )
       : request(method, endpoint, {
@@ -439,11 +442,12 @@ test("database() discovers conventional operations and serves them over HTTP", a
       `
       import { defineSchema, id, text } from ${JSON.stringify(builder)};
       import { defineOperation } from ${JSON.stringify(operations)};
+      import { z } from ${JSON.stringify(createRequire(import.meta.url).resolve("zod"))};
       const schema = defineSchema(({ table }) => ({ notes: table("notes", { id: id(), title: text().notNull() }) }));
       export const databaseRoutes = {
         schema: async () => ({ schema }),
         modules: [{ file: "server/database/routes/notes.ts", load: async () => ({
-          getNote: defineOperation({ name: "notes.get", entity: "notes", method: "GET", authorize: () => true,
+          getNote: defineOperation({ name: "notes.get", entity: "notes", method: "GET", input: z.object({ id: z.number() }), authorize: () => true,
             execute: ({ db, input }) => db.notes.find(input.id) }),
         }) }],
       };
@@ -750,7 +754,7 @@ describe("a database plugin with routes", () => {
     expect(edge.committed.notes[0]?.secret).toBe(SENTINEL.privateColumn);
 
     const read = await call("notes.get", { id: note.id }, asAda);
-    const titles = await call("notes.titles", {}, asAda);
+    const titles = await call("notes.titles", undefined, asAda);
     const missing = await call("notes.get", { id: 999 }, asAda);
     const notOwned = await call("notes.get", { id: note.id }, asBob);
 
@@ -773,6 +777,7 @@ describe("setup", () => {
     name: "notes.get",
     entity: "notes",
     method: "GET",
+    input: z.object({ id: z.number().int() }).strict(),
     authorize: () => true,
     execute: () => null,
   });

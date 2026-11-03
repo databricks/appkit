@@ -81,6 +81,7 @@ export const deleteNote = defineOperation({
   name: "notes.delete",
   entity: "notes",
   method: "DELETE",
+  input: z.object({ id: z.number().int() }),
   authorize: noteAuthor,
   execute: ({ db, input }) => db.notes.delete(input.id),
 });

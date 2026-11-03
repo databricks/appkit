@@ -16,7 +16,7 @@ declare global {
     };
     "boards.list": {
       method: "GET";
-      input: Record<string, never>;
+      input: void;
       output: {
         "id": number;
         "slug": string;

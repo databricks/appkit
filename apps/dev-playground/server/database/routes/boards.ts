@@ -8,7 +8,6 @@ export const listBoards = defineOperation({
   name: "boards.list",
   entity: "boards",
   method: "GET",
-  input: z.object({}),
   output: z.array(
     z.object({
       id: z.number(),
