@@ -1,6 +1,7 @@
 packages:
   - "packages/*"
   - "apps/*"
+  - "apps/dev-playground/client"
   # Local scratch apps (gitignored contents). Workspace-linked so their appkit
   # deps resolve to the monorepo; knip skips them via the apps/** ignore.
   - "apps/scratch/*"

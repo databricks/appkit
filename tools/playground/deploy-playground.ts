@@ -97,6 +97,13 @@ async function deployPlayground() {
     "@databricks/appkit-ui": `file:./databricks-appkit-ui-${appKitUiPackageJson.version}.tgz`,
   };
 
+  // The deployed app is installed with npm, outside the pnpm workspace that
+  // installs the client locally.
+  playgroundPackageJson.scripts = {
+    ...playgroundPackageJson.scripts,
+    install: "cd client && npm install && cd ..",
+  };
+
   fs.writeFileSync(
     path.join(TMP_FOLDER, "package.json"),
     JSON.stringify(playgroundPackageJson, null, 2),
