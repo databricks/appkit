@@ -82,7 +82,7 @@ const surface = (state: { exports: unknown }) =>
 const txSurface = (tx: unknown) => tx as TestTransaction;
 
 function arrange(path = fakePath()) {
-  const pool = { end: vi.fn(async () => undefined) };
+  const pool = { connect: vi.fn(), end: vi.fn(async () => undefined) };
   const db = { marker: Symbol("db") };
   mocks.initializeLakebasePool.mockResolvedValue(pool);
   mocks.createDrizzleDb.mockReturnValue(db);
@@ -137,6 +137,7 @@ describe("createDatabaseState", () => {
     const state = await pending;
     expect(mocks.initializeLakebasePool).toHaveBeenCalledTimes(1);
     expect(mocks.initializeLakebasePool).toHaveBeenCalledWith({
+      max: 105,
       statement_timeout: STATEMENT_TIMEOUT_MS,
       idle_in_transaction_session_timeout: IDLE_IN_TRANSACTION_TIMEOUT_MS,
     });
@@ -153,6 +154,19 @@ describe("createDatabaseState", () => {
     expect(state.exports).not.toHaveProperty("getPool");
     expect((state.exports as unknown as TestExports).notes).not.toHaveProperty(
       "unbounded",
+    );
+  });
+
+  test("passes pool overrides through to the connector", async () => {
+    const { execute } = arrange();
+    const pool = {
+      max: 20,
+      idleTimeoutMillis: 1_000,
+      connectionTimeoutMillis: 5_000,
+    };
+    await createDatabaseState(schema, execute, undefined, pool);
+    expect(mocks.initializeLakebasePool).toHaveBeenCalledWith(
+      expect.objectContaining(pool),
     );
   });
 

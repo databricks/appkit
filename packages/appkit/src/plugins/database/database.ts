@@ -56,6 +56,7 @@ export class DatabasePlugin<
       schema: config.schema,
       api: config.api,
       hooks: config.hooks,
+      pool: config.pool,
     };
   }
 
@@ -92,6 +93,7 @@ export class DatabasePlugin<
           schema,
           (operation, options) => this.execute(operation, options),
           this.hooks(),
+          this.config.pool,
         );
         if (this.draining) {
           // Setup may finish while shutdown is waiting; never publish that state.

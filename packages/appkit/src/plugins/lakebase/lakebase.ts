@@ -13,6 +13,11 @@ import {
   RoutingPool,
   assertEndpointHostMatches,
 } from "../../connectors/lakebase";
+import {
+  createPoolSaturationWatch,
+  DEFAULT_POOL_MAX,
+  RAISE_POOL_MAX_HINT,
+} from "../../connectors/lakebase/pool-saturation";
 import { getClientOptions } from "../../context/client-options";
 import { getCallerContext } from "../../context/execution-context";
 import { assertResourceExecution } from "../../context/resource-capabilities";
@@ -91,7 +96,14 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
       assertEndpointHostMatches(poolConfig),
     ]);
 
-    const spPool = createLakebasePool({ ...poolConfig, user });
+    const spMax = poolConfig.max ?? DEFAULT_POOL_MAX;
+    const spPool = createLakebasePool({ ...poolConfig, max: spMax, user });
+    createPoolSaturationWatch({
+      name: "SP",
+      max: spMax,
+      hint: RAISE_POOL_MAX_HINT,
+      logger,
+    })(spPool);
     logger.info("Lakebase SP pool initialized");
 
     this.oboPoolManager = createLakebasePoolManager({
@@ -101,6 +113,12 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
     logger.info("Lakebase OBO pool manager initialized");
 
     const oboManager = this.oboPoolManager;
+    const watchOboPool = createPoolSaturationWatch({
+      name: "OBO",
+      max: OBO_POOL_DEFAULTS.max,
+      hint: `Per-user pools are capped at ${OBO_POOL_DEFAULTS.max} connections and cannot be configured.`,
+      logger,
+    });
     this.pool = new RoutingPool(spPool, (ctx) => {
       if (!oboManager) throw new Error("OBO pool manager not initialized");
       // Lakebase OAuth roles use email as the postgres role when available
@@ -114,6 +132,7 @@ export class LakebasePlugin extends Plugin implements ToolProvider {
         },
         ctx.tokenFingerprint,
       );
+      watchOboPool(pool);
       if (isNew) {
         logger.debug("Created OBO pool for user (total: %d)", oboManager.size);
       }

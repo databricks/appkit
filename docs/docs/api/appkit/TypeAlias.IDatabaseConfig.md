@@ -4,6 +4,7 @@
 type IDatabaseConfig<TSchema> = {
   api?: DatabaseApiConfig<TSchema>;
   hooks?: { readonly [TTable in SchemaTableName<TSchema>]?: EntityHooks<TTable> };
+  pool?: DatabasePoolConfig;
   schema?: TSchema;
 };
 ```
@@ -46,6 +47,17 @@ true
 ```ts
 readonly optional hooks: { readonly [TTable in SchemaTableName<TSchema>]?: EntityHooks<TTable> };
 ```
+
+***
+
+### pool?
+
+```ts
+readonly optional pool: DatabasePoolConfig;
+```
+
+Overrides for the connection pool. A warning is logged when callers queue
+because every connection is in use.
 
 ***
 
