@@ -149,10 +149,9 @@ function toDimensionOptions(
  * in clicks, which `fromChartName` decodes back to selections.
  */
 function normalizeChartDataForChart(
-  rows: Array<Record<string, unknown>> | null,
+  rows: Array<Record<string, unknown>>,
   dimension: FilterDimension,
-): Array<Record<string, unknown>> | null {
-  if (!rows) return rows;
+): Array<Record<string, unknown>> {
   return rows.map((row) => {
     const value = row[dimension];
     let normalized: string;

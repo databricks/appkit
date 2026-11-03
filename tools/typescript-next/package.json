@@ -1,0 +1,10 @@
+{
+  "name": "typescript-next",
+  "private": true,
+  "description": "TypeScript 7.1 for .d.ts emit only. Kept in its own package so its tsc bin doesn't replace the workspace's TypeScript 7.0.",
+  "type": "module",
+  "exports": "./index.js",
+  "dependencies": {
+    "typescript": "7.1.0-beta"
+  }
+}

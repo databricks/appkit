@@ -94,13 +94,13 @@ function DataVisualizationRoute() {
               <AreaChart
                 queryKey="spend_data"
                 parameters={spendDataParams}
-                curveType="natural"
+                smooth
               />
               <CodeSnippet
                 code={`<AreaChart
   queryKey="spend_data"
   parameters={spendDataParams}
-  curveType="natural"
+  smooth
 />`}
               />
             </CardContent>
@@ -116,13 +116,13 @@ function DataVisualizationRoute() {
               <AreaChart
                 queryKey="spend_data"
                 parameters={spendDataParams}
-                curveType="linear"
+                smooth={false}
               />
               <CodeSnippet
                 code={`<AreaChart
   queryKey="spend_data"
   parameters={spendDataParams}
-  curveType="linear"
+  smooth={false}
 />`}
               />
             </CardContent>
@@ -182,15 +182,15 @@ function DataVisualizationRoute() {
               <LineChart
                 queryKey="spend_data"
                 parameters={spendDataParams}
-                curveType="monotone"
-                showDots={false}
+                smooth
+                showSymbol={false}
               />
               <CodeSnippet
                 code={`<LineChart
   queryKey="spend_data"
   parameters={spendDataParams}
-  curveType="monotone"
-  showDots={false}
+  smooth
+  showSymbol={false}
 />`}
               />
             </CardContent>
@@ -206,15 +206,15 @@ function DataVisualizationRoute() {
               <LineChart
                 queryKey="spend_data"
                 parameters={spendDataParams}
-                curveType="monotone"
-                showDots={true}
+                smooth
+                showSymbol={true}
               />
               <CodeSnippet
                 code={`<LineChart
   queryKey="spend_data"
   parameters={spendDataParams}
-  curveType="monotone"
-  showDots={true}
+  smooth
+  showSymbol={true}
 />`}
               />
             </CardContent>
@@ -250,14 +250,14 @@ function DataVisualizationRoute() {
                 queryKey="top_contributors"
                 parameters={commonParams}
                 innerRadius={60}
-                showLabel={true}
+                showLabels={true}
               />
               <CodeSnippet
                 code={`<PieChart
   queryKey="top_contributors"
   parameters={commonParams}
   innerRadius={60}
-  showLabel={true}
+  showLabels={true}
 />`}
               />
             </CardContent>
@@ -273,37 +273,35 @@ function DataVisualizationRoute() {
               <RadarChart
                 queryKey="spend_data"
                 parameters={spendDataParams}
-                fillOpacity={0.6}
+                showArea
               />
               <CodeSnippet
                 code={`<RadarChart
   queryKey="spend_data"
   parameters={spendDataParams}
-  fillOpacity={0.6}
+  showArea
 />`}
               />
             </CardContent>
           </Card>
 
-          {/* Radar Chart - With Dots */}
+          {/* Radar Chart - Outline */}
           <Card>
             <CardHeader>
-              <CardTitle>Performance Metrics (With Dots)</CardTitle>
-              <CardDescription>Radar Chart with data points</CardDescription>
+              <CardTitle>Performance Metrics (Outline)</CardTitle>
+              <CardDescription>Radar Chart without area fill</CardDescription>
             </CardHeader>
             <CardContent>
               <RadarChart
                 queryKey="spend_data"
                 parameters={spendDataParams}
-                showDots={true}
-                fillOpacity={0.4}
+                showArea={false}
               />
               <CodeSnippet
                 code={`<RadarChart
   queryKey="spend_data"
   parameters={spendDataParams}
-  showDots={true}
-  fillOpacity={0.4}
+  showArea={false}
 />`}
               />
             </CardContent>

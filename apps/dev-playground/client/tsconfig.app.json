@@ -23,8 +23,10 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
+    // Mirrors the aliases in vite.config.ts.
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@databricks/appkit-ui/*": ["../../../packages/appkit-ui/dist/*"]
     }
   },
   "include": ["src", "../shared/appkit-types"]

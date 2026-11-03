@@ -508,7 +508,7 @@ export class ServerPlugin extends Plugin {
    * Returns the public exports for the server plugin.
    * Exposes server management methods.
    */
-  exports() {
+  exports(): ServerExport {
     const self = this;
     return {
       /** Extend the server with custom routes or middleware */
@@ -535,6 +535,18 @@ export class ServerPlugin extends Plugin {
       },
     };
   }
+}
+
+/** Public API of the server plugin, available as `appkit.server`. */
+export interface ServerExport {
+  /** Extend the server with custom routes or middleware */
+  extend(fn: (app: express.Application) => void): ServerExport;
+  /** Get the underlying HTTP server instance */
+  getServer: ServerPlugin["getServer"];
+  /** Get the server configuration */
+  getConfig: ServerPlugin["getConfig"];
+  /** @deprecated Server is now started automatically by createApp. */
+  start(): never;
 }
 
 const EXCLUDED_PLUGINS: string[] = [ServerPlugin.manifest.name];
