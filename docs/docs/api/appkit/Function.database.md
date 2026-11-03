@@ -41,11 +41,11 @@ Create the database plugin. Omit configuration to load
 function database<TSchema>(config?: IDatabaseConfig<TSchema>): DatabaseRegistration<TSchema>;
 ```
 
-Register the database plugin. Pass `routes: databaseRoutes` to serve the
-generated named operations over HTTP; without it, no database endpoint is
-registered. Without `routes` or `schema`, setup loads the named `schema`
-export from the application's `config/database/schema.ts`. Registration
-itself performs no file or database I/O.
+Register the database plugin. By default, setup discovers operations from
+`server/database/routes/` through its generated registry. Pass `routes: false`
+for server-only access, or a registry to override discovery. Without a schema
+override, setup loads the registry's schema or `config/database/schema.ts`.
+Registration itself performs no file or database I/O.
 
 ### Type Parameters
 

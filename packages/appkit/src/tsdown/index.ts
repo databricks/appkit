@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 /**
@@ -11,7 +11,7 @@ import path from "node:path";
  * export default appkitServerConfig();
  * ```
  *
- * so the agent-discovery build wiring lives in the package and reaches existing
+ * so the agent and database discovery wiring lives in the package and reaches existing
  * apps on upgrade, instead of being hand-maintained in every scaffold. The
  * returned object is a plain tsdown config (no `defineConfig` wrapper needed).
  *
@@ -42,6 +42,17 @@ export type ServerConfigOverrides =
 
 const SERVER_ENTRY = "server/server.ts";
 const AGENT_ENTRY = "server/agents/*/agent.ts";
+const DATABASE_ENTRY = "server/database/routes.gen.ts";
+
+function hasDatabaseRoutes(cwd: string): boolean {
+  if (existsSync(path.join(cwd, DATABASE_ENTRY))) return true;
+  if (existsSync(path.join(cwd, "server/database/routes"))) {
+    throw new Error(
+      `Run appkit generate-types before building: ${DATABASE_ENTRY} is missing.`,
+    );
+  }
+  return false;
+}
 
 /** AppKit default: keep anything resolving outside the project out of the bundle. */
 const defaultExternal = (id: string): boolean =>
@@ -69,14 +80,21 @@ function hasCodeAgents(cwd: string): boolean {
   }
 }
 
-/** AppKit's base server config, with the agent entry + `clean` only when needed. */
-function baseConfig(codeAgents: boolean): ServerBuildConfig {
+/** Include discovered modules and remove stale output when sources are deleted. */
+function baseConfig(
+  codeAgents: boolean,
+  databaseRoutes: boolean,
+): ServerBuildConfig {
   return {
-    entry: [SERVER_ENTRY, ...(codeAgents ? [AGENT_ENTRY] : [])],
+    entry: [
+      SERVER_ENTRY,
+      ...(codeAgents ? [AGENT_ENTRY] : []),
+      ...(databaseRoutes ? [DATABASE_ENTRY] : []),
+    ],
     unbundle: true,
+    clean: true,
     external: defaultExternal,
     outExtensions: () => ({ js: ".js" }),
-    ...(codeAgents ? { clean: true } : {}),
   };
 }
 
@@ -90,9 +108,9 @@ function baseConfig(codeAgents: boolean): ServerBuildConfig {
  * A function override instead receives the computed base and returns the final
  * config, for callers that need full control (including removing the glob).
  *
- * The agent entry + `clean` are included only when `server/agents/` actually
- * holds code agents, so the same call works for every app. Pass
- * `opts.codeAgents` to force that decision (e.g. a non-standard layout).
+ * Agent and database entries are included when their conventions exist.
+ * The output is cleaned so deleting a route also removes its compiled registry.
+ * Pass `opts.codeAgents` to override agent detection (e.g. a non-standard layout).
  */
 export function appkitServerConfig(
   overrides: ServerConfigOverrides = {},
@@ -100,7 +118,7 @@ export function appkitServerConfig(
 ): ServerBuildConfig {
   const cwd = opts.cwd ?? process.cwd();
   const codeAgents = opts.codeAgents ?? hasCodeAgents(cwd);
-  const base = baseConfig(codeAgents);
+  const base = baseConfig(codeAgents, hasDatabaseRoutes(cwd));
 
   if (typeof overrides === "function") return overrides(base);
 
