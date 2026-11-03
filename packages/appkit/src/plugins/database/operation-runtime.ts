@@ -32,6 +32,7 @@ import {
   MAX_OPERATION_NAME_LENGTH,
   type validateOperationMetadata,
 } from "./operation-metadata";
+import { inputErrorDetails } from "./operation-validation";
 import type { OperationAppKit, OperationMethod } from "./operations";
 
 const logger = createLogger("database:operations");
@@ -158,7 +159,8 @@ const DEFAULT_OUTPUTS: Readonly<
 type Parse = (
   value: unknown,
 ) => Promise<
-  { readonly ok: true; readonly data: unknown } | { readonly ok: false }
+  | { readonly ok: true; readonly data: unknown }
+  | { readonly ok: false; readonly error: unknown }
 >;
 
 function setupFailed(
@@ -187,15 +189,27 @@ function parserOf(operation: ValidatedOperation, schema: object): Parse {
       result !== null &&
       Reflect.get(result, "success") === true
       ? { ok: true, data: Reflect.get(result, "data") }
-      : { ok: false };
+      : {
+          ok: false,
+          error:
+            typeof result === "object" && result !== null
+              ? Reflect.get(result, "error")
+              : undefined,
+        };
   };
 }
 
-function schemaInput(parse: Parse): Decode {
+function schemaInput(parse: Parse, schema: object): Decode {
+  const details = inputErrorDetails(schema);
   return async (raw) => {
     const parsed = await parse(raw);
-    // Zod issues can quote caller keys, so the refusal stays opaque.
-    if (!parsed.ok) throw new DatabasePluginError("INVALID_REQUEST", "read");
+    if (!parsed.ok)
+      throw new DatabasePluginError(
+        "INVALID_REQUEST",
+        "read",
+        undefined,
+        details(parsed.error),
+      );
     return parsed.data;
   };
 }
@@ -235,7 +249,7 @@ function compileOperations(
       throw setupFailed(operation, "names an entity the schema lacks.");
     }
     const decode = operation.input
-      ? schemaInput(parserOf(operation, operation.input))
+      ? schemaInput(parserOf(operation, operation.input), operation.input)
       : noInput;
     registry.set(operation.name, {
       name: operation.name,
