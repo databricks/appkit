@@ -55,6 +55,17 @@ import {
 } from "@databricks/appkit/beta";
 import { z } from "zod";
 
+const idInput = z.object({ id: z.number() });
+const wireBigint = z.union([z.string(), z.number()]).transform(BigInt);
+const bigIdInput = z.object({ id: wireBigint });
+const userInput = z.object({
+  slug: z.string(), name: z.string(), nickname: z.string().nullable().optional(), created_at: z.string().optional(),
+});
+const patchInput = z.object({ id: z.number(), changes: z.object({
+  user_slug: z.string().optional(), title: z.string().optional(), score: z.number().nullable().optional(), total: wireBigint.optional(),
+}) });
+const replaceInput = z.object({ id: z.string(), values: z.object({ name: z.string(), nickname: z.string().nullable() }) });
+
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 type Expect<T extends true> = T;
@@ -74,6 +85,7 @@ export const getPost = defineOperation({
   name: "posts.get",
   entity: "posts",
   method: "GET",
+  input: idInput,
   authorize: ({ actor }) => actor.id.length > 0,
   execute: ({ input, db, resource, actor, appkit }) => {
     type _Input = Expect<Equal<typeof input, { id: number }>>;
@@ -95,7 +107,7 @@ export type GetPost = [
   Expect<Equal<(typeof getPost)["name"], "posts.get">>,
   Expect<Equal<(typeof getPost)["entity"], "posts">>,
   Expect<Equal<(typeof getPost)["method"], "GET">>,
-  Expect<Equal<(typeof getPost)["input"], undefined>>,
+  Expect<Equal<(typeof getPost)["input"], typeof idInput>>,
   Expect<Equal<OperationWireInput<typeof getPost>, { id: number }>>,
   Expect<
     Equal<
@@ -109,10 +121,11 @@ export const createUser = defineOperation({
   name: "users.create",
   entity: "users",
   method: "POST",
+  input: userInput,
   authorize: async ({ input, actor }) => input.slug === actor.id,
   execute: async ({ input, db, actor }) => {
     type _Input = Expect<
-      Equal<typeof input, { slug: string; name: string; nickname?: string | null; created_at?: string }>
+      Equal<typeof input, { slug: string; name: string; nickname?: string | null | undefined; created_at?: string | undefined }>
     >;
     return db.users.create({ ...input, secret: actor.id });
   },
@@ -121,7 +134,7 @@ export type CreateUser = [
   Expect<
     Equal<
       OperationWireInput<typeof createUser>,
-      { slug: string; name: string; nickname?: string | null; created_at?: string }
+      { slug: string; name: string; nickname?: string | null | undefined; created_at?: string | undefined }
     >
   >,
   Expect<Equal<OperationWireOutput<typeof createUser>, UserRow>>,
@@ -131,6 +144,7 @@ export const logEvent = defineOperation({
   name: "events.log",
   entity: "events",
   method: "POST",
+  input: z.object({ message: z.string() }),
   authorize: () => true,
   execute: ({ input }) => input,
 });
@@ -139,6 +153,7 @@ export const patchPost = defineOperation({
   name: "posts.patch",
   entity: "posts",
   method: "PATCH",
+  input: patchInput,
   authorize: () => true,
   execute: ({ input, db }) => {
     type _Input = Expect<
@@ -164,6 +179,7 @@ export const replaceUser = defineOperation({
   name: "users.replace",
   entity: "users",
   method: "PUT",
+  input: replaceInput,
   authorize: () => true,
   execute: async ({ input, db }) => {
     type _Input = Expect<
@@ -177,6 +193,7 @@ export const deletePost = defineOperation({
   name: "posts.delete",
   entity: "posts",
   method: "DELETE",
+  input: idInput,
   authorize: () => true,
   execute: ({ input, db }) => db.posts.delete(input.id),
 });
@@ -189,6 +206,7 @@ export const getEntry = defineOperation({
   name: "ledger.get",
   entity: "ledger",
   method: "GET",
+  input: bigIdInput,
   authorize: () => true,
   execute: ({ input, db }) => {
     type _Input = Expect<Equal<typeof input, { id: bigint }>>;
@@ -235,6 +253,7 @@ export const postSummary = defineOperation({
   name: "posts.summary",
   entity: "posts",
   method: "GET",
+  input: idInput,
   output: z.object({ id: z.number(), title: z.string() }),
   authorize: () => true,
   execute: async ({ input, db }) => {
@@ -247,6 +266,7 @@ export const optionalPost = defineOperation({
   name: "posts.optional",
   entity: "posts",
   method: "GET",
+  input: idInput,
   output: z.object({ id: z.number() }).nullable(),
   authorize: () => true,
   execute: async ({ input, db }) => {
@@ -268,6 +288,7 @@ export const readVisiblePost = defineOperation({
   name: "posts.visible",
   entity: "posts",
   method: "GET",
+  input: idInput,
   authorize: hiddenPost,
   execute: ({ resource }) => {
     type _Resource = Expect<Equal<typeof resource.id, PostRow["id"]>>;
@@ -298,6 +319,7 @@ export const renamePost = defineOperation({
   name: "posts.rename",
   entity: "posts",
   method: "PATCH",
+  input: patchInput,
   authorize: authorOnly,
   execute: ({ input, db, resource }) => {
     const _show: [typeof resource, PostRow] = null as never;
@@ -324,6 +346,7 @@ export const readOwnPost = defineOperation({
   name: "posts.readOwn",
   entity: "posts",
   method: "GET",
+  input: idInput,
   authorize: authorOnly,
   execute: ({ resource }) => resource,
 });
@@ -332,6 +355,7 @@ export const removeOwnPost = defineOperation({
   name: "posts.removeOwn",
   entity: "posts",
   method: "DELETE",
+  input: idInput,
   authorize: authorOnly,
   execute: ({ resource }) => resource.id > 0,
 });
@@ -340,6 +364,7 @@ export const signedInCreate = defineOperation({
   name: "users.signedInCreate",
   entity: "users",
   method: "POST",
+  input: userInput,
   authorize: signedIn,
   execute: ({ input, db, resource }) => {
     type _Resource = Expect<Equal<typeof resource, undefined>>;
@@ -351,6 +376,7 @@ export const signedInRead = defineOperation({
   name: "ledger.signedIn",
   entity: "ledger",
   method: "GET",
+  input: bigIdInput,
   authorize: signedIn,
   execute: ({ db, input }) => db.ledger.find(input.id),
 });
@@ -359,12 +385,36 @@ export const inlineLookup = defineOperation({
   name: "posts.replaceScored",
   entity: "posts",
   method: "PUT",
+  input: z.object({ id: z.number(), values: z.object({ user_slug: z.string(), title: z.string(), score: z.number().nullable(), total: wireBigint }) }),
   authorize: definePolicy({
     resource: ({ input, db }: PolicyContext<{ id: number }>) => db.posts.find(input.id),
     allow: ({ resource }) => resource.score !== null,
   }),
   execute: ({ db, resource, input }) => db.posts.update(resource.id, input.values),
 });
+
+export const latest = defineOperation({
+  name: "events.noInput", entity: "events", method: "GET",
+  authorize: ({ input }) => {
+    type _Input = Expect<Equal<typeof input, undefined>>;
+    return true;
+  },
+  execute: ({ input, db }) => {
+    type _Input = Expect<Equal<typeof input, undefined>>;
+    return db.events.first();
+  },
+});
+export type NoInput = Expect<Equal<OperationWireInput<typeof latest>, void>>;
+export const noInputPost = defineOperation({ name: "events.noInputPost", entity: "events", method: "POST", authorize: () => true, execute: () => ({ message: "event" }) });
+export const noInputPatch = defineOperation({ name: "stamps.noInputPatch", entity: "stamps", method: "PATCH", authorize: () => true, execute: () => null });
+export const noInputPut = defineOperation({ name: "stamps.noInputPut", entity: "stamps", method: "PUT", authorize: () => true, execute: () => null });
+export const noInputDelete = defineOperation({ name: "events.noInputDelete", entity: "events", method: "DELETE", authorize: () => true, execute: () => true });
+export type NoInputMethods = [
+  Expect<Equal<OperationWireInput<typeof noInputPost>, void>>,
+  Expect<Equal<OperationWireInput<typeof noInputPatch>, void>>,
+  Expect<Equal<OperationWireInput<typeof noInputPut>, void>>,
+  Expect<Equal<OperationWireInput<typeof noInputDelete>, void>>,
+];
 
 declare const context: OperationContext<{ id: number }, PostRow>;
 export const direct = authorOnly.allow(context);
@@ -391,6 +441,17 @@ import {
   type PolicyContext,
 } from "@databricks/appkit/beta";
 import { z } from "zod";
+
+const idInput = z.object({ id: z.number() });
+const wireBigint = z.union([z.string(), z.number()]).transform(BigInt);
+const bigIdInput = z.object({ id: wireBigint });
+const userInput = z.object({
+  slug: z.string(), name: z.string(), nickname: z.string().nullable().optional(), created_at: z.string().optional(),
+});
+const patchInput = z.object({ id: z.number(), changes: z.object({
+  user_slug: z.string().optional(), title: z.string().optional(), score: z.number().nullable().optional(), total: wireBigint.optional(),
+}) });
+const replaceInput = z.object({ id: z.string(), values: z.object({ name: z.string(), nickname: z.string().nullable() }) });
 // @ts-expect-error TS2305 operations run only through the HTTP runtime
 import { runOperation } from "@databricks/appkit/beta";
 // @ts-expect-error TS2305 candidate detection is internal
@@ -409,6 +470,7 @@ defineOperation({
   name: "posts.missingAuthorize",
   entity: "posts",
   method: "GET",
+  input: idInput,
   execute: ({ input, db }) => db.posts.find(input.id),
 });
 defineOperation({
@@ -440,6 +502,7 @@ defineOperation({
   name: "posts.get",
   entity: "posts",
   method: "GET",
+  input: idInput,
   authorize: () => true,
   execute: () => null,
   action: "read",
@@ -448,8 +511,9 @@ defineOperation({
   name: "users.private",
   entity: "users",
   method: "POST",
+  input: userInput,
   authorize: () => true,
-  // @ts-expect-error TS2339 private columns are not part of the default input
+  // @ts-expect-error TS2339 private columns are absent from the declared input
   execute: ({ input, db }) => db.users.create({ ...input, secret: input.secret }),
 });
 defineOperation({
@@ -552,7 +616,8 @@ defineOperation({
   name: "posts.lookupCreate",
   entity: "posts",
   method: "POST",
-  // @ts-expect-error TS2769 a default create carries no id for the lookup
+  input: z.object({ user_slug: z.string(), title: z.string(), total: z.bigint() }),
+  // @ts-expect-error TS2769 the declared input has no id for the lookup
   authorize: authorOnly,
   execute: ({ input, db }) => db.posts.create(input),
 });
@@ -560,6 +625,7 @@ defineOperation({
   name: "users.wrongPolicy",
   entity: "users",
   method: "PATCH",
+  input: z.object({ id: z.string() }),
   // @ts-expect-error TS2769 a users id is a string slug
   authorize: authorOnly,
   execute: () => null,
@@ -568,43 +634,38 @@ defineOperation({
   name: "posts.secret",
   entity: "posts",
   method: "PATCH",
+  input: idInput,
   authorize: authorOnly,
   // @ts-expect-error TS2339 the resource is the public row
   execute: ({ resource }) => resource.secret,
-});
-defineOperation({
-  name: "events.get",
-  entity: "events",
-  method: "GET",
-  authorize: () => true,
-  execute: () => null,
-  // @ts-expect-error TS2769 a keyless entity has no default id input
-  input: undefined,
-});
-// @ts-expect-error TS2769 an empty public update has no default input
-defineOperation({
-  name: "stamps.patch",
-  entity: "stamps",
-  method: "PATCH",
-  authorize: () => true,
-  execute: () => null,
-});
-// @ts-expect-error TS2769 an empty public replacement has no default input
-defineOperation({
-  name: "stamps.put",
-  entity: "stamps",
-  method: "PUT",
-  authorize: () => true,
-  execute: () => null,
 });
 defineOperation({
   name: "events.delete",
   entity: "events",
   method: "DELETE",
   // @ts-expect-error TS2769 an explicit input must be a schema
-  input: undefined,
+  input: false,
   authorize: () => true,
   execute: () => true,
+});
+defineOperation({
+  name: "posts.noInput",
+  entity: "posts",
+  method: "GET",
+  authorize: () => true,
+  execute: ({ input }) => {
+    // @ts-expect-error TS18048 no schema means no parameters
+    input.id;
+    return null;
+  },
+});
+defineOperation({
+  name: "posts.noInputPolicy",
+  entity: "posts",
+  method: "GET",
+  // @ts-expect-error TS2769 a policy requiring parameters needs an input schema
+  authorize: authorOnly,
+  execute: () => null,
 });
 defineOperation({
   name: "posts.plugins",
@@ -623,6 +684,7 @@ const replaceUser = defineOperation({
   name: "users.replace",
   entity: "users",
   method: "PUT",
+  input: replaceInput,
   authorize: () => true,
   execute: ({ input, db }) => db.users.update(input.id, input.values),
 });
@@ -632,6 +694,7 @@ const getEntry = defineOperation({
   name: "ledger.get",
   entity: "ledger",
   method: "GET",
+  input: bigIdInput,
   authorize: () => true,
   execute: ({ input, db }) => db.ledger.find(input.id),
 });
@@ -645,6 +708,7 @@ const patchPost = defineOperation({
   name: "posts.patch",
   entity: "posts",
   method: "PATCH",
+  input: patchInput,
   authorize: () => true,
   execute: ({ input, db }) => db.posts.update(input.id, input.changes),
 });
@@ -655,6 +719,7 @@ const getPost = defineOperation({
   name: "posts.get",
   entity: "posts",
   method: "GET",
+  input: idInput,
   authorize: () => true,
   execute: ({ input, db }) => db.posts.find(input.id),
 });
@@ -683,6 +748,7 @@ const deletePost = defineOperation({
   name: "posts.delete",
   entity: "posts",
   method: "DELETE",
+  input: idInput,
   authorize: () => true,
   execute: ({ input, db }) => db.posts.delete(input.id),
 });
@@ -692,6 +758,7 @@ const createUser = defineOperation({
   name: "users.create",
   entity: "users",
   method: "POST",
+  input: userInput,
   authorize: () => true,
   execute: ({ input, db }) => db.users.create({ ...input, secret: "s" }),
 });
@@ -855,7 +922,7 @@ export type GeneratedOperation = [
 `;
 
 describe("operation definitions through the public entries", () => {
-  test("infer entities, inputs, resources, and wire bodies from the generated registry", () => {
+  test("infer explicit inputs, omitted inputs, resources, and default outputs", () => {
     expect(
       typecheck({ "positive.ts": positive, "global.ts": globalContract }),
     ).toEqual([]);

@@ -3,25 +3,16 @@
 ## Call Signature
 
 ```ts
-function defineOperation<Name, E, M, I, O, R>(definition: {
-  entity: E;
-  method: M;
-  name: Name;
-  output?: O;
-} & [Contract<E, M>["input"]] extends [never] ? {
-  input: I & Schema;
-} : {
-  input?: I;
-} & {
-  authorize: ResourcePolicy<ParsedInput<E, M, I>, R>;
-  execute: (context: OperationContext<ParsedInput<E, M, I>, NonNullable<Awaited<R>>>) => Awaitable<ExecuteResult<E, M, O>>;
+function defineOperation<Name, E, M, I, O, R>(definition: OperationFields<E, M, I, O, Name> & {
+  authorize: ResourcePolicy<ParsedInput<I>, R>;
+  execute: (context: OperationContext<ParsedInput<I>, NonNullable<Awaited<R>>>) => Awaitable<ExecuteResult<E, M, O>>;
 }): OperationDefinition<E, M, I, O, R, Name>;
 ```
 
 Declare one database operation. `name` is its public identifier. The entity
-and method infer the default input and output; `input` and `output` Zod
-schemas override them. Definition is pure: it freezes a descriptor and
-calls nothing.
+and method infer the default output. Declare an `input` Zod schema to accept
+parameters; without one, callbacks receive `undefined`. An `output` schema
+overrides the default response. Definition only freezes a descriptor.
 
 ### Type Parameters
 
@@ -38,7 +29,7 @@ calls nothing.
 
 | Parameter | Type |
 | ------ | ------ |
-| `definition` | \{ `entity`: `E`; `method`: `M`; `name`: `Name`; `output?`: `O`; \} & \[`Contract`\<`E`, `M`\>\[`"input"`\]\] *extends* \[`never`\] ? \{ `input`: `I` & `Schema`; \} : \{ `input?`: `I`; \} & \{ `authorize`: `ResourcePolicy`\<`ParsedInput`\<`E`, `M`, `I`\>, `R`\>; `execute`: (`context`: [`OperationContext`](Interface.OperationContext.md)\<`ParsedInput`\<`E`, `M`, `I`\>, `NonNullable`\<`Awaited`\<`R`\>\>\>) => `Awaitable`\<`ExecuteResult`\<`E`, `M`, `O`\>\>; \} |
+| `definition` | `OperationFields`\<`E`, `M`, `I`, `O`, `Name`\> & \{ `authorize`: `ResourcePolicy`\<`ParsedInput`\<`I`\>, `R`\>; `execute`: (`context`: [`OperationContext`](Interface.OperationContext.md)\<`ParsedInput`\<`I`\>, `NonNullable`\<`Awaited`\<`R`\>\>\>) => `Awaitable`\<`ExecuteResult`\<`E`, `M`, `O`\>\>; \} |
 
 ### Returns
 
@@ -51,9 +42,9 @@ function defineOperation<Name, E, M, I, O>(definition: OperationOptions<E, M, I,
 ```
 
 Declare one database operation. `name` is its public identifier. The entity
-and method infer the default input and output; `input` and `output` Zod
-schemas override them. Definition is pure: it freezes a descriptor and
-calls nothing.
+and method infer the default output. Declare an `input` Zod schema to accept
+parameters; without one, callbacks receive `undefined`. An `output` schema
+overrides the default response. Definition only freezes a descriptor.
 
 ### Type Parameters
 
