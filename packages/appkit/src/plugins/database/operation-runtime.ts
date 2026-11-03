@@ -13,7 +13,6 @@ import {
   databaseSetupFailed,
   invalidDatabaseInput,
 } from "../../database/errors";
-import type { Row } from "../../database/runtime";
 import type { Schema } from "../../database/schema-builder";
 import { DatabaseValidationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
@@ -25,7 +24,6 @@ import {
   type CrudTable,
   isPlainObject,
 } from "./crud/contract";
-import { decodeCreateBody, decodeUpdateBody } from "./crud/request";
 import { sendEmpty, sendJson } from "./crud/response";
 import { MAX_OPERATION_BODY_BYTES, MAX_QUERY_BYTES } from "./defaults";
 import type { DatabaseExports } from "./entity-types";
@@ -79,7 +77,7 @@ type Reply =
   | { readonly status: 200 | 201; readonly body: JsonValue }
   | { readonly status: 204 };
 
-type Decode = (raw: JsonValue) => unknown;
+type Decode = (raw: JsonValue | undefined) => unknown;
 
 /** Validate an answer and shape the reply; a schema may refine asynchronously. */
 type Respond = (result: unknown) => Reply | Promise<Reply>;
@@ -126,150 +124,34 @@ function rowOrMissing(table: CrudTable): (result: unknown) => Reply {
   };
 }
 
-/** Refuse a body that leaves out a column the contract requires. */
-function requireColumns(columns: Iterable<string>, values: Row): Row {
-  for (const column of columns) {
-    if (!Object.hasOwn(values, column)) {
-      throw invalidDatabaseInput([column], "Required");
-    }
+/** No schema means no parameters; never pass unexpected values to a policy. */
+function noInput(raw: JsonValue | undefined): undefined {
+  if (
+    raw === undefined ||
+    (isPlainObject(raw) && Object.keys(raw).length === 0)
+  ) {
+    return undefined;
   }
-  return values;
+  throw invalidDatabaseInput(["input"], "This operation accepts no parameters");
 }
 
-/**
- * Decode one member of a keyed input, naming its refusals inside it: a field
- * detail reads `["changes", "title"]`, and a refusal of the whole member reads
- * `["changes"]`.
- */
-function member(
-  name: "changes" | "values",
-  decode: (raw: unknown) => Row,
-): {
-  readonly name: "changes" | "values";
-  readonly decode: (raw: unknown) => Row;
-} {
-  return {
-    name,
-    decode: (raw) => {
-      try {
-        return decode(raw);
-      } catch (error) {
-        if (!(error instanceof DatabasePluginError) || !error.details) {
-          throw error;
-        }
-        throw new DatabasePluginError(
-          error.category,
-          error.phase,
-          undefined,
-          error.details.map((detail) => ({
-            path:
-              detail.path.length === 1 && detail.path[0] === "body"
-                ? [name]
-                : [name, ...detail.path],
-            message: detail.message,
-          })),
-        );
-      }
-    },
-  };
-}
-
-/** `{ id }`, plus one member of column values for an update. */
-function keyedInput(
-  table: CrudTable,
-  member?: {
-    readonly name: "changes" | "values";
-    readonly decode: (raw: unknown) => Row;
-  },
-): Decode | undefined {
-  const key = table.primaryKey;
-  if (!key) return undefined;
-  const members = new Set(member ? ["id", member.name] : ["id"]);
-  return (raw) => {
-    if (
-      !isPlainObject(raw) ||
-      Object.keys(raw).some((name) => !members.has(name))
-    ) {
-      throw invalidDatabaseInput(["input"], "Unexpected input shape");
-    }
-    const id = key.decode(raw.id);
-    if (id === undefined) {
-      throw invalidDatabaseInput(["id"], "Not a valid identifier");
-    }
-    return member
-      ? { id, [member.name]: member.decode(raw[member.name]) }
-      : { id };
-  };
-}
-
-/**
- * The conventional contract of each method, compiled from the table's public
- * HTTP facet. An `undefined` input means the table has no default for that
- * method, so the operation must declare its own.
- */
-const DEFAULTS: Readonly<
-  Record<
-    OperationMethod,
-    {
-      readonly input: (table: CrudTable) => Decode | undefined;
-      readonly reply: (table: CrudTable) => (result: unknown) => Reply;
-    }
-  >
+/** Output defaults remain independent of the operation's input schema. */
+const DEFAULT_OUTPUTS: Readonly<
+  Record<OperationMethod, (table: CrudTable) => (result: unknown) => Reply>
 > = {
-  GET: { input: (table) => keyedInput(table), reply: rowOrMissing },
-  POST: {
-    input: (table) => {
-      const required = [...table.creatable].filter((name) => {
-        const meta = table.columns.get(name)?.meta;
-        return meta?.notNull && !meta.hasDefault;
-      });
-      return (raw) => requireColumns(required, decodeCreateBody(table, raw));
-    },
-    reply: (table) => (result) => ({
-      status: 201,
-      body: publicColumns(table, result),
-    }),
-  },
-  PATCH: {
-    input: (table) =>
-      table.updatable.size === 0
-        ? undefined
-        : keyedInput(
-            table,
-            member("changes", (raw) => {
-              const changes = decodeUpdateBody(table, raw);
-              if (Object.keys(changes).length === 0) {
-                throw invalidDatabaseInput(
-                  ["body"],
-                  "Expected at least one change",
-                );
-              }
-              return changes;
-            }),
-          ),
-    reply: rowOrMissing,
-  },
-  PUT: {
-    input: (table) =>
-      table.updatable.size === 0
-        ? undefined
-        : keyedInput(
-            table,
-            member("values", (raw) =>
-              requireColumns(table.updatable, decodeUpdateBody(table, raw)),
-            ),
-          ),
-    reply: rowOrMissing,
-  },
-  DELETE: {
-    input: (table) => keyedInput(table),
-    reply: () => (result) => {
-      if (result === true) return { status: 204 };
-      throw new DatabasePluginError(
-        result === false ? "NOT_FOUND" : "INTERNAL",
-        "write",
-      );
-    },
+  GET: rowOrMissing,
+  POST: (table) => (result) => ({
+    status: 201,
+    body: publicColumns(table, result),
+  }),
+  PATCH: rowOrMissing,
+  PUT: rowOrMissing,
+  DELETE: () => (result) => {
+    if (result === true) return { status: 204 };
+    throw new DatabasePluginError(
+      result === false ? "NOT_FOUND" : "INTERNAL",
+      "write",
+    );
   },
 };
 
@@ -352,16 +234,9 @@ function compileOperations(
     if (!table) {
       throw setupFailed(operation, "names an entity the schema lacks.");
     }
-    const defaults = DEFAULTS[operation.method];
     const decode = operation.input
       ? schemaInput(parserOf(operation, operation.input))
-      : defaults.input(table);
-    if (!decode) {
-      throw setupFailed(
-        operation,
-        `needs an explicit input: ${operation.entity} has no default ${operation.method} input.`,
-      );
-    }
+      : noInput;
     registry.set(operation.name, {
       name: operation.name,
       method: operation.method,
@@ -370,7 +245,7 @@ function compileOperations(
       execute: operation.execute,
       reply: operation.output
         ? schemaReply(operation.method, parserOf(operation, operation.output))
-        : defaults.reply(table),
+        : DEFAULT_OUTPUTS[operation.method](table),
     });
   }
   return registry;
@@ -383,9 +258,10 @@ function rawQuery(req: Request): string {
   return start === -1 ? "" : url.slice(start + 1);
 }
 
-/** A GET carries exactly one `input` parameter holding bounded JSON. */
-function queryInput(req: Request): JsonValue {
+/** A GET may omit input, or carry one bounded JSON input parameter. */
+function queryInput(req: Request): JsonValue | undefined {
   const query = rawQuery(req);
+  if (query === "") return undefined;
   if (Buffer.byteLength(query, "utf8") > MAX_QUERY_BYTES) {
     throw invalidDatabaseInput(["input"], "Input exceeds the maximum size");
   }
@@ -418,10 +294,17 @@ function statusOf(error: unknown): number {
 }
 
 /** A write's whole input is one bounded JSON body, read only after authentication. */
-async function bodyInput(req: Request, res: Response): Promise<JsonValue> {
+async function bodyInput(
+  req: Request,
+  res: Response,
+): Promise<JsonValue | undefined> {
   if (rawQuery(req) !== "") {
     throw invalidDatabaseInput(["query"], "Writes accept no query parameters");
   }
+  const hasBody =
+    req.headers["transfer-encoding"] !== undefined ||
+    Number(req.headers["content-length"]) > 0;
+  if (!hasBody) return undefined;
   if (req.is("application/json") === false) {
     throw new DatabasePluginError("UNSUPPORTED_MEDIA_TYPE", "write");
   }
