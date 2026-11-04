@@ -263,14 +263,24 @@ Start the file with the contract: every exported type, then one \`export declare
     const i = soFar.indexOf(CONTRACT_END);
     if (i !== -1) contractReady(stripFences(soFar.slice(0, i)));
   },
-).then(async (ok) => {
-  contractReady(await readFile(path.join(stagingDir, "mock.ts"), "utf8")); // no-op if the contract already streamed
-  if (!ok) throw new Error(`mock.ts failed:\n${mockResult.error}`);
-  await copyFile(
-    path.join(stagingDir, "mock.ts"),
-    path.join(designDir, "mock.ts"),
-  );
-});
+)
+  .catch((e: unknown) => {
+    mockResult.status = "failed";
+    mockResult.error ??= e instanceof Error ? e.message : String(e);
+    return false;
+  })
+  .then(async (ok) => {
+    // No-op if the contract already streamed; otherwise unblocks the page writers either way.
+    contractReady(
+      await readFile(path.join(stagingDir, "mock.ts"), "utf8").catch(() => ""),
+    );
+    if (!ok)
+      throw new Error(`mock.ts failed: ${mockResult.error?.split("\n")[0]}`);
+    await copyFile(
+      path.join(stagingDir, "mock.ts"),
+      path.join(designDir, "mock.ts"),
+    );
+  });
 
 const browser = await chromium.launch({ channel: "chrome" });
 const results: Result[] = VARIANTS.map((_, i) => ({
@@ -293,63 +303,72 @@ const saveStatus = async (done: boolean) => {
   await writeFile(`${statusFile}.tmp`, JSON.stringify(body, null, 2));
   await rename(`${statusFile}.tmp`, statusFile);
 };
+// Page writers observe a failed mock through before(); this only keeps Node from flagging it as unhandled.
+mockDone.catch(() => {});
+
 const ticker = setInterval(() => void saveStatus(false), 300);
 
 await Promise.all(
   results.map(async (result, i) => {
-    const file = `${result.name}.tsx`;
-    const mockContract = await contract;
-    result.contractAt = since();
-    const ok = await write(
-      result,
-      file,
-      `${brief}\n\n${VARIANTS[i]}\n\nWrite the design page. Import sample data from "../mock", which exports exactly this (types and values; import types with \`import type\`):\n\n${mockContract}`,
-      () => mockDone,
-    );
-    if (!ok) return;
-    await copyFile(path.join(stagingDir, file), path.join(pagesDir, file));
-    // Tailwind's Vite plugin only rescans sources when the stylesheet changes, so new pages lack their classes.
-    const now = new Date();
-    await utimes(path.join(root, "client/src/index.css"), now, now);
+    // A failing draft (or a failed mock.ts) marks only this draft failed; the others keep going.
+    try {
+      const file = `${result.name}.tsx`;
+      const mockContract = await contract;
+      result.contractAt = since();
+      const ok = await write(
+        result,
+        file,
+        `${brief}\n\n${VARIANTS[i]}\n\nWrite the design page. Import sample data from "../mock", which exports exactly this (types and values; import types with \`import type\`):\n\n${mockContract}`,
+        () => mockDone,
+      );
+      if (!ok) return;
+      await copyFile(path.join(stagingDir, file), path.join(pagesDir, file));
+      // Tailwind's Vite plugin only rescans sources when the stylesheet changes, so new pages lack their classes.
+      const now = new Date();
+      await utimes(path.join(root, "client/src/index.css"), now, now);
 
-    const page = await browser.newPage({
-      viewport: { width: 1440, height: 900 },
-    });
-    const pageErrors: string[] = [];
-    page.on("pageerror", (e) => pageErrors.push(e.message));
-    // Vite picks the new page up via import.meta.glob; retry until the route knows it.
-    for (let attempt = 0; attempt < 20; attempt++) {
-      await page.goto(`${args.url}/design/${result.name}`);
-      const hit = await page
-        .waitForSelector("[data-draft-ready] > *, [data-draft-error]", {
-          timeout: 3000,
-        })
-        .catch(() => null);
-      if (hit) break;
-    }
-    if (await page.$("[data-draft-error]")) {
+      const page = await browser.newPage({
+        viewport: { width: 1440, height: 900 },
+      });
+      const pageErrors: string[] = [];
+      page.on("pageerror", (e) => pageErrors.push(e.message));
+      // Vite picks the new page up via import.meta.glob; retry until the route knows it.
+      for (let attempt = 0; attempt < 20; attempt++) {
+        await page.goto(`${args.url}/design/${result.name}`);
+        const hit = await page
+          .waitForSelector("[data-draft-ready] > *, [data-draft-error]", {
+            timeout: 3000,
+          })
+          .catch(() => null);
+        if (hit) break;
+      }
+      if (await page.$("[data-draft-error]")) {
+        result.status = "failed";
+        result.error = `render: ${await page.textContent("[data-draft-error]")}`;
+      } else {
+        result.rendered = since();
+        if (pageErrors.length) result.error = `console: ${pageErrors[0]}`;
+      }
+      if (args.shots) {
+        await mkdir(args.shots, { recursive: true });
+        await page.waitForTimeout(1500); // let charts animate in
+        await page.screenshot({
+          path: path.join(args.shots, `${result.name}-light.png`),
+          fullPage: true,
+        });
+        await page.goto(`${args.url}/design/${result.name}?theme=dark`);
+        await page.waitForSelector("[data-draft-ready] > *");
+        await page.waitForTimeout(1500);
+        await page.screenshot({
+          path: path.join(args.shots, `${result.name}-dark.png`),
+          fullPage: true,
+        });
+      }
+      await page.close();
+    } catch (e) {
       result.status = "failed";
-      result.error = `render: ${await page.textContent("[data-draft-error]")}`;
-    } else {
-      result.rendered = since();
-      if (pageErrors.length) result.error = `console: ${pageErrors[0]}`;
+      result.error = e instanceof Error ? e.message : String(e);
     }
-    if (args.shots) {
-      await mkdir(args.shots, { recursive: true });
-      await page.waitForTimeout(1500); // let charts animate in
-      await page.screenshot({
-        path: path.join(args.shots, `${result.name}-light.png`),
-        fullPage: true,
-      });
-      await page.goto(`${args.url}/design/${result.name}?theme=dark`);
-      await page.waitForSelector("[data-draft-ready] > *");
-      await page.waitForTimeout(1500);
-      await page.screenshot({
-        path: path.join(args.shots, `${result.name}-dark.png`),
-        fullPage: true,
-      });
-    }
-    await page.close();
   }),
 );
 await browser.close();
