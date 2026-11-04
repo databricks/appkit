@@ -141,9 +141,7 @@ export class DatabasePlugin<
           );
         }
         // Every declaration is checked before the pool exists.
-        const served = routes
-          ? await this.serveRoutes(schema, routes)
-          : undefined;
+        const served = routes ? await this.serveRoutes(routes) : undefined;
         if (this.draining) throw databaseSetupFailed();
         const candidate = await createDatabaseState(
           schema,
@@ -190,7 +188,6 @@ export class DatabasePlugin<
    * malformed or duplicated fails setup.
    */
   private async serveRoutes(
-    schema: Schema,
     routes: DatabaseRoutes,
   ): Promise<ServedOperations | undefined> {
     const located: LocatedDeclaration[] = [];
@@ -207,10 +204,7 @@ export class DatabasePlugin<
         located.push({ file, exportName, value });
       }
     }
-    const { operations, skipped, errors } = validateOperationMetadata(
-      located,
-      new Set(Object.keys(schema.$tables)),
-    );
+    const { operations, skipped, errors } = validateOperationMetadata(located);
     if (errors.length > 0) {
       throw databaseSetupFailed(
         ["invalid database operations:", ...errors.map((e) => e.message)].join(
@@ -232,7 +226,6 @@ export class DatabasePlugin<
         operations.map(({ name, method }) => [name, method] as const),
       ),
       handler: createOperationHandler({
-        schema,
         operations,
         resolveActor: createActorResolver(boundary),
         services: () => {

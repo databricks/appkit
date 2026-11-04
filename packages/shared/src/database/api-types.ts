@@ -19,15 +19,6 @@ export interface DatabaseApiEntry {
   };
 }
 
-/** JSON carries a bigint as a decimal string, at every depth of a response. */
-export type WireOutput<T> = T extends bigint
-  ? string
-  : T extends readonly (infer E)[]
-    ? WireOutput<E>[]
-    : T extends object
-      ? { [K in keyof T]: WireOutput<T[K]> }
-      : T;
-
 /** A bigint input travels as a decimal string or a safe integer. */
 export type WireInput<T> = T extends bigint
   ? string | number

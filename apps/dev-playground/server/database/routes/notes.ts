@@ -5,10 +5,18 @@ import { noteAuthor, signedIn } from "../policies";
 
 const body = z.string().trim().min(1).max(2000);
 
+/** A note as the browser sees it; `author_email` stays on the server by not being named. */
+const noteOutput = z.object({
+  id: z.number(),
+  board_id: z.number(),
+  author: z.string(),
+  body: z.string(),
+  created_at: z.string(),
+});
+
 /** A board's 20 newest notes, each with its audit trail. */
 export const listNotes = defineOperation({
   name: "notes.list",
-  entity: "notes",
   method: "GET",
   input: z.object({ board_id: z.number().int() }),
   output: z.array(
@@ -42,9 +50,9 @@ export const listNotes = defineOperation({
  */
 export const createNote = defineOperation({
   name: "notes.create",
-  entity: "notes",
   method: "POST",
   input: z.object({ board_id: z.number().int(), body }),
+  output: noteOutput,
   authorize: signedIn,
   execute: ({ actor, db, input }) =>
     db.transaction(async (tx) => {
@@ -62,9 +70,9 @@ export const createNote = defineOperation({
 /** A new body for the caller's own note, recorded as an "edited" event. */
 export const updateNote = defineOperation({
   name: "notes.update",
-  entity: "notes",
   method: "PATCH",
   input: z.object({ id: z.number().int(), body }),
+  output: noteOutput,
   authorize: noteAuthor,
   execute: ({ db, input }) =>
     db.transaction(async (tx) => {
@@ -79,9 +87,10 @@ export const updateNote = defineOperation({
 /** The caller's own note; its events go with it through the foreign key. */
 export const deleteNote = defineOperation({
   name: "notes.delete",
-  entity: "notes",
   method: "DELETE",
   input: z.object({ id: z.number().int() }),
   authorize: noteAuthor,
-  execute: ({ db, input }) => db.notes.delete(input.id),
+  execute: async ({ db, input }) => {
+    await db.notes.delete(input.id);
+  },
 });
