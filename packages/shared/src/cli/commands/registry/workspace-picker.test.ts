@@ -284,6 +284,37 @@ describe("listWorkspaceResources", () => {
     expect(res.error).toContain("cannot configure default credentials");
   });
 
+  it("walks catalogs and schemas to list model services by full name", async () => {
+    const pages: Record<string, unknown> = {
+      "/api/2.1/unity-catalog/catalogs|": {
+        catalogs: [{ name: "main" }],
+        next_page_token: "p2",
+      },
+      "/api/2.1/unity-catalog/catalogs|p2": { catalogs: [{ name: "dev" }] },
+      "/api/2.1/unity-catalog/schemas|main": {
+        schemas: [{ full_name: "main.default" }],
+      },
+      "/api/2.1/unity-catalog/schemas|dev": { schemas: [] },
+      "/api/2.1/unity-catalog/model-services|schemas/main.default": {
+        model_services: [{ name: "model-services/main.default.chat" }],
+      },
+    };
+    const request = vi.fn(
+      async (req: { path: string; query: Record<string, string> }) => {
+        const q = req.query;
+        const key = `${req.path}|${q.page_token ?? q.catalog_name ?? q.parent ?? ""}`;
+        return new Response(JSON.stringify(pages[key] ?? {}));
+      },
+    );
+    const res = await listWorkspaceResources("model_service", undefined, () =>
+      fakeClient({ request }),
+    );
+    expect(res.choices).toEqual([
+      { value: "main.default.chat", label: "main.default.chat" },
+    ]);
+    expect(res.error).toBeUndefined();
+  });
+
   it("has no error field for a genuinely empty (unknown-type) listing", async () => {
     const factory = () => fakeClient({});
     const res = await listWorkspaceResources("nonsense", undefined, factory);

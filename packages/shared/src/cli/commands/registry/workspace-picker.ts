@@ -88,6 +88,61 @@ function iterateGenieSpaces(client: WorkspaceClient): AsyncIterable<unknown> {
   });
 }
 
+/** GETs one page of a Unity Catalog list endpoint through the raw-request seam. */
+function ucPages(
+  client: WorkspaceClient,
+  path: string,
+  itemsKey: string,
+  query: Record<string, string> = {},
+): AsyncIterable<unknown> {
+  return paginate(async (pageToken) => {
+    const res = await client.request({
+      method: "GET",
+      path,
+      query: pageToken ? { ...query, page_token: pageToken } : query,
+    });
+    if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
+    const body = (await res.json()) as Record<string, unknown>;
+    return {
+      items: body[itemsKey] as unknown[] | undefined,
+      next: body.next_page_token as string | undefined,
+    };
+  });
+}
+
+/**
+ * Model services are listed per schema (`parent` is required), so walk
+ * catalogs → schemas → model services. Lazy, so the picker's result cap stops
+ * the walk early.
+ */
+async function* iterateModelServices(
+  client: WorkspaceClient,
+): AsyncIterable<unknown> {
+  for await (const catalog of ucPages(
+    client,
+    "/api/2.1/unity-catalog/catalogs",
+    "catalogs",
+  )) {
+    const catalogName = (catalog as { name?: string }).name;
+    if (!catalogName) continue;
+    for await (const schema of ucPages(
+      client,
+      "/api/2.1/unity-catalog/schemas",
+      "schemas",
+      { catalog_name: catalogName },
+    )) {
+      const schemaName = (schema as { full_name?: string }).full_name;
+      if (!schemaName) continue;
+      yield* ucPages(
+        client,
+        "/api/2.1/unity-catalog/model-services",
+        "model_services",
+        { parent: `schemas/${schemaName}` },
+      );
+    }
+  }
+}
+
 /** Flat, top-level listable resource types, backed by SDK services. */
 export const SDK_LISTERS: Record<string, SdkLister> = {
   sql_warehouse: {
@@ -105,6 +160,16 @@ export const SDK_LISTERS: Record<string, SdkLister> = {
   serving_endpoint: {
     list: iterateServingEndpoints,
     toChoice: (i) => choiceFrom(i, "name", "name"),
+  },
+  model_service: {
+    list: iterateModelServices,
+    // API names are `model-services/{catalog}.{schema}.{name}`; apps bind the bare full name.
+    toChoice: (i) => {
+      const name = i.name;
+      if (typeof name !== "string") return null;
+      const value = name.replace(/^model-services\//, "");
+      return { value, label: value };
+    },
   },
   uc_connection: {
     list: (c) => c.connections.listConnectionsIter({}),

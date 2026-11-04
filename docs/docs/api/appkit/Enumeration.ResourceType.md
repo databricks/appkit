@@ -44,6 +44,14 @@ JOB: "job";
 
 ***
 
+### MODEL\_SERVICE
+
+```ts
+MODEL_SERVICE: "model_service";
+```
+
+***
+
 ### POSTGRES
 
 ```ts
