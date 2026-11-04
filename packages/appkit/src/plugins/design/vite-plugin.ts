@@ -706,6 +706,20 @@ export function designVitePlugin({
     },
 
     configureServer(server) {
+      // The app's theme tokens (light and dark) for drafts, from appkit-ui's
+      // styles as the app resolves them.
+      const draftTheme = () => {
+        let css = "";
+        try {
+          css = fs.readFileSync(
+            createRequire(
+              path.join(server.config.root, "package.json"),
+            ).resolve("@databricks/appkit-ui/styles.css"),
+            "utf-8",
+          );
+        } catch {}
+        return themeCss(css);
+      };
       // Not Vite's watcher: for a changed .html it matches no module, Vite
       // sends a full reload, and in middleware mode that reloads every page
       // (a draft mid-stream, the app) on each write.
@@ -960,18 +974,9 @@ export function designVitePlugin({
         }
 
         if (pathname === DRAFT_THEME_PATH) {
-          let css = "";
-          try {
-            css = fs.readFileSync(
-              createRequire(
-                path.join(server.config.root, "package.json"),
-              ).resolve("@databricks/appkit-ui/styles.css"),
-              "utf-8",
-            );
-          } catch {}
           res.setHeader("Content-Type", "text/css; charset=utf-8");
           res.setHeader("Cache-Control", "no-store");
-          res.end(themeCss(css));
+          res.end(draftTheme());
           return;
         }
 
@@ -1009,9 +1014,13 @@ export function designVitePlugin({
           streamingDrafts.set(draft, (streamingDrafts.get(draft) ?? 0) + 1);
           streamDraft(
             file,
-            hydratorTag(
-              `/@id/__x00__${HYDRATOR_PREFIX}${draft}${ENTRY_SUFFIX}`,
-            ),
+            // The theme inline in the first bytes: the page has the app's
+            // colors (dark too) from its first paint, before any stylesheet
+            // the draft links has loaded.
+            `<style data-appkit-theme>${draftTheme().replaceAll("</", "<\\/")}</style>` +
+              hydratorTag(
+                `/@id/__x00__${HYDRATOR_PREFIX}${draft}${ENTRY_SUFFIX}`,
+              ),
             res,
             (mtime) => {
               streamingDrafts.set(draft, (streamingDrafts.get(draft) ?? 1) - 1);

@@ -604,6 +604,72 @@ describe("draft errors in /design/__status", () => {
     });
   });
 
+  // Any app: a to-do list draft. The theme is in the first bytes, so a dark
+  // page is dark from its first paint (no stylesheet to wait for).
+  test("a streamed draft starts with the app's theme inline, before its own bytes", async () => {
+    const { app, handler } = start();
+    // The app's appkit-ui styles, as the app resolves them.
+    const ui = path.join(app, "client/node_modules/@databricks/appkit-ui");
+    fs.mkdirSync(ui, { recursive: true });
+    fs.writeFileSync(
+      path.join(ui, "package.json"),
+      JSON.stringify({
+        name: "@databricks/appkit-ui",
+        exports: { "./styles.css": "./styles.css" },
+      }),
+    );
+    fs.copyFileSync(
+      path.join(
+        import.meta.dirname,
+        "../../../../../appkit-ui/src/react/styles/globals.css",
+      ),
+      path.join(ui, "styles.css"),
+    );
+    fs.writeFileSync(path.join(app, "client/package.json"), "{}");
+    fs.writeFileSync(
+      path.join(app, "drafts", "todos.html"),
+      "<!doctype html><html><head></head><body><h1>Todos</h1></body></html>",
+    );
+    const chunks: string[] = [];
+    await new Promise<void>((done) => {
+      const res = {
+        statusCode: 200,
+        setHeader() {},
+        on() {},
+        write: (c: string) => chunks.push(c),
+        end: (c?: string) => {
+          if (c) chunks.push(c);
+          done();
+        },
+      };
+      void handler(
+        { url: "/design/drafts/todos", method: "GET", headers: {} } as never,
+        res as never,
+        () => {},
+      );
+    });
+    const page = chunks.join("");
+    expect(page.startsWith("<!doctype html><style data-appkit-theme>")).toBe(
+      true,
+    );
+    const inline =
+      /<style data-appkit-theme>([\s\S]*?)<\/style>/.exec(page)?.[1] ?? "";
+    expect(inline).toContain("color-scheme: light;");
+    expect(inline).toMatch(
+      /@media \(prefers-color-scheme: dark\) \{\n {2}:root:not\(\.light\) \{[\s\S]*--background:[\s\S]*color-scheme: dark;/,
+    );
+    expect(inline).toContain(
+      ":where(body) {\n  background: var(--background);",
+    );
+    // Before the draft's own content, and the hydrator still loads async.
+    expect(page.indexOf("data-appkit-theme")).toBeLessThan(
+      page.indexOf("<html>"),
+    );
+    expect(page).toContain(
+      '<script type="module" async src="/@id/__x00__virtual:appkit-draft-hydrator:todos.mjs"></script>',
+    );
+  });
+
   test("serves the hydrator at a stable URL for drafts streamed elsewhere", async () => {
     const { handler } = start();
     const r = await call(
