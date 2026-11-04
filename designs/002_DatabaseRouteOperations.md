@@ -8,12 +8,12 @@
 
 [Google Doc](https://docs.google.com/document/d/1zO0X7bCwYtmX6m-p7DFGZJneSa5OsgVd5nctGhCdVZY/edit)
 is the linked comment copy. This repository document records the current implementation and supersedes its earlier
-proposal for inferred CRUD inputs, export-derived names, and mandatory registry imports.
+proposal for inferred CRUD inputs, entity-derived outputs, export-derived names, and mandatory registry imports.
 
 An app exposes database access to the browser through named, authorized operations. `database()` discovers operations
-in the conventional directory; declaring tables alone exposes no HTTP endpoint. Inputs are explicit schemas or absent.
-Outputs retain useful entity/method defaults, with explicit schemas for lists and custom responses. Browser calls and
-React hooks are typed without importing server modules.
+in the conventional directory; declaring tables alone exposes no HTTP endpoint. Inputs and outputs are explicit schemas
+or absent. No input schema means no parameters, and no output schema means no response body. Browser calls and React
+hooks are typed without importing server modules.
 
 ## Background and motivation
 
@@ -22,7 +22,8 @@ principal and had no required per-operation user authorization. Adding a protect
 protect the generated route. Lifecycle hooks also spread business behavior between table declarations and callers.
 
 This design replaces that HTTP surface while preserving trusted `appkit.database` access, schema-derived server types,
-private-column projection, wire codecs, and explicit transactions. The operations-first POC in
+the entity client's default private-column projection, and explicit transactions. Operation responses are explicit Zod
+schemas, which replace the earlier HTTP column codecs. The operations-first POC in
 [#682](https://github.com/databricks/appkit/pull/682) is prior art, rather than the implementation baseline.
 
 Design [001](https://github.com/databricks/appkit/pull/677) covers database branches, migrations, and deployment. Its
@@ -34,7 +35,7 @@ startup; it does not create or migrate them. Integrating the migration flow is s
 1. Register only authored operations with authorization, with no alternate generated CRUD endpoint.
 2. Verify the caller before parsing input, then authorize before executing database work.
 3. Make no-parameter operations simple to declare and call, without an empty Zod object.
-4. Keep useful row-output defaults while making list, aggregate, and custom responses explicit.
+4. Make every response body an explicit schema, so a table change never widens an answer.
 5. Use conventional discovery in development and compiled registries in production.
 6. Generate browser contracts and provide generic React hooks with clear read, write, and session behavior.
 7. Keep transactional business rules visible in application code.
@@ -84,7 +85,7 @@ fail validation, including a duplicate whose declaration lacks authorization.
 ### No input schema means no parameters
 
 An absent `input` gives callbacks `undefined` and generates a browser input type of `void`. It never infers an ID,
-create body, or patch from the entity or method. An operation that needs parameters declares its Zod schema.
+create body, or patch from the method or a table. An operation that needs parameters declares its Zod schema.
 
 ```tsx
 useDatabaseQuery("alerts.queue");
@@ -99,29 +100,32 @@ policy lookup. An explicit schema controls parsing, defaults, optional propertie
 its Zod semantics. Every object is not implicitly made strict. Server-owned values, such as ownership, come from the
 verified actor and domain logic rather than client input.
 
-### Output defaults remain
+### No output schema means no body
 
-| Method | Executor result without `output` | Successful response |
-|---|---|---|
-| `GET` | Public entity row or `null` | Row, 200; `null` gives 404 |
-| `POST` | Created public entity row | Row, 201 |
-| `PATCH` / `PUT` | Updated public entity row or `null` | Row, 200; `null` gives 404 |
-| `DELETE` | Boolean | `true` gives 204 with no body; `false` gives 404 |
+An absent `output` means the operation answers with no body, and the browser output type is `void`. Nothing infers a
+response from a table or the method.
 
-The default row projection excludes private columns and relations. Existing codecs encode bigint as decimal strings
-and timestamps as RFC 3339 text. Adding a public column can widen a default response, so schema review still matters.
-An explicit output schema provides a narrower or different response; `execute` owns the mapping into it.
+| `execute` result without `output` | Response |
+|---|---|
+| `undefined` | 204 with no body |
+| `null` on `GET`, `PATCH`, or `PUT` | 404 |
+| Anything else | Opaque 500; a write carries `outcome: "unknown"` |
 
-Lists, aggregates, custom responses, and successful nullable responses declare `output`. The presence of `{ id }` in
-input never determines whether the answer is one object or an array. A GET list with no input needs only its array
-output schema. A nullable output can return `null` with 200; otherwise a null GET/PATCH/PUT result gives 404.
+Every operation that answers a body declares `output`, rows included. `z.object` strips undeclared keys, so the schema
+is the projection and a private column stays out of the answer by not being named. `.passthrough()`, `z.record`,
+`z.any()`, `z.unknown()`, transforms, and naming a private field all defeat that projection; `.private()` on a column
+does not sanitize an operation's `output`. `execute` owns the mapping into the schema.
+
+The presence of `{ id }` in input never determines whether the answer is one object or an array. A GET list with no
+input needs only its array output schema. A nullable output can return `null` with 200; otherwise a null GET/PATCH/PUT
+result gives 404. A DELETE that must report a missing row uses a resource policy, which answers 404 before `execute`.
 
 ### Authorization is required at both boundaries
 
 TypeScript requires `authorize`. If an otherwise valid untyped declaration omits it, runtime setup and normal generation
 skip it and warn with `file#export`. Production generation fails instead. An invalid authorization value, malformed
-contract, unknown entity, duplicate name, or module import failure blocks the registry. A missing policy is never an
-allow-all default, and skipping a policy does not hide another malformed field.
+contract, duplicate name, or module import failure blocks the registry. A missing policy is never an allow-all
+default, and skipping a policy does not hide another malformed field.
 
 ## Author experience
 
@@ -139,6 +143,13 @@ export const noteAuthor = definePolicy({
     db.notes.find(input.id),
   allow: ({ actor, resource }) => resource.author === actor.id,
 });
+
+// The lookup receives the same context as every other callback, actor included.
+export const ownNote = definePolicy({
+  resource: ({ actor, db, input }: PolicyContext<{ readonly id: number }>) =>
+    db.notes.where({ id: input.id, author: actor.id }).first(),
+  allow: () => true,
+});
 ```
 
 ```ts
@@ -148,46 +159,59 @@ import { z } from "zod";
 
 import { noteAuthor, signedIn } from "../policies";
 
+const note = z.object({ id: z.number(), author: z.string(), body: z.string() });
+
 export const listNotes = defineOperation({
   name: "notes.list",
-  entity: "notes",
   method: "GET",
-  output: z.array(z.object({ id: z.number(), body: z.string() })),
+  output: z.array(note.pick({ id: true, body: true })),
   authorize: signedIn,
   execute: ({ db }) => db.notes.select(["id", "body"]).limit(100).toArray(),
 });
 
 export const getNote = defineOperation({
   name: "notes.get",
-  entity: "notes",
   method: "GET",
   input: z.object({ id: z.number().int() }),
+  output: note,
   authorize: noteAuthor,
   execute: ({ resource }) => resource,
 });
 
 export const createNote = defineOperation({
   name: "notes.create",
-  entity: "notes",
   method: "POST",
   input: z.object({ body: z.string().trim().min(1) }),
+  output: note,
   authorize: signedIn,
   execute: ({ actor, db, input }) =>
     db.transaction(async (tx) => {
-      const note = await tx.notes.create({ author: actor.id, body: input.body });
-      await tx.note_events.create({ note_id: note.id, action: "created" });
-      return note;
+      const created = await tx.notes.create({ author: actor.id, body: input.body });
+      await tx.note_events.create({ note_id: created.id, action: "created" });
+      return created;
     }),
+});
+
+export const deleteNote = defineOperation({
+  name: "notes.delete",
+  method: "DELETE",
+  input: z.object({ id: z.number().int() }),
+  authorize: noteAuthor,
+  execute: async ({ db, input }) => {
+    await db.notes.delete(input.id);
+  },
 });
 ```
 
-`name`, `entity`, `method`, `authorize`, and `execute` are required. `input` and `output` are optional, independently.
-An operation descriptor does not execute a policy or database query during declaration or generation.
+`name`, `method`, `authorize`, and `execute` are required. `input` and `output` are optional, independently. An
+operation descriptor does not execute a policy or database query during declaration or generation.
 
-Callbacks receive the verified `actor: { id, email? }`, parsed `input`, service-principal `db`, and `appkit` exports.
-`allow` and `execute` also receive the loaded `resource`, or `undefined` for a policy without a lookup. The callback
-context contains no request, headers, or user token. At runtime `appkit` contains registered plugin exports; its static
-operation type makes other SDK plugins optional because a route module cannot know the app's registration list.
+Every callback, the `resource` lookup included, receives the verified `actor: { id, email? }`, parsed `input`,
+service-principal `db`, and `appkit` exports. `allow` and `execute` also receive the loaded `resource`, or `undefined`
+for a policy without a lookup. The lookup runs once per request, so `execute: ({ resource }) => resource` answers
+without a second query. The callback context contains no request, headers, or user token. At runtime `appkit` contains
+registered plugin exports; its static operation type makes other SDK plugins optional because a route module cannot know
+the app's registration list.
 
 A reusable resource policy annotates the input fields its lookup reads. Operations with those fields can reuse it;
 incompatible input is a type error. `allow` and `execute` receive the lookup's non-null resource type. A literal in a
@@ -299,8 +323,8 @@ A custom build must include the registry beside its server with the same extensi
 production TypeScript loading uses Jiti. An explicit schema must be the same schema object used by an explicit registry.
 
 Setup loads and validates declarations before opening a pool. Missing authorization skips only the affected otherwise
-valid operation at runtime. Malformed or duplicate declarations, unknown entities, import errors, and invalid registry
-exports fail setup. A missing/empty source directory is distinct from a broken expected artifact. Nothing restores CRUD.
+valid operation at runtime. Malformed or duplicate declarations, import errors, and invalid registry exports fail
+setup. A missing/empty source directory is distinct from a broken expected artifact. Nothing restores CRUD.
 
 ## HTTP contract
 
@@ -318,7 +342,7 @@ must remain side-effect-free; the method cannot mechanically prove its executor 
 
 | Condition | Response |
 |---|---|
-| Success | 200; POST uses 201; default DELETE uses 204 without a body |
+| Success | 200; POST uses 201; an operation without `output` uses 204 without a body |
 | Malformed transport or explicit input-schema failure | 400 |
 | No actor / denied / missing operation or resource | 401 / 403 / 404 as specified above |
 | Database constraint conflict | 409 |
@@ -415,7 +439,7 @@ custom output or write an incorrect policy; neither the schema nor the SDK is a 
 
 The implementation PRs record build, docs build, lint/format, and monorepo typecheck results, plus focused server, UI,
 contract-generation, and playground suites. Coverage includes missing/malformed policies, concealed denials, safe input
-errors, private projection, unsupported contracts, exact methods, transport limits, mutation/session identity,
+errors, explicit output projection, unsupported contracts, exact methods, transport limits, mutation/session identity,
 `skipToken`, shared-file watching, first/last route changes, and a plain-Node source-less server bundle.
 
 The local AML evaluation exercises more complex domain and UI scenarios, including transactional audit and concurrency
@@ -425,7 +449,7 @@ live Databricks Apps proxy behavior.
 Before production release, validate forwarded-token scopes and proxy/header behavior in the actual Apps deployment,
 verify the deployed origin/session boundary, and integrate the separate migration flow if shipping both designs.
 Repository tests and packaging proofs do not substitute for those platform checks. No current product decision depends
-on inferring output cardinality from input or reintroducing legacy CRUD.
+on inferring an output from a table or from input, or on reintroducing legacy CRUD.
 
 ## PR stack
 
@@ -435,8 +459,8 @@ Design first, then the existing implementation layers, bottom to top:
 |---|---|---|
 | 00 | [#683](https://github.com/databricks/appkit/pull/683) | This design and the current author experience |
 | 01 | [#687](https://github.com/databricks/appkit/pull/687) | Remove lifecycle hooks, serialize, and their callers |
-| 02 | [#688](https://github.com/databricks/appkit/pull/688) | Typed operation and reusable policy definitions; explicit input, retained output defaults |
-| 03 | [#689](https://github.com/databricks/appkit/pull/689) | Actor, authorization, HTTP execution, and safe field-validation details |
+| 02 | [#688](https://github.com/databricks/appkit/pull/688) | Typed operation and reusable policy definitions; explicit input and output schemas |
+| 03 | [#689](https://github.com/databricks/appkit/pull/689) | Actor, authorization, HTTP execution, bodiless replies, and safe field-validation details |
 | 04 | [#690](https://github.com/databricks/appkit/pull/690) | Discovery, generated browser contracts, empty registry, and shared-file generation |
 | 05 | [#691](https://github.com/databricks/appkit/pull/691) | Typed browser client, query/mutation hooks, session/operation identity, and skipToken |
 | 06 | [#692](https://github.com/databricks/appkit/pull/692) | Default route discovery, serving/build cutover, real watcher integration, and first-party app/docs migration |
