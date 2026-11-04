@@ -340,9 +340,7 @@ async function resolveAdapter(
   def: AgentDefinition,
   onBehalfOfUser: boolean,
 ): Promise<AgentAdapter> {
-  // Explicit model wins; otherwise fall back to the model_service env, then the
-  // legacy serving-endpoint env. A string from any source routes by name
-  // (catalog.schema.name → AI Gateway, else Model Serving).
+  // Explicit model wins, then the model_service env, then the legacy serving env.
   const source =
     def.model ??
     process.env.DATABRICKS_MODEL_SERVICE_NAME ??

@@ -270,9 +270,7 @@ const probeFunction: ExistenceProbe = async (client, target) => {
   }
 };
 
-// No SDK client covers model services yet, so GET through the raw-request seam.
-// It resolves on any status, so surface a non-OK one as the error shape
-// classifyError reads.
+// request() resolves on any status; throw non-OK so classifyError reads it.
 const probeModelService: ExistenceProbe = async (client, target) => {
   const name = field(target, "name");
   if (!name) return missingField("name");

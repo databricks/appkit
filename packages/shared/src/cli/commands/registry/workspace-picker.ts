@@ -430,12 +430,7 @@ export const PARENT_CONTEXT_CHAINS: Record<string, ParentContextStep[]> = {
   ],
 };
 
-/**
- * Parents a drill-down opens on before offering the full walk. Finding
- * `system` among thousands of catalogs is slow, and system.ai holds the
- * foundation models, so the model service picker lists it first. The picker
- * still offers the full drill-down: user model services live in other schemas.
- */
+/** Parents a drill-down opens on first; the full walk stays one pick away. */
 export const DEFAULT_PARENTS: Record<string, string[]> = {
   model_service: ["system", "ai"],
 };
@@ -481,15 +476,16 @@ export function listParentContextStep(
     runner,
   );
   const prefix = spec.stripPrefix;
-  if (!prefix) return { key: step.key, choices };
   return {
     key: step.key,
-    choices: choices.map(({ value }) => {
-      const bare = value.startsWith(prefix)
-        ? value.slice(prefix.length)
-        : value;
-      return { value: bare, label: bare };
-    }),
+    choices: prefix
+      ? choices.map(({ value }) => {
+          const bare = value.startsWith(prefix)
+            ? value.slice(prefix.length)
+            : value;
+          return { value: bare, label: bare };
+        })
+      : choices,
   };
 }
 

@@ -1002,8 +1002,9 @@ type ModelStringOptions = Pick<
  *   ({@link DatabricksAdapter.fromModelServing}); the name goes in the URL.
  *
  * Serving-endpoint names are `[a-zA-Z0-9_-]` (no dots), so a dot cleanly
- * separates the two namespaces and no existing endpoint name changes routing. This is the single decision point shared by the agents
- * plugin and standalone `runAgent`, so the two never drift. To force a
+ * separates the two namespaces and no existing endpoint name changes routing.
+ * This is the single decision point shared by the agents plugin and
+ * standalone `runAgent`, so the two never drift. To force a
  * dotted name onto a serving endpoint instead, pass a pre-built adapter
  * (`DatabricksAdapter.fromServingEndpoint(...)`) as the agent's `model`.
  */

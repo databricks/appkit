@@ -570,10 +570,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     def: AgentDefinition,
     name: string,
   ): Promise<AgentAdapter> {
-    // Explicit model (adapter or string) wins; otherwise fall back to the
-    // model_service resource env, then the legacy serving-endpoint env. A
-    // string from any source routes by name in `adapterFromModelString`
-    // (catalog.schema.name → AI Gateway, everything else → Model Serving).
+    // Explicit model wins, then the model_service env, then the legacy serving env.
     const source =
       def.model ??
       this.config.defaultModel ??
