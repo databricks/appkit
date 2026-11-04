@@ -173,10 +173,7 @@ async function boot(
     exportName: `operation${index}`,
     value,
   }));
-  const validated = validateOperationMetadata(
-    located,
-    new Set(Object.keys(schema.$tables)),
-  );
+  const validated = validateOperationMetadata(located);
   expect(validated.skipped).toEqual([]);
   expect(validated.errors).toEqual([]);
 
@@ -193,7 +190,6 @@ async function boot(
   router.use(
     OPERATIONS_PATH,
     createOperationHandler({
-      schema,
       operations: validated.operations,
       resolveActor:
         options.resolveActor ??
@@ -233,6 +229,13 @@ async function boot(
 }
 
 const asAda = { "x-forwarded-access-token": SENTINEL.token };
+const wireBigint = z.union([z.string(), z.number()]).transform(BigInt);
+const noteOutput = z.object({
+  id: z.number(),
+  title: z.string(),
+  ownerId: z.string().nullable(),
+  views: z.bigint().transform(String).nullable(),
+});
 const discriminator = (actorId: string) =>
   createHash("sha256").update(`${workspace.url}\0${actorId}`).digest("hex");
 const json = (reply: Reply) => JSON.parse(reply.body);
@@ -245,9 +248,9 @@ function ownedNoteGet(
     spies,
     operation: define({
       name: "notes.get",
-      entity: "notes",
       method: "GET",
       input: z.object({ id: z.number().int() }).strict(),
+      output: noteOutput,
       authorize: policy({
         resource: (ctx: Ctx) => {
           spies.lookup(ctx);
@@ -284,7 +287,6 @@ describe("authentication comes first", () => {
       get.operation,
       define({
         name: "notes.create",
-        entity: "notes",
         method: "POST",
         input: z.object({ title: z.string() }).strict(),
         authorize: () => true,
@@ -473,7 +475,6 @@ describe("input", () => {
     const app = await boot([
       define({
         name: "notes.create",
-        entity: "notes",
         method: "POST",
         input: z.object({ title: z.string() }).strict(),
         authorize: () => true,
@@ -516,7 +517,6 @@ describe("input", () => {
       [
         define({
           name: "notes.create",
-          entity: "notes",
           method: "POST",
           input: z.object({ title: z.string() }).strict(),
           authorize: () => true,
@@ -540,7 +540,6 @@ describe("input", () => {
       const app = await boot([
         define({
           name: "notes.noInput",
-          entity: "notes",
           method,
           output: z.literal("ok"),
           authorize,
@@ -581,9 +580,9 @@ describe("authorization", () => {
     const app = await boot([
       define({
         name: "notes.create",
-        entity: "notes",
         method: "POST",
         input: z.object({ title: z.string() }).strict(),
+        output: z.object({ id: z.number(), title: z.string() }),
         authorize: () => {
           if (next instanceof Error) throw next;
           return next;
@@ -628,7 +627,6 @@ describe("authorization", () => {
     const app = await boot([
       define({
         name: "notes.check",
-        entity: "notes",
         method: "PATCH",
         input: z.object({ id: z.number() }),
         output: z.object({ id: z.number(), title: z.string() }),
@@ -702,7 +700,6 @@ describe("execution and output", () => {
     const app = await boot([
       define({
         name: "notes.validate",
-        entity: "notes",
         method: "POST",
         input: z.object({ content: z.string().trim().min(1) }),
         output: z.string(),
@@ -725,47 +722,59 @@ describe("execution and output", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  test("default replies project public columns and answer missing rows with 404", async () => {
-    const wireBigint = z.union([z.string(), z.number()]).transform(BigInt);
+  const deleteNote = define({
+    name: "notes.delete",
+    method: "DELETE",
+    input: z.object({ id: z.number() }),
+    authorize: () => true,
+    execute: async ({ db, input }: Ctx) => {
+      await db.notes.delete(input.id);
+    },
+  });
+
+  test("an explicit output is the projection; without one undefined answers 204 and null a missing row", async () => {
     const fields = z.object({
       title: z.string(),
       ownerId: z.string().nullable(),
       views: wireBigint.nullable(),
     });
-    const inputs: Record<string, z.ZodType> = {
-      POST: fields.partial().required({ title: true }),
-      PATCH: z.object({ id: z.number(), changes: fields.partial() }),
-      PUT: z.object({ id: z.number(), values: fields }),
-      DELETE: z.object({ id: z.number() }),
-    };
-    const owned = (
-      method: string,
-      name: string,
-      execute: (ctx: Ctx) => unknown,
-    ) =>
-      define({
-        name,
-        entity: "notes",
-        method,
-        input: inputs[method],
-        authorize: () => true,
-        execute,
-      });
     const get = ownedNoteGet();
     const app = await boot([
       get.operation,
-      owned("POST", "notes.create", ({ db, input, actor }) =>
-        db.notes.create({ ...input, ownerId: actor.id, secret: SENTINEL.row }),
-      ),
-      owned("PATCH", "notes.patch", ({ db, input }) =>
-        db.notes.update(input.id, input.changes),
-      ),
-      owned("PUT", "notes.put", ({ db, input }) =>
-        db.notes.update(input.id, input.values),
-      ),
-      owned("DELETE", "notes.delete", ({ db, input }) =>
-        db.notes.delete(input.id),
-      ),
+      define({
+        name: "notes.create",
+        method: "POST",
+        input: fields.partial().required({ title: true }),
+        output: noteOutput,
+        authorize: () => true,
+        execute: ({ db, input, actor }: Ctx) =>
+          db.notes.create({
+            ...input,
+            ownerId: actor.id,
+            secret: SENTINEL.row,
+          }),
+      }),
+      define({
+        name: "notes.patch",
+        method: "PATCH",
+        input: z.object({ id: z.number(), changes: fields.partial() }),
+        output: noteOutput,
+        authorize: () => true,
+        execute: ({ db, input }: Ctx) =>
+          db.notes.update(input.id, input.changes),
+      }),
+      define({
+        name: "notes.put",
+        method: "PUT",
+        input: z.object({ id: z.number(), values: fields }),
+        authorize: () => true,
+        execute: async ({ db, input }: Ctx) => {
+          if ((await db.notes.update(input.id, input.values)) === null) {
+            return null;
+          }
+        },
+      }),
+      deleteNote,
     ]);
 
     const created = await app.call(
@@ -782,9 +791,11 @@ describe("execution and output", () => {
       ownerId: SENTINEL.actorId,
       views: "9007199254740993",
     });
+    expect(created.body).not.toContain(SENTINEL.row);
 
     const read = await app.call("GET", "notes.get", { id: row.id }, asAda);
     expect(json(read)).toEqual(row);
+    expect(read.body).not.toContain(SENTINEL.row);
     expect(read.body).not.toContain("hidden");
 
     const patched = await app.call(
@@ -794,17 +805,6 @@ describe("execution and output", () => {
       asAda,
     );
     expect([patched.status, json(patched).title]).toEqual([200, "second"]);
-    const put = await app.call(
-      "PUT",
-      "notes.put",
-      { id: row.id, values: { title: "third", ownerId: null, views: null } },
-      asAda,
-    );
-    expect([put.status, json(put).title, json(put).views]).toEqual([
-      200,
-      "third",
-      null,
-    ]);
     expect(
       (
         await app.call(
@@ -816,6 +816,21 @@ describe("execution and output", () => {
       ).status,
     ).toBe(404);
 
+    const values = { title: "third", ownerId: SENTINEL.actorId, views: null };
+    const put = await app.call(
+      "PUT",
+      "notes.put",
+      { id: row.id, values },
+      asAda,
+    );
+    expect([put.status, put.body]).toEqual([204, ""]);
+    expect(
+      (await app.call("PUT", "notes.put", { id: 999, values }, asAda)).status,
+    ).toBe(404);
+    expect(
+      json(await app.call("GET", "notes.get", { id: row.id }, asAda)),
+    ).toEqual({ ...row, title: "third", views: null });
+
     const deleted = await app.call(
       "DELETE",
       "notes.delete",
@@ -824,9 +839,70 @@ describe("execution and output", () => {
     );
     expect([deleted.status, deleted.body]).toEqual([204, ""]);
     expect(deleted.headers["cache-control"]).toBe("no-store");
-    expect(
-      (await app.call("DELETE", "notes.delete", { id: row.id }, asAda)).status,
-    ).toBe(404);
+    expect(app.database.committed.notes).toEqual([]);
+  });
+
+  test("a row returned without an output answers 500 and never sends the row", async () => {
+    const app = await boot([
+      define({
+        name: "notes.rowWithoutOutput",
+        method: "GET",
+        authorize: () => true,
+        execute: ({ db }: Ctx) => db.notes.first(),
+      }),
+    ]);
+    await seedNote(app.db());
+
+    const leaked = await app.call(
+      "GET",
+      "notes.rowWithoutOutput",
+      undefined,
+      asAda,
+    );
+
+    expect([leaked.status, json(leaked)]).toEqual([
+      500,
+      { error: "Database operation failed" },
+    ]);
+    expect(leaked.body).not.toContain(SENTINEL.row);
+  });
+
+  test("a delete of an absent row without a resource policy answers 204", async () => {
+    const app = await boot([deleteNote]);
+
+    const deleted = await app.call(
+      "DELETE",
+      "notes.delete",
+      { id: 999 },
+      asAda,
+    );
+
+    expect([deleted.status, deleted.body]).toEqual([204, ""]);
+  });
+
+  test("a boolean returned by a write without an output answers 500 with an unknown outcome", async () => {
+    const app = await boot([
+      define({
+        name: "notes.deleteAnsweringBoolean",
+        method: "DELETE",
+        input: z.object({ id: z.number() }),
+        authorize: () => true,
+        execute: ({ db, input }: Ctx) => db.notes.delete(input.id),
+      }),
+    ]);
+    const note = await seedNote(app.db());
+
+    const existed = await app.call(
+      "DELETE",
+      "notes.deleteAnsweringBoolean",
+      { id: note.id },
+      asAda,
+    );
+
+    expect([existed.status, json(existed)]).toEqual([
+      500,
+      { error: "Database write may have completed", outcome: "unknown" },
+    ]);
     expect(app.database.committed.notes).toEqual([]);
   });
 
@@ -834,7 +910,6 @@ describe("execution and output", () => {
     const app = await boot([
       define({
         name: "notes.search",
-        entity: "notes",
         method: "GET",
         input: z.object({
           term: z.string().transform((term) => term.toUpperCase()),
@@ -846,7 +921,6 @@ describe("execution and output", () => {
       }),
       define({
         name: "notes.summary",
-        entity: "notes",
         method: "GET",
         output: z.object({ count: z.number() }),
         authorize: () => true,
@@ -854,7 +928,6 @@ describe("execution and output", () => {
       }),
       define({
         name: "notes.broken",
-        entity: "notes",
         method: "POST",
         output: z.object({ count: z.number() }),
         authorize: () => true,
@@ -862,7 +935,6 @@ describe("execution and output", () => {
       }),
       define({
         name: "notes.purge",
-        entity: "notes",
         method: "DELETE",
         output: z.void(),
         authorize: () => true,
@@ -893,7 +965,6 @@ describe("execution and output", () => {
     const app = await boot([
       define({
         name: "notes.rename",
-        entity: "notes",
         method: "PATCH",
         input: z
           .object({ id: z.number(), changes: z.object({ title: z.string() }) })
@@ -903,7 +974,6 @@ describe("execution and output", () => {
       }),
       define({
         name: "notes.drop",
-        entity: "notes",
         method: "DELETE",
         input: z.object({ id: z.number() }).strict(),
         authorize: () => true,
@@ -911,7 +981,6 @@ describe("execution and output", () => {
       }),
       define({
         name: "notes.peek",
-        entity: "notes",
         method: "GET",
         output: z.object({ count: z.number() }),
         authorize: () => true,
@@ -951,7 +1020,6 @@ describe("execution and output", () => {
     const app = await boot([
       define({
         name: "notes.checked",
-        entity: "notes",
         method: "POST",
         input: z.object({
           title: z.string().refine(async (title) => title !== "taken"),
@@ -990,7 +1058,6 @@ describe("execution and output", () => {
     const app = await boot([
       define({
         name: "notes.create",
-        entity: "notes",
         method: "POST",
         input: z.object({ title: z.string() }).strict(),
         authorize: () => true,
@@ -1021,9 +1088,9 @@ describe("execution and output", () => {
     const app = await boot([
       define({
         name: "notes.publish",
-        entity: "notes",
         method: "POST",
         input: z.object({ title: z.string() }).strict(),
+        output: z.object({ id: z.number(), title: z.string() }),
         authorize: () => true,
         execute: ({ db, input, actor }: Ctx) =>
           db.transaction(async (tx: any) => {
@@ -1076,9 +1143,9 @@ describe("browser origin", () => {
       get.operation,
       define({
         name: "notes.create",
-        entity: "notes",
         method: "POST",
         input: z.object({ title: z.string() }).strict(),
+        output: z.object({ id: z.number(), title: z.string() }),
         authorize: () => true,
         execute,
       }),
@@ -1134,7 +1201,6 @@ describe("telemetry", () => {
       get.operation,
       define({
         name: "notes.create",
-        entity: "notes",
         method: "POST",
         input: z.object({ title: z.string() }).strict(),
         authorize: policy({
@@ -1144,7 +1210,6 @@ describe("telemetry", () => {
       }),
       define({
         name: "notes.explode",
-        entity: "notes",
         method: "POST",
         input: z.object({ title: z.string() }).strict(),
         authorize: () => true,
@@ -1247,7 +1312,6 @@ describe("local development boundary", () => {
       [
         define({
           name: "me.get",
-          entity: "notes",
           method: "GET",
 
           output: z.object({ term: z.string() }),
@@ -1308,59 +1372,5 @@ describe("local development boundary", () => {
     expect(reply.status).toBe(401);
     expect(workspace.authorizations).toEqual([]);
     expect(get.spies.lookup).not.toHaveBeenCalled();
-  });
-});
-
-describe("setup", () => {
-  const handler =
-    (
-      operation: Record<string, unknown>,
-      extra: Record<string, unknown>[] = [],
-    ) =>
-    () => {
-      const { operations } = validateOperationMetadata(
-        [operation, ...extra].map((value, index) => ({
-          file: "routes.ts",
-          exportName: `op${index}`,
-          value: define(value),
-        })),
-        new Set(Object.keys(schema.$tables)),
-      );
-      return createOperationHandler({
-        schema,
-        operations,
-        resolveActor: createActorResolver({ kind: "unsupported" }),
-        services: () => {
-          throw new Error("unused");
-        },
-        telemetry: TelemetryManager.getProvider("database"),
-      });
-    };
-  const base = { authorize: () => true, execute: () => null };
-
-  test("accepts omitted input regardless of primary keys or writable columns", () => {
-    expect(
-      handler({ ...base, name: "tags.get", entity: "tags", method: "GET" }),
-    ).not.toThrow();
-    expect(
-      handler({
-        ...base,
-        name: "stamps.patch",
-        entity: "stamps",
-        method: "PATCH",
-      }),
-    ).not.toThrow();
-    expect(
-      handler({ ...base, name: "stamps.put", entity: "stamps", method: "PUT" }),
-    ).not.toThrow();
-    expect(
-      handler({
-        ...base,
-        name: "tags.find",
-        entity: "tags",
-        method: "GET",
-        input: z.object({ label: z.string() }),
-      }),
-    ).not.toThrow();
   });
 });

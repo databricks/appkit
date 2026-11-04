@@ -13,17 +13,11 @@ import {
   databaseSetupFailed,
   invalidDatabaseInput,
 } from "../../database/errors";
-import type { Schema } from "../../database/schema-builder";
 import { DatabaseValidationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import type { ITelemetry } from "../../telemetry";
 import type { JsonValue } from "./crud/codecs";
-import {
-  boundedJson,
-  compileCrudTables,
-  type CrudTable,
-  isPlainObject,
-} from "./crud/contract";
+import { boundedJson, isPlainObject } from "./crud/contract";
 import { sendEmpty, sendJson } from "./crud/response";
 import { MAX_OPERATION_BODY_BYTES, MAX_QUERY_BYTES } from "./defaults";
 import type { DatabaseExports } from "./entity-types";
@@ -66,7 +60,6 @@ interface OperationServices {
 }
 
 interface OperationHandlerOptions {
-  readonly schema: Schema;
   readonly operations: readonly ValidatedOperation[];
   readonly resolveActor: ActorResolver;
   /** Read per admitted request, so a draining plugin serves no stale client. */
@@ -107,24 +100,6 @@ function errorName(error: unknown): string {
   return error instanceof Error ? error.name : typeof error;
 }
 
-/** Public scalar columns only; a relation is never part of a default reply. */
-function publicColumns(table: CrudTable, row: unknown): JsonValue {
-  if (!isPlainObject(row)) throw new DatabasePluginError("INTERNAL", "read");
-  const out: Record<string, JsonValue> = {};
-  for (const [name, value] of Object.entries(row)) {
-    const column = table.columns.get(name);
-    if (column && !column.meta.isPrivate) out[name] = column.encode(value);
-  }
-  return out;
-}
-
-function rowOrMissing(table: CrudTable): (result: unknown) => Reply {
-  return (result) => {
-    if (result === null) throw new DatabasePluginError("NOT_FOUND", "read");
-    return { status: 200, body: publicColumns(table, result) };
-  };
-}
-
 /** No schema means no parameters; never pass unexpected values to a policy. */
 function noInput(raw: JsonValue | undefined): undefined {
   if (
@@ -136,25 +111,17 @@ function noInput(raw: JsonValue | undefined): undefined {
   throw invalidDatabaseInput(["input"], "This operation accepts no parameters");
 }
 
-/** Output defaults remain independent of the operation's input schema. */
-const DEFAULT_OUTPUTS: Readonly<
-  Record<OperationMethod, (table: CrudTable) => (result: unknown) => Reply>
-> = {
-  GET: rowOrMissing,
-  POST: (table) => (result) => ({
-    status: 201,
-    body: publicColumns(table, result),
-  }),
-  PATCH: rowOrMissing,
-  PUT: rowOrMissing,
-  DELETE: () => (result) => {
-    if (result === true) return { status: 204 };
+function noBody(method: OperationMethod): Respond {
+  return (result) => {
+    if (result === undefined) return { status: 204 };
     throw new DatabasePluginError(
-      result === false ? "NOT_FOUND" : "INTERNAL",
-      "write",
+      result === null && NULLABLE_METHODS.has(method)
+        ? "NOT_FOUND"
+        : "INTERNAL",
+      "read",
     );
-  },
-};
+  };
+}
 
 type Parse = (
   value: unknown,
@@ -238,16 +205,10 @@ function schemaReply(method: OperationMethod, parse: Parse): Respond {
 
 /** Compile every declaration once; a contract that cannot be honored fails setup. */
 function compileOperations(
-  schema: Schema,
   operations: readonly ValidatedOperation[],
 ): ReadonlyMap<string, CompiledOperation> {
-  const tables = compileCrudTables(schema.$tables);
   const registry = new Map<string, CompiledOperation>();
   for (const operation of operations) {
-    const table = tables.get(operation.entity);
-    if (!table) {
-      throw setupFailed(operation, "names an entity the schema lacks.");
-    }
     const decode = operation.input
       ? schemaInput(parserOf(operation, operation.input), operation.input)
       : noInput;
@@ -259,7 +220,7 @@ function compileOperations(
       execute: operation.execute,
       reply: operation.output
         ? schemaReply(operation.method, parserOf(operation, operation.output))
-        : DEFAULT_OUTPUTS[operation.method](table),
+        : noBody(operation.method),
     });
   }
   return registry;
@@ -434,7 +395,7 @@ function sendFailure(res: Response, failure: DatabasePluginError): void {
 export function createOperationHandler(
   options: OperationHandlerOptions,
 ): RequestHandler {
-  const registry = compileOperations(options.schema, options.operations);
+  const registry = compileOperations(options.operations);
 
   function route(req: Request): CompiledOperation | undefined {
     const segment = /^\/([^/]+)$/.exec(req.path)?.[1];
