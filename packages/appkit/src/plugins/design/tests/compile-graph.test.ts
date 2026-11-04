@@ -172,6 +172,46 @@ describe("compileGraph on a real Vite server", () => {
     );
   });
 
+  test("writing drafts/mock.json tells open drafts to fetch it again", async () => {
+    const app = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "appkit-mock-")),
+    );
+    fs.mkdirSync(path.join(app, "drafts"));
+    fs.mkdirSync(path.join(app, "client"));
+    const cwd = process.cwd();
+    process.chdir(app);
+    try {
+      server = await createServer({
+        root: path.join(app, "client"),
+        configFile: false,
+        logLevel: "silent",
+        plugins: [designVitePlugin()],
+        server: { middlewareMode: true, ws: false },
+        optimizeDeps: { noDiscovery: true, include: [] },
+      });
+    } finally {
+      process.chdir(cwd);
+    }
+    const sent: unknown[] = [];
+    server.environments.client.hot.send = (p: unknown) => sent.push(p);
+    server.ws.send = (p: unknown) => sent.push(p);
+    // Written after the server started, as drafts/mock.json is; written
+    // again on each retry (macOS can miss writes just after a watch starts).
+    await vi.waitFor(
+      () => {
+        fs.writeFileSync(path.join(app, "drafts/mock.json"), "{}");
+        expect(sent).toContainEqual({
+          type: "custom",
+          event: "appkit:mock-changed",
+        });
+      },
+      { timeout: 5000, interval: 200 },
+    );
+    expect(sent).not.toContainEqual(
+      expect.objectContaining({ type: "full-reload" }),
+    );
+  });
+
   test("an app's react-router 7 is found when Vite serves its pre-bundled copy", async () => {
     const app = fs.realpathSync(
       fs.mkdtempSync(path.join(os.tmpdir(), "appkit-router-")),

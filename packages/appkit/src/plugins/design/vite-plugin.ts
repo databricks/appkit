@@ -622,6 +622,11 @@ export function designVitePlugin({
       // sends a full reload, and in middleware mode that reloads every page
       // (a draft mid-stream, the app) on each write.
       const onDraftChange = (file: string | null) => {
+        // Open drafts fetch it again (drafts may be written before it).
+        if (file === "mock.json") {
+          server.ws.send({ type: "custom", event: "appkit:mock-changed" });
+          return;
+        }
         const name = /^([A-Za-z0-9_-]+)\.html$/.exec(file ?? "")?.[1];
         // Writes during a stream reach the page through the stream itself,
         // and a late event for content already streamed needs no reload.

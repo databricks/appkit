@@ -234,7 +234,7 @@ Data the drafts share can live in one `drafts/mock.json` instead of inline: a JS
 <script type="application/json" data-appkit="KpiCard" data-src="mock#totalTrips"></script>
 ```
 
-The page fetches `mock.json` once. Until it's there and parses (the agent may write it after the drafts), those blocks show their skeleton and the page asks again every second; after 30 seconds they show an error. A key that isn't in the file fails just that block, reported like any other draft error.
+The drafts may be written before `mock.json`. Until it's there and parses, those blocks show their skeleton (after 30 seconds with "Waiting for drafts/mock.json…") and the page asks for it again every second, for as long as it takes; the dev server also tells open drafts when the file is written, so they fetch it at once. When a new version arrives, each block whose data changed renders again in place. A key that a loaded `mock.json` lacks shows an error in just that block, reported like any other draft error, and the page keeps checking the file, so the block renders once the key is added. While blocks are still waiting, `/design/__status` reports the draft's errors as not known yet.
 
 The exact props of each component are published as JSON Schema (2020-12), with an example per component, in the package as `@databricks/appkit-ui/design/components.schema.json` (`node_modules/@databricks/appkit-ui/dist/design/components.schema.json`), and served at `GET /design/__data-appkit.schema.json` (linked from `/design/__status` as `blockSchema`). Read it to write valid blocks. In short:
 
