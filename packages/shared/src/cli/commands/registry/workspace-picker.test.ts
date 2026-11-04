@@ -284,37 +284,6 @@ describe("listWorkspaceResources", () => {
     expect(res.error).toContain("cannot configure default credentials");
   });
 
-  it("walks catalogs and schemas to list model services by full name", async () => {
-    const pages: Record<string, unknown> = {
-      "/api/2.1/unity-catalog/catalogs|": {
-        catalogs: [{ name: "main" }],
-        next_page_token: "p2",
-      },
-      "/api/2.1/unity-catalog/catalogs|p2": { catalogs: [{ name: "dev" }] },
-      "/api/2.1/unity-catalog/schemas|main": {
-        schemas: [{ full_name: "main.default" }],
-      },
-      "/api/2.1/unity-catalog/schemas|dev": { schemas: [] },
-      "/api/2.1/unity-catalog/model-services|schemas/main.default": {
-        model_services: [{ name: "model-services/main.default.chat" }],
-      },
-    };
-    const request = vi.fn(
-      async (req: { path: string; query: Record<string, string> }) => {
-        const q = req.query;
-        const key = `${req.path}|${q.page_token ?? q.catalog_name ?? q.parent ?? ""}`;
-        return new Response(JSON.stringify(pages[key] ?? {}));
-      },
-    );
-    const res = await listWorkspaceResources("model_service", undefined, () =>
-      fakeClient({ request }),
-    );
-    expect(res.choices).toEqual([
-      { value: "main.default.chat", label: "main.default.chat" },
-    ]);
-    expect(res.error).toBeUndefined();
-  });
-
   it("has no error field for a genuinely empty (unknown-type) listing", async () => {
     const factory = () => fakeClient({});
     const res = await listWorkspaceResources("nonsense", undefined, factory);
@@ -393,6 +362,31 @@ describe("listParentContextStep", () => {
     ]);
     expect(step?.choices).toEqual([
       { value: "main.sales.events", label: "events (main.sales.events)" },
+    ]);
+  });
+
+  it("lists model services by bare full name under the picked schema", () => {
+    const run = vi.fn(() => ({
+      status: 0,
+      stdout: JSON.stringify([{ name: "model-services/system.ai.gpt-5-mini" }]),
+    }));
+    const step = listParentContextStep(
+      "model_service",
+      2,
+      ["system", "ai"],
+      undefined,
+      run,
+    );
+    expect(run).toHaveBeenCalledWith([
+      "ai-gateway",
+      "list-model-services",
+      "--parent",
+      "schemas/system.ai",
+      "-o",
+      "json",
+    ]);
+    expect(step?.choices).toEqual([
+      { value: "system.ai.gpt-5-mini", label: "system.ai.gpt-5-mini" },
     ]);
   });
 
