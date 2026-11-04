@@ -3,23 +3,22 @@
 ## Call Signature
 
 ```ts
-function defineOperation<Name, E, M, I, O, R>(definition: OperationFields<E, M, I, O, Name> & {
+function defineOperation<Name, M, I, O, R>(definition: OperationFields<M, I, O, Name> & {
   authorize: ResourcePolicy<ParsedInput<I>, R>;
-  execute: (context: OperationContext<ParsedInput<I>, NonNullable<Awaited<R>>>) => Awaitable<ExecuteResult<E, M, O>>;
-}): OperationDefinition<E, M, I, O, R, Name>;
+  execute: (context: OperationContext<ParsedInput<I>, NonNullable<Awaited<R>>>) => Awaitable<ExecuteResult<M, O>>;
+}): OperationDefinition<M, I, O, R, Name>;
 ```
 
-Declare one database operation. `name` is its public identifier. The entity
-and method infer the default output. Declare an `input` Zod schema to accept
-parameters; without one, callbacks receive `undefined`. An `output` schema
-overrides the default response. Definition only freezes a descriptor.
+Declare one database operation. `name` is its public identifier. Declare an
+`input` Zod schema to accept parameters; without one, callbacks receive
+`undefined`. Declare an `output` Zod schema to answer a body; without one,
+the operation answers none. Definition only freezes a descriptor.
 
 ### Type Parameters
 
 | Type Parameter |
 | ------ |
 | `Name` *extends* `string` |
-| `E` *extends* `never` |
 | `M` *extends* `DatabaseOperationMethod` |
 | `I` *extends* `SchemaSlot` |
 | `O` *extends* `SchemaSlot` |
@@ -29,29 +28,28 @@ overrides the default response. Definition only freezes a descriptor.
 
 | Parameter | Type |
 | ------ | ------ |
-| `definition` | `OperationFields`\<`E`, `M`, `I`, `O`, `Name`\> & \{ `authorize`: `ResourcePolicy`\<`ParsedInput`\<`I`\>, `R`\>; `execute`: (`context`: [`OperationContext`](Interface.OperationContext.md)\<`ParsedInput`\<`I`\>, `NonNullable`\<`Awaited`\<`R`\>\>\>) => `Awaitable`\<`ExecuteResult`\<`E`, `M`, `O`\>\>; \} |
+| `definition` | `OperationFields`\<`M`, `I`, `O`, `Name`\> & \{ `authorize`: `ResourcePolicy`\<`ParsedInput`\<`I`\>, `R`\>; `execute`: (`context`: [`OperationContext`](Interface.OperationContext.md)\<`ParsedInput`\<`I`\>, `NonNullable`\<`Awaited`\<`R`\>\>\>) => `Awaitable`\<`ExecuteResult`\<`M`, `O`\>\>; \} |
 
 ### Returns
 
-[`OperationDefinition`](Interface.OperationDefinition.md)\<`E`, `M`, `I`, `O`, `R`, `Name`\>
+[`OperationDefinition`](Interface.OperationDefinition.md)\<`M`, `I`, `O`, `R`, `Name`\>
 
 ## Call Signature
 
 ```ts
-function defineOperation<Name, E, M, I, O>(definition: OperationOptions<E, M, I, O, undefined, Name>): OperationDefinition<E, M, I, O, undefined, Name>;
+function defineOperation<Name, M, I, O>(definition: OperationOptions<M, I, O, undefined, Name>): OperationDefinition<M, I, O, undefined, Name>;
 ```
 
-Declare one database operation. `name` is its public identifier. The entity
-and method infer the default output. Declare an `input` Zod schema to accept
-parameters; without one, callbacks receive `undefined`. An `output` schema
-overrides the default response. Definition only freezes a descriptor.
+Declare one database operation. `name` is its public identifier. Declare an
+`input` Zod schema to accept parameters; without one, callbacks receive
+`undefined`. Declare an `output` Zod schema to answer a body; without one,
+the operation answers none. Definition only freezes a descriptor.
 
 ### Type Parameters
 
 | Type Parameter | Default type |
 | ------ | ------ |
 | `Name` *extends* `string` | - |
-| `E` *extends* `never` | - |
 | `M` *extends* `DatabaseOperationMethod` | - |
 | `I` *extends* `SchemaSlot` | `undefined` |
 | `O` *extends* `SchemaSlot` | `undefined` |
@@ -60,8 +58,8 @@ overrides the default response. Definition only freezes a descriptor.
 
 | Parameter | Type |
 | ------ | ------ |
-| `definition` | `OperationOptions`\<`E`, `M`, `I`, `O`, `undefined`, `Name`\> |
+| `definition` | `OperationOptions`\<`M`, `I`, `O`, `undefined`, `Name`\> |
 
 ### Returns
 
-[`OperationDefinition`](Interface.OperationDefinition.md)\<`E`, `M`, `I`, `O`, `undefined`, `Name`\>
+[`OperationDefinition`](Interface.OperationDefinition.md)\<`M`, `I`, `O`, `undefined`, `Name`\>

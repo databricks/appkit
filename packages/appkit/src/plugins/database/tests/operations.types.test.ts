@@ -65,6 +65,12 @@ const patchInput = z.object({ id: z.number(), changes: z.object({
   user_slug: z.string().optional(), title: z.string().optional(), score: z.number().nullable().optional(), total: wireBigint.optional(),
 }) });
 const replaceInput = z.object({ id: z.string(), values: z.object({ name: z.string(), nickname: z.string().nullable() }) });
+const postOutput = z.object({
+  id: z.number(), user_slug: z.string(), title: z.string(), score: z.number().nullable(), total: z.bigint().transform(String),
+});
+const userOutput = z.object({ slug: z.string(), name: z.string(), nickname: z.string().nullable(), created_at: z.string() });
+const ledgerOutput = z.object({ seq: z.bigint().transform(String), note: z.string() });
+const eventOutput = z.object({ message: z.string() });
 
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
@@ -74,7 +80,6 @@ type Same<A, B> = IsAny<A> extends true
   ? false
   : [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
-type UserRow = DatabaseRegistry["users"]["publicRow"];
 type PostRow = DatabaseRegistry["posts"]["publicRow"];
 
 export type Registry = Expect<
@@ -83,9 +88,9 @@ export type Registry = Expect<
 
 export const getPost = defineOperation({
   name: "posts.get",
-  entity: "posts",
   method: "GET",
   input: idInput,
+  output: postOutput,
   authorize: ({ actor }) => actor.id.length > 0,
   execute: ({ input, db, resource, actor, appkit }) => {
     type _Input = Expect<Equal<typeof input, { id: number }>>;
@@ -105,7 +110,6 @@ export const getPost = defineOperation({
 });
 export type GetPost = [
   Expect<Equal<(typeof getPost)["name"], "posts.get">>,
-  Expect<Equal<(typeof getPost)["entity"], "posts">>,
   Expect<Equal<(typeof getPost)["method"], "GET">>,
   Expect<Equal<(typeof getPost)["input"], typeof idInput>>,
   Expect<Equal<OperationWireInput<typeof getPost>, { id: number }>>,
@@ -119,9 +123,9 @@ export type GetPost = [
 
 export const createUser = defineOperation({
   name: "users.create",
-  entity: "users",
   method: "POST",
   input: userInput,
+  output: userOutput,
   authorize: async ({ input, actor }) => input.slug === actor.id,
   execute: async ({ input, db, actor }) => {
     type _Input = Expect<
@@ -137,23 +141,30 @@ export type CreateUser = [
       { slug: string; name: string; nickname?: string | null | undefined; created_at?: string | undefined }
     >
   >,
-  Expect<Equal<OperationWireOutput<typeof createUser>, UserRow>>,
+  Expect<
+    Equal<
+      OperationWireOutput<typeof createUser>,
+      { slug: string; name: string; nickname: string | null; created_at: string }
+    >
+  >,
 ];
 
 export const logEvent = defineOperation({
   name: "events.log",
-  entity: "events",
   method: "POST",
   input: z.object({ message: z.string() }),
   authorize: () => true,
-  execute: ({ input }) => input,
+  execute: async ({ input, db }) => {
+    await db.events.create(input);
+  },
 });
+export type LogEvent = Expect<Equal<OperationWireOutput<typeof logEvent>, void>>;
 
 export const patchPost = defineOperation({
   name: "posts.patch",
-  entity: "posts",
   method: "PATCH",
   input: patchInput,
+  output: postOutput,
   authorize: () => true,
   execute: ({ input, db }) => {
     type _Input = Expect<
@@ -177,7 +188,6 @@ export type PatchPost = Expect<
 
 export const replaceUser = defineOperation({
   name: "users.replace",
-  entity: "users",
   method: "PUT",
   input: replaceInput,
   authorize: () => true,
@@ -185,17 +195,20 @@ export const replaceUser = defineOperation({
     type _Input = Expect<
       Equal<typeof input, { id: string; values: { name: string; nickname: string | null } }>
     >;
-    return db.users.update(input.id, input.values);
+    const user = await db.users.update(input.id, input.values);
+    if (user === null) return null;
   },
 });
+export type ReplaceUser = Expect<Equal<OperationWireOutput<typeof replaceUser>, void>>;
 
 export const deletePost = defineOperation({
   name: "posts.delete",
-  entity: "posts",
   method: "DELETE",
   input: idInput,
   authorize: () => true,
-  execute: ({ input, db }) => db.posts.delete(input.id),
+  execute: async ({ input, db }) => {
+    await db.posts.delete(input.id);
+  },
 });
 export type DeletePost = [
   Expect<Equal<OperationWireInput<typeof deletePost>, { id: number }>>,
@@ -204,9 +217,9 @@ export type DeletePost = [
 
 export const getEntry = defineOperation({
   name: "ledger.get",
-  entity: "ledger",
   method: "GET",
   input: bigIdInput,
+  output: ledgerOutput,
   authorize: () => true,
   execute: ({ input, db }) => {
     type _Input = Expect<Equal<typeof input, { id: bigint }>>;
@@ -220,9 +233,9 @@ export type GetEntry = [
 
 export const latestEvent = defineOperation({
   name: "events.latest",
-  entity: "events",
   method: "GET",
   input: z.object({ message: z.string() }),
+  output: eventOutput,
   authorize: () => true,
   execute: ({ input, db }) => db.events.where({ message: input.message }).first(),
 });
@@ -233,7 +246,6 @@ export type LatestEvent = [
 
 export const draftPost = defineOperation({
   name: "posts.draft",
-  entity: "posts",
   method: "POST",
   input: z.object({ title: z.string().trim(), pinned: z.boolean().default(false) }),
   output: z.object({ id: z.number(), total: z.bigint().transform(String) }),
@@ -251,7 +263,6 @@ export type DraftPost = [
 
 export const postSummary = defineOperation({
   name: "posts.summary",
-  entity: "posts",
   method: "GET",
   input: idInput,
   output: z.object({ id: z.number(), title: z.string() }),
@@ -264,7 +275,6 @@ export const postSummary = defineOperation({
 
 export const optionalPost = defineOperation({
   name: "posts.optional",
-  entity: "posts",
   method: "GET",
   input: idInput,
   output: z.object({ id: z.number() }).nullable(),
@@ -286,9 +296,9 @@ export const hiddenPost = definePolicy({
 
 export const readVisiblePost = defineOperation({
   name: "posts.visible",
-  entity: "posts",
   method: "GET",
   input: idInput,
+  output: postOutput,
   authorize: hiddenPost,
   execute: ({ resource }) => {
     type _Resource = Expect<Equal<typeof resource.id, PostRow["id"]>>;
@@ -301,12 +311,12 @@ export const readVisiblePost = defineOperation({
 export const stampInput = z.object({ id: z.number(), at: z.string() });
 export const recordStamp = defineOperation({
   name: "stamps.record",
-  entity: "stamps",
   method: "PATCH",
   input: stampInput,
   authorize: ({ input }) => input.at.length > 0,
   execute: () => null,
 });
+export type RecordStamp = Expect<Equal<OperationWireOutput<typeof recordStamp>, void>>;
 
 export const signedIn = definePolicy({ allow: ({ actor }) => actor.id !== "" });
 
@@ -317,9 +327,9 @@ export const authorOnly = definePolicy({
 
 export const renamePost = defineOperation({
   name: "posts.rename",
-  entity: "posts",
   method: "PATCH",
   input: patchInput,
+  output: postOutput,
   authorize: authorOnly,
   execute: ({ input, db, resource }) => {
     const _show: [typeof resource, PostRow] = null as never;
@@ -329,9 +339,9 @@ export const renamePost = defineOperation({
 
 export const retitleOwnPost = defineOperation({
   name: "posts.retitleOwn",
-  entity: "posts",
   method: "PATCH",
   input: z.object({ id: z.number(), title: z.string().trim() }),
+  output: postOutput,
   authorize: authorOnly,
   execute: ({ input, db, resource }) => {
     type _Input = Expect<Equal<typeof input, { id: number; title: string }>>;
@@ -344,27 +354,28 @@ export type RetitleOwnPost = Expect<
 
 export const readOwnPost = defineOperation({
   name: "posts.readOwn",
-  entity: "posts",
   method: "GET",
   input: idInput,
+  output: postOutput,
   authorize: authorOnly,
   execute: ({ resource }) => resource,
 });
 
 export const removeOwnPost = defineOperation({
   name: "posts.removeOwn",
-  entity: "posts",
   method: "DELETE",
   input: idInput,
   authorize: authorOnly,
-  execute: ({ resource }) => resource.id > 0,
+  execute: async ({ db, resource }) => {
+    await db.posts.delete(resource.id);
+  },
 });
 
 export const signedInCreate = defineOperation({
   name: "users.signedInCreate",
-  entity: "users",
   method: "POST",
   input: userInput,
+  output: userOutput,
   authorize: signedIn,
   execute: ({ input, db, resource }) => {
     type _Resource = Expect<Equal<typeof resource, undefined>>;
@@ -374,18 +385,18 @@ export const signedInCreate = defineOperation({
 
 export const signedInRead = defineOperation({
   name: "ledger.signedIn",
-  entity: "ledger",
   method: "GET",
   input: bigIdInput,
+  output: ledgerOutput,
   authorize: signedIn,
   execute: ({ db, input }) => db.ledger.find(input.id),
 });
 
 export const inlineLookup = defineOperation({
   name: "posts.replaceScored",
-  entity: "posts",
   method: "PUT",
   input: z.object({ id: z.number(), values: z.object({ user_slug: z.string(), title: z.string(), score: z.number().nullable(), total: wireBigint }) }),
+  output: postOutput,
   authorize: definePolicy({
     resource: ({ input, db }: PolicyContext<{ id: number }>) => db.posts.find(input.id),
     allow: ({ resource }) => resource.score !== null,
@@ -394,7 +405,7 @@ export const inlineLookup = defineOperation({
 });
 
 export const latest = defineOperation({
-  name: "events.noInput", entity: "events", method: "GET",
+  name: "events.noInput", method: "GET", output: eventOutput,
   authorize: ({ input }) => {
     type _Input = Expect<Equal<typeof input, undefined>>;
     return true;
@@ -405,10 +416,15 @@ export const latest = defineOperation({
   },
 });
 export type NoInput = Expect<Equal<OperationWireInput<typeof latest>, void>>;
-export const noInputPost = defineOperation({ name: "events.noInputPost", entity: "events", method: "POST", authorize: () => true, execute: () => ({ message: "event" }) });
-export const noInputPatch = defineOperation({ name: "stamps.noInputPatch", entity: "stamps", method: "PATCH", authorize: () => true, execute: () => null });
-export const noInputPut = defineOperation({ name: "stamps.noInputPut", entity: "stamps", method: "PUT", authorize: () => true, execute: () => null });
-export const noInputDelete = defineOperation({ name: "events.noInputDelete", entity: "events", method: "DELETE", authorize: () => true, execute: () => true });
+export const noInputPost = defineOperation({
+  name: "events.noInputPost", method: "POST", authorize: () => true,
+  execute: async ({ db }) => {
+    await db.events.create({ message: "event" });
+  },
+});
+export const noInputPatch = defineOperation({ name: "stamps.noInputPatch", method: "PATCH", authorize: () => true, execute: () => null });
+export const noInputPut = defineOperation({ name: "stamps.noInputPut", method: "PUT", authorize: () => true, execute: () => null });
+export const noInputDelete = defineOperation({ name: "events.noInputDelete", method: "DELETE", authorize: () => true, execute: () => {} });
 export type NoInputMethods = [
   Expect<Equal<OperationWireInput<typeof noInputPost>, void>>,
   Expect<Equal<OperationWireInput<typeof noInputPatch>, void>>,
@@ -452,6 +468,7 @@ const patchInput = z.object({ id: z.number(), changes: z.object({
   user_slug: z.string().optional(), title: z.string().optional(), score: z.number().nullable().optional(), total: wireBigint.optional(),
 }) });
 const replaceInput = z.object({ id: z.string(), values: z.object({ name: z.string(), nickname: z.string().nullable() }) });
+const ledgerOutput = z.object({ seq: z.bigint().transform(String), note: z.string() });
 // @ts-expect-error TS2305 operations run only through the HTTP runtime
 import { runOperation } from "@databricks/appkit/beta";
 // @ts-expect-error TS2305 candidate detection is internal
@@ -460,7 +477,6 @@ import { isOperationCandidate } from "@databricks/appkit/beta";
 import { defineOperation as stable } from "@databricks/appkit";
 // @ts-expect-error TS2769 name is required
 defineOperation({
-  entity: "posts",
   method: "GET",
   authorize: () => true,
   execute: () => null,
@@ -468,22 +484,12 @@ defineOperation({
 // @ts-expect-error TS2769 authorize is required
 defineOperation({
   name: "posts.missingAuthorize",
-  entity: "posts",
   method: "GET",
   input: idInput,
-  execute: ({ input, db }) => db.posts.find(input.id),
-});
-defineOperation({
-  name: "missing.get",
-  // @ts-expect-error TS2769 entities are generated table names
-  entity: "missing",
-  method: "GET",
-  authorize: () => true,
   execute: () => null,
 });
 defineOperation({
   name: "posts.head",
-  entity: "posts",
   // @ts-expect-error TS2769 methods are the five operation verbs
   method: "HEAD",
   authorize: () => true,
@@ -492,7 +498,6 @@ defineOperation({
 defineOperation({
   // @ts-expect-error TS2769 an operation name is a string literal
   name: 1,
-  entity: "posts",
   method: "GET",
   authorize: () => true,
   execute: () => null,
@@ -500,7 +505,6 @@ defineOperation({
 // @ts-expect-error TS2769 there is no separate action
 defineOperation({
   name: "posts.get",
-  entity: "posts",
   method: "GET",
   input: idInput,
   authorize: () => true,
@@ -509,40 +513,38 @@ defineOperation({
 });
 defineOperation({
   name: "users.private",
-  entity: "users",
   method: "POST",
   input: userInput,
   authorize: () => true,
-  // @ts-expect-error TS2339 private columns are absent from the declared input
-  execute: ({ input, db }) => db.users.create({ ...input, secret: input.secret }),
+  execute: async ({ input, db }) => {
+    // @ts-expect-error TS2339 private columns are absent from the declared input
+    await db.users.create({ ...input, secret: input.secret });
+  },
 });
 defineOperation({
-  name: "posts.partial",
-  entity: "posts",
+  name: "posts.row",
   method: "GET",
+  input: idInput,
   authorize: () => true,
-  // @ts-expect-error TS2769 a default read answers the full public row
-  execute: () => ({ id: 1 }),
+  // @ts-expect-error TS2769 without an output schema there is no body to answer a row with
+  execute: ({ input, db }) => db.posts.find(input.id),
 });
 defineOperation({
   name: "posts.nullCreate",
-  entity: "posts",
   method: "POST",
   authorize: () => true,
-  // @ts-expect-error TS2769 a create answers a row, never a missing record
+  // @ts-expect-error TS2769 null on POST is neither a body nor a missing record
   execute: () => null,
 });
 defineOperation({
   name: "posts.badDelete",
-  entity: "posts",
   method: "DELETE",
   authorize: () => true,
-  // @ts-expect-error TS2769 a delete answers whether the record existed
-  execute: () => "deleted",
+  // @ts-expect-error TS2769 a delete without an output answers nothing, not whether a row existed
+  execute: () => true,
 });
 defineOperation({
   name: "posts.badSummary",
-  entity: "posts",
   method: "GET",
   output: z.object({ id: z.number(), title: z.string() }),
   authorize: () => true,
@@ -551,7 +553,6 @@ defineOperation({
 });
 defineOperation({
   name: "posts.truthyNumber",
-  entity: "posts",
   method: "GET",
   // @ts-expect-error TS2769 a decision is a boolean, not a truthy number
   authorize: () => 1,
@@ -559,7 +560,6 @@ defineOperation({
 });
 defineOperation({
   name: "posts.truthyString",
-  entity: "posts",
   method: "GET",
   // @ts-expect-error TS2769 a decision is a boolean, not a truthy string
   authorize: async ({ actor }) => actor.email,
@@ -567,7 +567,6 @@ defineOperation({
 });
 defineOperation({
   name: "posts.badDenial",
-  entity: "posts",
   method: "GET",
   // @ts-expect-error TS2769 a denial names forbidden or not-found
   authorize: () => ({ deny: "hidden", reason: "no" }),
@@ -580,7 +579,6 @@ definePolicy({
 });
 defineOperation({
   name: "posts.email",
-  entity: "posts",
   method: "GET",
   // @ts-expect-error TS18048 the actor email is optional
   authorize: ({ actor }) => actor.email.endsWith("@example.com"),
@@ -588,7 +586,6 @@ defineOperation({
 });
 defineOperation({
   name: "posts.noResource",
-  entity: "posts",
   method: "GET",
   authorize: () => true,
   // @ts-expect-error TS18048 a decision loads no resource
@@ -614,16 +611,16 @@ const authorOnly = definePolicy({
 });
 defineOperation({
   name: "posts.lookupCreate",
-  entity: "posts",
   method: "POST",
   input: z.object({ user_slug: z.string(), title: z.string(), total: z.bigint() }),
   // @ts-expect-error TS2769 the declared input has no id for the lookup
   authorize: authorOnly,
-  execute: ({ input, db }) => db.posts.create(input),
+  execute: async ({ input, db }) => {
+    await db.posts.create(input);
+  },
 });
 defineOperation({
   name: "users.wrongPolicy",
-  entity: "users",
   method: "PATCH",
   input: z.object({ id: z.string() }),
   // @ts-expect-error TS2769 a users id is a string slug
@@ -632,7 +629,6 @@ defineOperation({
 });
 defineOperation({
   name: "posts.secret",
-  entity: "posts",
   method: "PATCH",
   input: idInput,
   authorize: authorOnly,
@@ -641,16 +637,14 @@ defineOperation({
 });
 defineOperation({
   name: "events.delete",
-  entity: "events",
   method: "DELETE",
   // @ts-expect-error TS2769 an explicit input must be a schema
   input: false,
   authorize: () => true,
-  execute: () => true,
+  execute: () => {},
 });
 defineOperation({
   name: "posts.noInput",
-  entity: "posts",
   method: "GET",
   authorize: () => true,
   execute: ({ input }) => {
@@ -661,7 +655,6 @@ defineOperation({
 });
 defineOperation({
   name: "posts.noInputPolicy",
-  entity: "posts",
   method: "GET",
   // @ts-expect-error TS2769 a policy requiring parameters needs an input schema
   authorize: authorOnly,
@@ -669,7 +662,6 @@ defineOperation({
 });
 defineOperation({
   name: "posts.plugins",
-  entity: "posts",
   method: "GET",
   authorize: () => true,
   execute: ({ appkit }) => {
@@ -682,19 +674,18 @@ defineOperation({
 });
 const replaceUser = defineOperation({
   name: "users.replace",
-  entity: "users",
   method: "PUT",
   input: replaceInput,
   authorize: () => true,
-  execute: ({ input, db }) => db.users.update(input.id, input.values),
+  execute: () => null,
 });
 // @ts-expect-error TS2741 a replacement carries every mutable public field
 export const partial: OperationWireInput<typeof replaceUser> = { id: "ada", values: { name: "Ada" } };
 const getEntry = defineOperation({
   name: "ledger.get",
-  entity: "ledger",
   method: "GET",
   input: bigIdInput,
+  output: ledgerOutput,
   authorize: () => true,
   execute: ({ input, db }) => db.ledger.find(input.id),
 });
@@ -706,28 +697,25 @@ export const decimalBigId: OperationWireInput<typeof getEntry> = { id: "1" };
 export const bigSeq: OperationWireOutput<typeof getEntry>["seq"] = 1n;
 const patchPost = defineOperation({
   name: "posts.patch",
-  entity: "posts",
   method: "PATCH",
   input: patchInput,
   authorize: () => true,
-  execute: ({ input, db }) => db.posts.update(input.id, input.changes),
+  execute: () => null,
 });
 // @ts-expect-error TS2322 a nested bigint change travels as a string or safe integer
 export const bigChange: OperationWireInput<typeof patchPost> = { id: 1, changes: { total: 1n } };
 export const decimalChange: OperationWireInput<typeof patchPost> = { id: 1, changes: { total: "1" } };
 const getPost = defineOperation({
   name: "posts.get",
-  entity: "posts",
   method: "GET",
   input: idInput,
   authorize: () => true,
-  execute: ({ input, db }) => db.posts.find(input.id),
+  execute: () => null,
 });
-// @ts-expect-error TS2322 a successful read answers a row, never null
-export const missing: OperationWireOutput<typeof getPost> = null;
+// @ts-expect-error TS2322 without an output schema the wire output is void
+export const missing: OperationWireOutput<typeof getPost> = { id: 1 };
 const nullableSummary = defineOperation({
   name: "posts.nullableSummary",
-  entity: "posts",
   method: "GET",
   output: z.object({ id: z.number(), title: z.string() }).nullable(),
   authorize: () => true,
@@ -736,7 +724,6 @@ const nullableSummary = defineOperation({
 export const absentSummary: OperationWireOutput<typeof nullableSummary> = null;
 const requiredSummary = defineOperation({
   name: "posts.requiredSummary",
-  entity: "posts",
   method: "GET",
   output: z.object({ id: z.number() }),
   authorize: () => true,
@@ -746,25 +733,26 @@ const requiredSummary = defineOperation({
 export const rejectedSummary: OperationWireOutput<typeof requiredSummary> = null;
 const deletePost = defineOperation({
   name: "posts.delete",
-  entity: "posts",
   method: "DELETE",
   input: idInput,
   authorize: () => true,
-  execute: ({ input, db }) => db.posts.delete(input.id),
+  execute: async ({ input, db }) => {
+    await db.posts.delete(input.id);
+  },
 });
 // @ts-expect-error TS2322 a delete answers an empty body
 export const deleted: OperationWireOutput<typeof deletePost> = true;
 const createUser = defineOperation({
   name: "users.create",
-  entity: "users",
   method: "POST",
   input: userInput,
+  output: z.object({ slug: z.string(), name: z.string() }),
   authorize: () => true,
   execute: ({ input, db }) => db.users.create({ ...input, secret: "s" }),
 });
 // @ts-expect-error TS2353 private columns are not wire inputs
 export const leaked: OperationWireInput<typeof createUser> = { slug: "a", name: "A", secret: "s" };
-// @ts-expect-error TS2339 private columns are not wire outputs
+// @ts-expect-error TS2339 an output answers only the fields it names
 export type Leaked = OperationWireOutput<typeof createUser>["secret"];
 // @ts-expect-error TS2540 descriptors are immutable
 getPost.execute = () => null;
@@ -922,7 +910,7 @@ export type GeneratedOperation = [
 `;
 
 describe("operation definitions through the public entries", () => {
-  test("infer explicit inputs, omitted inputs, resources, and default outputs", () => {
+  test("infer explicit and omitted inputs and outputs, and resources", () => {
     expect(
       typecheck({ "positive.ts": positive, "global.ts": globalContract }),
     ).toEqual([]);

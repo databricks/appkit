@@ -1,14 +1,10 @@
-import type { DatabaseOperationMethod, PluginMap, WireOutput } from "shared";
+import type { DatabaseOperationMethod, PluginMap } from "shared";
 import type { z } from "zod";
 
-import type {
-  DatabaseRegistry,
-  DatabaseRegistryEntry,
-} from "../../database/contract";
 import type { Schema as DatabaseSchema } from "../../database/schema-builder";
 import type * as betaPlugins from "../beta-exports.generated";
 import type * as gaPlugins from "../ga-exports.generated";
-import type { DatabaseExports, EntityName } from "./entity-types";
+import type { DatabaseExports } from "./entity-types";
 
 /** HTTP methods an operation can answer; the browser client reads the same union. */
 export type OperationMethod = DatabaseOperationMethod;
@@ -39,7 +35,10 @@ export type OperationAppKit = Readonly<
   readonly database: DatabaseExports;
 };
 
-/** What every authorization callback receives. */
+/**
+ * What every authorization callback receives, the `resource` lookup included.
+ * `actor` is the verified caller, so a lookup can scope its query to them.
+ */
 export interface PolicyContext<In = unknown> {
   readonly actor: Actor;
   readonly db: DatabaseExports;
@@ -95,115 +94,64 @@ type Decision<In> = (context: PolicyContext<In>) => Awaitable<PolicyDecision>;
 
 type Authorize<In, R> = Decision<In> | Policy<In, R>;
 
-type Entry<E extends EntityName> =
-  DatabaseRegistry[E] extends DatabaseRegistryEntry
-    ? DatabaseRegistry[E]
-    : never;
-type PublicRow<E extends EntityName> = Entry<E>["publicRow"];
-/**
- * Default results and responses come from the entity and method. Inputs are
- * explicit schemas; an operation without one accepts no parameters.
- */
-interface DefaultContract<E extends EntityName> {
-  GET: {
-    result: PublicRow<E> | null;
-    output: PublicRow<E>;
-  };
-  POST: {
-    result: PublicRow<E>;
-    output: PublicRow<E>;
-  };
-  PATCH: {
-    result: PublicRow<E> | null;
-    output: PublicRow<E>;
-  };
-  PUT: {
-    result: PublicRow<E> | null;
-    output: PublicRow<E>;
-  };
-  DELETE: {
-    result: boolean;
-    output: void;
-  };
-}
-
-type Contract<
-  E extends EntityName,
-  M extends OperationMethod,
-> = DefaultContract<E>[M];
-
-/** Methods whose `null` result means a missing record, whatever the output schema. */
+/** Methods whose `null` result answers 404 unless an `output` schema accepts `null`. */
 type NullableMethod = "GET" | "PATCH" | "PUT";
 
 type ParsedInput<I extends SchemaSlot> = [I] extends [Schema]
   ? z.output<I>
   : undefined;
 
-type ExecuteResult<
-  E extends EntityName,
-  M extends OperationMethod,
-  O extends SchemaSlot,
-> = [O] extends [Schema]
+type ExecuteResult<M extends OperationMethod, O extends SchemaSlot> = [
+  O,
+] extends [Schema]
   ? z.input<O> | (M extends NullableMethod ? null : never)
-  : Contract<E, M>["result"];
+  : void | (M extends NullableMethod ? null : never);
 
 type WireInputOf<I extends SchemaSlot> = [I] extends [Schema]
   ? z.input<I>
   : void;
 
-/**
- * A default body encodes bigint as a decimal string. An explicit output uses
- * its parsed JSON type, and `null` is a successful body only when that type
- * accepts it. DELETE has no body unless its output says otherwise.
- */
-type WireOutputOf<
-  E extends EntityName,
-  M extends OperationMethod,
-  O extends SchemaSlot,
-> = [O] extends [Schema]
+type WireOutputOf<M extends OperationMethod, O extends SchemaSlot> = [
+  O,
+] extends [Schema]
   ? null extends z.output<O>
     ? z.output<O>
     : M extends NullableMethod
       ? Exclude<z.output<O>, null>
       : z.output<O>
-  : WireOutput<Contract<E, M>["output"]>;
+  : void;
 
 /** Fields shared by the decision and resource-policy overloads. */
 type OperationFields<
-  E extends EntityName,
   M extends OperationMethod,
   I extends SchemaSlot,
   O extends SchemaSlot,
   Name extends string,
 > = {
   readonly name: Name & string;
-  readonly entity: E;
   readonly method: M;
   readonly input?: I;
   readonly output?: O;
 };
 
-/** What `defineOperation` accepts for one entity and method. */
 type OperationOptions<
-  E extends EntityName,
   M extends OperationMethod,
   I extends SchemaSlot,
   O extends SchemaSlot,
   R,
   Name extends string,
-> = OperationFields<E, M, I, O, Name> & {
+> = OperationFields<M, I, O, Name> & {
   readonly authorize: Authorize<ParsedInput<I>, R>;
   readonly execute: (
     context: OperationContext<
       ParsedInput<I>,
       [R] extends [undefined] ? undefined : NonNullable<Awaited<R>>
     >,
-  ) => Awaitable<ExecuteResult<E, M, O>>;
+  ) => Awaitable<ExecuteResult<M, O>>;
 };
 
 /** One immutable operation descriptor. Nothing in it runs until a request does. */
 export interface OperationDefinition<
-  E extends EntityName,
   M extends OperationMethod,
   I extends SchemaSlot,
   O extends SchemaSlot,
@@ -211,7 +159,6 @@ export interface OperationDefinition<
   Name extends string,
 > {
   readonly name: Name;
-  readonly entity: E;
   readonly method: M;
   readonly input: I;
   readonly output: O;
@@ -221,13 +168,12 @@ export interface OperationDefinition<
       ParsedInput<I>,
       [R] extends [undefined] ? undefined : NonNullable<Awaited<R>>
     >,
-  ) => Awaitable<ExecuteResult<E, M, O>>;
+  ) => Awaitable<ExecuteResult<M, O>>;
 }
 
 /** The JSON a caller sends to an operation; a bigint travels as a string or safe integer. */
 export type OperationWireInput<Operation> =
   Operation extends OperationDefinition<
-    infer _E extends EntityName,
     infer _M extends OperationMethod,
     infer I extends SchemaSlot,
     infer _O extends SchemaSlot,
@@ -237,23 +183,21 @@ export type OperationWireInput<Operation> =
     ? WireInputOf<I>
     : never;
 
-/** The JSON a successful call answers with; a bigint travels as a decimal string. */
+/** The JSON a successful call answers with; without an output schema there is none. */
 export type OperationWireOutput<Operation> =
   Operation extends OperationDefinition<
-    infer E extends EntityName,
     infer M extends OperationMethod,
     infer _I extends SchemaSlot,
     infer O extends SchemaSlot,
     infer _R,
     infer _Name extends string
   >
-    ? WireOutputOf<E, M, O>
+    ? WireOutputOf<M, O>
     : never;
 
 /** @internal What `defineOperation` produced; every field still needs validation. */
 interface OperationCandidate {
   readonly name: unknown;
-  readonly entity: unknown;
   readonly method: unknown;
   readonly input: unknown;
   readonly output: unknown;
@@ -267,42 +211,39 @@ type RawFields<T> = { readonly [K in keyof T]?: unknown };
 const OPERATION = Symbol.for("@databricks/appkit/database/operation");
 
 /**
- * Declare one database operation. `name` is its public identifier. The entity
- * and method infer the default output. Declare an `input` Zod schema to accept
- * parameters; without one, callbacks receive `undefined`. An `output` schema
- * overrides the default response. Definition only freezes a descriptor.
+ * Declare one database operation. `name` is its public identifier. Declare an
+ * `input` Zod schema to accept parameters; without one, callbacks receive
+ * `undefined`. Declare an `output` Zod schema to answer a body; without one,
+ * the operation answers none. Definition only freezes a descriptor.
  */
 export function defineOperation<
   const Name extends string,
-  E extends EntityName,
   M extends OperationMethod,
   I extends SchemaSlot,
   O extends SchemaSlot,
   R extends NonNullable<unknown>,
 >(
-  definition: OperationFields<E, M, I, O, Name> & {
+  definition: OperationFields<M, I, O, Name> & {
     readonly authorize: ResourcePolicy<ParsedInput<I>, R>;
     readonly execute: (
       context: OperationContext<ParsedInput<I>, NonNullable<Awaited<R>>>,
-    ) => Awaitable<ExecuteResult<E, M, O>>;
+    ) => Awaitable<ExecuteResult<M, O>>;
   },
-): OperationDefinition<E, M, I, O, R, Name>;
+): OperationDefinition<M, I, O, R, Name>;
 export function defineOperation<
   const Name extends string,
-  E extends EntityName,
   M extends OperationMethod,
   I extends SchemaSlot = undefined,
   O extends SchemaSlot = undefined,
 >(
-  definition: OperationOptions<E, M, I, O, undefined, Name>,
-): OperationDefinition<E, M, I, O, undefined, Name>;
+  definition: OperationOptions<M, I, O, undefined, Name>,
+): OperationDefinition<M, I, O, undefined, Name>;
 export function defineOperation(
   definition: RawFields<OperationCandidate>,
 ): OperationCandidate {
   // An untyped file may omit authorize; the loader reports it, nothing here fills it.
   const descriptor: OperationCandidate = {
     name: definition.name,
-    entity: definition.entity,
     method: definition.method,
     input: definition.input,
     output: definition.output,
@@ -326,9 +267,10 @@ export function isOperationCandidate(
 
 /**
  * Declare a reusable authorization rule. Without `resource` it decides from
- * the actor and input. With `resource` it loads one record first; annotate
- * the lookup context to fix the input the policy needs. `allow` may return
- * `true`, `false`, or `{ deny }`.
+ * the actor and input. With `resource` it loads one record first, from the
+ * same context every callback receives, `actor` included; annotate the lookup
+ * context to fix the input the policy needs. `allow` may return `true`,
+ * `false`, or `{ deny }`.
  */
 export function definePolicy<In = unknown>(
   policy: AllowPolicy<In>,
