@@ -134,8 +134,8 @@ warning at most once a minute.
 ## Operations
 
 An operation is one named database action that the browser may call. It
-declares the entity it works on, its HTTP method, its input and output, an
-`authorize` rule, and an `execute` function.
+declares its HTTP method, its input and output schemas, an `authorize` rule,
+and an `execute` function.
 
 ### Define an operation
 
@@ -149,14 +149,13 @@ import { z } from "zod";
 
 import { noteAuthor, signedIn } from "../policies";
 
+const note = z.object({ id: z.number(), author: z.string(), body: z.string() });
+
 export const listNotes = defineOperation({
   name: "notes.list",
-  entity: "notes",
   method: "GET",
   input: z.object({ limit: z.number().int().max(100) }),
-  output: z.array(
-    z.object({ id: z.number(), author: z.string(), body: z.string() }),
-  ),
+  output: z.array(note),
   authorize: signedIn,
   execute: ({ db, input }) =>
     db.notes.order({ created_at: "desc" }).limit(input.limit).toArray(),
@@ -164,48 +163,56 @@ export const listNotes = defineOperation({
 
 export const createNote = defineOperation({
   name: "notes.create",
-  entity: "notes",
   method: "POST",
   input: z.object({ body: z.string().trim().min(1) }),
+  output: note,
   authorize: signedIn,
   execute: ({ actor, db, input }) =>
     db.transaction(async (tx) => {
-      const note = await tx.notes.create({ author: actor.id, body: input.body });
-      await tx.note_events.create({ note_id: note.id, action: "created" });
-      return note;
+      const created = await tx.notes.create({ author: actor.id, body: input.body });
+      await tx.note_events.create({ note_id: created.id, action: "created" });
+      return created;
     }),
 });
 
 export const updateNote = defineOperation({
   name: "notes.update",
-  entity: "notes",
   method: "PATCH",
   input: z.object({ id: z.number().int(), body: z.string().trim().min(1) }),
+  output: note,
   authorize: noteAuthor,
   execute: ({ db, input }) => db.notes.update(input.id, { body: input.body }),
+});
+
+export const deleteNote = defineOperation({
+  name: "notes.delete",
+  method: "DELETE",
+  input: z.object({ id: z.number().int() }),
+  authorize: noteAuthor,
+  execute: async ({ db, input }) => {
+    await db.notes.delete(input.id);
+  },
 });
 ```
 
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `name` | Yes | The name the browser calls, one URL segment. Parts of letters, digits, `_`, and `-`, each starting with a letter, joined by dots. At most 64 characters per part and 255 in total. `constructor` and `prototype` are reserved |
-| `entity` | Yes | The declared table the operation works on. It types the default output |
 | `method` | Yes | `GET`, `POST`, `PATCH`, `PUT`, or `DELETE`. The operation answers only this method |
 | `input` | No | A Zod schema for accepted parameters. Omit it for no parameters; callbacks receive `undefined` |
-| `output` | No | A Zod schema for the answer. The plugin parses what `execute` returns and sends only that |
+| `output` | No | A Zod schema for the answer. The plugin parses what `execute` returns and sends only that. Omit it for no body; `execute` returns nothing |
 | `authorize` | Yes | A function or a [policy](#authorize-an-operation) that admits the caller |
 | `execute` | Yes | Does the work and returns the answer |
 
 Omitting `input` means the operation accepts no parameters. Declare a schema
 whenever it needs an ID, filters, or write values. There is no input inferred
-from the entity or HTTP method, and no need for `input: z.object({})` on lists.
+from the HTTP method or a table, and no need for `input: z.object({})` on lists.
 Unexpected parameters are rejected before authorization; an empty object is
 also accepted and normalized to `undefined`.
 
 ```ts
 export const countNotes = defineOperation({
   name: "notes.count",
-  entity: "notes",
   method: "GET",
   output: z.number(),
   authorize: signedIn,
@@ -213,22 +220,23 @@ export const countNotes = defineOperation({
 });
 ```
 
-Without `output`, the entity and method determine the response:
+Omitting `output` means the operation answers no body, and the browser type of
+its answer is `void`. Nothing infers a response from a table or the HTTP method:
 
-| Method | Default output |
+| `execute` returns | Response |
 | --- | --- |
-| `GET` | The public row, or 404 when `execute` returns `null` |
-| `POST` | The created public row, with status 201 |
-| `PATCH` | The updated public row, or 404 for `null` |
-| `PUT` | The updated public row, or 404 for `null` |
-| `DELETE` | No body, status 204. `false` from `execute` answers 404 |
+| `undefined` | 204 with no body |
+| `null` on `GET`, `PATCH`, or `PUT` | 404 |
+| Anything else | 500. After a write the client reports `OUTCOME_UNKNOWN` |
 
-A default output carries a `bigint` as a decimal string and a timestamp as
-RFC 3339 text, such as `2024-01-01T10:00:00+00:00`. Explicit input schemas
-control how incoming values are validated and converted. Keep server-owned
-values, such as the caller's identity, out of those schemas.
+Every operation that answers a body declares `output`, rows included. `z.object`
+strips the keys it does not name, so the schema is the projection, and a column
+stays out of the answer by not being named. Explicit input schemas control how
+incoming values are validated and converted. Keep server-owned values, such as
+the caller's identity, out of those schemas.
 
-`execute` and `authorize` receive one context:
+Every callback receives one context. `authorize`, a policy's `resource` lookup
+and `allow`, and `execute` all see the same `actor`, `input`, `db`, and `appkit`:
 
 | Field | Meaning |
 | --- | --- |
@@ -236,7 +244,7 @@ values, such as the caller's identity, out of those schemas.
 | `input` | The parsed input, or `undefined` when there is no input schema |
 | `db` | The same client as `appkit.database` |
 | `appkit` | Every plugin's exports, as `createApp` returns them |
-| `resource` | The value a resource policy loaded, otherwise `undefined` |
+| `resource` | In `allow` and `execute`, the value the policy's lookup loaded, otherwise `undefined` |
 
 The context carries no request, headers, or user token. Use an explicit nullable
 `output`, such as `z.object({ ... }).nullable()`, for a `GET` that may answer
@@ -278,6 +286,21 @@ export const noteAuthor = definePolicy({
     db.notes.find(input.id),
   allow: ({ actor, resource }) =>
     resource.author === actor.id ? true : { deny: "forbidden" },
+});
+```
+
+The lookup receives the same context as every other callback, `actor`
+included, and runs once per request. `execute` receives its value as
+`resource`, so `execute: ({ resource }) => resource` answers without a second
+query. A lookup can scope its query to the caller, so that another author's
+note is a 404 rather than a 403:
+
+```ts
+/** The caller's own note, or nothing. */
+export const ownNote = definePolicy({
+  resource: ({ actor, db, input }: PolicyContext<{ readonly id: number }>) =>
+    db.notes.where({ id: input.id, author: actor.id }).first(),
+  allow: () => true,
 });
 ```
 
@@ -378,7 +401,8 @@ Each operation answers one method at `/api/database/operations/<name>`:
   `/api/database/operations/notes.list?input=%7B%22limit%22%3A20%7D`. The query
   string is limited to 8 KiB.
 - Other methods take a JSON body of at most 1 MiB, and no query parameters.
-- A success answers 200, or 201 for `POST`, or 204 with no body.
+- A success answers 200, or 201 for `POST`. An operation without `output`
+  answers 204 with no body.
 - An unknown name, or a method the operation does not declare, answers 404.
 - Without a verified caller, every request answers 401, before the plugin reads
   its input.
@@ -447,12 +471,15 @@ database rollback to undo it.
 
 ## Private columns
 
-A column declared with `.private()` stays on the server. Server code, including
-`execute`, can read and write it, but a default output never includes it. An
-explicit `output` answers only the fields its schema names, so list the public
-fields you mean to send. For example, `execute` can store the caller's email
-from `actor.email` in a private column that no input accepts and no output
-returns.
+A column declared with `.private()` stays on the server. Default reads leave it
+out of the rows the trusted client returns, and server code, including
+`execute`, can still select, read, and write it. It does not sanitize an
+operation's `output`. The output schema alone decides what is sent, so list the
+public fields you mean to send, nested objects included. `.passthrough()`,
+`z.record`, `z.any()`, `z.unknown()`, a transform, or naming a private field
+sends whatever `execute` returns. For example, `execute` can store the caller's
+email from `actor.email` in a private column that no input accepts and no
+output names.
 
 ## Browser client (beta)
 
@@ -598,7 +625,7 @@ A `DatabaseApiError` has a stable `code`, the HTTP `status`, a `message`, and
 | `UNAUTHENTICATED` | 401 | No verified caller |
 | `INVALID_REQUEST` | 400 or `null` | The input failed its schema. `null` when the client could not encode it and sent nothing |
 | `FORBIDDEN` | 403 | `authorize` refused, the request came from another origin, or the database refused |
-| `NOT_FOUND` | 404 | No such operation for this method, a resource policy found nothing, or `execute` answered `null` |
+| `NOT_FOUND` | 404 | No such operation for this method, a resource policy found nothing, or `execute` answered `null` on a `GET`, `PATCH`, or `PUT` with no `output` or an `output` that rejects `null`. An `output` that accepts `null` answers 200 |
 | `CONFLICT` | 409 | A constraint rejected the change |
 | `PAYLOAD_TOO_LARGE` | 413 | The request body exceeded its limit |
 | `UNSUPPORTED_MEDIA_TYPE` | 415 | The request body was not JSON |

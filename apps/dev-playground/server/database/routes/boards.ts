@@ -6,7 +6,6 @@ import { signedIn } from "../policies";
 /** Every board, oldest first, with how many notes it holds. */
 export const listBoards = defineOperation({
   name: "boards.list",
-  entity: "boards",
   method: "GET",
   output: z.array(
     z.object({
@@ -31,9 +30,14 @@ export const listBoards = defineOperation({
 /** A new board. The server derives its unique slug from the title. */
 export const createBoard = defineOperation({
   name: "boards.create",
-  entity: "boards",
   method: "POST",
   input: z.object({ title: z.string().trim().min(1).max(120) }),
+  output: z.object({
+    id: z.number(),
+    slug: z.string(),
+    title: z.string(),
+    created_at: z.string(),
+  }),
   authorize: signedIn,
   execute: ({ db, input }) =>
     db.boards.create({

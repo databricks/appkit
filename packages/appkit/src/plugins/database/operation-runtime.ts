@@ -16,8 +16,7 @@ import {
 import { DatabaseValidationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import type { ITelemetry } from "../../telemetry";
-import type { JsonValue } from "./crud/codecs";
-import { boundedJson, isPlainObject } from "./crud/contract";
+import { boundedJson, isPlainObject, type JsonValue } from "./crud/contract";
 import { sendEmpty, sendJson } from "./crud/response";
 import { MAX_OPERATION_BODY_BYTES, MAX_QUERY_BYTES } from "./defaults";
 import type { DatabaseExports } from "./entity-types";

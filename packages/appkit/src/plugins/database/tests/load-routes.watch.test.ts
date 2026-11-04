@@ -27,7 +27,7 @@ test("the standard watcher reloads first, edited, shared, added, and deleted ope
     import { defineOperation } from ${source("plugins/database/operations.ts")};
     import { row } from "../rows";
     export const marker = ${JSON.stringify(marker)};
-    export const operation = defineOperation({ name: ${JSON.stringify(name)}, entity: "notes", method: "GET", output: row, authorize: () => true, execute: () => ({ body: "ok" }) });
+    export const operation = defineOperation({ name: ${JSON.stringify(name)}, method: "GET", output: row, authorize: () => true, execute: () => ({ body: "ok" }) });
   `;
   await fs.symlink(
     path.resolve(appkit, "../../node_modules"),

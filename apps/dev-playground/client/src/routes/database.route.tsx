@@ -80,11 +80,19 @@ export const schema = defineSchema(({ table }) => {
 });`;
 
 const OPERATION_EXAMPLE = `// server/database/routes/notes.ts
+const noteOutput = z.object({
+  id: z.number(),
+  board_id: z.number(),
+  author: z.string(),
+  body: z.string(),
+  created_at: z.string(),
+});
+
 export const createNote = defineOperation({
   name: "notes.create",
-  entity: "notes",
   method: "POST",
   input: z.object({ board_id: z.number().int(), body }),
+  output: noteOutput,
   authorize: signedIn,
   execute: ({ actor, db, input }) =>
     db.transaction(async (tx) => {
@@ -112,9 +120,9 @@ export const noteAuthor = definePolicy({
 // server/database/routes/notes.ts
 export const updateNote = defineOperation({
   name: "notes.update",
-  entity: "notes",
   method: "PATCH",
   input: z.object({ id: z.number().int(), body }),
+  output: noteOutput,
   authorize: noteAuthor,
   execute: ({ db, input }) => /* ... */,
 });`;
@@ -240,7 +248,10 @@ function DatabaseRoute() {
                 <code className="text-xs">true</code> admits.{" "}
                 <code className="text-xs">noteAuthor</code> loads the note once,
                 refuses everyone but its author with 403, and hands the note to{" "}
-                <code className="text-xs">execute</code>.
+                <code className="text-xs">execute</code>. Its{" "}
+                <code className="text-xs">resource</code> lookup receives the
+                same context as every callback,{" "}
+                <code className="text-xs">actor</code> included.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -290,11 +301,10 @@ function DatabaseRoute() {
             <CardContent>
               <p className="text-sm text-muted-foreground">
                 <code>notes.create</code> stores the caller's email in{" "}
-                <code>author_email</code> without ever accepting it as input. A
-                default output, like the row <code>notes.create</code> answers
-                with, drops private columns. An explicit output, like the one{" "}
-                <code>notes.list</code> declares, answers with exactly the
-                fields its schema names.
+                <code>author_email</code> without ever accepting it as input.
+                Every output is an explicit schema, so <code>notes.create</code>{" "}
+                answers with exactly the fields its schema names and{" "}
+                <code>author_email</code> never leaves the server.
               </p>
             </CardContent>
           </Card>

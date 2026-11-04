@@ -129,13 +129,19 @@ function executions() {
 }
 type Executions = ReturnType<typeof executions>;
 
+const noteOutput = z.object({
+  id: z.number(),
+  title: z.string(),
+  ownerId: z.string().nullable(),
+});
+
 /** `server/database/routes/notes.ts` as an application would write it. */
 function notesModule(ran: Executions): Record<string, unknown> {
   const getNote = define({
     name: "notes.get",
-    entity: "notes",
     method: "GET",
     input: z.object({ id: z.number().int() }).strict(),
+    output: noteOutput,
     authorize: policy({
       resource: ({ db, input }: Ctx<{ id: number }>) => db.notes.find(input.id),
       allow: ({ actor, resource }: Ctx<{ id: number }, NoteRow>) =>
@@ -148,9 +154,9 @@ function notesModule(ran: Executions): Record<string, unknown> {
   });
   const createNote = define({
     name: "notes.create",
-    entity: "notes",
     method: "POST",
     input: z.object({ title: z.string().min(1).max(200) }),
+    output: noteOutput,
     authorize: ({ actor }: Ctx<{ title: string }>) => actor.email !== undefined,
     execute: ({ db, actor, input }: Ctx<{ title: string }>) => {
       ran.create();
@@ -167,7 +173,6 @@ function notesModule(ran: Executions): Record<string, unknown> {
   });
   const listTitles = define({
     name: "notes.titles",
-    entity: "notes",
     method: "GET",
     output: z.array(z.object({ id: z.number(), title: z.string() })),
     authorize: ({ actor }: Ctx<undefined>) => actor.email !== undefined,
@@ -179,7 +184,6 @@ function notesModule(ran: Executions): Record<string, unknown> {
   });
   const unguarded = define({
     name: "notes.unguarded",
-    entity: "notes",
     method: "GET",
     execute: ran.unguarded,
   });
@@ -193,7 +197,6 @@ function archiveModule(ran: Executions): Record<string, unknown> {
   return {
     archiveNote: define({
       name: "notes.archive",
-      entity: "notes",
       method: "POST",
       input: z.object({ id: z.number() }),
       output: z.object({ archived: z.boolean() }),
@@ -238,7 +241,6 @@ const DatabaseClientConfig = z.strictObject({
     z.enum(["GET", "POST", "PATCH", "PUT", "DELETE"]),
   ),
 });
-/** A default note reply: exactly the public columns. */
 const PublicNote = z.strictObject({
   id: z.number(),
   title: z.string(),
@@ -447,7 +449,7 @@ test("database() discovers conventional operations and serves them over HTTP", a
       export const databaseRoutes = {
         schema: async () => ({ schema }),
         modules: [{ file: "server/database/routes/notes.ts", load: async () => ({
-          getNote: defineOperation({ name: "notes.get", entity: "notes", method: "GET", input: z.object({ id: z.number() }), authorize: () => true,
+          getNote: defineOperation({ name: "notes.get", method: "GET", input: z.object({ id: z.number() }), output: z.object({ id: z.number(), title: z.string() }), authorize: () => true,
             execute: ({ db, input }) => db.notes.find(input.id) }),
         }) }],
       };
@@ -745,7 +747,7 @@ describe("a database plugin with routes", () => {
     expect(ran.create).toHaveBeenCalledTimes(2);
   });
 
-  test("private columns never reach a response", async () => {
+  test("an explicit output is the projection, so a private column never reaches a response", async () => {
     const { call, edge } = await boot({ routes: fixtureRoutes(executions()) });
 
     const created = await call("notes.create", { title: "Mine" }, asAda);
@@ -775,7 +777,6 @@ describe("setup", () => {
   const ran = executions();
   const sameName = define({
     name: "notes.get",
-    entity: "notes",
     method: "GET",
     input: z.object({ id: z.number().int() }).strict(),
     authorize: () => true,
@@ -793,7 +794,6 @@ describe("setup", () => {
           [NOTES_FILE]: {
             broken: define({
               name: "notes.broken",
-              entity: "notes",
               method: "FETCH",
               authorize: () => true,
               execute: () => null,
@@ -817,23 +817,6 @@ describe("setup", () => {
       "a schema that is not the one the registry loads",
       { schema: otherSchema, routes: fixtureRoutes(ran) },
       /is not the schema the routes registry loads/,
-    ],
-    [
-      "an entity the registry schema lacks",
-      {
-        routes: registry({
-          [NOTES_FILE]: {
-            ghost: define({
-              name: "ghosts.get",
-              entity: "ghosts",
-              method: "GET",
-              authorize: () => true,
-              execute: () => null,
-            }),
-          },
-        }),
-      },
-      /routes\/notes\.ts#ghost must name one entity in the database schema/,
     ],
   ])(
     "%s fails setup before a connection opens",
