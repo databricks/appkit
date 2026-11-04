@@ -211,6 +211,7 @@ TSX drafts are design pages written with real appkit-ui components. The plugin o
 
 - `client/src/design/mock.ts`: the sample data the drafts share (any module works; the pages import it as `../mock`).
 - `client/src/design/pages/<name>.tsx` per draft, default-exporting the page, served at `/design/<name>`. Write a page there only once it type-checks (e.g. write elsewhere, then move it in), so a half-written file never shows. Use theme tokens (`bg-background`, `text-foreground`, ...), so drafts work in dark mode.
+- After moving a page in, touch `client/src/index.css` (update its modification time). Tailwind's Vite plugin only rescans sources for classes when the stylesheet changes, so until then a new page renders without its Tailwind styles.
 
 Each page renders in its own error boundary and posts `appkit:design-ready` once rendered. Its state is in `GET /design/__status` under `pages` (see above): `compiled` / `compileError` (built server-side, no browser needed), `rendered`, `errors`, and `state`: `compile-error`, `rendering` (builds, not rendered yet), `ready` or `failed` (a browser reported errors).
 
