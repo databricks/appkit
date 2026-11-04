@@ -53,27 +53,29 @@ import { z } from "zod";
 import { defineOperation, definePolicy, type PolicyContext } from ${JSON.stringify(operationsModule)};
 `;
 
-/** Explicit inputs and every method's default output. */
-const defaults = `${header}
+const rows = `${header}
 const wireBigint = z.union([z.string(), z.number()]).transform(BigInt);
-export const getPost = defineOperation({ name: "posts.get", entity: "posts", method: "GET", input: z.object({ id: z.number() }), authorize: () => true, execute: ({ input, db }) => db.posts.find(input.id) });
-export const getUser = defineOperation({ name: "users.get", entity: "users", method: "GET", input: z.object({ id: z.string() }), authorize: () => true, execute: ({ input, db }) => db.users.find(input.id) });
-export const getEntry = defineOperation({ name: "ledger.get", entity: "ledger", method: "GET", input: z.object({ id: wireBigint }), authorize: () => true, execute: ({ input, db }) => db.ledger.find(input.id) });
-export const createUser = defineOperation({ name: "users.create", entity: "users", method: "POST", input: z.object({ slug: z.string(), name: z.string() }), authorize: () => true, execute: ({ input, db, actor }) => db.users.create({ ...input, secret: actor.id }) });
-export const createPost = defineOperation({ name: "posts.create", entity: "posts", method: "POST", input: z.object({ user_slug: z.string(), title: z.string(), total: wireBigint, status: z.enum(["draft", "live"]) }), authorize: () => true, execute: ({ input, db }) => db.posts.create(input) });
-export const logEvent = defineOperation({ name: "events.log", entity: "events", method: "POST", input: z.object({ message: z.string() }), authorize: () => true, execute: ({ input, db }) => db.events.create(input) });
-export const stamp = defineOperation({ name: "stamps.create", entity: "stamps", method: "POST", authorize: () => true, execute: ({ db }) => db.stamps.create({}) });
-export const patchPost = defineOperation({ name: "posts.patch", entity: "posts", method: "PATCH", input: z.object({ id: z.number(), changes: z.object({ title: z.string().optional(), total: wireBigint.optional() }) }), authorize: () => true, execute: ({ input, db }) => db.posts.update(input.id, input.changes) });
-export const patchEntry = defineOperation({ name: "ledger.patch", entity: "ledger", method: "PATCH", input: z.object({ id: wireBigint, changes: z.object({ note: z.string().optional(), amount: wireBigint.nullable().optional() }) }), authorize: () => true, execute: ({ input, db }) => db.ledger.update(input.id, input.changes) });
-export const replaceUser = defineOperation({ name: "users.replace", entity: "users", method: "PUT", input: z.object({ id: z.string(), values: z.object({ name: z.string(), nickname: z.string().nullable() }) }), authorize: () => true, execute: ({ input, db }) => db.users.update(input.id, input.values) });
-export const replacePost = defineOperation({ name: "posts.replace", entity: "posts", method: "PUT", input: z.object({ id: z.number(), values: z.object({ title: z.string() }) }), authorize: () => true, execute: ({ input, db }) => db.posts.update(input.id, input.values) });
-export const deletePost = defineOperation({ name: "posts.delete", entity: "posts", method: "DELETE", input: z.object({ id: z.number() }), authorize: () => true, execute: ({ input, db }) => db.posts.delete(input.id) });
-export const deleteUser = defineOperation({ name: "users.delete", entity: "users", method: "DELETE", input: z.object({ id: z.string() }), authorize: () => true, execute: ({ input, db }) => db.users.delete(input.id) });
+const post = z.object({ id: z.number(), user_slug: z.string(), title: z.string(), score: z.number().nullable(), status: z.enum(["draft", "live"]) });
+const user = z.object({ slug: z.string(), name: z.string(), nickname: z.string().nullable(), created_at: z.string() });
+const entry = z.object({ note: z.string() });
+export const getPost = defineOperation({ name: "posts.get", method: "GET", input: z.object({ id: z.number() }), output: post, authorize: () => true, execute: ({ input, db }) => db.posts.find(input.id) });
+export const getUser = defineOperation({ name: "users.get", method: "GET", input: z.object({ id: z.string() }), output: user, authorize: () => true, execute: ({ input, db }) => db.users.find(input.id) });
+export const getEntry = defineOperation({ name: "ledger.get", method: "GET", input: z.object({ id: wireBigint }), output: entry, authorize: () => true, execute: ({ input, db }) => db.ledger.find(input.id) });
+export const createUser = defineOperation({ name: "users.create", method: "POST", input: z.object({ slug: z.string(), name: z.string() }), output: user, authorize: () => true, execute: ({ input, db, actor }) => db.users.create({ ...input, secret: actor.id }) });
+export const createPost = defineOperation({ name: "posts.create", method: "POST", input: z.object({ user_slug: z.string(), title: z.string(), total: wireBigint, status: z.enum(["draft", "live"]) }), output: post, authorize: () => true, execute: ({ input, db }) => db.posts.create(input) });
+export const logEvent = defineOperation({ name: "events.log", method: "POST", input: z.object({ message: z.string() }), authorize: () => true, execute: async ({ input, db }) => { await db.events.create(input); } });
+export const stamp = defineOperation({ name: "stamps.create", method: "POST", authorize: () => true, execute: async ({ db }) => { await db.stamps.create({}); } });
+export const patchPost = defineOperation({ name: "posts.patch", method: "PATCH", input: z.object({ id: z.number(), changes: z.object({ title: z.string().optional(), total: wireBigint.optional() }) }), output: post, authorize: () => true, execute: ({ input, db }) => db.posts.update(input.id, input.changes) });
+export const patchEntry = defineOperation({ name: "ledger.patch", method: "PATCH", input: z.object({ id: wireBigint, changes: z.object({ note: z.string().optional(), amount: wireBigint.nullable().optional() }) }), output: entry, authorize: () => true, execute: ({ input, db }) => db.ledger.update(input.id, input.changes) });
+export const replaceUser = defineOperation({ name: "users.replace", method: "PUT", input: z.object({ id: z.string(), values: z.object({ name: z.string(), nickname: z.string().nullable() }) }), authorize: () => true, execute: async ({ input, db }) => { if ((await db.users.update(input.id, input.values)) === null) return null; } });
+export const replacePost = defineOperation({ name: "posts.replace", method: "PUT", input: z.object({ id: z.number(), values: z.object({ title: z.string() }) }), output: post, authorize: () => true, execute: ({ input, db }) => db.posts.update(input.id, input.values) });
+export const deletePost = defineOperation({ name: "posts.delete", method: "DELETE", input: z.object({ id: z.number() }), authorize: () => true, execute: async ({ input, db }) => { await db.posts.delete(input.id); } });
+export const deleteUser = defineOperation({ name: "users.delete", method: "DELETE", input: z.object({ id: z.string() }), authorize: () => true, execute: async ({ input, db }) => { await db.users.delete(input.id); } });
 const ownPost = definePolicy({
   resource: ({ input, db }: PolicyContext<{ id: number }>) => db.posts.find(input.id),
   allow: ({ resource, actor }) => resource.user_slug === actor.id,
 });
-export const readOwnPost = defineOperation({ name: "posts.readOwn", entity: "posts", method: "GET", input: z.object({ id: z.number() }), authorize: ownPost, execute: ({ resource }) => resource });
+export const readOwnPost = defineOperation({ name: "posts.readOwn", method: "GET", input: z.object({ id: z.number() }), output: post, authorize: ownPost, execute: ({ resource }) => resource });
 `;
 
 /** Every construct the Zod renderer supports, on both sides of the wire. */
@@ -81,7 +83,6 @@ const custom = `${header}
 const Slug = z.string().min(1).meta({ id: "AppKitOperationFixtureSlug" });
 export const search = defineOperation({
   name: "posts.search",
-  entity: "posts",
   method: "GET",
   input: z.object({
     q: z.string().min(1),
@@ -117,7 +118,6 @@ export const search = defineOperation({
 });
 export const publish = defineOperation({
   name: "posts.publish",
-  entity: "posts",
   method: "POST",
   input: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("now") }),
@@ -130,7 +130,6 @@ export const publish = defineOperation({
 });
 export const inspect = defineOperation({
   name: "posts.inspect",
-  entity: "posts",
   method: "PATCH",
   input: z.object({
     id: z.number(),
@@ -149,7 +148,6 @@ export const inspect = defineOperation({
 });
 export const maybePost = defineOperation({
   name: "posts.maybe",
-  entity: "posts",
   method: "GET",
   output: z.object({ id: z.number() }).nullable(),
   authorize: () => true,
@@ -157,7 +155,6 @@ export const maybePost = defineOperation({
 });
 export const archive = defineOperation({
   name: "posts.archive",
-  entity: "posts",
   method: "DELETE",
   output: z.object({ archived: z.boolean() }),
   authorize: () => true,
@@ -165,16 +162,14 @@ export const archive = defineOperation({
 });
 export const resetStamp = defineOperation({
   name: "stamps.reset",
-  entity: "stamps",
   method: "PUT",
   input: z.object({ id: z.number(), at: z.iso.datetime() }),
   authorize: () => true,
   execute: () => null,
 });
-export const resetWithoutInput = defineOperation({ name: "stamps.noInput", entity: "stamps", method: "PUT", authorize: () => true, execute: () => null });
+export const resetWithoutInput = defineOperation({ name: "stamps.noInput", method: "PUT", authorize: () => true, execute: () => null });
 export const touch = defineOperation({
   name: "events.touch",
-  entity: "events",
   method: "PATCH",
   output: z.object({ touched: z.number() }).readonly(),
   authorize: () => true,
@@ -210,14 +205,14 @@ const operations: Record<string, string> = {
 /** The generated entry of every operation equals the server's own wire types. */
 const consumer = `
 import type { OperationWireInput, OperationWireOutput } from "@databricks/appkit/beta";
-import * as defaults from "./server/database/routes/defaults";
+import * as rows from "./server/database/routes/rows";
 import * as custom from "./server/database/routes/custom";
 
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 type Expect<T extends true> = T;
 type Operations = DatabricksAppKitDatabaseOperations;
-const server = { ...defaults, ...custom };
+const server = { ...rows, ...custom };
 
 export type Names = Expect<Equal<keyof Operations, ${Object.keys(operations)
   .map((name) => JSON.stringify(name))
@@ -236,7 +231,7 @@ ${Object.entries(operations)
 export type BigKey = Expect<Equal<Operations["ledger.get"]["input"], { id: string }>>;
 // @ts-expect-error a nullable column keeps null
 export type Nullable = Expect<Equal<Operations["posts.get"]["output"]["score"], number>>;
-// @ts-expect-error a delete answers without a body
+// @ts-expect-error an operation without an output answers no body
 export type Body = Expect<Equal<Operations["posts.delete"]["output"], undefined>>;
 `;
 
@@ -246,7 +241,7 @@ beforeAll(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), "appkit-operation-types-"));
   const files: Record<string, string> = {
     "config/database/schema.ts": schemaSource,
-    "server/database/routes/defaults.ts": defaults,
+    "server/database/routes/rows.ts": rows,
     "server/database/routes/custom.ts": custom,
     "consumer.ts": consumer,
   };

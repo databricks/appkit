@@ -152,12 +152,10 @@ async function contractsOf(
     throw generationFailed([`${ROUTES_DIR} needs a schema at ${SCHEMA_FILE}.`]);
   }
   if (files.length === 0) return [];
-  const schema = await loadDatabaseSchema(schemaFile);
+  // Loaded only so a schema that cannot import fails generation.
+  await loadDatabaseSchema(schemaFile);
   const located = await loadDeclarations(appRoot, files);
-  const { operations, skipped, errors } = validateOperationMetadata(
-    located,
-    new Set(Object.keys(schema.$tables)),
-  );
+  const { operations, skipped, errors } = validateOperationMetadata(located);
   const problems = errors.map((issue) => issue.message);
   for (const issue of skipped) {
     if (strict) {
@@ -170,7 +168,7 @@ async function contractsOf(
   }
   const contracts: OperationContract[] = [];
   for (const operation of operations) {
-    const result = operationContract(schema, operation);
+    const result = operationContract(operation);
     if (result.ok) contracts.push(result.contract);
     else problems.push(...result.problems);
   }

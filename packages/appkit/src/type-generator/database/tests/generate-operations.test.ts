@@ -47,9 +47,9 @@ ${body}
 
 const getNote = `export const getNote = defineOperation({
   name: "notes.get",
-  entity: "notes",
   method: "GET",
   input: z.object({ id: z.number() }),
+  output: z.object({ id: z.number(), body: z.string(), rank: z.number().nullable() }),
   authorize: () => true,
   execute: ({ input, db }) => db.notes.find(input.id),
 });`;
@@ -58,9 +58,9 @@ const getBoard = (
   exportName = "getBoard",
 ) => `export const ${exportName} = defineOperation({
   name: "boards.get",
-  entity: "boards",
   method: "GET",
   input: z.object({ id: z.string() }),
+  output: z.object({ slug: z.string(), title: z.string() }),
   authorize: () => true,
   execute: ({ input, db }) => db.boards.find(input.id),
 });`;
@@ -129,7 +129,6 @@ async function loadGenerated(root: string) {
   const { databaseRoutes }: { databaseRoutes: DatabaseRoutes } = await import(
     path.join(root, ROUTES_FILE)
   );
-  const { schema } = await databaseRoutes.schema();
   const located: LocatedDeclaration[] = [];
   for (const module of databaseRoutes.modules) {
     const namespace = await module.load();
@@ -137,10 +136,7 @@ async function loadGenerated(root: string) {
       located.push({ file: module.file, exportName, value });
     }
   }
-  return validateOperationMetadata(
-    located,
-    new Set(Object.keys(schema.$tables)),
-  );
+  return validateOperationMetadata(located);
 }
 
 describe("generateDatabaseOperations", () => {
@@ -281,7 +277,7 @@ export const databaseRoutes = {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const root = await app({
       [`${ROUTES}/notes.ts`]: route(
-        `${getNote}\nexport const open = defineOperation({ name: "notes.open", entity: "notes", method: "GET", execute: () => null });`,
+        `${getNote}\nexport const open = defineOperation({ name: "notes.open", method: "GET", execute: () => null });`,
       ),
     });
 
@@ -329,15 +325,31 @@ export const databaseRoutes = {
     expect(routes).toContain('import("./routes/orphan")');
   });
 
+  test("a schema that throws on import fails generation and neutralizes the contracts", async () => {
+    const root = await app({ [`${ROUTES}/notes.ts`]: route(getNote) });
+    await generate(root);
+    expect(await read(root, TYPES_FILE)).toContain('"notes.get": {');
+
+    await write(
+      root,
+      "config/database/schema.ts",
+      'throw new Error("broken schema dependency");',
+    );
+    const error = await failure(generate(root));
+
+    expect(error.message).toContain("schema.ts");
+    expect(error.message).toContain("threw while loading");
+    expect(await read(root, TYPES_FILE)).toBe(NEUTRAL_DATABASE_OPERATION_TYPES);
+  });
+
   test("fails on duplicate names and malformed declarations", async () => {
     const root = await app({
       [`${ROUTES}/notes.ts`]: route(getNote),
       [`${ROUTES}/copy.ts`]: route(getNote.replace("getNote", "copiedNote")),
       [`${ROUTES}/invalid.ts`]: route(`
-export const ghost = defineOperation({ name: "ghosts.get", entity: "ghosts", method: "GET", authorize: () => true, execute: () => null });
-export const keyless = defineOperation({ name: "events.get", entity: "events", method: "GET", authorize: () => true, execute: () => null });
-export const frozen = defineOperation({ name: "stamps.patch", entity: "stamps", method: "PATCH", authorize: () => true, execute: () => null });
-export const headless = defineOperation({ name: "notes.head", entity: "notes", method: "HEAD", authorize: () => true, execute: () => null });
+export const keyless = defineOperation({ name: "events.get", method: "GET", authorize: () => true, execute: () => null });
+export const frozen = defineOperation({ name: "stamps.patch", method: "PATCH", authorize: () => true, execute: () => null });
+export const headless = defineOperation({ name: "notes.head", method: "HEAD", authorize: () => true, execute: () => null });
 `),
     });
     const error = await failure(generate(root));
@@ -346,27 +358,19 @@ export const headless = defineOperation({ name: "notes.head", entity: "notes", m
       'server/database/routes/notes.ts#getNote repeats operation name "notes.get", already exported by server/database/routes/copy.ts#copiedNote.',
     );
     expect(error.message).toContain(
-      "server/database/routes/invalid.ts#ghost must name one entity in the database schema.",
-    );
-    expect(error.message).toContain(
       "server/database/routes/invalid.ts#headless must use GET, POST, PATCH, PUT, or DELETE.",
     );
     expect(await read(root, TYPES_FILE)).toBe(NEUTRAL_DATABASE_OPERATION_TYPES);
   });
 
-  test("renders omitted input as void for every method, including keyless and read-only entities", async () => {
+  test("renders omitted input and output as void for every method", async () => {
+    const methods = ["GET", "POST", "PATCH", "PUT", "DELETE"];
     const root = await app({
       [`${ROUTES}/no-input.ts`]: route(
-        [
-          ["GET", "events"],
-          ["POST", "events"],
-          ["PATCH", "stamps"],
-          ["PUT", "stamps"],
-          ["DELETE", "events"],
-        ]
+        methods
           .map(
-            ([method, entity]) =>
-              `export const op${method} = defineOperation({ name: "empty.${method}", entity: "${entity}", method: "${method}", authorize: () => true, execute: () => null });`,
+            (method) =>
+              `export const op${method} = defineOperation({ name: "empty.${method}", method: "${method}", authorize: () => true, execute: () => null });`,
           )
           .join("\n"),
       ),
@@ -374,7 +378,8 @@ export const headless = defineOperation({ name: "notes.head", entity: "notes", m
     await generate(root);
     const types = await read(root, TYPES_FILE);
     expect(types.match(/input: void;/g)).toHaveLength(5);
-    for (const method of ["GET", "POST", "PATCH", "PUT", "DELETE"])
+    expect(types.match(/output: void;/g)).toHaveLength(5);
+    for (const method of methods)
       expect(types).toContain(`"empty.${method}": {`);
   });
 
@@ -390,7 +395,7 @@ export const headless = defineOperation({ name: "notes.head", entity: "notes", m
 
   test("names the source and slot of every Zod schema without an exact JSON type", async () => {
     const operation = (name: string, input: string, output = "undefined") =>
-      `export const ${name} = defineOperation({ name: "notes.${name}", entity: "notes", method: "POST", input: ${input}, output: ${output}, authorize: () => true, execute: () => null } as never);`;
+      `export const ${name} = defineOperation({ name: "notes.${name}", method: "POST", input: ${input}, output: ${output}, authorize: () => true, execute: () => null } as never);`;
     const unsupported: Record<string, [string, string, string?]> = {
       big: ["input", "z.object({ n: z.bigint() })"],
       date: ["output", "z.object({})", "z.object({ at: z.date() })"],

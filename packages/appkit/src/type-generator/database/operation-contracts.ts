@@ -1,11 +1,5 @@
 import { z } from "zod";
 
-import type {
-  AppKitTable,
-  ColumnMeta,
-  Schema,
-} from "../../database/schema-builder";
-import { columnHttpCapabilities } from "../../plugins/database/crud/capabilities";
 import type { validateOperationMetadata } from "../../plugins/database/operation-metadata";
 import type { OperationMethod } from "../../plugins/database/operations";
 
@@ -82,54 +76,6 @@ function union(members: readonly TsType[]): TsType {
 
 function object(properties: readonly TsProperty[], readonly = false): TsType {
   return { kind: "object", properties, readonly };
-}
-
-// ---------------------------------------------------------------------------
-// Default contracts, from the same capability predicates the runtime compiles.
-// ---------------------------------------------------------------------------
-
-/** Default outputs carry bigint columns as decimal strings. */
-function columnType(meta: ColumnMeta): TsType {
-  const scalar = ((): TsType => {
-    switch (meta.kind) {
-      case "string":
-      case "uuid":
-      case "date":
-        return STRING;
-      case "number":
-        return NUMBER;
-      case "bigint":
-        return STRING;
-      case "boolean":
-        return BOOLEAN;
-      case "enum":
-        return meta.enumValues?.length
-          ? union(meta.enumValues.map((value) => ({ kind: "literal", value })))
-          : STRING;
-      case "json":
-      case "unknown":
-        return { kind: "json" };
-    }
-  })();
-  return meta.notNull ? scalar : union([scalar, NULL]);
-}
-
-function column(meta: ColumnMeta): TsProperty {
-  return {
-    name: meta.columnName,
-    optional: false,
-    type: columnType(meta),
-  };
-}
-
-/** Every public scalar column; a delete answers without a body. */
-function defaultOutput(table: AppKitTable, method: OperationMethod): TsType {
-  if (method === "DELETE") return keyword("void");
-  return object(
-    Object.values(table.$columns)
-      .filter((meta) => columnHttpCapabilities(meta).selectable)
-      .map((meta) => column(meta)),
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -420,33 +366,18 @@ function zodType(schema: object, io: "input" | "output"): TsType {
   return render(json, { root: json, refs: [] }, VALUE);
 }
 
-/**
- * Derive the wire contract of one validated operation: an explicit Zod slot
- * from its JSON Schema, a default slot from the entity's HTTP capabilities.
- * Every slot that has no exact type is reported with its source and slot.
- */
 export function operationContract(
-  schema: Schema,
   operation: ValidatedOperation,
 ): ContractResult {
   const source = `${operation.file}#${operation.exportName}`;
-  if (!Object.hasOwn(schema.$tables, operation.entity)) {
-    return {
-      ok: false,
-      problems: [`${source} must name one entity in the database schema.`],
-    };
-  }
-  const table = schema.$tables[operation.entity];
   const problems: string[] = [];
   const slot = (
     name: "input" | "output",
     explicit: object | undefined,
-    fallback: (table: AppKitTable, method: OperationMethod) => TsType,
+    omitted: () => TsType,
   ): TsType | undefined => {
     try {
-      return explicit
-        ? zodType(explicit, name)
-        : fallback(table, operation.method);
+      return explicit ? zodType(explicit, name) : omitted();
     } catch (error) {
       if (!(error instanceof ContractProblem)) throw error;
       problems.push(`${source} ${name} ${error.message}.`);
@@ -454,7 +385,7 @@ export function operationContract(
     }
   };
   const input = slot("input", operation.input, () => keyword("void"));
-  const output = slot("output", operation.output, defaultOutput);
+  const output = slot("output", operation.output, () => keyword("void"));
   if (!input || !output) return { ok: false, problems };
   return {
     ok: true,
