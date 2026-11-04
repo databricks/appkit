@@ -125,16 +125,39 @@ export function listDesignPages(clientRoot: string): DesignPageInfo[] {
   return pages;
 }
 
-/** Modification time of the index page, or undefined when there is none. */
-function indexVersion(clientRoot: string): number | undefined {
-  const index = resolveDesignPage(clientRoot, "/design");
-  return index ? fs.statSync(index).mtimeMs : undefined;
+/** Modification time of a design page's file, or undefined when there is none. */
+function pageVersion(clientRoot: string, name: string): number | undefined {
+  const file = resolveDesignPage(
+    clientRoot,
+    name === "index" ? "/design" : `/design/${name}`,
+  );
+  return file ? fs.statSync(file).mtimeMs : undefined;
 }
+const indexVersion = (clientRoot: string) => pageVersion(clientRoot, "index");
+
+/** The app's entry module, from the `<script type="module" src>` of index.html. */
+function appEntry(clientRoot: string): string | undefined {
+  let html: string;
+  try {
+    html = fs.readFileSync(path.join(clientRoot, "index.html"), "utf-8");
+  } catch {
+    return undefined;
+  }
+  for (const tag of html.match(/<script\b[^>]*>/g) ?? []) {
+    const src = /\bsrc=["']([^"']+)["']/.exec(tag)?.[1];
+    if (/type=["']module["']/.test(tag) && src && !src.startsWith("/@")) {
+      return src;
+    }
+  }
+  return undefined;
+}
+
+type ReportedError = { error: string };
 
 /**
  * `/design/__status`: ready once `index.tsx` exists, isn't the template
- * placeholder, and has painted in a browser since it last changed
- * (`paintedVersion` is the file's mtime when that paint was reported).
+ * placeholder, and has rendered in a browser (visible or not) since it last
+ * changed (`paintedVersion` is the file's mtime when that was reported).
  *
  * @internal
  */
@@ -230,10 +253,14 @@ new MutationObserver(() => (lastMutation = performance.now())).observe(document.
   attributes: true,
 });
 
+// Two frames (painted), or 100 ms without them: a builder may keep the page
+// hidden (a preview it reveals when ready), and hidden frames get none.
+const painted = () => Promise.race([frame().then(frame), sleep(100)]);
+
 // Resolves once the page shows its real content: fonts loaded, no fetch in
-// flight, no DOM change for QUIET_MS, then two frames (painted). \`paint\`
-// replaces the frame wait.
-async function settled(isCurrent, paint) {
+// flight, no DOM change for QUIET_MS, then painted (or hidden). Nothing here
+// looks at pixels: it's the same for any page.
+async function settled(isCurrent) {
   await document.fonts?.ready;
   const start = performance.now();
   while (isCurrent()) {
@@ -242,9 +269,30 @@ async function settled(isCurrent, paint) {
     if (host.blockers === 0 && (capped || (pendingFetches === 0 && quiet))) break;
     await sleep(50);
   }
-  if (paint) return paint();
-  await frame();
-  await frame();
+  await painted();
+}
+
+// Reports to ${STATUS_PATH}, one at a time and in order (a late report must
+// not overtake a newer one).
+let statusQueue = Promise.resolve();
+function sendStatus(body) {
+  statusQueue = statusQueue.then(() =>
+    realFetch("${STATUS_PATH}", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).catch(() => {}),
+  );
+}
+
+// Errors outside React's render (or without an error boundary): uncaught
+// errors, unhandled promise rejections, and Vite's compile errors.
+function watchErrors(report) {
+  addEventListener("error", (e) => report(e.error?.message ?? e.message ?? "Script error"));
+  addEventListener("unhandledrejection", (e) =>
+    report("Unhandled rejection: " + (e.reason?.message ?? String(e.reason))),
+  );
+  import.meta.hot?.on("vite:error", (payload) => report(payload?.err?.message ?? "Vite error"));
 }
 `;
 
@@ -279,12 +327,8 @@ const pages = Object.keys(import.meta.glob(${JSON.stringify(PAGE_GLOBS)}))
   .sort((a, b) => (a.name === "index" ? -1 : b.name === "index" ? 1 : a.name.localeCompare(b.name)));
 
 ${SETTLE_SNIPPET}
-function postStatus(name, ok) {
-  fetch("${STATUS_PATH}", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ page: name, ok }),
-  }).catch(() => {});
+function postStatus(name, ok, error) {
+  sendStatus(error ? { page: name, ok, error } : { page: name, ok });
 }
 
 function reportReady(name) {
@@ -299,6 +343,10 @@ function reportReady(name) {
 // The page on screen and whether it rendered (not the placeholder, no error).
 let current;
 let run = 0;
+// A new load of this page: earlier reports are replaced by this one's.
+const initialPage = pageName("/src/design/${file}");
+sendStatus({ page: initialPage, reset: true });
+watchErrors((error) => sendStatus({ page: current?.name ?? initialPage, error }));
 
 // (Re)starts the wait for the current page; a newer render or update cancels
 // an older wait, so only the latest state can be reported.
@@ -347,8 +395,9 @@ function withReady(mod, name) {
     }
     settle() {
       current = { name, ok: !this.state.error && !placeholder };
-      if (this.state.error) postStatus(name, false);
-      else schedule();
+      if (this.state.error) {
+        postStatus(name, false, this.state.error?.message ?? String(this.state.error));
+      } else schedule();
     }
     render() {
       if (this.state.error) {
@@ -406,17 +455,21 @@ export function appReadyModule(builderOrigins: string[]): string {
 const ORIGINS = ${JSON.stringify(builderOrigins)};
 ${SETTLE_SNIPPET}
 
-// A builder may load the app in a hidden frame to reveal it when ready, and
-// hidden frames get no animation frames: two frames, or 100 ms without them.
-const painted = () =>
-  Promise.race([frame().then(frame), sleep(100)]);
+// A new load of the app: earlier reports are replaced by this one's.
+sendStatus({ app: location.pathname, reset: true });
+watchErrors((error) => sendStatus({ app: location.pathname, error }));
 
 let run = 0;
 function schedule() {
   const mine = ++run;
-  settled(() => mine === run, painted).then(() => {
+  settled(() => mine === run).then(() => {
     if (mine !== run || host.blockers > 0) return;
-    if (document.querySelector("[${TEMPLATE_HOME_ATTR}]")) return;
+    // Rendered: something is mounted (a crash without an error boundary
+    // leaves the root empty, and its error is reported above).
+    const ok = (document.getElementById("root")?.childElementCount ?? 0) > 0;
+    const template = !!document.querySelector("[${TEMPLATE_HOME_ATTR}]");
+    sendStatus({ app: location.pathname, ok, template });
+    if (!ok || template) return;
     const target = window.parent !== window ? window.parent : window.opener;
     if (!target) return;
     for (const origin of ORIGINS) {
@@ -529,8 +582,21 @@ export function designVitePlugin({
   // Drafts live in the app folder (the dev server's working directory).
   const projectRoot = process.cwd();
   const draftsDir = path.join(projectRoot, "drafts");
-  // mtime of the index page when a browser last reported painting it.
-  let paintedVersion: number | undefined;
+  // What a browser reported for each design page, for one version of its file:
+  // rendered (mounted, settled; visible or not) and the errors it hit.
+  const pageReports = new Map<
+    string,
+    { version: number | undefined; rendered: boolean; errors: ReportedError[] }
+  >();
+  // The same for the app's own pages, since the last load.
+  let appReport:
+    | {
+        path: string;
+        rendered: boolean;
+        template: boolean;
+        errors: ReportedError[];
+      }
+    | undefined;
   // Render errors reported by the hydrator, per draft, for one version of it;
   // `checked` once a page has handled every block of that version.
   const draftErrors = new Map<
@@ -579,8 +645,9 @@ export function designVitePlugin({
     },
 
     transformIndexHtml(_html, ctx) {
-      // App pages only: design pages report appkit:design-ready themselves.
-      if (builderOrigins.length === 0) return;
+      // App pages only: design pages report themselves. Always added, so
+      // /design/__status knows the app rendered (and its errors) also without
+      // a builder; it posts appkit:app-ready only to builder origins.
       if (resolveDesignPage(root, ctx.path.split("?")[0]) !== undefined) return;
       return [
         {
@@ -728,11 +795,42 @@ export function designVitePlugin({
                 });
               }
             }
-            if (body?.page === "index") {
-              paintedVersion =
-                (body as { ok?: unknown }).ok === false
-                  ? undefined
-                  : indexVersion(server.config.root);
+            const r = body as {
+              page?: unknown;
+              app?: unknown;
+              reset?: unknown;
+              ok?: unknown;
+              template?: unknown;
+              error?: unknown;
+            };
+            if (typeof r?.page === "string") {
+              const version = pageVersion(server.config.root, r.page);
+              let entry = pageReports.get(r.page);
+              if (r.reset === true || !entry || entry.version !== version) {
+                entry = { version, rendered: false, errors: [] };
+                pageReports.set(r.page, entry);
+              }
+              if (typeof r.ok === "boolean") entry.rendered = r.ok;
+              if (typeof r.error === "string")
+                entry.errors.push({ error: r.error });
+            }
+            if (typeof r?.app === "string") {
+              if (r.reset === true || !appReport) {
+                appReport = {
+                  path: r.app,
+                  rendered: false,
+                  template: false,
+                  errors: [],
+                };
+              }
+              if (typeof r.ok === "boolean") {
+                appReport.path = r.app;
+                appReport.rendered = r.ok;
+                appReport.template = r.template === true;
+              }
+              if (typeof r.error === "string") {
+                appReport.errors.push({ error: r.error });
+              }
             }
             res.statusCode = 204;
             res.end();
@@ -769,7 +867,38 @@ export function designVitePlugin({
               errors: entry.checked ? entry.errors : null,
             });
           }
-          const status = designStatus(server.config.root, paintedVersion);
+          const indexReport = pageReports.get("index");
+          const status = designStatus(
+            server.config.root,
+            indexReport?.rendered ? indexReport.version : undefined,
+          );
+          // Per page, for the version on disk: null until a browser reported.
+          const pages = status.pages.map((page) => {
+            const report = pageReports.get(page.name);
+            const known =
+              !!report &&
+              report.version === pageVersion(server.config.root, page.name);
+            return {
+              ...page,
+              rendered: known && report.rendered,
+              errors: known ? report.errors : null,
+            };
+          });
+          // The app's own pages: compiled server-side from index.html's entry
+          // module, rendered and errors as its pages report them.
+          const entry = appEntry(server.config.root);
+          const appCompileError = entry
+            ? await compileGraph(server, entry)
+            : undefined;
+          const app = {
+            entry: entry ?? null,
+            compiled: !!entry && appCompileError === undefined,
+            ...(appCompileError ? { compileError: appCompileError } : {}),
+            path: appReport?.path ?? null,
+            rendered: appReport?.rendered ?? false,
+            template: appReport?.template ?? false,
+            errors: appReport ? appReport.errors : null,
+          };
           // `ready` needs a browser to paint /design. `compiled` doesn't: it
           // builds the index page (and resolves its imports) server-side, so
           // an agent can wait on it without a browser.
@@ -795,6 +924,7 @@ export function designVitePlugin({
           res.end(
             JSON.stringify({
               ...status,
+              pages,
               compiled,
               ...(compileError ? { compileError } : {}),
               waitingFor,
@@ -803,6 +933,7 @@ export function designVitePlugin({
               theme: DRAFT_THEME_PATH,
               mock: DRAFT_MOCK_PATH,
               hydrator: HYDRATOR_PATH,
+              app,
             }),
           );
           return;

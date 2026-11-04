@@ -16,7 +16,12 @@ function load(html: string) {
     configurable: true,
     value: { postMessage },
   });
-  win.fetch ??= async () => ({});
+  // The status endpoint, as the script reports to it.
+  statusReports.length = 0;
+  win.fetch = async (_url: string, init?: { body?: string }) => {
+    if (init?.body) statusReports.push(JSON.parse(init.body));
+    return {};
+  };
   // Its one module-only piece is Vite's import.meta.hot, absent outside a
   // dev server.
   new Function(
@@ -25,6 +30,7 @@ function load(html: string) {
   return postMessage;
 }
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const statusReports: Record<string, unknown>[] = [];
 
 afterEach(() => {
   delete win.__appkitDesign;
@@ -60,4 +66,58 @@ test("says nothing while the template home is up, then posts once the real page 
     { type: "appkit:app-ready", version: 1, path: "/play" },
     ORIGIN,
   );
+});
+
+// Not a dashboard: a to-do form app, in a hidden preview (no animation frames).
+test("a form app reports rendered and its runtime errors to the status endpoint, hidden", async () => {
+  win.history.replaceState(null, "", "/");
+  win.requestAnimationFrame = vi.fn();
+  load(
+    '<div id="root"><form><input name="todo"><button>Add</button></form><ul></ul></div>',
+  );
+  await wait(700);
+  // (Earlier tests' copies of the script are still live on this window and
+  // add reports of their own: check for these, not the exact list.)
+  expect(statusReports[0]).toEqual({ app: "/", reset: true });
+  expect(statusReports).toContainEqual({ app: "/", ok: true, template: false });
+  const before = statusReports.length;
+
+  // A click handler that throws: not a render error, still reported.
+  win.dispatchEvent(
+    new win.ErrorEvent("error", {
+      error: new Error("Cannot read properties of undefined (reading 'title')"),
+      message: "Cannot read properties of undefined (reading 'title')",
+    }),
+  );
+  win.dispatchEvent(
+    Object.assign(new win.Event("unhandledrejection"), {
+      reason: new Error("save failed"),
+    }),
+  );
+  await wait(10);
+  const errors = statusReports.slice(before).filter((r) => "error" in r);
+  expect(errors).toContainEqual({
+    app: "/",
+    error: "Cannot read properties of undefined (reading 'title')",
+  });
+  expect(errors).toContainEqual({
+    app: "/",
+    error: "Unhandled rejection: save failed",
+  });
+});
+
+test("a crash that leaves nothing mounted is reported as not rendered, and no ready signal", async () => {
+  win.history.replaceState(null, "", "/tools/convert");
+  win.requestAnimationFrame = vi.fn();
+  const postMessage = load('<div id="root"></div>');
+  await wait(700);
+  expect(statusReports).toContainEqual({
+    app: "/tools/convert",
+    ok: false,
+    template: false,
+  });
+  expect(statusReports).not.toContainEqual(
+    expect.objectContaining({ app: "/tools/convert", ok: true }),
+  );
+  expect(postMessage).not.toHaveBeenCalled();
 });
