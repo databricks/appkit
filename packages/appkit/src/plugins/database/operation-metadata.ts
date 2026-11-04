@@ -24,7 +24,6 @@ interface ValidatedOperation {
   readonly file: string;
   readonly exportName: string;
   readonly name: string;
-  readonly entity: string;
   readonly method: (typeof METHODS)[number];
   readonly input: object | undefined;
   readonly output: object | undefined;
@@ -44,7 +43,6 @@ interface OperationMetadataIssue {
   readonly code:
     | "not-operation"
     | "name"
-    | "entity"
     | "method"
     | "input"
     | "output"
@@ -91,7 +89,6 @@ function isSchema(value: unknown): value is object {
 function readFields(value: object): Record<string, unknown> {
   return {
     name: Reflect.get(value, "name"),
-    entity: Reflect.get(value, "entity"),
     method: Reflect.get(value, "method"),
     input: Reflect.get(value, "input"),
     output: Reflect.get(value, "output"),
@@ -109,7 +106,6 @@ function readFields(value: object): Record<string, unknown> {
  */
 export function validateOperationMetadata(
   located: readonly LocatedDeclaration[],
-  entities: ReadonlySet<string>,
 ): OperationMetadataResult {
   const operations: ValidatedOperation[] = [];
   const skipped: OperationMetadataIssue[] = [];
@@ -151,15 +147,6 @@ export function validateOperationMetadata(
       } else {
         seen.set(name, entry);
       }
-    }
-    if (typeof fields.entity !== "string" || !entities.has(fields.entity)) {
-      problems.push(
-        issue(
-          entry,
-          "entity",
-          `${source(entry)} must name one entity in the database schema.`,
-        ),
-      );
     }
     if (
       typeof fields.method !== "string" ||
@@ -234,7 +221,6 @@ export function validateOperationMetadata(
       file: entry.file,
       exportName: entry.exportName,
       name,
-      entity: fields.entity as string,
       method: fields.method as (typeof METHODS)[number],
       input: fields.input as object | undefined,
       output: fields.output as object | undefined,

@@ -46,7 +46,6 @@ describe("defineOperation", () => {
 
     const operation = defineUntyped({
       name: "posts.get",
-      entity: "posts",
       method: "GET",
       input,
       output,
@@ -57,7 +56,6 @@ describe("defineOperation", () => {
     expect(Object.isFrozen(operation)).toBe(true);
     expect(Object.keys(operation as object)).toEqual([
       "name",
-      "entity",
       "method",
       "input",
       "output",
@@ -66,7 +64,6 @@ describe("defineOperation", () => {
     ]);
     expect(operation).toMatchObject({
       name: "posts.get",
-      entity: "posts",
       method: "GET",
     });
     expect(
@@ -89,7 +86,6 @@ describe("defineOperation", () => {
 
     defineUntyped({
       name: "posts.create",
-      entity: "posts",
       method: "POST",
       input: opaqueSchema(),
       output: opaqueSchema(),
@@ -106,7 +102,6 @@ describe("defineOperation", () => {
 
     const candidate = defineUntyped({
       name: "posts.get",
-      entity: "posts",
       method: "GET",
       execute,
     });
@@ -123,7 +118,6 @@ describe("defineOperation", () => {
   test("recognizes only descriptors it produced", () => {
     const fields = {
       name: "posts.get",
-      entity: "posts",
       method: "GET",
       authorize: () => true,
       execute: () => null,
@@ -198,7 +192,6 @@ describe("definePolicy", () => {
 });
 
 describe("validateOperationMetadata", () => {
-  const entities = new Set(["posts"]);
   const located = (exportName: string, value: unknown) => ({
     file: "routes/posts.ts",
     exportName,
@@ -211,17 +204,16 @@ describe("validateOperationMetadata", () => {
     const input = z.object({ id: z.number() });
     const operation = defineUntyped({
       name: "posts.get",
-      entity: "posts",
       method: "GET",
       input,
       authorize,
       execute,
     });
 
-    const result = validateOperationMetadata(
-      [located("helper", { name: "posts.get" }), located("getPost", operation)],
-      entities,
-    );
+    const result = validateOperationMetadata([
+      located("helper", { name: "posts.get" }),
+      located("getPost", operation),
+    ]);
 
     expect(result.skipped).toEqual([]);
     expect(result.errors).toEqual([]);
@@ -230,7 +222,6 @@ describe("validateOperationMetadata", () => {
         file: "routes/posts.ts",
         exportName: "getPost",
         name: "posts.get",
-        entity: "posts",
         method: "GET",
         input,
         output: undefined,
@@ -243,15 +234,13 @@ describe("validateOperationMetadata", () => {
   test("skips a declaration whose only problem is missing authorization", () => {
     const unauthorized = defineUntyped({
       name: "posts.get",
-      entity: "posts",
       method: "GET",
       execute: () => null,
     });
 
-    const result = validateOperationMetadata(
-      [located("unauthorized", unauthorized)],
-      entities,
-    );
+    const result = validateOperationMetadata([
+      located("unauthorized", unauthorized),
+    ]);
 
     expect(result.operations).toEqual([]);
     expect(result.errors).toEqual([]);
@@ -268,14 +257,12 @@ describe("validateOperationMetadata", () => {
   test("reports every malformed field, with or without authorization", () => {
     const unauthorized = defineUntyped({
       name: "posts.get.",
-      entity: "missing",
       method: "HEAD",
       execute: () => null,
     });
     const malformed = defineUntyped({
       // Four valid 64-character parts exceed the total length.
       name: Array.from({ length: 4 }, () => "x".repeat(64)).join("."),
-      entity: "missing",
       method: "HEAD",
       input: {},
       output: "row",
@@ -283,10 +270,10 @@ describe("validateOperationMetadata", () => {
       execute: null,
     });
 
-    const result = validateOperationMetadata(
-      [located("unauthorized", unauthorized), located("malformed", malformed)],
-      entities,
-    );
+    const result = validateOperationMetadata([
+      located("unauthorized", unauthorized),
+      located("malformed", malformed),
+    ]);
 
     expect(result.operations).toEqual([]);
     expect(result.skipped.map((entry) => entry.exportName)).toEqual([
@@ -296,10 +283,8 @@ describe("validateOperationMetadata", () => {
       result.errors.map((entry) => `${entry.exportName} ${entry.code}`),
     ).toEqual([
       "unauthorized name",
-      "unauthorized entity",
       "unauthorized method",
       "malformed name",
-      "malformed entity",
       "malformed method",
       "malformed input",
       "malformed output",
@@ -314,7 +299,6 @@ describe("validateOperationMetadata", () => {
         name,
         defineUntyped({
           name,
-          entity: "posts",
           method: "GET",
           authorize: () => true,
           execute: () => null,
@@ -322,7 +306,7 @@ describe("validateOperationMetadata", () => {
       ),
     );
 
-    const result = validateOperationMetadata(reserved, entities);
+    const result = validateOperationMetadata(reserved);
 
     expect(result.operations).toEqual([]);
     expect(result.errors.map((entry) => entry.message)).toEqual([
@@ -334,23 +318,21 @@ describe("validateOperationMetadata", () => {
   test("rejects a repeated operation name without dropping the first", () => {
     const first = defineUntyped({
       name: "posts.get",
-      entity: "posts",
       method: "GET",
       authorize: () => true,
       execute: () => null,
     });
     const second = defineUntyped({
       name: "posts.get",
-      entity: "posts",
       method: "GET",
       authorize: () => true,
       execute: () => null,
     });
 
-    const result = validateOperationMetadata(
-      [located("first", first), located("second", second)],
-      entities,
-    );
+    const result = validateOperationMetadata([
+      located("first", first),
+      located("second", second),
+    ]);
 
     expect(result.operations.map((entry) => entry.exportName)).toEqual([
       "first",
@@ -364,25 +346,20 @@ describe("validateOperationMetadata", () => {
   test("counts a skipped declaration's name toward duplicates", () => {
     const unauthorized = defineUntyped({
       name: "posts.get",
-      entity: "posts",
       method: "GET",
       execute: () => null,
     });
     const authorized = defineUntyped({
       name: "posts.get",
-      entity: "posts",
       method: "GET",
       authorize: () => true,
       execute: () => null,
     });
 
-    const result = validateOperationMetadata(
-      [
-        located("unauthorized", unauthorized),
-        located("authorized", authorized),
-      ],
-      entities,
-    );
+    const result = validateOperationMetadata([
+      located("unauthorized", unauthorized),
+      located("authorized", authorized),
+    ]);
 
     expect(result.operations).toEqual([]);
     expect(result.skipped.map((entry) => entry.exportName)).toEqual([

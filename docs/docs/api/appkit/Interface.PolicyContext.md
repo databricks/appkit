@@ -1,6 +1,7 @@
 # Interface: PolicyContext\<In\>
 
-What every authorization callback receives.
+What every authorization callback receives, the `resource` lookup included.
+`actor` is the verified caller, so a lookup can scope its query to them.
 
 ## Extended by
 

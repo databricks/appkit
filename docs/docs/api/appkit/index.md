@@ -99,7 +99,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [OperationDefinition](Interface.OperationDefinition.md) | One immutable operation descriptor. Nothing in it runs until a request does. |
 | [PluginManifest](Interface.PluginManifest.md) | Plugin manifest that declares metadata and resource requirements. Attached to plugin classes as a static property. Extends the shared PluginManifest with strict resource types. |
 | [PluginToolkitProvider](Interface.PluginToolkitProvider.md) | Minimum shape every entry in the [Plugins](TypeAlias.Plugins.md) map must expose. Core plugins (analytics, files, genie, lakebase) implement this directly via their `.toolkit()` method. The agents plugin and standalone `runAgent` synthesize this shape for any registered plugin that doesn't implement `.toolkit()` directly (falling back to `getAgentTools()` walking). |
-| [PolicyContext](Interface.PolicyContext.md) | What every authorization callback receives. |
+| [PolicyContext](Interface.PolicyContext.md) | What every authorization callback receives, the `resource` lookup included. `actor` is the verified caller, so a lookup can scope its query to them. |
 | [PolicyDenial](Interface.PolicyDenial.md) | An explicit refusal. `reason` stays on the server; HTTP and logs do not receive it. |
 | [PostResult](Interface.PostResult.md) | Structured result for a best-effort POST that must not throw. |
 | [PromptContext](Interface.PromptContext.md) | Context passed to `baseSystemPrompt` callbacks. |
@@ -171,7 +171,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [Matcher](TypeAlias.Matcher.md) | A deterministic matcher: inspects a string value and returns a result. |
 | [OperationMethod](TypeAlias.OperationMethod.md) | HTTP methods an operation can answer; the browser client reads the same union. |
 | [OperationWireInput](TypeAlias.OperationWireInput.md) | The JSON a caller sends to an operation; a bigint travels as a string or safe integer. |
-| [OperationWireOutput](TypeAlias.OperationWireOutput.md) | The JSON a successful call answers with; a bigint travels as a decimal string. |
+| [OperationWireOutput](TypeAlias.OperationWireOutput.md) | The JSON a successful call answers with; without an output schema there is none. |
 | [PluginData](TypeAlias.PluginData.md) | Tuple of plugin class, config, and name. Created by `toPlugin()` and passed to `createApp()`. |
 | [Plugins](TypeAlias.Plugins.md) | Plugin map passed to the function form of [AgentDefinition.tools](Interface.AgentDefinition.md#tools). Each entry exposes a `.toolkit(opts?)` method that returns a record of [ToolkitEntry](Interface.ToolkitEntry.md) markers ready to be spread into a tool record. |
 | [Policy](TypeAlias.Policy.md) | A reusable authorization rule, with or without a resource lookup. |
@@ -225,8 +225,8 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [defineEval](Function.defineEval.md) | Define an agent eval. Default-export the result from a `server/agents/<id>/evals/*.eval.ts` file. |
 | [defineEvalConfig](Function.defineEvalConfig.md) | Define per-directory eval config. Default-export from `evals.config.ts`. |
 | [defineManifest](Function.defineManifest.md) | Validates a raw manifest (typically a `manifest.json` import) against the canonical Zod schema and returns it as a strict [PluginManifest](Interface.PluginManifest.md). |
-| [defineOperation](Function.defineOperation.md) | Declare one database operation. `name` is its public identifier. The entity and method infer the default output. Declare an `input` Zod schema to accept parameters; without one, callbacks receive `undefined`. An `output` schema overrides the default response. Definition only freezes a descriptor. |
-| [definePolicy](Function.definePolicy.md) | Declare a reusable authorization rule. Without `resource` it decides from the actor and input. With `resource` it loads one record first; annotate the lookup context to fix the input the policy needs. `allow` may return `true`, `false`, or `{ deny }`. |
+| [defineOperation](Function.defineOperation.md) | Declare one database operation. `name` is its public identifier. Declare an `input` Zod schema to accept parameters; without one, callbacks receive `undefined`. Declare an `output` Zod schema to answer a body; without one, the operation answers none. Definition only freezes a descriptor. |
+| [definePolicy](Function.definePolicy.md) | Declare a reusable authorization rule. Without `resource` it decides from the actor and input. With `resource` it loads one record first, from the same context every callback receives, `actor` included; annotate the lookup context to fix the input the policy needs. `allow` may return `true`, `false`, or `{ deny }`. |
 | [defineSchema](Function.defineSchema.md) | Compile one declared schema. The returned type keeps the table names the builder returned, so `api.tables` can name only real tables. |
 | [defineTool](Function.defineTool.md) | Defines a single tool entry for a plugin's internal registry. |
 | [discoverEvalConfigs](Function.discoverEvalConfigs.md) | Discover the per-agent `evals.config.ts` (from [defineEvalConfig](Function.defineEvalConfig.md)) at `<rootDir>/server/agents/<agent>/evals/evals.config.ts`. Config is per-agent: each agent's config applies only to that agent's evals. Agents without a config file are omitted. Returns a stable, sorted list. |

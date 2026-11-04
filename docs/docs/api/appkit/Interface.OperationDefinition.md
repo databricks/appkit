@@ -1,4 +1,4 @@
-# Interface: OperationDefinition\<E, M, I, O, R, Name\>
+# Interface: OperationDefinition\<M, I, O, R, Name\>
 
 One immutable operation descriptor. Nothing in it runs until a request does.
 
@@ -6,7 +6,6 @@ One immutable operation descriptor. Nothing in it runs until a request does.
 
 | Type Parameter |
 | ------ |
-| `E` *extends* `EntityName` |
 | `M` *extends* [`OperationMethod`](TypeAlias.OperationMethod.md) |
 | `I` *extends* `SchemaSlot` |
 | `O` *extends* `SchemaSlot` |
@@ -23,18 +22,10 @@ readonly authorize: Authorize<ParsedInput<I>, R>;
 
 ***
 
-### entity
-
-```ts
-readonly entity: E;
-```
-
-***
-
 ### execute()
 
 ```ts
-readonly execute: (context: OperationContext<ParsedInput<I>, [R] extends [undefined] ? undefined : NonNullable<Awaited<R>>>) => Awaitable<ExecuteResult<E, M, O>>;
+readonly execute: (context: OperationContext<ParsedInput<I>, [R] extends [undefined] ? undefined : NonNullable<Awaited<R>>>) => Awaitable<ExecuteResult<M, O>>;
 ```
 
 #### Parameters
@@ -45,7 +36,7 @@ readonly execute: (context: OperationContext<ParsedInput<I>, [R] extends [undefi
 
 #### Returns
 
-`Awaitable`\<`ExecuteResult`\<`E`, `M`, `O`\>\>
+`Awaitable`\<`ExecuteResult`\<`M`, `O`\>\>
 
 ***
 
