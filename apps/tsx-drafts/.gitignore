@@ -1,0 +1,5 @@
+.drafts/
+client/src/design/pages/*.tsx
+client/src/design/mock.ts
+client/src/design/status.json
+client/src/design/.staging/
