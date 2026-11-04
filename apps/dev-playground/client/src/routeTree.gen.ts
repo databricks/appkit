@@ -18,6 +18,7 @@ import { Route as ServingRouteRouteImport } from './routes/serving.route'
 import { Route as ReconnectRouteRouteImport } from './routes/reconnect.route'
 import { Route as QueryDedupRouteRouteImport } from './routes/query-dedup.route'
 import { Route as PolicyMatrixRouteRouteImport } from './routes/policy-matrix.route'
+import { Route as OmnigentRouteRouteImport } from './routes/omnigent.route'
 import { Route as MetricViewsRouteRouteImport } from './routes/metric-views.route'
 import { Route as LakebaseRouteRouteImport } from './routes/lakebase.route'
 import { Route as JobsRouteRouteImport } from './routes/jobs.route'
@@ -75,6 +76,11 @@ const QueryDedupRouteRoute = QueryDedupRouteRouteImport.update({
 const PolicyMatrixRouteRoute = PolicyMatrixRouteRouteImport.update({
   id: '/policy-matrix',
   path: '/policy-matrix',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OmnigentRouteRoute = OmnigentRouteRouteImport.update({
+  id: '/omnigent',
+  path: '/omnigent',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MetricViewsRouteRoute = MetricViewsRouteRouteImport.update({
@@ -157,6 +163,7 @@ export interface FileRoutesByFullPath {
   '/jobs': typeof JobsRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
   '/metric-views': typeof MetricViewsRouteRoute
+  '/omnigent': typeof OmnigentRouteRoute
   '/policy-matrix': typeof PolicyMatrixRouteRoute
   '/query-dedup': typeof QueryDedupRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
@@ -181,6 +188,7 @@ export interface FileRoutesByTo {
   '/jobs': typeof JobsRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
   '/metric-views': typeof MetricViewsRouteRoute
+  '/omnigent': typeof OmnigentRouteRoute
   '/policy-matrix': typeof PolicyMatrixRouteRoute
   '/query-dedup': typeof QueryDedupRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
@@ -206,6 +214,7 @@ export interface FileRoutesById {
   '/jobs': typeof JobsRouteRoute
   '/lakebase': typeof LakebaseRouteRoute
   '/metric-views': typeof MetricViewsRouteRoute
+  '/omnigent': typeof OmnigentRouteRoute
   '/policy-matrix': typeof PolicyMatrixRouteRoute
   '/query-dedup': typeof QueryDedupRouteRoute
   '/reconnect': typeof ReconnectRouteRoute
@@ -232,6 +241,7 @@ export interface FileRouteTypes {
     | '/jobs'
     | '/lakebase'
     | '/metric-views'
+    | '/omnigent'
     | '/policy-matrix'
     | '/query-dedup'
     | '/reconnect'
@@ -256,6 +266,7 @@ export interface FileRouteTypes {
     | '/jobs'
     | '/lakebase'
     | '/metric-views'
+    | '/omnigent'
     | '/policy-matrix'
     | '/query-dedup'
     | '/reconnect'
@@ -280,6 +291,7 @@ export interface FileRouteTypes {
     | '/jobs'
     | '/lakebase'
     | '/metric-views'
+    | '/omnigent'
     | '/policy-matrix'
     | '/query-dedup'
     | '/reconnect'
@@ -305,6 +317,7 @@ export interface RootRouteChildren {
   JobsRouteRoute: typeof JobsRouteRoute
   LakebaseRouteRoute: typeof LakebaseRouteRoute
   MetricViewsRouteRoute: typeof MetricViewsRouteRoute
+  OmnigentRouteRoute: typeof OmnigentRouteRoute
   PolicyMatrixRouteRoute: typeof PolicyMatrixRouteRoute
   QueryDedupRouteRoute: typeof QueryDedupRouteRoute
   ReconnectRouteRoute: typeof ReconnectRouteRoute
@@ -379,6 +392,13 @@ declare module '@tanstack/react-router' {
       path: '/policy-matrix'
       fullPath: '/policy-matrix'
       preLoaderRoute: typeof PolicyMatrixRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/omnigent': {
+      id: '/omnigent'
+      path: '/omnigent'
+      fullPath: '/omnigent'
+      preLoaderRoute: typeof OmnigentRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/metric-views': {
@@ -489,6 +509,7 @@ const rootRouteChildren: RootRouteChildren = {
   JobsRouteRoute: JobsRouteRoute,
   LakebaseRouteRoute: LakebaseRouteRoute,
   MetricViewsRouteRoute: MetricViewsRouteRoute,
+  OmnigentRouteRoute: OmnigentRouteRoute,
   PolicyMatrixRouteRoute: PolicyMatrixRouteRoute,
   QueryDedupRouteRoute: QueryDedupRouteRoute,
   ReconnectRouteRoute: ReconnectRouteRoute,

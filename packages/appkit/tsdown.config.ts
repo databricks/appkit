@@ -43,6 +43,11 @@ export default defineConfig([
         to: "dist/plugins/server/remote-tunnel",
         flatten: true,
       },
+      {
+        from: "src/plugins/omnigent/python/*.py",
+        to: "dist/plugins/omnigent/python",
+        flatten: true,
+      },
     ],
   },
 ]);

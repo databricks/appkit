@@ -1,0 +1,63 @@
+{
+  "$schema": "https://databricks.github.io/appkit/schemas/plugin-manifest.schema.json",
+  "name": "omnigent",
+  "displayName": "Omnigent Plugin",
+  "description": "Omnigent agent sessions for the app's users on the workspace's managed Omnigent: Claude Agent SDK, Pi and OpenAI Agents SDK on Databricks Sandboxes, with models through Unity Gateway",
+  "stability": "beta",
+  "resources": {
+    "required": [],
+    "optional": []
+  },
+  "scaffolding": {
+    "rules": {
+      "must": [
+        "Enable the Omnigent and Databricks Sandbox previews in the workspace",
+        "Account admin: add all-apis to the app's OAuth integration (databricks account custom-app-integration update)",
+        "Re-run that update after a bundle deploy or a user_api_scopes change, which both drop all-apis"
+      ]
+    }
+  },
+  "config": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "description": "System instructions for every session"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "Databricks-managed MCP servers sessions can call, as the user"
+        },
+        "writeTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Further tool names that change data"
+        },
+        "defaultMode": {
+          "type": "string",
+          "enum": ["auto", "ask", "read"],
+          "default": "ask"
+        },
+        "harnesses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Harnesses users may pick"
+        },
+        "defaultHarness": {
+          "type": "string"
+        },
+        "defaultModel": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
