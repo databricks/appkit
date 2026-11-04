@@ -205,6 +205,9 @@ importers:
       '@databricks/appkit-ui':
         specifier: workspace:*
         version: link:../../packages/appkit-ui
+      express:
+        specifier: 4.22.2
+        version: 4.22.2
       lucide-react:
         specifier: 0.546.0
         version: 0.546.0(react@19.2.4)
@@ -224,6 +227,9 @@ importers:
       '@tailwindcss/vite':
         specifier: 4.1.17
         version: 4.1.17(rolldown-vite@7.1.14(@types/node@22.20.5)(esbuild@0.25.10)(jiti@2.6.1)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.2))
+      '@types/express':
+        specifier: 4.17.25
+        version: 4.17.25
       '@types/node':
         specifier: 22.20.5
         version: 22.20.5
@@ -8612,10 +8618,6 @@ packages:
     resolution: {integrity: sha512-4fCk79wshMdzMp2rH06qWrJE4iolqLhCUH+OiuIgU++RB0+94NlDL81atO7GX55uUKueo0txHNtvEyI6D7WdMw==}
     engines: {node: '>=0.10.0'}
 
-  iconv-lite@0.7.0:
-    resolution: {integrity: sha512-cf6L2Ds3h57VVmkZe+Pn+5APsT7FpqJtEhhieDCvrE2MK5Qk9MyffgQyuxQTm6BChfeZNtcOLHp9IcWRVcIcBQ==}
-    engines: {node: '>=0.10.0'}
-
   iconv-lite@0.7.2:
     resolution: {integrity: sha512-im9DjEDQ55s9fL4EYzOAv0yMqmMBSZp6G0VvFyTMPKWxiSBHUj9NW/qqLmXUwXrrM7AvqSlTCfvqRb0cM8yYqw==}
     engines: {node: '>=0.10.0'}
@@ -15824,7 +15826,7 @@ snapshots:
   '@inquirer/external-editor@1.0.3(@types/node@22.20.5)':
     dependencies:
       chardet: 2.1.1
-      iconv-lite: 0.7.0
+      iconv-lite: 0.7.2
     optionalDependencies:
       '@types/node': 22.20.5
 
@@ -22293,10 +22295,6 @@ snapshots:
       safer-buffer: 2.1.2
 
   iconv-lite@0.6.3:
-    dependencies:
-      safer-buffer: 2.1.2
-
-  iconv-lite@0.7.0:
     dependencies:
       safer-buffer: 2.1.2
 

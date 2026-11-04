@@ -9,6 +9,7 @@ import {
   copyFile,
   mkdir,
   readFile,
+  rename,
   rm,
   utimes,
   writeFile,
@@ -278,6 +279,22 @@ const results: Result[] = VARIANTS.map((_, i) => ({
   status: "ok",
 }));
 
+// The builder UI polls this file; rename keeps readers from seeing a half-written one.
+const statusFile = path.join(designDir, "status.json");
+const saveStatus = async (done: boolean) => {
+  const body = {
+    prompt: args.prompt,
+    answers: args.answers,
+    done,
+    elapsed: since(),
+    results: [mockResult, ...results],
+    usage,
+  };
+  await writeFile(`${statusFile}.tmp`, JSON.stringify(body, null, 2));
+  await rename(`${statusFile}.tmp`, statusFile);
+};
+const ticker = setInterval(() => void saveStatus(false), 300);
+
 await Promise.all(
   results.map(async (result, i) => {
     const file = `${result.name}.tsx`;
@@ -363,7 +380,5 @@ for (const r of results)
 console.log(
   `cache: ${usage.map((u) => `read ${u.cacheRead}/write ${u.cacheWrite}`).join(", ")}`,
 );
-await writeFile(
-  path.join(designDir, "status.json"),
-  JSON.stringify({ prompt: args.prompt, results: all, usage }, null, 2),
-);
+clearInterval(ticker);
+await saveStatus(true);

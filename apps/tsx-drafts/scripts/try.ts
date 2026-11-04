@@ -15,7 +15,12 @@ const up = () =>
 
 let server: ReturnType<typeof spawn> | undefined;
 if (!(await up())) {
-  server = spawn("pnpm", ["dev"], { cwd: root, stdio: "ignore" });
+  // Own process group, so Ctrl+C can stop pnpm's tsx-watch and node grandchildren too.
+  server = spawn("pnpm", ["dev"], {
+    cwd: root,
+    stdio: "ignore",
+    detached: true,
+  });
   for (let i = 0; i < 60 && !(await up()); i++)
     await new Promise((r) => setTimeout(r, 1000));
   if (!(await up()))
@@ -44,6 +49,6 @@ const code = await new Promise<number>((r) =>
 if (!server) process.exit(code);
 console.log("\nDev server running at", url, "(Ctrl+C to stop)");
 process.on("SIGINT", () => {
-  server.kill();
+  if (server.pid) process.kill(-server.pid);
   process.exit(code);
 });
