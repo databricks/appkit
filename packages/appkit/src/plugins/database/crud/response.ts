@@ -2,7 +2,7 @@ import type { Response } from "express";
 
 import { DatabasePluginError } from "../../../database/errors";
 import { MAX_RESPONSE_BYTES } from "../defaults";
-import type { JsonValue } from "./codecs";
+import type { JsonValue } from "./contract";
 
 /**
  * Row data is never cacheable by a shared proxy or a browser: the same URL can

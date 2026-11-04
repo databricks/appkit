@@ -58,7 +58,6 @@ const define = defineOperation as unknown as (
 ) => unknown;
 const readUser = define({
   name: "users.get",
-  entity: "users",
   method: "GET",
   authorize: () => true,
   execute: () => null,
@@ -512,7 +511,6 @@ describe("DatabasePlugin", () => {
   test("serves nothing when every declaration was skipped", async () => {
     const unguarded = define({
       name: "users.get",
-      entity: "users",
       method: "GET",
       execute: () => null,
     });
