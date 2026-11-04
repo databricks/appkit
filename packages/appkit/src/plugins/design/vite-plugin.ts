@@ -178,6 +178,66 @@ export function designStatus(
   };
 }
 
+/** A TSX draft as written by `appkit design tsx-drafts`. */
+interface TsxWriterEntry {
+  name: string;
+  path: string | null;
+  state: "writing" | "type-checking" | "compiled" | "failed";
+  fixRounds: number;
+  error?: string;
+}
+
+/**
+ * The `tsx` section of `/design/__status`: the TSX draft writer's progress
+ * (`<design>/.staging/status.json`), with a compiled page's state taken from
+ * what the browser reported for it: `rendering` until it rendered, then
+ * `ready`, or `failed` with its errors. Null when no run was written.
+ *
+ * @internal
+ */
+export function tsxDraftStatus(
+  clientRoot: string,
+  pages: { name: string; rendered: boolean; errors: ReportedError[] | null }[],
+) {
+  let file: {
+    prompt: string;
+    done: boolean;
+    mock: TsxWriterEntry;
+    drafts: TsxWriterEntry[];
+  };
+  try {
+    file = JSON.parse(
+      fs.readFileSync(
+        path.join(clientRoot, "src/design/.staging/status.json"),
+        "utf-8",
+      ),
+    );
+  } catch {
+    return null;
+  }
+  const drafts = file.drafts.map(
+    ({
+      state,
+      error,
+      ...d
+    }): {
+      name: string;
+      path: string | null;
+      fixRounds: number;
+      state: TsxWriterEntry["state"] | "rendering" | "ready";
+      error?: string;
+    } => {
+      if (state !== "compiled") return { ...d, state, error };
+      const page = pages.find((p) => p.name === d.name);
+      if (page?.errors?.length) {
+        return { ...d, state: "failed", error: page.errors[0].error };
+      }
+      return { ...d, state: page?.rendered ? "ready" : "rendering" };
+    },
+  );
+  return { prompt: file.prompt, done: file.done, mock: file.mock, drafts };
+}
+
 /**
  * Whether the page entry can use react-router 7+ (the template ships it):
  * Node's resolution from the design page, i.e. the app's own copy. Not from
@@ -967,6 +1027,7 @@ export function designVitePlugin({
               theme: DRAFT_THEME_PATH,
               mock: DRAFT_MOCK_PATH,
               hydrator: HYDRATOR_PATH,
+              tsx: tsxDraftStatus(server.config.root, pages),
               app,
             }),
           );
