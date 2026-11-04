@@ -543,7 +543,10 @@ interface HydratorDeps {
   /** App CSS (or appkit-ui's) to scope into each block's shadow root. */
   css: string;
   h: (...args: any[]) => unknown;
-  createRoot: (el: unknown) => { render(node: unknown): void };
+  createRoot: (el: unknown) => {
+    render(node: unknown): void;
+    unmount?(): void;
+  };
   UI: Record<string, unknown>;
   normalizeBlock: typeof normalizeBlock;
   fetch: (url: string, init: RequestInit) => Promise<unknown>;
@@ -558,6 +561,8 @@ interface HydratorDeps {
  */
 export function runHydrator(deps: HydratorDeps): {
   scan(final: boolean): void;
+  /** drafts/mock.json changed: fetch it again now. */
+  mockChanged(): void;
 } {
   const { draft, origins, statusPath, css, h, createRoot, UI } = deps;
   // Browser globals; reached through globalThis because this package compiles
@@ -685,6 +690,7 @@ export function runHydrator(deps: HydratorDeps): {
   const blockCss = `
 .appkit-skeleton { min-height: 160px; border-radius: 8px; background: var(--muted, #f4f4f5); animation: appkit-pulse 1.4s ease-in-out infinite; }
 .appkit-skeleton[data-kind="KpiCard"] { min-height: 96px; }
+.appkit-skeleton[data-waiting] { display: flex; align-items: center; justify-content: center; font: 12px system-ui, sans-serif; color: var(--muted-foreground, #71717a); }
 .appkit-root { height: 100%; display: flex; flex-direction: column; }
 .appkit-title { margin: 0 0 8px; font: 600 14px/1.4 system-ui, sans-serif; color: var(--card-foreground, inherit); }
 .appkit-chart { flex: 1 1 auto; min-height: 0; }
@@ -778,11 +784,24 @@ export function runHydrator(deps: HydratorDeps): {
     );
   };
 
+  // The React root of each mounted block, and the error it reported (if any),
+  // so a block can be rendered again when drafts/mock.json changes.
+  const roots = new Map<any, { unmount?(): void }>();
+  const errorReports = new Map<any, Record<string, unknown>>();
+  // Blocks failed only because mock.json lacks their key (it may still come).
+  const mockMissing = new Set<any>();
+  const renderBlock = (script: any, node: unknown) => {
+    const root = createRoot(mount(script));
+    roots.set(script, root);
+    root.render(node);
+  };
+
   const fail = (script: any, error: unknown) => {
     handled.add(script);
     const component = script.dataset.appkit ?? "";
     const message = error instanceof Error ? error.message : String(error);
-    createRoot(mount(script)).render(
+    renderBlock(
+      script,
       h(
         "div",
         {
@@ -804,6 +823,7 @@ export function runHydrator(deps: HydratorDeps): {
       component,
       error: message,
     };
+    errorReports.set(script, report);
     post(report);
     const target = win.parent !== win ? win.parent : win.opener;
     if (target) {
@@ -816,16 +836,27 @@ export function runHydrator(deps: HydratorDeps): {
     }
   };
 
-  // drafts/mock.json: fetched once per page for `data-src="mock#<key>"`
-  // blocks, and asked for again every second until it's there and parses
-  // (the agent may still be writing it). Blocks wait as skeletons.
-  const MOCK_TRIES = 30;
+  // drafts/mock.json for `data-src="mock#<key>"` blocks. The drafts may be
+  // written before it: while it's missing or doesn't parse, those blocks
+  // wait as skeletons and the page asks again every second, for as long as
+  // it takes. A newer version (polled, or announced by the dev server) renders
+  // the blocks whose data changed again.
+  const MOCK_POLL_MS = 1000;
+  const MOCK_SLOW_MS = 30000;
   let mock: Record<string, unknown> | undefined;
+  let mockBody: string | undefined;
   let mockLoading = false;
-  let mockTries = 0;
+  let mockTimer: unknown;
   let finalSeen = false;
+  const started = Date.now();
+  // What each data-src block was last rendered from (its JSON or its error).
+  const renderedFrom = new Map<any, string>();
+  const mockBlocks = () => blocks().filter((b: any) => b.dataset.src != null);
+  // Still waiting: no usable mock.json, or it lacks a block's key.
+  const waiting = () =>
+    mockBlocks().some((b: any) => !handled.has(b) || mockMissing.has(b));
   const loadMock = () => {
-    if (mock || mockLoading || mockTries >= MOCK_TRIES) return;
+    if (mockLoading) return;
     mockLoading = true;
     deps
       .fetch(deps.mockPath, { method: "GET" })
@@ -833,20 +864,60 @@ export function runHydrator(deps: HydratorDeps): {
         r?.ok ? r.text() : Promise.reject(new Error("HTTP " + r?.status)),
       )
       .then((body: string) => {
+        if (body === mockBody) return;
         const value = JSON.parse(body);
         if (!value || typeof value !== "object" || Array.isArray(value)) {
           throw new Error("not a JSON object");
         }
         mock = value;
+        mockBody = body;
+        refresh();
       })
-      .catch(() => {
-        mockTries++;
-      })
+      .catch(() => {})
       .finally(() => {
         mockLoading = false;
-        if (mock || mockTries >= MOCK_TRIES) scan(finalSeen);
-        else win.setTimeout(loadMock, 1000);
+        if (!mock && Date.now() - started > MOCK_SLOW_MS) {
+          for (const b of mockBlocks()) {
+            const bone = shadowOf(b).querySelector(".appkit-skeleton");
+            if (bone && !bone.hasAttribute("data-waiting")) {
+              bone.setAttribute("data-waiting", "");
+              bone.textContent = "Waiting for drafts/mock.json…";
+            }
+          }
+        }
+        win.clearTimeout(mockTimer);
+        if (waiting()) mockTimer = win.setTimeout(loadMock, MOCK_POLL_MS);
       });
+  };
+  // A new mock.json: blocks whose data changed render again (in place), and
+  // the status endpoint gets this page's errors again from the start.
+  const refresh = () => {
+    let changed = false;
+    for (const b of mockBlocks()) {
+      if (!handled.has(b)) continue;
+      let from: string;
+      try {
+        from = JSON.stringify(withMock(b, {}));
+      } catch (error) {
+        from = "error:" + (error as Error).message;
+      }
+      if (renderedFrom.get(b) === from) continue;
+      changed = true;
+      roots.get(b)?.unmount?.();
+      roots.delete(b);
+      const host = hostOf(b);
+      host.removeAttribute("data-appkit-state");
+      host.shadowRoot.querySelector(".appkit-root")?.remove();
+      handled.delete(b);
+      errorReports.delete(b);
+      mockMissing.delete(b);
+    }
+    if (changed) {
+      reportedChecked = false;
+      post({ draft, reset: true });
+      for (const report of errorReports.values()) post(report);
+    }
+    scan(finalSeen);
   };
   // A block's data from mock.json: rows become its data prop (`rows` for a
   // DataTable), an object is merged into its props. Inline props win.
@@ -855,21 +926,23 @@ export function runHydrator(deps: HydratorDeps): {
     if (!key) {
       throw new Error('data-src must be "mock#<key>".');
     }
-    if (!mock) {
-      throw new Error(
-        "drafts/mock.json didn't load (missing, or not a JSON object).",
-      );
-    }
+    if (!mock) throw new Error("drafts/mock.json isn't there yet.");
     // UNV-4's drafts skill writes { mock, datasets: { <name>: rows } }.
     const datasets = (mock as { datasets?: unknown }).datasets;
     const source =
       datasets && typeof datasets === "object" && key in datasets
         ? (datasets as Record<string, unknown>)
         : mock;
-    if (!(key in source))
-      throw new Error(
-        'drafts/mock.json has no "' + key + '" (in "datasets" or at the top).',
+    if (!(key in source)) {
+      throw Object.assign(
+        new Error(
+          'drafts/mock.json has no "' +
+            key +
+            '" (in "datasets" or at the top).',
+        ),
+        { mock: true },
       );
+    }
     const value = source[key];
     const own = (props ?? {}) as Record<string, unknown>;
     if (Array.isArray(value)) {
@@ -930,23 +1003,30 @@ export function runHydrator(deps: HydratorDeps): {
           }
           continue;
         }
-      if (script.dataset.src != null && !mock && mockTries < MOCK_TRIES) {
+      if (script.dataset.src != null && !mock) {
         skeleton(script);
         loadMock();
         continue;
       }
       try {
-        if (script.dataset.src != null) props = withMock(script, props);
+        if (script.dataset.src != null) {
+          try {
+            renderedFrom.set(script, JSON.stringify(withMock(script, {})));
+          } catch (error) {
+            renderedFrom.set(script, "error:" + (error as Error).message);
+          }
+          props = withMock(script, props);
+        }
         const spec = deps.normalizeBlock(script.dataset.appkit ?? "", props);
         handled.add(script);
         const render = RENDER[spec.component];
         if (render) {
-          createRoot(mount(script)).render(render(spec.props));
+          renderBlock(script, render(spec.props));
         } else {
           // A chart: its title is a heading above it, not drawn inside the
           // chart where ECharts would put it over the axes and legend.
           const { title, ...props } = spec.props as Record<string, unknown>;
-          createRoot(mount(script)).render([
+          renderBlock(script, [
             title != null
               ? h("div", { key: "t", className: "appkit-title" }, text(title))
               : null,
@@ -959,6 +1039,11 @@ export function runHydrator(deps: HydratorDeps): {
         }
       } catch (error) {
         fail(script, error);
+        // A key mock.json lacks: keep asking, the file may still change.
+        if ((error as { mock?: boolean }).mock) {
+          mockMissing.add(script);
+          loadMock();
+        }
       }
     }
   };
@@ -981,7 +1066,12 @@ export function runHydrator(deps: HydratorDeps): {
   } else {
     scan(true);
   }
-  return { scan };
+  return {
+    scan,
+    mockChanged: () => {
+      if (mockBlocks().length) loadMock();
+    },
+  };
 }
 
 /**
@@ -1029,7 +1119,7 @@ const DRAFT = ${JSON.stringify(draft)};
 const __name = (target) => target;
 const normalizeBlock = ${normalizeBlock.toString()};
 const runHydrator = ${runHydrator.toString()};
-runHydrator({
+const hydrator = runHydrator({
   draft: DRAFT,
   origins: ${JSON.stringify(builderOrigins)},
   // Absolute, from this module's origin: the draft may be served from another
@@ -1045,6 +1135,9 @@ runHydrator({
   normalizeBlock,
   fetch: (url, init) => fetch(url, init),
 });
+
+// drafts/mock.json was written or changed: fetch it now, not on the next poll.
+import.meta.hot?.on("appkit:mock-changed", () => hydrator.mockChanged());
 
 // The draft file changed after it finished loading: show the new version.
 // (Only for drafts this dev server serves, not ones streamed from elsewhere.)

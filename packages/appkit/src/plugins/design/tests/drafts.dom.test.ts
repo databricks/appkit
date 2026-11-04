@@ -543,6 +543,132 @@ describe("runHydrator", () => {
       expect(checked()).toBe(1);
     });
 
+    // A mock.json that can change: undefined is a 404.
+    const liveMock = () => {
+      let current: unknown;
+      const gets: number[] = [];
+      const fetch = vi.fn(
+        async (_url: string, init?: { method?: string; body?: string }) => {
+          if (init?.method !== "GET") return {};
+          gets.push(Date.now());
+          return current === undefined
+            ? { ok: false, status: 404 }
+            : { ok: true, text: async () => JSON.stringify(current) };
+        },
+      );
+      const posts = () =>
+        fetch.mock.calls
+          .map((c) => c[1] as { method?: string; body?: string } | undefined)
+          .filter(
+            (i): i is { method: string; body: string } =>
+              i?.method === "POST" && typeof i.body === "string",
+          )
+          .map((i) => JSON.parse(i.body));
+      return {
+        fetch,
+        gets,
+        posts,
+        set: (value: unknown) => (current = value),
+      };
+    };
+    const states = () =>
+      [...doc.querySelectorAll("[data-appkit-block]")].map((h) => {
+        const root = (
+          h as unknown as {
+            shadowRoot: {
+              querySelector(s: string): { textContent: string } | null;
+            };
+          }
+        ).shadowRoot;
+        if (root.querySelector("[data-appkit-error]")) return "error";
+        if (root.querySelector(".appkit-root")) return "rendered";
+        const bone = root.querySelector(".appkit-skeleton");
+        return bone ? "skeleton:" + bone.textContent : "?";
+      });
+
+    test("mock.json written long after the blocks: they wait, then render when it arrives", async () => {
+      vi.useFakeTimers();
+      doc.body.innerHTML = `
+        <div><script type="application/json" data-appkit="BarChart" data-src="mock#trips">{"xKey":"day","yKey":"n"}</script></div>
+        <div><script type="application/json" data-appkit="KpiCard" data-src="mock#total"></script></div>`;
+      const m = liveMock();
+      const rendered: any[] = [];
+      run(m.fetch, (n) => rendered.push(n));
+      await settle();
+      expect(states()).toEqual(["skeleton:", "skeleton:"]);
+
+      // Past the old 30-try limit: still waiting, never an error.
+      await vi.advanceTimersByTimeAsync(45_000);
+      expect(rendered).toHaveLength(0);
+      expect(states()).toEqual([
+        "skeleton:Waiting for drafts/mock.json…",
+        "skeleton:Waiting for drafts/mock.json…",
+      ]);
+      expect(m.posts().some((p) => p.checked)).toBe(false); // errors unknown
+
+      m.set({
+        datasets: { trips: [{ day: "Mon", n: 3 }] },
+        total: { label: "Trips", value: 12 },
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(states()).toEqual(["rendered", "rendered"]);
+      expect(rendered).toHaveLength(2);
+      expect(rendered[0][1].children[0].props.data).toEqual([
+        { day: "Mon", n: 3 },
+      ]);
+      expect(m.posts().at(-1)).toEqual({ draft: "d", checked: true });
+
+      // Nothing left to wait for: no more requests, nothing rendered again.
+      const asked = m.gets.length;
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(m.gets.length).toBe(asked);
+      expect(rendered).toHaveLength(2);
+    });
+
+    test("a key mock.json lacks shows an error, and the block renders once the key is added", async () => {
+      vi.useFakeTimers();
+      doc.body.innerHTML = `
+        <div><script type="application/json" data-appkit="KpiCard" data-src="mock#a"></script></div>
+        <div><script type="application/json" data-appkit="KpiCard" data-src="mock#b"></script></div>`;
+      const m = liveMock();
+      m.set({ datasets: { a: { label: "A", value: 1 } } });
+      const rendered: any[] = [];
+      run(m.fetch, (n) => rendered.push(n));
+      await settle();
+      // (Rendering is stubbed here: the error box is in what was rendered.)
+      expect(rendered).toHaveLength(2);
+      expect(JSON.stringify(rendered[1])).toContain(
+        'drafts/mock.json has no \\"b\\"',
+      );
+
+      m.set({
+        datasets: { a: { label: "A", value: 1 }, b: { label: "B", value: 2 } },
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(rendered).toHaveLength(3); // only b rendered again
+      expect(JSON.stringify(rendered[2])).toContain('"B"');
+      expect(JSON.stringify(rendered[2])).not.toContain("has no");
+      // The status hears this page's errors again from the start: none now.
+      const posts = m.posts();
+      const last = posts.slice(posts.map((p) => !!p.reset).lastIndexOf(true));
+      expect(last).toEqual([
+        { draft: "d", reset: true },
+        { draft: "d", checked: true },
+      ]);
+    });
+
+    test("the dev server's mock-changed signal fetches it at once", async () => {
+      vi.useFakeTimers();
+      doc.body.innerHTML = `<div><script type="application/json" data-appkit="KpiCard" data-src="mock#k"></script></div>`;
+      const m = liveMock();
+      const h = run(m.fetch, () => {});
+      await settle();
+      m.set({ k: { label: "K", value: 1 } });
+      h.mockChanged();
+      await settle(); // no poll interval has passed
+      expect(states()).toEqual(["rendered"]);
+    });
+
     test("a missing key fails just that block, with a clear error", async () => {
       vi.useFakeTimers();
       doc.body.innerHTML = `<div><script type="application/json" data-appkit="BarChart" data-src="mock#nope"></script></div>`;
