@@ -14,6 +14,7 @@ import {
   entryModule,
   listDesignPages,
   resolveDesignPage,
+  tsxDraftStatus,
 } from "../vite-plugin";
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "appkit-design-"));
@@ -442,5 +443,44 @@ describe("design plugin outside development", () => {
     expect((await app.get("/design/orders")).status).toBe(404);
     // The SPA fallback still serves everything else.
     expect((await app.get("/anything")).status).toBe(200);
+  });
+});
+
+describe("tsxDraftStatus", () => {
+  test("null without a writer run", () => {
+    expect(tsxDraftStatus(clientWith([]), [])).toBeNull();
+  });
+
+  test("a compiled draft is rendering, then ready or failed from page reports", () => {
+    const entry = (name: string, state: string) => ({
+      name,
+      path: state === "compiled" ? `/design/${name}` : null,
+      state,
+      fixRounds: 0,
+    });
+    const root = clientWith({
+      "src/design/.staging/status.json": JSON.stringify({
+        prompt: "p",
+        done: false,
+        mock: entry("mock", "compiled"),
+        drafts: [
+          entry("d-a", "compiled"),
+          entry("d-b", "compiled"),
+          entry("d-c", "compiled"),
+          entry("d-d", "type-checking"),
+        ],
+      }),
+    });
+    const status = tsxDraftStatus(root, [
+      { name: "d-b", rendered: true, errors: [] },
+      { name: "d-c", rendered: false, errors: [{ error: "boom" }] },
+    ]);
+    expect(status?.drafts.map((d) => [d.name, d.state])).toEqual([
+      ["d-a", "rendering"],
+      ["d-b", "ready"],
+      ["d-c", "failed"],
+      ["d-d", "type-checking"],
+    ]);
+    expect(status?.drafts[2].error).toBe("boom");
   });
 });
