@@ -553,6 +553,57 @@ describe("draft errors in /design/__status", () => {
     });
   });
 
+  test("a reset (a load or a hot update) clears the app's errors, for that path only", async () => {
+    const { handler } = start();
+    const S = "/design/__status";
+    const app = async () => (await call(handler, "GET", S)).json.app;
+    // Two tabs of a CRUD app on different paths.
+    await call(handler, "POST", S, { app: "/orders", reset: true });
+    await call(handler, "POST", S, {
+      app: "/orders",
+      ok: true,
+      template: false,
+    });
+    await call(handler, "POST", S, {
+      app: "/orders",
+      error: "orders.map is not a function",
+    });
+    await call(handler, "POST", S, { app: "/orders/new", reset: true });
+    await call(handler, "POST", S, {
+      app: "/orders/new",
+      ok: true,
+      template: false,
+    });
+    // The last path reported is shown; the other tab didn't wipe /orders.
+    expect(await app()).toMatchObject({
+      path: "/orders/new",
+      rendered: true,
+      errors: [],
+    });
+    await call(handler, "POST", S, {
+      app: "/orders",
+      ok: true,
+      template: false,
+    });
+    expect(await app()).toMatchObject({
+      path: "/orders",
+      errors: [{ error: "orders.map is not a function" }],
+    });
+
+    // The fix arrives as a hot update: /orders resets and reports again.
+    await call(handler, "POST", S, { app: "/orders", reset: true });
+    await call(handler, "POST", S, {
+      app: "/orders",
+      ok: true,
+      template: false,
+    });
+    expect(await app()).toMatchObject({
+      path: "/orders",
+      rendered: true,
+      errors: [],
+    });
+  });
+
   test("serves the hydrator at a stable URL for drafts streamed elsewhere", async () => {
     const { handler } = start();
     const r = await call(

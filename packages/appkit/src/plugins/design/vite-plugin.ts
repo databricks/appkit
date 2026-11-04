@@ -380,6 +380,8 @@ function Pending() {
 // Reports readiness only from a successful render. A render error is caught
 // here (and shown) instead of being reported; the server is told, so a
 // failure in any component the page uses un-readies it.
+// Mounted boundaries, so a hot update can retry the ones showing an error.
+const boundaries = new Set();
 function withReady(mod, name) {
   const placeholder = mod.designPlaceholder === true;
   return class DesignReady extends Component {
@@ -388,7 +390,11 @@ function withReady(mod, name) {
       return { error };
     }
     componentDidMount() {
+      boundaries.add(this);
       this.settle();
+    }
+    componentWillUnmount() {
+      boundaries.delete(this);
     }
     componentDidUpdate() {
       this.settle();
@@ -415,7 +421,20 @@ function withReady(mod, name) {
 // Hot edits re-render in place without remounting; once React has applied
 // the edit, wait for the page to settle again before reporting it.
 // (Adding or removing the placeholder export reloads the page instead.)
-import.meta.hot?.on("vite:afterUpdate", () => setTimeout(schedule, 50));
+// Errors from before the edit are dropped: what's still wrong reports again
+// (a render error as React re-renders, a compile error from Vite).
+import.meta.hot?.on("vite:afterUpdate", () => {
+  sendStatus({ page: current?.name ?? initialPage, reset: true });
+  // Fast Refresh re-renders only the edited modules, and applies them a
+  // moment after this event: then a boundary holding an earlier error renders
+  // the page again (and catches it again if the edit didn't fix it).
+  setTimeout(() => {
+    for (const boundary of boundaries) {
+      if (boundary.state.error) boundary.setState({ error: null });
+    }
+    schedule();
+  }, 50);
+});
 `;
 
   if (!router) {
@@ -491,8 +510,12 @@ for (const method of ["pushState", "replaceState"]) {
   };
 }
 addEventListener("popstate", schedule);
-// E.g. the default home page being replaced by the real one.
-import.meta.hot?.on("vite:afterUpdate", () => setTimeout(schedule, 50));
+// E.g. the default home page being replaced by the real one. Errors from
+// before the edit are dropped: what's still wrong reports again.
+import.meta.hot?.on("vite:afterUpdate", () => {
+  sendStatus({ app: location.pathname, reset: true });
+  setTimeout(schedule, 50);
+});
 schedule();
 `;
 }
@@ -588,15 +611,13 @@ export function designVitePlugin({
     string,
     { version: number | undefined; rendered: boolean; errors: ReportedError[] }
   >();
-  // The same for the app's own pages, since the last load.
-  let appReport:
-    | {
-        path: string;
-        rendered: boolean;
-        template: boolean;
-        errors: ReportedError[];
-      }
-    | undefined;
+  // The same for the app's own pages, per path (since its last load or hot
+  // update), and the path reported last.
+  const appReports = new Map<
+    string,
+    { rendered: boolean; template: boolean; errors: ReportedError[] }
+  >();
+  let appPath: string | undefined;
   // Render errors reported by the hydrator, per draft, for one version of it;
   // `checked` once a page has handled every block of that version.
   const draftErrors = new Map<
@@ -815,21 +836,18 @@ export function designVitePlugin({
                 entry.errors.push({ error: r.error });
             }
             if (typeof r?.app === "string") {
-              if (r.reset === true || !appReport) {
-                appReport = {
-                  path: r.app,
-                  rendered: false,
-                  template: false,
-                  errors: [],
-                };
+              let entry = appReports.get(r.app);
+              if (r.reset === true || !entry) {
+                entry = { rendered: false, template: false, errors: [] };
+                appReports.set(r.app, entry);
               }
+              appPath = r.app;
               if (typeof r.ok === "boolean") {
-                appReport.path = r.app;
-                appReport.rendered = r.ok;
-                appReport.template = r.template === true;
+                entry.rendered = r.ok;
+                entry.template = r.template === true;
               }
               if (typeof r.error === "string") {
-                appReport.errors.push({ error: r.error });
+                entry.errors.push({ error: r.error });
               }
             }
             res.statusCode = 204;
@@ -890,11 +908,13 @@ export function designVitePlugin({
           const appCompileError = entry
             ? await compileGraph(server, entry)
             : undefined;
+          const appReport =
+            appPath === undefined ? undefined : appReports.get(appPath);
           const app = {
             entry: entry ?? null,
             compiled: !!entry && appCompileError === undefined,
             ...(appCompileError ? { compileError: appCompileError } : {}),
-            path: appReport?.path ?? null,
+            path: appPath ?? null,
             rendered: appReport?.rendered ?? false,
             template: appReport?.template ?? false,
             errors: appReport ? appReport.errors : null,
