@@ -8,7 +8,6 @@ import { Command } from "commander";
 
 import { agentCommand } from "./commands/agent/index.js";
 import { codemodCommand } from "./commands/codemod/index.js";
-import { designCommand } from "./commands/design/index.js";
 import { docsCommand } from "./commands/docs.js";
 import { doctorCommand } from "./commands/doctor/index.js";
 import { generateTypesCommand } from "./commands/generate-types.js";
@@ -41,7 +40,6 @@ cmd.addCommand(doctorCommand);
 cmd.addCommand(registryCommand, { hidden: true });
 cmd.addCommand(addCommand, { hidden: true });
 cmd.addCommand(agentCommand);
-cmd.addCommand(designCommand);
 
 // Surface a clean message for any uncaught setup failure (e.g. a root
 // evals.config.ts that throws on import) instead of a raw unhandled-rejection

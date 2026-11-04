@@ -22,13 +22,6 @@ export default defineConfig({
   outExtensions: () => ({
     js: ".js",
   }),
-  copy: [
-    {
-      from: "src/cli/commands/design/prompt/*",
-      to: "dist/cli/commands/design/prompt",
-      flatten: true,
-    },
-  ],
   exports: {
     devExports: "development",
   },

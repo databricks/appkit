@@ -117,8 +117,8 @@ export const designPlaceholder = true;
   "ready": true,
   "compiled": true,
   "pages": [
-    { "name": "index", "path": "/design", "rendered": true, "errors": [] },
-    { "name": "orders", "path": "/design/orders", "rendered": true, "errors": [{ "error": "Unhandled rejection: save failed" }] }
+    { "name": "index", "path": "/design", "compiled": true, "rendered": true, "errors": [], "state": "ready" },
+    { "name": "orders", "path": "/design/orders", "compiled": true, "rendered": true, "errors": [{ "error": "Unhandled rejection: save failed" }], "state": "failed" }
   ],
   "app": { "entry": "/src/main.tsx", "compiled": true, "path": "/", "rendered": true, "template": false, "errors": [] }
 }
@@ -147,7 +147,6 @@ The status also carries:
 | `waitingFor` | What `ready` is waiting on: `"index"` (no `index.tsx`), `"placeholder"` (still the template page), `"compile"` (build error), `"paint"` (no browser has rendered it yet, visible or not; the name is kept for compatibility), or `null` when ready. |
 | `placeholder` | `index.tsx` is still the template placeholder. |
 | `drafts`, `blockSchema`, `theme` | See [HTML drafts](#html-drafts). |
-| `tsx` | See [TSX drafts](#tsx-drafts). |
 
 An agent writing the page waits for `compiled: true`; a builder that wants to reveal it loads `/design` (hidden is fine) and waits for `ready` or the `appkit:design-ready` message. To check that a page works, an agent reads `rendered` and `errors` here, for any kind of app (a game, a form, a chat, a dashboard); it never needs the preview to be visible, a resize, or a look at its pixels:
 
@@ -208,38 +207,14 @@ window.addEventListener("message", (event) => {
 
 ## TSX drafts
 
-TSX drafts are design pages written directly with appkit-ui: one shared `client/src/design/mock.ts` and one page per design direction at `client/src/design/pages/<name>.tsx`, served at `/design/<name>` like any design page (each in its own error boundary, posting `appkit:design-ready` once it renders). From the app folder:
+TSX drafts are design pages written with real appkit-ui components. The plugin only renders them; whatever writes them (an app builder) owns the prompt, the model calls, the mock data and the type-check. A builder writes:
 
-```bash
-npx appkit design tsx-drafts --prompt "A dashboard for NYC taxi trips" \
-  --answers "Audience: ops analysts. Metrics: trips/day, avg fare." --name taxi
-```
+- `client/src/design/mock.ts`: the sample data the drafts share (any module works; the pages import it as `../mock`).
+- `client/src/design/pages/<name>.tsx` per draft, default-exporting the page, served at `/design/<name>`. Write a page there only once it type-checks (e.g. write elsewhere, then move it in), so a half-written file never shows. Use theme tokens (`bg-background`, `text-foreground`, ...), so drafts work in dark mode.
 
-It writes `mock.ts` and three directions (`taxi-a`, `taxi-b`, `taxi-c`) in parallel through the workspace's AI Gateway (`/ai-gateway/anthropic/v1/messages`, model `--model`, default `system.ai.claude-sonnet-5-5`, `--effort low`), all sharing one cached system prompt (`--print-prompt` shows it): the rules (theme tokens only, so pages work in dark mode), `components.schema.json`, the appkit-ui exports drafts use, and an example page with its mock. The mock streams its typed export list first and the pages start from it. Each file is type-checked with the app's `tsc` (`tsconfig.client.json`, or `--tsconfig`) and sent back with the errors for up to 2 fix rounds. Files are written in `client/src/design/.staging/` and a page is moved into `pages/` only once it compiles, so a draft shows only once it compiles. A new run replaces the previous run's drafts.
+Each page renders in its own error boundary and posts `appkit:design-ready` once rendered. Its state is in `GET /design/__status` under `pages` (see above): `compiled` / `compileError` (built server-side, no browser needed), `rendered`, `errors`, and `state`: `compile-error`, `rendering` (builds, not rendered yet), `ready` or `failed` (a browser reported errors).
 
-Progress is in `GET /design/__status` under `tsx` (null before a run):
-
-```json
-{
-  "prompt": "A dashboard for NYC taxi trips",
-  "done": false,
-  "mock": { "name": "mock", "path": null, "state": "compiled", "fixRounds": 0 },
-  "drafts": [
-    { "name": "taxi-a", "path": "/design/taxi-a", "state": "ready", "fixRounds": 0 },
-    { "name": "taxi-b", "path": null, "state": "type-checking", "fixRounds": 1 },
-    { "name": "taxi-c", "path": null, "state": "failed", "fixRounds": 2, "error": "..." }
-  ]
-}
-```
-
-`state` is `writing`, `type-checking`, then `rendering` once the page compiled, `ready` once a browser rendered it (as `rendered` in `pages`), or `failed` (it didn't compile after 2 fix rounds, or its page reported an error; `error` says why).
-
-Lock-in keeps one draft as is and deletes the others (no translation; only its `../mock` import becomes `./mock`):
-
-```bash
-npx appkit design lock-in taxi-b          # → client/src/design/index.tsx (/design)
-npx appkit design lock-in taxi-b --home   # no-data apps → client/src/pages/home/HomePage.tsx + mock.ts; route it at / in App.tsx
-```
+Lock-in is a file operation for the builder: keep the chosen page as `client/src/design/index.tsx` (`/design`, repointing `../mock` to `./mock`), or as the app's home page for apps with no data, and delete the other drafts.
 
 ## HTML drafts
 
