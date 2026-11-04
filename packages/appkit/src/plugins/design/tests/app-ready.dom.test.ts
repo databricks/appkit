@@ -22,15 +22,20 @@ function load(html: string) {
     if (init?.body) statusReports.push(JSON.parse(init.body));
     return {};
   };
-  // Its one module-only piece is Vite's import.meta.hot, absent outside a
-  // dev server.
+  // Its one module-only piece is Vite's import.meta.hot: a stand-in whose
+  // events the test can fire.
+  hot.handlers = {};
+  win.__testHot = {
+    on: (event: string, fn: () => void) => (hot.handlers[event] = fn),
+  };
   new Function(
-    appReadyModule([ORIGIN]).replaceAll("import.meta.hot", "undefined"),
+    appReadyModule([ORIGIN]).replaceAll("import.meta.hot", "window.__testHot"),
   )();
   return postMessage;
 }
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const statusReports: Record<string, unknown>[] = [];
+const hot: { handlers: Record<string, () => void> } = { handlers: {} };
 
 afterEach(() => {
   delete win.__appkitDesign;
@@ -120,4 +125,34 @@ test("a crash that leaves nothing mounted is reported as not rendered, and no re
     expect.objectContaining({ app: "/tools/convert", ok: true }),
   );
   expect(postMessage).not.toHaveBeenCalled();
+});
+
+// Not a dashboard: a quiz game whose answer handler threw, then got fixed by a
+// hot update (no page load).
+test("a hot update drops the errors from before it, then reports the page again", async () => {
+  win.history.replaceState(null, "", "/quiz");
+  win.requestAnimationFrame = vi.fn();
+  load('<div id="root"><h1>Quiz</h1><button>Answer</button></div>');
+  await wait(700);
+  win.dispatchEvent(
+    new win.ErrorEvent("error", {
+      error: new Error("answers is undefined"),
+      message: "answers is undefined",
+    }),
+  );
+  await wait(10);
+  expect(statusReports).toContainEqual({
+    app: "/quiz",
+    error: "answers is undefined",
+  });
+  const before = statusReports.length;
+
+  hot.handlers["vite:afterUpdate"]();
+  await wait(700);
+  const after = statusReports.slice(before);
+  expect(after[0]).toEqual({ app: "/quiz", reset: true });
+  expect(after).toContainEqual({ app: "/quiz", ok: true, template: false });
+  expect(after).not.toContainEqual(
+    expect.objectContaining({ error: expect.anything() }),
+  );
 });

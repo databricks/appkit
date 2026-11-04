@@ -127,13 +127,13 @@ export const designPlaceholder = true;
 `pages` lists every design page, index first, so a builder can show a page switcher. For each, as a browser (hidden is fine) last reported it for the file's current version:
 
 - `rendered`: React mounted the page without a render error and it settled (see above).
-- `errors`: what the page hit: its render error (caught by the page's error boundary), uncaught errors (event handlers, timers), unhandled promise rejections and Vite compile errors, each `{ "error": message }`. `null` until a browser has loaded this version of the page (unknown, not "no errors").
+- `errors`: what the page hit: its render error (caught by the page's error boundary), uncaught errors (event handlers, timers), unhandled promise rejections and Vite compile errors, each `{ "error": message }`. `null` until a browser has loaded this version of the page (unknown, not "no errors"). Errors are cleared when the page loads again or takes a hot update (also one to a component it imports): what's still wrong is reported again, so a fixed error disappears without a reload.
 
 `app` is the same for the app's own pages (not `/design`):
 
 - `entry`: the app's entry module, from `client/index.html`.
 - `compiled`: that module and everything it imports build, checked server-side like `compiled` below (`compileError` when they don't).
-- `path`: the page last loaded.
+- `path`: the page last reported. Each path is tracked on its own, so two tabs on different pages don't reset each other; `rendered`, `template` and `errors` are this path's.
 - `rendered`: something is mounted in `#root` and the page settled (a crash outside an error boundary leaves `#root` empty: `false`, and its error is listed).
 - `template`: it's the template's default home page.
 - `errors`: as for `pages` (`null` until a page has loaded since the dev server started).

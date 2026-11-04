@@ -208,6 +208,16 @@ describe("entryModule", () => {
     expect(code).toContain(
       "postStatus(name, false, this.state.error?.message ?? String(this.state.error))",
     );
+    // A hot update (e.g. a fix in an imported component) drops the page's
+    // earlier errors before it reports again.
+    expect(code).toContain(
+      "sendStatus({ page: current?.name ?? initialPage, reset: true });",
+    );
+    // ...and retries a boundary still showing the old error, so a fix in an
+    // imported component renders the page again.
+    expect(code).toContain(
+      "if (boundary.state.error) boundary.setState({ error: null });",
+    );
   });
 });
 
