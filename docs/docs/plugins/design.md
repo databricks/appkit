@@ -215,7 +215,7 @@ Drafts share the app template's theme by linking `/design/drafts/theme.css` inst
 <link rel="stylesheet" href="/design/drafts/theme.css" />
 ```
 
-A draft is streamed while it's still being written: the plugin sends what the file holds and keeps appending what's added, until the file ends with `</html>` (or stops changing for 8 seconds). So a draft fills in on screen as the agent writes it. Editing a finished draft reloads it.
+A draft is streamed while it's still being written: the plugin sends what the file holds and keeps appending what's added, until the file ends with `</html>` (or stops changing for 8 seconds). So a draft fills in on screen as the agent writes it: each `data-appkit` block renders as soon as its JSON is complete, while the rest is still arriving. The first bytes of the response carry the app's theme inline (light and dark tokens, `color-scheme`, the page background), so a dark page is dark from its first paint, before any stylesheet the draft links has loaded, and the injected hydrator script is `async`, so nothing in front of the draft holds back its rendering. Editing a finished draft reloads it.
 
 ### Drafts streamed by an app builder
 
