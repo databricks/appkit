@@ -14,7 +14,7 @@ import {
   entryModule,
   listDesignPages,
   resolveDesignPage,
-  tsxDraftStatus,
+  pageState,
 } from "../vite-plugin";
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "appkit-design-"));
@@ -446,41 +446,16 @@ describe("design plugin outside development", () => {
   });
 });
 
-describe("tsxDraftStatus", () => {
-  test("null without a writer run", () => {
-    expect(tsxDraftStatus(clientWith([]), [])).toBeNull();
-  });
-
-  test("a compiled draft is rendering, then ready or failed from page reports", () => {
-    const entry = (name: string, state: string) => ({
-      name,
-      path: state === "compiled" ? `/design/${name}` : null,
-      state,
-      fixRounds: 0,
-    });
-    const root = clientWith({
-      "src/design/.staging/status.json": JSON.stringify({
-        prompt: "p",
-        done: false,
-        mock: entry("mock", "compiled"),
-        drafts: [
-          entry("d-a", "compiled"),
-          entry("d-b", "compiled"),
-          entry("d-c", "compiled"),
-          entry("d-d", "type-checking"),
-        ],
-      }),
-    });
-    const status = tsxDraftStatus(root, [
-      { name: "d-b", rendered: true, errors: [] },
-      { name: "d-c", rendered: false, errors: [{ error: "boom" }] },
-    ]);
-    expect(status?.drafts.map((d) => [d.name, d.state])).toEqual([
-      ["d-a", "rendering"],
-      ["d-b", "ready"],
-      ["d-c", "failed"],
-      ["d-d", "type-checking"],
-    ]);
-    expect(status?.drafts[2].error).toBe("boom");
+describe("pageState", () => {
+  test("from compile, render and error reports", () => {
+    const state = (
+      compiled: boolean,
+      rendered: boolean,
+      errors: { error: string }[] | null,
+    ) => pageState({ compiled, rendered, errors });
+    expect(state(false, false, null)).toBe("compile-error");
+    expect(state(true, false, null)).toBe("rendering");
+    expect(state(true, true, [])).toBe("ready");
+    expect(state(true, true, [{ error: "boom" }])).toBe("failed");
   });
 });

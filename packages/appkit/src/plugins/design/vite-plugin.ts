@@ -178,64 +178,22 @@ export function designStatus(
   };
 }
 
-/** A TSX draft as written by `appkit design tsx-drafts`. */
-interface TsxWriterEntry {
-  name: string;
-  path: string | null;
-  state: "writing" | "type-checking" | "compiled" | "failed";
-  fixRounds: number;
-  error?: string;
-}
-
 /**
- * The `tsx` section of `/design/__status`: the TSX draft writer's progress
- * (`<design>/.staging/status.json`), with a compiled page's state taken from
- * what the browser reported for it: `rendering` until it rendered, then
- * `ready`, or `failed` with its errors. Null when no run was written.
+ * A design page's state in `/design/__status`, from what the plugin knows:
+ * `compile-error` (its module graph doesn't build), `rendering` (builds, no
+ * browser has rendered this version yet), `ready` (rendered, no errors) or
+ * `failed` (a browser reported errors).
  *
  * @internal
  */
-export function tsxDraftStatus(
-  clientRoot: string,
-  pages: { name: string; rendered: boolean; errors: ReportedError[] | null }[],
-) {
-  let file: {
-    prompt: string;
-    done: boolean;
-    mock: TsxWriterEntry;
-    drafts: TsxWriterEntry[];
-  };
-  try {
-    file = JSON.parse(
-      fs.readFileSync(
-        path.join(clientRoot, "src/design/.staging/status.json"),
-        "utf-8",
-      ),
-    );
-  } catch {
-    return null;
-  }
-  const drafts = file.drafts.map(
-    ({
-      state,
-      error,
-      ...d
-    }): {
-      name: string;
-      path: string | null;
-      fixRounds: number;
-      state: TsxWriterEntry["state"] | "rendering" | "ready";
-      error?: string;
-    } => {
-      if (state !== "compiled") return { ...d, state, error };
-      const page = pages.find((p) => p.name === d.name);
-      if (page?.errors?.length) {
-        return { ...d, state: "failed", error: page.errors[0].error };
-      }
-      return { ...d, state: page?.rendered ? "ready" : "rendering" };
-    },
-  );
-  return { prompt: file.prompt, done: file.done, mock: file.mock, drafts };
+export function pageState(page: {
+  compiled: boolean;
+  rendered: boolean;
+  errors: ReportedError[] | null;
+}): "compile-error" | "rendering" | "ready" | "failed" {
+  if (!page.compiled) return "compile-error";
+  if (page.errors?.length) return "failed";
+  return page.rendered ? "ready" : "rendering";
 }
 
 /**
@@ -965,17 +923,31 @@ export function designVitePlugin({
             indexReport?.rendered ? indexReport.version : undefined,
           );
           // Per page, for the version on disk: null until a browser reported.
-          const pages = status.pages.map((page) => {
-            const report = pageReports.get(page.name);
-            const known =
-              !!report &&
-              report.version === pageVersion(server.config.root, page.name);
-            return {
-              ...page,
-              rendered: known && report.rendered,
-              errors: known ? report.errors : null,
-            };
-          });
+          // Each page is compiled server-side like the index below, so a
+          // builder can tell a draft that doesn't build without a browser.
+          const pages = await Promise.all(
+            status.pages.map(async (page) => {
+              const report = pageReports.get(page.name);
+              const known =
+                !!report &&
+                report.version === pageVersion(server.config.root, page.name);
+              const file = resolveDesignPage(server.config.root, page.path);
+              const pageCompileError = file
+                ? await compileGraph(
+                    server,
+                    `/${path.relative(server.config.root, file).split(path.sep).join("/")}`,
+                  )
+                : "missing";
+              const info = {
+                ...page,
+                compiled: pageCompileError === undefined,
+                ...(pageCompileError ? { compileError: pageCompileError } : {}),
+                rendered: known && report.rendered,
+                errors: known ? report.errors : null,
+              };
+              return { ...info, state: pageState(info) };
+            }),
+          );
           // The app's own pages: compiled server-side from index.html's entry
           // module, rendered and errors as its pages report them.
           const entry = appEntry(server.config.root);
@@ -1027,7 +999,6 @@ export function designVitePlugin({
               theme: DRAFT_THEME_PATH,
               mock: DRAFT_MOCK_PATH,
               hydrator: HYDRATOR_PATH,
-              tsx: tsxDraftStatus(server.config.root, pages),
               app,
             }),
           );

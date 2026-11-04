@@ -482,12 +482,21 @@ describe("draft errors in /design/__status", () => {
     // Nothing reported yet: not rendered, errors unknown.
     let status = await get();
     expect(status.pages).toEqual([
-      { name: "index", path: "/design", rendered: false, errors: null },
+      {
+        name: "index",
+        path: "/design",
+        compiled: true,
+        rendered: false,
+        errors: null,
+        state: "rendering",
+      },
       {
         name: "settings",
         path: "/design/settings",
+        compiled: true,
         rendered: false,
         errors: null,
+        state: "rendering",
       },
     ]);
     expect(status.app).toEqual({
@@ -514,12 +523,21 @@ describe("draft errors in /design/__status", () => {
     status = await get();
     expect(status).toMatchObject({ ready: true, waitingFor: null });
     expect(status.pages).toEqual([
-      { name: "index", path: "/design", rendered: true, errors: [] },
+      {
+        name: "index",
+        path: "/design",
+        compiled: true,
+        rendered: true,
+        errors: [],
+        state: "ready",
+      },
       {
         name: "settings",
         path: "/design/settings",
+        compiled: true,
         rendered: true,
         errors: [{ error: "Unhandled rejection: save failed" }],
+        state: "failed",
       },
     ]);
     expect(status.app).toMatchObject({ path: "/", rendered: true, errors: [] });
@@ -544,8 +562,18 @@ describe("draft errors in /design/__status", () => {
     expect(status.pages[1]).toEqual({
       name: "settings",
       path: "/design/settings",
+      compiled: true,
       rendered: false,
       errors: [{ error: "Settings is not a function" }],
+      state: "failed",
+    });
+
+    // A page that doesn't build, known without a browser.
+    compileErrors["/src/design/pages/settings.tsx"] = "Unexpected token";
+    expect((await get()).pages[1]).toMatchObject({
+      compiled: false,
+      compileError: expect.stringContaining("Unexpected token"),
+      state: "compile-error",
     });
     expect(status.app).toMatchObject({
       compiled: false,
