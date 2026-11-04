@@ -430,6 +430,16 @@ export const PARENT_CONTEXT_CHAINS: Record<string, ParentContextStep[]> = {
   ],
 };
 
+/**
+ * Parents a drill-down opens on before offering the full walk. Finding
+ * `system` among thousands of catalogs is slow, and system.ai holds the
+ * foundation models, so the model service picker lists it first. The picker
+ * still offers the full drill-down: user model services live in other schemas.
+ */
+export const DEFAULT_PARENTS: Record<string, string[]> = {
+  model_service: ["system", "ai"],
+};
+
 /** True when a resource type needs a parent-context drill-down to list. */
 export function isParentContext(resourceType: string): boolean {
   return resourceType in PARENT_CONTEXT_CHAINS;
