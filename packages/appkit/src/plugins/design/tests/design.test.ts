@@ -203,8 +203,11 @@ describe("entryModule", () => {
       "const placeholder = mod.designPlaceholder === true",
     );
     expect(code).toContain("ok: !this.state.error && !placeholder");
-    // A render error anywhere in the page's tree un-readies the server.
-    expect(code).toContain("if (this.state.error) postStatus(name, false)");
+    // A render error anywhere in the page's tree un-readies the server, with
+    // its message.
+    expect(code).toContain(
+      "postStatus(name, false, this.state.error?.message ?? String(this.state.error))",
+    );
   });
 });
 
@@ -216,8 +219,9 @@ describe("app-ready script", () => {
       'type: "appkit:app-ready", version: 1, path: location.pathname',
     );
     expect(code).toContain(
-      'if (document.querySelector("[data-appkit-template-home]")) return;',
+      'const template = !!document.querySelector("[data-appkit-template-home]")',
     );
+    expect(code).toContain("if (!ok || template) return;");
     expect(code).toContain("await document.fonts?.ready");
     expect(code).not.toContain('"*"');
   });
@@ -245,7 +249,7 @@ describe("app-ready script", () => {
     });
   };
 
-  test("is added to app pages only, and only with a builder origin", () => {
+  test("is added to app pages only (with or without a builder origin)", () => {
     const tags = inject(["https://builder.example.com"], "/orders?x=1");
     expect(tags?.[0].attrs.src).toBe(
       "/@id/__x00__virtual:appkit-app-ready.mjs",
@@ -254,7 +258,10 @@ describe("app-ready script", () => {
     expect(
       inject(["https://builder.example.com"], "/design/x"),
     ).toBeUndefined();
-    expect(inject([], "/")).toBeUndefined();
+    // Without a builder it still reports to /design/__status.
+    expect(inject([], "/")?.[0].attrs.src).toBe(
+      "/@id/__x00__virtual:appkit-app-ready.mjs",
+    );
   });
 });
 

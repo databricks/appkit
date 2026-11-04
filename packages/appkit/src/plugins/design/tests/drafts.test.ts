@@ -457,6 +457,102 @@ describe("draft errors in /design/__status", () => {
     });
   });
 
+  // Not a dashboard: a multi-page tool with a settings form.
+  test("reports each page and the app as rendered, with errors, from browser reports only", async () => {
+    const compileErrors: Record<string, string> = {};
+    const { app, handler } = start(async (url) => {
+      if (compileErrors[url]) throw new Error(compileErrors[url]);
+      return {};
+    });
+    writeIndex(app, "export default () => null;");
+    fs.mkdirSync(path.join(app, "client/src/design/pages"), {
+      recursive: true,
+    });
+    fs.writeFileSync(
+      path.join(app, "client/src/design/pages/settings.tsx"),
+      "export default () => null;",
+    );
+    fs.writeFileSync(
+      path.join(app, "client/index.html"),
+      '<div id="root"></div><script type="module" src="/src/main.tsx"></script>',
+    );
+    const S = "/design/__status";
+    const get = async () => (await call(handler, "GET", S)).json;
+
+    // Nothing reported yet: not rendered, errors unknown.
+    let status = await get();
+    expect(status.pages).toEqual([
+      { name: "index", path: "/design", rendered: false, errors: null },
+      {
+        name: "settings",
+        path: "/design/settings",
+        rendered: false,
+        errors: null,
+      },
+    ]);
+    expect(status.app).toEqual({
+      entry: "/src/main.tsx",
+      compiled: true,
+      path: null,
+      rendered: false,
+      template: false,
+      errors: null,
+    });
+
+    // A hidden preview loads both pages and the app; the settings form's
+    // submit handler throws later.
+    for (const page of ["index", "settings"]) {
+      await call(handler, "POST", S, { page, reset: true });
+      await call(handler, "POST", S, { page, ok: true });
+    }
+    await call(handler, "POST", S, {
+      page: "settings",
+      error: "Unhandled rejection: save failed",
+    });
+    await call(handler, "POST", S, { app: "/", reset: true });
+    await call(handler, "POST", S, { app: "/", ok: true, template: false });
+    status = await get();
+    expect(status).toMatchObject({ ready: true, waitingFor: null });
+    expect(status.pages).toEqual([
+      { name: "index", path: "/design", rendered: true, errors: [] },
+      {
+        name: "settings",
+        path: "/design/settings",
+        rendered: true,
+        errors: [{ error: "Unhandled rejection: save failed" }],
+      },
+    ]);
+    expect(status.app).toMatchObject({ path: "/", rendered: true, errors: [] });
+
+    // Editing a page makes its report stale: unknown again until it reports.
+    const settings = path.join(app, "client/src/design/pages/settings.tsx");
+    fs.utimesSync(settings, new Date(), new Date(Date.now() + 5000));
+    expect((await get()).pages[1]).toMatchObject({
+      rendered: false,
+      errors: null,
+    });
+
+    // A render error, with its message; and the app failing to build.
+    await call(handler, "POST", S, {
+      page: "settings",
+      ok: false,
+      error: "Settings is not a function",
+    });
+    compileErrors["/src/main.tsx"] =
+      'Failed to resolve import "./api" from "src/main.tsx"';
+    status = await get();
+    expect(status.pages[1]).toEqual({
+      name: "settings",
+      path: "/design/settings",
+      rendered: false,
+      errors: [{ error: "Settings is not a function" }],
+    });
+    expect(status.app).toMatchObject({
+      compiled: false,
+      compileError: expect.stringContaining("Failed to resolve import"),
+    });
+  });
+
   test("serves the hydrator at a stable URL for drafts streamed elsewhere", async () => {
     const { handler } = start();
     const r = await call(

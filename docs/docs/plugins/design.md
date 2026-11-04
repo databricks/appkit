@@ -72,7 +72,7 @@ In development, the dev server adds `data-source="file:line:col"` to every nativ
 
 ## Readiness
 
-A builder that embeds `/design` can wait until there is a real design to show, instead of revealing an empty page. `/design` is **ready** once `client/src/design/index.tsx` exists, isn't the template placeholder, and has painted in a browser since it last changed. **`ready` needs a browser**: nothing turns it true until a client loads `/design` and paints it (a hidden iframe is enough). To wait without a browser, use `compiled` and `waitingFor` (below). A page that throws while rendering (in the page file or any component it uses) shows the error in place and turns `ready` back to `false` until a render succeeds again.
+A builder that embeds `/design` can wait until there is a real design to show, instead of revealing an empty page. `/design` is **ready** once `client/src/design/index.tsx` exists, isn't the template placeholder, and has rendered in a browser since it last changed. **`ready` needs a browser, but not a visible one**: a client has to load `/design`, and a hidden iframe is enough (nothing waits for a painted frame, and nothing looks at pixels). To wait without a browser at all, use `compiled` and `waitingFor` (below). A page that throws while rendering (in the page file or any component it uses) shows the error in place, reports it, and turns `ready` back to `false` until a render succeeds again.
 
 ### What "ready" waits for
 
@@ -80,9 +80,9 @@ After a successful render the page waits until it shows its real content before 
 
 - web fonts have loaded (`document.fonts.ready`);
 - no `Suspense` fallback is on screen (lazy components and data that suspend);
-- no `fetch` started by the page is still in flight, for example chart data;
-- the page's DOM hasn't changed for 300 ms (charts drawing, lists filling in);
-- then two animation frames, so it has painted.
+- no `fetch` started by the page is still in flight (its data, whatever kind);
+- the page's DOM hasn't changed for 300 ms (lists filling in, content appearing);
+- then two animation frames, or 100 ms without any: a hidden page (a builder's preview kept out of sight) gets no animation frames, and still reports.
 
 It never reports while the page is the template placeholder or is showing a render error. The automatic waits give up after 10 seconds, so a stream that never ends can't hold the page back forever.
 
@@ -115,24 +115,46 @@ export const designPlaceholder = true;
 ```json
 {
   "ready": true,
+  "compiled": true,
   "pages": [
-    { "name": "index", "path": "/design" },
-    { "name": "orders", "path": "/design/orders" }
-  ]
+    { "name": "index", "path": "/design", "rendered": true, "errors": [] },
+    { "name": "orders", "path": "/design/orders", "rendered": true, "errors": [{ "error": "Unhandled rejection: save failed" }] }
+  ],
+  "app": { "entry": "/src/main.tsx", "compiled": true, "path": "/", "rendered": true, "template": false, "errors": [] }
 }
 ```
 
-`pages` lists every design page, index first, so a builder can show a page switcher. The status also carries:
+`pages` lists every design page, index first, so a builder can show a page switcher. For each, as a browser (hidden is fine) last reported it for the file's current version:
+
+- `rendered`: React mounted the page without a render error and it settled (see above).
+- `errors`: what the page hit: its render error (caught by the page's error boundary), uncaught errors (event handlers, timers), unhandled promise rejections and Vite compile errors, each `{ "error": message }`. `null` until a browser has loaded this version of the page (unknown, not "no errors").
+
+`app` is the same for the app's own pages (not `/design`):
+
+- `entry`: the app's entry module, from `client/index.html`.
+- `compiled`: that module and everything it imports build, checked server-side like `compiled` below (`compileError` when they don't).
+- `path`: the page last loaded.
+- `rendered`: something is mounted in `#root` and the page settled (a crash outside an error boundary leaves `#root` empty: `false`, and its error is listed).
+- `template`: it's the template's default home page.
+- `errors`: as for `pages` (`null` until a page has loaded since the dev server started).
+
+The status also carries:
 
 | Field | Meaning |
 | ----- | ------- |
 | `compiled` | The index page and every module of the app it imports, transitively, build (compiled server-side as a browser would load them, so no browser is needed; dependencies in `node_modules` aren't recompiled). |
 | `compileError` | Why it doesn't, prefixed with the failing module (`src/design/Card.tsx: ...`). |
-| `waitingFor` | What `ready` is waiting on: `"index"` (no `index.tsx`), `"placeholder"` (still the template page), `"compile"` (build error), `"paint"` (no browser has painted it yet), or `null` when ready. |
+| `waitingFor` | What `ready` is waiting on: `"index"` (no `index.tsx`), `"placeholder"` (still the template page), `"compile"` (build error), `"paint"` (no browser has rendered it yet, visible or not; the name is kept for compatibility), or `null` when ready. |
 | `placeholder` | `index.tsx` is still the template placeholder. |
 | `drafts`, `blockSchema`, `theme` | See [HTML drafts](#html-drafts). |
 
-An agent writing the page waits for `compiled: true`; a builder that wants to reveal it loads `/design` (hidden is fine) and waits for `ready` or the `appkit:design-ready` message.
+An agent writing the page waits for `compiled: true`; a builder that wants to reveal it loads `/design` (hidden is fine) and waits for `ready` or the `appkit:design-ready` message. To check that a page works, an agent reads `rendered` and `errors` here, for any kind of app (a game, a form, a chat, a dashboard); it never needs the preview to be visible, a resize, or a look at its pixels:
+
+```ts
+const s = await (await fetch(`${appUrl}/design/__status`)).json();
+const appWorks = s.app.compiled && s.app.rendered && s.app.errors?.length === 0;
+const pagesWork = s.pages.every((p) => p.rendered && p.errors?.length === 0);
+```
 
 ### `appkit:design-ready` message
 
@@ -159,7 +181,7 @@ window.addEventListener("message", (event) => {
 
 ## App readiness
 
-The same idea for the real app, so a builder never reveals the template's default home page. In development, when `builderOrigin` is set, the plugin adds a small script to the app's own pages (not `/design`). Once a page has settled (the same waits as [design readiness](#what-ready-waits-for), including `useDesignReady`), and again after client-side navigation and hot updates, it posts:
+The same idea for the real app, so a builder never reveals the template's default home page. In development the plugin adds a small script to the app's own pages (not `/design`). It always reports to `/design/__status` (`app`, above); with `builderOrigin` set it also posts to the builder. Once a page has settled (the same waits as [design readiness](#what-ready-waits-for), including `useDesignReady`), and again after client-side navigation and hot updates, it posts:
 
 ```ts
 interface AppReadyMessage {
@@ -169,7 +191,7 @@ interface AppReadyMessage {
 }
 ```
 
-This is the signal for an app that skips `/design` (e.g. one that needs no data): the builder can load the app's `/` in a hidden frame and reveal it when `appkit:app-ready` arrives. Hidden frames get no animation frames, so on the app's pages the final wait for a paint gives up after 100 ms instead of waiting for frames forever. `/design` keeps its two-frame wait.
+This is the signal for an app that skips `/design` (e.g. one that needs no data): the builder can load the app's `/` in a hidden frame and reveal it when `appkit:app-ready` arrives. It isn't posted while nothing is mounted in `#root` (a crash), and it's sent from a hidden frame too (the final wait for a paint gives up after 100 ms, as on `/design`).
 
 It isn't posted while an element with the `data-appkit-template-home` attribute is on screen. The app template's default home page (`HomePage` in `client/src/App.tsx`) carries it; a builder can also look for it directly. Remove the attribute, or the page, when the app gets its real home page, and the next settle (a hot update counts) posts `appkit:app-ready`.
 
