@@ -39,15 +39,14 @@ export const schema = defineSchema(({ table }) => ({
 import { z } from "zod";
 export const getNote = defineOperation({
   name: "notes.get",
-  entity: "notes",
   method: "GET",
   input: z.object({ id: z.number() }),
+  output: z.object({ id: z.number(), body: z.string() }),
   authorize: ({ actor }) => actor.id !== "",
   execute: ({ input, db }) => db.notes.find(input.id),
 });
 export const searchNotes = defineOperation({
   name: "notes.search",
-  entity: "notes",
   method: "GET",
   input: z.object({ q: z.string() }),
   output: z.array(z.object({ id: z.number(), body: z.string() })),
@@ -59,7 +58,6 @@ export const searchNotes = defineOperation({
 import { z } from "zod";
 export const countNotes = defineOperation({
   name: "notes.count",
-  entity: "notes",
   method: "GET",
   output: z.number(),
   authorize: () => true,
