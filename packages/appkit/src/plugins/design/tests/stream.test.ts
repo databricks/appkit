@@ -1,7 +1,13 @@
 import { transformWithOxc } from "vite";
 import { describe, expect, test } from "vitest";
 
-import { closeOpen, mockImports, renderablePartial, stubMock } from "../stream";
+import {
+  closeOpen,
+  mockImports,
+  placeholderKind,
+  renderablePartial,
+  stubMock,
+} from "../stream";
 
 const parses = async (code: string) => {
   try {
@@ -68,6 +74,14 @@ describe("closeOpen", () => {
     );
   });
 
+  test("a generic arrow's type parameters are not a tag", () => {
+    expect(
+      closeOpen(
+        'const setE = <K extends keyof D["e"]>(k: K, v: D["e"][K]) =>\n  setDraft((d) => ({ ...d, [k]: v }));\nconst f = <T,>(x: T) => x;\nreturn (\n  <div>',
+      ),
+    ).toMatch(/return \(\n {2}<div><\/div>\)$/);
+  });
+
   test("a cut inside a string or comment can't be closed", () => {
     expect(closeOpen('const a = "abc')).toBeNull();
     expect(closeOpen("/* note")).toBeNull();
@@ -89,8 +103,34 @@ describe("renderablePartial", () => {
   test("helpers not written yet are stubbed", async () => {
     const cut = PAGE.slice(0, PAGE.indexOf("function Row"));
     const code = (await renderablePartial(cut, parses)) as string;
-    expect(code).toContain("function Row() { return null; }");
-    expect(code).toContain("function Footer() { return null; }");
+    expect(code).toContain(
+      'import { DraftPlaceholder as __DraftPlaceholder } from "@databricks/appkit-ui/react/beta";',
+    );
+    expect(code).toContain(
+      'function Row() { return <__DraftPlaceholder kind="generic" />; }',
+    );
+    expect(code).toContain(
+      'function Footer() { return <__DraftPlaceholder kind="generic" />; }',
+    );
+    expect(await parses(code)).toBe(true);
+  });
+
+  test("a generic arrow's type parameter isn't stubbed as a component", async () => {
+    const src = `export default function Page() {\n  const pick = <K extends string>(k: K) => k;\n  const id = <T,>(x: T) => x;\n  return <h1>{pick("a")}{id(1)}</h1>;\n}\n`;
+    const code = (await renderablePartial(src, parses)) as string;
+    expect(code).not.toContain("__DraftPlaceholder");
+  });
+
+  test("component-boundary mode only takes cuts with nothing open", async () => {
+    const inside = PAGE.slice(0, PAGE.indexOf("      <Footer />"));
+    expect(
+      await renderablePartial(inside, parses, { boundary: true }),
+    ).toBeNull();
+    const after = PAGE.slice(0, PAGE.indexOf("function Row"));
+    const code = (await renderablePartial(after, parses, {
+      boundary: true,
+    })) as string;
+    expect(code).toContain("<Footer />\n    </div>\n  );\n}");
   });
 
   test("nothing before the default export", async () => {
@@ -106,14 +146,23 @@ describe("renderablePartial", () => {
   });
 });
 
+describe("placeholderKind", () => {
+  test("the skeleton follows the component's name", () => {
+    expect(placeholderKind("TripsChart")).toBe("chart");
+    expect(placeholderKind("RecentTripsTable")).toBe("table");
+    expect(placeholderKind("KpiCard")).toBe("card");
+    expect(placeholderKind("Header")).toBe("generic");
+  });
+});
+
 describe("stubMock", () => {
   test("stubs the values a page imports that the mock doesn't export yet", () => {
     expect(mockImports(PAGE)).toEqual(["trips"]);
     // The contract comment lists trips before it is defined.
     const mock =
       "export type Trip = { id: number };\n// export const trips: Trip[]\nexport const kpis = {};";
-    expect(stubMock(mock, ["trips", "kpis"])).toBe(
-      `${mock}\nexport const trips: any = [];\n`,
-    );
+    const code = stubMock(mock, ["trips", "kpis"]);
+    expect(code).toContain("export const trips: any = __draftValue;");
+    expect(code).not.toContain("export const kpis: any");
   });
 });

@@ -53,6 +53,12 @@ const DRAFT_MOCK_PATH = "/design/drafts/mock.json";
 const HYDRATOR_PATH = "/design/drafts/__hydrator.js";
 /** `/design/__stream/<name>`: a TSX draft rendered while it's being written. */
 const STREAM_ROUTE = /^\/design\/__stream\/([A-Za-z0-9_-]+)\/?$/;
+/**
+ * SPIKE: `APPKIT_DESIGN_STREAM_MODE=boundary` publishes a streamed page only
+ * at component boundaries (complete top-level declarations) instead of at
+ * any line, for comparing the two.
+ */
+const STREAM_MODE = process.env.APPKIT_DESIGN_STREAM_MODE;
 /** At most one published version per stream in this long. */
 const STREAM_INTERVAL_MS = 150;
 /** Vite's default dev CORS origins (localhost), kept when builders are added. */
@@ -346,6 +352,7 @@ export function entryModule(
   const shared = `
 import { Component, createElement, Suspense, useLayoutEffect } from "react";
 import { createRoot } from "react-dom/client";
+import { DesignPage } from "@databricks/appkit-ui/react/beta";
 import * as initial from "/src/design/${file}";
 import.meta.glob("/src/index.css", { eager: true });
 
@@ -407,18 +414,24 @@ function Pending() {
   return null;
 }
 
-// Reports readiness only from a successful render. A render error is caught
-// here (and shown) instead of being reported; the server is told, so a
-// failure in any component the page uses un-readies it.
-// Mounted boundaries, so a hot update can retry the ones showing an error.
+// Reports readiness only from a successful render. Every page renders
+// through appkit-ui's DesignPage: the app's theme from the first paint, and a
+// boundary that keeps the last good frame on screen when a render throws. The
+// error is reported here, so a failure in any component the page uses
+// un-readies it.
+// Mounted pages, so a hot update can retry the ones that hit an error.
 const boundaries = new Set();
 function withReady(mod, name) {
   const placeholder = mod.designPlaceholder === true;
   return class DesignReady extends Component {
-    state = { error: null };
-    static getDerivedStateFromError(error) {
-      return { error };
-    }
+    state = { reset: 0 };
+    // Set by DesignPage (it commits before this component's own lifecycle).
+    failed = false;
+    onError = (error) => {
+      this.failed = true;
+      current = { name, ok: false };
+      postStatus(name, false, error?.message ?? String(error));
+    };
     componentDidMount() {
       boundaries.add(this);
       this.settle();
@@ -429,21 +442,21 @@ function withReady(mod, name) {
     componentDidUpdate() {
       this.settle();
     }
+    retry() {
+      this.failed = false;
+      this.setState(({ reset }) => ({ reset: reset + 1 }));
+    }
     settle() {
-      current = { name, ok: !this.state.error && !placeholder };
-      if (this.state.error) {
-        postStatus(name, false, this.state.error?.message ?? String(this.state.error));
-      } else schedule();
+      if (this.failed) return;
+      current = { name, ok: !placeholder };
+      schedule();
     }
     render() {
-      if (this.state.error) {
-        return createElement(
-          "pre",
-          { style: { padding: 16, whiteSpace: "pre-wrap", color: "#b91c1c" } },
-          "Design page failed to render: " + (this.state.error?.message ?? String(this.state.error)),
-        );
-      }
-      return createElement(Suspense, { fallback: createElement(Pending) }, createElement(mod.default));
+      return createElement(
+        DesignPage,
+        { onError: this.onError, resetKey: this.state.reset },
+        createElement(Suspense, { fallback: createElement(Pending) }, createElement(mod.default)),
+      );
     }
   };
 }
@@ -460,7 +473,7 @@ import.meta.hot?.on("vite:afterUpdate", () => {
   // the page again (and catches it again if the edit didn't fix it).
   setTimeout(() => {
     for (const boundary of boundaries) {
-      if (boundary.state.error) boundary.setState({ error: null });
+      if (boundary.failed) boundary.retry();
     }
     schedule();
   }, 50);
@@ -809,7 +822,10 @@ export function designVitePlugin({
       return;
     }
     const mock = name === "mock";
-    const code = await renderablePartial(raw, isValid, { page: !mock });
+    const code = await renderablePartial(raw, isValid, {
+      page: !mock,
+      boundary: STREAM_MODE === "boundary",
+    });
     if (code === null || code === s.code) return;
     s.code = code;
     s.last = Date.now();
@@ -862,8 +878,16 @@ export function designVitePlugin({
   /** The finished file landed: Vite hot-updates the module from disk. */
   const onFinal = async (name: string) => {
     const file = finalFile(name);
+    let code: string;
+    let written: number;
+    try {
+      code = fs.readFileSync(file, "utf-8");
+      written = fs.statSync(file).mtimeMs;
+    } catch {
+      // Deleted again already (a builder starting the draft over).
+      return;
+    }
     if (name !== "mock") {
-      const code = fs.readFileSync(file, "utf-8");
       if (newTokens(code)) {
         fs.writeFileSync(path.join(streamCssDir, `${name}.tsx`), code);
         await reloadCss();
@@ -876,7 +900,7 @@ export function designVitePlugin({
       data: {
         name,
         done: true,
-        written: fs.statSync(file).mtimeMs,
+        written,
         seen: Date.now(),
       },
     });
@@ -1002,6 +1026,14 @@ export function designVitePlugin({
         }
         return [];
       }
+      // A finished draft (or mock.ts) landing while nothing imports it yet:
+      // with no boundary to update, Vite would reload every open page.
+      if (name && file === finalFile(name)) {
+        const live = modules.filter(
+          (mod) => mod.importers.size > 0 || mod.isSelfAccepting,
+        );
+        if (live.length < modules.length) return live;
+      }
     },
 
     // Tailwind only scans files for class names: point it at the copies of
@@ -1028,9 +1060,15 @@ export function designVitePlugin({
       const onFile = (file: string) => {
         const name = streamName(file);
         if (!name) return;
-        if (file === stagingFile(name)) void onStagingChange(name);
+        // Never let a draft's file (deleted mid-way, unreadable) take the
+        // dev server down.
+        const failed = (error: unknown) =>
+          server.config.logger.warn(
+            `[appkit-design] ${name}: ${String(error)}`,
+          );
+        if (file === stagingFile(name)) onStagingChange(name).catch(failed);
         else if (file === finalFile(name) && streams.has(name))
-          void onFinal(name);
+          onFinal(name).catch(failed);
       };
       server.watcher?.on("add", onFile);
       server.watcher?.on("change", onFile);

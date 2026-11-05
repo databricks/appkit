@@ -28,7 +28,12 @@ const BATCH_MS = 100;
 // Time for the replay page to get ready; the recording's t=0 is this far after the request.
 const LEAD_MS = 1500;
 
+// The writers of the replay running now, stopped by a reset.
+let writers: ReturnType<typeof setInterval>[] = [];
+
 function reset() {
+  for (const w of writers) clearInterval(w);
+  writers = [];
   let deleted = 0;
   for (const dir of [".staging", "pages"]) {
     fs.mkdirSync(path.join(design, dir), { recursive: true });
@@ -57,7 +62,7 @@ function replay(rec: Recording) {
       ? path.join(design, "mock.ts")
       : path.join(design, "pages", `${key}.tsx`);
     let next = 0;
-    const tick = setInterval(() => {
+    const tick: ReturnType<typeof setInterval> = setInterval(() => {
       const now = Date.now() - start;
       let text = "";
       while (next < stream.chunks.length && stream.chunks[next][0] <= now)
@@ -68,6 +73,7 @@ function replay(rec: Recording) {
         fs.writeFileSync(final, stream.final);
       }
     }, BATCH_MS);
+    writers.push(tick);
   }
   return start;
 }
