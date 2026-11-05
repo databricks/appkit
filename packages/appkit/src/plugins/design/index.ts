@@ -59,9 +59,9 @@ function parseOrigins(value: DesignConfig["builderOrigin"]): string[] {
  * map them back to source. `GET /design/__status` and an
  * `appkit:design-ready` message tell an embedding builder when the design is
  * ready to show (never while it's the template placeholder) and which pages
- * exist. HTML drafts in `drafts/<name>.html` are served at
- * `/design/drafts/<name>`, streamed as they're written, with their
- * `data-appkit` JSON blocks rendered by real appkit-ui components.
+ * exist. A TSX draft can be shown while it's written: a builder appends it
+ * to `client/src/design/.staging/<name>.tsx`, and `/design/__stream/<name>`
+ * renders its latest renderable version.
  *
  * In any other environment it does nothing except answer `/design` with 404.
  * The manifest is deliberately not `devOnly`: a dropped plugin couldn't claim
