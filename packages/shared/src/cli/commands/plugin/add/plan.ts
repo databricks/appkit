@@ -85,24 +85,14 @@ function bindingVarFields(r: ManifestResource): string[] {
   return (bindingOf(r)?.varFields ?? []).map(([f]) => f);
 }
 
-/** The --set keys the manifest declares, each with its allowed auth modes (null = any value). */
-export function validSetKeys(
-  plugin: ManifestPlugin,
-): Map<string, AuthMode[] | null> {
-  const keys = new Map<string, AuthMode[] | null>();
+/** The --set keys the manifest declares (authMode only for non-app-only resources). */
+export function validSetKeys(plugin: ManifestPlugin): Set<string> {
+  const keys = new Set<string>();
   for (const r of allResources(plugin)) {
     const prefix = `${plugin.name}.${r.resourceKey}.`;
-    for (const f of new Set([...fieldNames(r), ...bindingVarFields(r)])) {
-      keys.set(prefix + f, null);
-    }
-    if (!r.appOnly) {
-      keys.set(
-        prefix + AUTH_MODE_FIELD,
-        r.scope
-          ? [AUTH_MODE_OBO, AUTH_MODE_SP, AUTH_MODE_BOTH]
-          : [AUTH_MODE_SP],
-      );
-    }
+    for (const f of [...fieldNames(r), ...bindingVarFields(r)])
+      keys.add(prefix + f);
+    if (!r.appOnly) keys.add(prefix + AUTH_MODE_FIELD);
   }
   return keys;
 }
@@ -111,7 +101,7 @@ export function validSetKeys(
 function undeclaredKey(plugin: ManifestPlugin, sv: string): Error {
   const keys = validSetKeys(plugin);
   return new Error(
-    `--set "${sv}" does not match a resource declared by plugin "${plugin.name}"; valid keys: ${[...keys.keys()].join(", ") || "(none, the plugin declares no resources)"}`,
+    `--set "${sv}" does not match a resource declared by plugin "${plugin.name}"; valid keys: ${[...keys].join(", ") || "(none, the plugin declares no resources)"}`,
   );
 }
 

@@ -79,7 +79,7 @@ describe("parseSetValues", () => {
 
 test("validSetKeys derives keys and values from the manifest", () => {
   const keys = validSetKeys(plugin);
-  expect([...keys.keys()]).toEqual([
+  expect([...keys]).toEqual([
     "analytics.sql-warehouse.id",
     "analytics.sql-warehouse.authMode",
     "analytics.secret.key",
@@ -87,7 +87,6 @@ test("validSetKeys derives keys and values from the manifest", () => {
     "analytics.job.id",
     "analytics.job.authMode",
   ]);
-  expect(keys.get("analytics.job.authMode")).toEqual(["sp"]);
   expect(() =>
     parseSetValues(["analytics.sql-warehouse.name=x"], plugin),
   ).toThrow("valid keys: analytics.sql-warehouse.id");
