@@ -27,7 +27,7 @@ await createApp({
 
 | Option | Type | Description |
 | ------ | ---- | ----------- |
-| `builderOrigin` | `string \| string[]` | Origin(s) of the app builder that embeds the app. The [design](#readiness) and [app](#app-readiness) ready messages and [draft errors](#draft-errors) are posted only to these origins. Must be a bare origin like `"https://builder.example.com"`; `"*"` is rejected. Defaults to the `APPKIT_DESIGN_BUILDER_ORIGIN` environment variable (one origin, or several separated by commas), so a builder's runtime can set it for a scaffolded `design()` with no options; an explicit `builderOrigin` wins. Optional: without either, no message is posted, and `/design/__status` still works. |
+| `builderOrigin` | `string \| string[]` | Origin(s) of the app builder that embeds the app. The [design](#readiness) and [app](#app-readiness) ready messages are posted only to these origins, and `/design/__status` answers CORS for them. Must be a bare origin like `"https://builder.example.com"`; `"*"` is rejected. Defaults to the `APPKIT_DESIGN_BUILDER_ORIGIN` environment variable (one origin, or several separated by commas), so a builder's runtime can set it for a scaffolded `design()` with no options; an explicit `builderOrigin` wins. Optional: without either, no message is posted, and `/design/__status` still works. |
 
 ## Pages
 
@@ -146,7 +146,6 @@ The status also carries:
 | `compileError` | Why it doesn't, prefixed with the failing module (`src/design/Card.tsx: ...`). |
 | `waitingFor` | What `ready` is waiting on: `"index"` (no `index.tsx`), `"placeholder"` (still the template page), `"compile"` (build error), `"paint"` (no browser has rendered it yet, visible or not; the name is kept for compatibility), or `null` when ready. |
 | `placeholder` | `index.tsx` is still the template placeholder. |
-| `drafts`, `blockSchema`, `theme` | See [HTML drafts](#html-drafts). |
 
 An agent writing the page waits for `compiled: true`; a builder that wants to reveal it loads `/design` (hidden is fine) and waits for `ready` or the `appkit:design-ready` message. To check that a page works, an agent reads `rendered` and `errors` here, for any kind of app (a game, a form, a chat, a dashboard); it never needs the preview to be visible, a resize, or a look at its pixels:
 
@@ -215,106 +214,15 @@ TSX drafts are design pages written with real appkit-ui components. The plugin o
 
 Each page renders in its own error boundary and posts `appkit:design-ready` once rendered. Its state is in `GET /design/__status` under `pages` (see above): `compiled` / `compileError` (built server-side, no browser needed), `rendered`, `errors`, and `state`: `compile-error`, `rendering` (builds, not rendered yet), `ready` or `failed` (a browser reported errors).
 
+### Streaming a draft while it's written
+
+A builder can show a draft while it's still being written, instead of only once it's finished:
+
+- Append the page's source, as it arrives, to `client/src/design/.staging/<name>.tsx` (and the shared mock's to `.staging/mock.ts`).
+- Show `/design/__stream/<name>`. The dev server keeps the latest renderable version of the staging file under the page's real module (`pages/<name>.tsx`): it closes whatever is still open at the cut (JSX tags, brackets, template literals) and stubs what the page uses that hasn't arrived yet. Components not written yet show a `DraftPlaceholder` skeleton of the right shape. Each version reaches the page as a hot update, so it fills in in place, with no reload and with its state kept.
+- Until `mock.ts` exists, the page's `../mock` import is what `.staging/mock.ts` has so far, plus stubs for whatever the page imports from it that isn't there yet.
+- When the page type-checks, write it to `pages/<name>.tsx` (and `mock.ts`): the same module then loads from disk. Deleting the staging file starts that draft over.
+
+Every design page, streamed or not, renders through `DesignPage` (from `@databricks/appkit-ui/react/beta`; the plugin adds it, pages don't). It applies the app's theme before the first paint (`?theme=dark` or `?theme=light` on the URL, else the system setting), so a dark page never flashes light. If a render fails mid-stream, it keeps the last good frame on screen instead of a broken page, and holds readiness back until a render succeeds.
+
 Lock-in is a file operation for the builder: keep the chosen page as `client/src/design/index.tsx` (`/design`, repointing `../mock` to `./mock`), or as the app's home page for apps with no data, and delete the other drafts.
-
-## HTML drafts
-
-Quick layout drafts are plain HTML files in the app's `drafts/` folder, served in development at `/design/drafts/<name>` (`drafts/dashboard.html` → `/design/drafts/dashboard`). A missing draft returns 404.
-
-Drafts share the app template's theme by linking `/design/drafts/theme.css` instead of inlining tokens: appkit-ui's CSS variables (`--background`, `--foreground`, `--primary`, `--muted`, `--border`, `--chart-1` … ) for light, and for dark via `prefers-color-scheme`, plus the page background and text color at zero specificity, so the draft's own styles win:
-
-```html
-<link rel="stylesheet" href="/design/drafts/theme.css" />
-```
-
-A draft is streamed while it's still being written: the plugin sends what the file holds and keeps appending what's added, until the file ends with `</html>` (or stops changing for 8 seconds). So a draft fills in on screen as the agent writes it: each `data-appkit` block renders as soon as its JSON is complete, while the rest is still arriving. The first bytes of the response carry the app's theme inline (light and dark tokens, `color-scheme`, the page background), so a dark page is dark from its first paint, before any stylesheet the draft links has loaded, and the injected hydrator script is `async`, so nothing in front of the draft holds back its rendering. Editing a finished draft reloads it.
-
-### Drafts streamed by an app builder
-
-A builder that streams a draft itself (from its own URL, while the agent is still writing it) can use the same theme and hydrator by linking them from the app's dev server:
-
-```html
-<!doctype html>
-<html>
-  <head>
-    <link rel="stylesheet" href="http://localhost:8000/design/drafts/theme.css" />
-    <script type="module" async src="http://localhost:8000/design/drafts/__hydrator.js?draft=option-1"></script>
-  </head>
-  <body>
-    <!-- layout, then data-appkit blocks, streamed top to bottom -->
-```
-
-- `/design/drafts/__hydrator.js?draft=<name>` is a stable URL for the hydrator. `draft` names the draft in error reports (it defaults to `stream`).
-- `/design/drafts/theme.css` is the theme stylesheet described above.
-- Both URLs are listed in `/design/__status` (`hydrator`, `theme`). The plugin's endpoints and the modules the hydrator loads answer CORS for the configured `builderOrigin`s, so the draft page can be on the builder's own origin.
-- Errors of a streamed draft are reported like any other; in `/design/__status` such drafts are listed with `path: null` and `streamed: true`.
-
-Each block shows a skeleton while its JSON is still arriving, and the rendered component replaces it in place with a short fade-in (instant with `prefers-reduced-motion`).
-
-### `data-appkit` blocks
-
-Costly parts of a draft (charts, tables, KPI cards) are written as JSON blocks instead of hand-built HTML. The plugin injects one script into every draft that renders each block with the real appkit-ui component as soon as its JSON is complete, even while the rest of the file is still streaming. It uses no CDN and no network, and theme colors follow the app's styles and the system light/dark preference. Each block renders in its own shadow root, so the draft's own CSS and the components' styles don't affect each other.
-
-```html
-<script type="application/json" data-appkit="BarChart">
-  {"title": "Trips per day", "x": ["Mon", "Tue", "Wed"], "series": [{"name": "Trips", "data": [12, 19, 7]}]}
-</script>
-```
-
-Data the drafts share can live in one `drafts/mock.json` instead of inline: a JSON object keyed by name, served at `GET /design/drafts/mock.json` (linked from `/design/__status` as `mock`). A block with `data-src="mock#<key>"` takes the key from `mock.datasets` when it's there, else from the top level (so `{"datasets": {"trips": [...]}}` and `{"trips": [...]}` both work): an array becomes its `data` (`rows` for a `DataTable`), an object is merged into its props. Props written in the block win, and the block may hold no JSON at all:
-
-```html
-<script type="application/json" data-appkit="LineChart" data-src="mock#tripsPerDay">{"xKey": "day", "yKey": "trips"}</script>
-<script type="application/json" data-appkit="KpiCard" data-src="mock#totalTrips"></script>
-```
-
-The drafts may be written before `mock.json`. Until it's there and parses, those blocks show their skeleton (after 30 seconds with "Waiting for drafts/mock.json…") and the page asks for it again every second, for as long as it takes; the dev server also tells open drafts when the file is written, so they fetch it at once. When a new version arrives, each block whose data changed renders again in place. A key that a loaded `mock.json` lacks shows an error in just that block, reported like any other draft error, and the page keeps checking the file, so the block renders once the key is added. While blocks are still waiting, `/design/__status` reports the draft's errors as not known yet.
-
-The exact props of each component are published as JSON Schema (2020-12), with an example per component, in the package as `@databricks/appkit-ui/design/components.schema.json` (`node_modules/@databricks/appkit-ui/dist/design/components.schema.json`), and served at `GET /design/__data-appkit.schema.json` (linked from `/design/__status` as `blockSchema`). Read it to write valid blocks. In short:
-
-| Component | Required | Optional |
-| --------- | -------- | -------- |
-| `BarChart` | either `x` (non-empty array of labels) and `series` (non-empty array of `{ name: string, data: (number \| null)[] }`, one value per label), or `data` (array of row objects) | `xKey`, `yKey` (with `data`), `title`, `height`, `showLegend`, `colors`, `ariaLabel`, `orientation` (`"vertical"` \| `"horizontal"`), `stacked` |
-| `LineChart` | same as `BarChart` | as `BarChart` without `stacked`, plus `smooth`, `showSymbol` |
-| `AreaChart` | same as `BarChart` | as `LineChart`, plus `stacked` |
-| `PieChart`, `DonutChart` | same as `BarChart`; one series, `x` are the slice names | `title`, `height`, `showLegend`, `colors`, `ariaLabel`, `innerRadius` (0-100), `showLabels`, `labelPosition` (`"outside"` \| `"inside"` \| `"center"`) |
-| `DataTable` | `columns`: non-empty array of column names or `{ key: string, label?: string }`; `rows`: array of objects keyed by column key, or arrays in column order | |
-| `KpiCard` | `label`: string; `value`: string or number | `delta` (string or number), `hint` (string) |
-
-`DataTable` renders with appkit-ui's `Table` primitives (the `DataTable` component itself loads its rows through a query), and `KpiCard` with appkit-ui's `Card` parts. Charts take their colors from the app's theme tokens, which follow the system light/dark preference, also in a draft with a dark background.
-
-Each block renders in place, in the element that holds its `<script>`. A block that's alone in its element fills that element's height, so a sized box (`<div style="height: 20rem">`) sizes the chart. Next to a heading or text it keeps its own height (at least 160px, or `height`). A chart's `title` is shown as a heading above the chart; leave it out when the card already has its own heading. Blocks render once: while a draft streams in, a block that has rendered is never mounted or faded in again.
-
-Turning a draft into a `/design` page is then mostly mechanical: the component and its props are already there.
-
-### Draft errors
-
-A block that can't render (unknown component, props that don't fit, or JSON still invalid once the file is complete) shows a small "Couldn't render" placeholder in the draft, and the error goes back to the agent two ways:
-
-- `GET /design/__status` lists every draft with the errors of its current version (each new load of the draft replaces them). Errors are known only once a browser page has rendered that version and handled every block: until then `checked` is `false` and `errors` is `null` (unknown, not "no errors"), e.g. right after a restart or an edit:
-
-  ```json
-  {
-    "drafts": [
-      {
-        "name": "dashboard",
-        "path": "/design/drafts/dashboard",
-        "checked": true,
-        "errors": [{ "block": 3, "component": "LineChart", "error": "invalid JSON: ..." }]
-      }
-    ]
-  }
-  ```
-
-- each error is posted to the embedding builder (only to `builderOrigin`):
-
-  ```ts
-  interface DraftErrorMessage {
-    type: "appkit:draft-error";
-    version: 1;
-    draft: string;     // draft name
-    block: number;     // index of the block among the draft's data-appkit blocks
-    component: string; // the data-appkit value
-    error: string;
-  }
-  ```

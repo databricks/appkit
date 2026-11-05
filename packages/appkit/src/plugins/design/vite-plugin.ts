@@ -5,16 +5,6 @@ import path from "node:path";
 import type { Plugin, ViteDevServer } from "vite";
 
 import {
-  DRAFT_ROUTE,
-  dataAppkitSchema,
-  draftFile,
-  hydratorModule,
-  hydratorTag,
-  listDrafts,
-  streamDraft,
-  themeCss,
-} from "./drafts";
-import {
   mockImports,
   renderablePartial,
   streamHostModule,
@@ -28,8 +18,6 @@ import {
  */
 const ENTRY_PREFIX = "virtual:appkit-design-page:";
 const ENTRY_SUFFIX = ".mjs";
-/** Hydrator injected into served drafts: `virtual:appkit-draft-hydrator:<name>.mjs`. */
-const HYDRATOR_PREFIX = "virtual:appkit-draft-hydrator:";
 /** Script added to the app's own pages (not /design) to post appkit:app-ready. */
 const APP_READY_ID = "virtual:appkit-app-ready.mjs";
 /** Host page of a streamed TSX draft: `virtual:appkit-design-stream:<name>.mjs`. */
@@ -45,12 +33,6 @@ const TEMPLATE_HOME_ATTR = "data-appkit-template-home";
 const PAGE_FILE = /^(index|pages\/[A-Za-z0-9_-]+)\.(tsx|jsx)$/;
 const DESIGN_ROUTE = /^\/design(?:\/([A-Za-z0-9_-]+))?\/?$/;
 const STATUS_PATH = "/design/__status";
-const BLOCK_SCHEMA_PATH = "/design/__data-appkit.schema.json";
-const DRAFT_THEME_PATH = "/design/drafts/theme.css";
-/** drafts/mock.json, the data `data-src="mock#<key>"` blocks read. */
-const DRAFT_MOCK_PATH = "/design/drafts/mock.json";
-/** Stable URL of the draft hydrator, for drafts streamed from elsewhere. */
-const HYDRATOR_PATH = "/design/drafts/__hydrator.js";
 /** `/design/__stream/<name>`: a TSX draft rendered while it's being written. */
 const STREAM_ROUTE = /^\/design\/__stream\/([A-Za-z0-9_-]+)\/?$/;
 /**
@@ -61,25 +43,21 @@ const STREAM_ROUTE = /^\/design\/__stream\/([A-Za-z0-9_-]+)\/?$/;
 const STREAM_MODE = process.env.APPKIT_DESIGN_STREAM_MODE;
 /** At most one published version per stream in this long. */
 const STREAM_INTERVAL_MS = 150;
-/** Vite's default dev CORS origins (localhost), kept when builders are added. */
-const LOCALHOST_ORIGIN =
-  /^https?:\/\/(?:(?:[^:]+\.)?localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/;
 const EXTENSIONS = [".tsx", ".jsx"];
 
 /**
- * `pages/index.tsx` would collide with the root page, `pages/drafts.tsx` with
- * the drafts at `/design/drafts/<name>`, and `__*` with the plugin's own
- * endpoints (`/design/__status`), so those names aren't pages.
+ * `pages/index.tsx` would collide with the root page, and `__*` with the
+ * plugin's own endpoints (`/design/__status`, `/design/__stream/<name>`), so
+ * those names aren't pages.
  */
 const isReservedName = (name: string) =>
-  name === "index" || name === "drafts" || name.startsWith("__");
+  name === "index" || name.startsWith("__");
 
 /** Page files the browser entry may route to (reserved names excluded). */
 const PAGE_GLOBS = [
   "/src/design/index.{tsx,jsx}",
   "/src/design/pages/*.{tsx,jsx}",
   "!/src/design/pages/index.{tsx,jsx}",
-  "!/src/design/pages/drafts.{tsx,jsx}",
   "!/src/design/pages/__*",
 ];
 
@@ -645,9 +623,8 @@ export function designVitePlugin({
   builderOrigins = [],
 }: { builderOrigins?: string[] } = {}): Plugin {
   let root = process.cwd();
-  // Drafts live in the app folder (the dev server's working directory).
+  // The app folder (the dev server's working directory).
   const projectRoot = process.cwd();
-  const draftsDir = path.join(projectRoot, "drafts");
   // What a browser reported for each design page, for one version of its file:
   // rendered (mounted, settled; visible or not) and the errors it hit.
   const pageReports = new Map<
@@ -661,24 +638,6 @@ export function designVitePlugin({
     { rendered: boolean; template: boolean; errors: ReportedError[] }
   >();
   let appPath: string | undefined;
-  // Render errors reported by the hydrator, per draft, for one version of it;
-  // `checked` once a page has handled every block of that version.
-  const draftErrors = new Map<
-    string,
-    {
-      version: number;
-      checked: boolean;
-      errors: { block: number; component: string; error: string }[];
-    }
-  >();
-  // Drafts with a response still streaming, and the version last streamed in
-  // full: a change notification (page reload) is only needed after both.
-  const streamingDrafts = new Map<string, number>();
-  const streamedVersion = new Map<string, number>();
-  const draftVersion = (name: string) => {
-    const file = draftFile(projectRoot, name);
-    return file ? fs.statSync(file).mtimeMs : -1;
-  };
 
   // Streamed TSX drafts. A builder appends each draft's source as it
   // arrives to src/design/.staging/<name>.tsx (the shared mock's to
@@ -910,16 +869,6 @@ export function designVitePlugin({
     name: "appkit-design",
     apply: "serve",
 
-    // A draft streamed by the builder (from its own origin) loads the
-    // hydrator and its imports from this dev server: allow the builder origins
-    // next to Vite's default localhost ones.
-    config() {
-      if (builderOrigins.length === 0) return;
-      return {
-        server: { cors: { origin: [...builderOrigins, LOCALHOST_ORIGIN] } },
-      };
-    },
-
     configResolved(config) {
       root = config.root;
     },
@@ -930,7 +879,6 @@ export function designVitePlugin({
       handler(id, importer) {
         if (
           id.startsWith(ENTRY_PREFIX) ||
-          id.startsWith(HYDRATOR_PREFIX) ||
           id.startsWith(STREAM_HOST_PREFIX) ||
           id === APP_READY_ID
         ) {
@@ -1077,53 +1025,6 @@ export function designVitePlugin({
         const name = streamName(file);
         if (name && file === stagingFile(name)) streams.delete(name);
       });
-      // The app's theme tokens (light and dark) for drafts, from appkit-ui's
-      // styles as the app resolves them.
-      const draftTheme = () => {
-        let css = "";
-        try {
-          css = fs.readFileSync(
-            createRequire(
-              path.join(server.config.root, "package.json"),
-            ).resolve("@databricks/appkit-ui/styles.css"),
-            "utf-8",
-          );
-        } catch {}
-        return themeCss(css);
-      };
-      // Not Vite's watcher: for a changed .html it matches no module, Vite
-      // sends a full reload, and in middleware mode that reloads every page
-      // (a draft mid-stream, the app) on each write.
-      const onDraftChange = (file: string | null) => {
-        // Open drafts fetch it again (drafts may be written before it).
-        if (file === "mock.json") {
-          server.ws.send({ type: "custom", event: "appkit:mock-changed" });
-          return;
-        }
-        const name = /^([A-Za-z0-9_-]+)\.html$/.exec(file ?? "")?.[1];
-        // Writes during a stream reach the page through the stream itself,
-        // and a late event for content already streamed needs no reload.
-        if (
-          name &&
-          !(streamingDrafts.get(name) ?? 0) &&
-          draftVersion(name) !== streamedVersion.get(name)
-        ) {
-          server.ws.send({
-            type: "custom",
-            event: "appkit:draft-changed",
-            data: { draft: name },
-          });
-        }
-      };
-      let draftsWatcher: fs.FSWatcher | undefined;
-      const watchDrafts = () => {
-        if (draftsWatcher || !fs.existsSync(draftsDir)) return;
-        draftsWatcher = fs.watch(draftsDir, (_, file) => onDraftChange(file));
-        draftsWatcher.unref();
-      };
-      watchDrafts();
-      // drafts/ may only be created once the app is running.
-      fs.watch(projectRoot, watchDrafts).unref();
       server.middlewares.use(async (req, res, next) => {
         const pathname = req.url?.split("?")[0] ?? "";
 
@@ -1145,17 +1046,12 @@ export function designVitePlugin({
           }
         }
 
-        // The plugin's own endpoints are also used by builder pages on other
-        // origins (a streamed draft posts errors, loads the hydrator).
+        // The status endpoint is also read by builder pages on other origins.
         const origin = req.headers?.origin;
         if (
           typeof origin === "string" &&
           builderOrigins.includes(origin) &&
-          (pathname === STATUS_PATH ||
-            pathname === HYDRATOR_PATH ||
-            pathname === DRAFT_THEME_PATH ||
-            pathname === DRAFT_MOCK_PATH ||
-            pathname === BLOCK_SCHEMA_PATH)
+          pathname === STATUS_PATH
         ) {
           res.setHeader("Access-Control-Allow-Origin", origin);
           res.setHeader("Vary", "Origin");
@@ -1182,21 +1078,6 @@ export function designVitePlugin({
           return;
         }
 
-        if (pathname === HYDRATOR_PATH) {
-          const draft = new URL(req.url ?? "", "http://x").searchParams.get(
-            "draft",
-          );
-          const name =
-            draft && /^[A-Za-z0-9_-]+$/.test(draft) ? draft : "stream";
-          res.statusCode = 302;
-          res.setHeader(
-            "Location",
-            `/@id/__x00__${HYDRATOR_PREFIX}${name}${ENTRY_SUFFIX}`,
-          );
-          res.end();
-          return;
-        }
-
         if (pathname === STATUS_PATH) {
           if (req.method === "POST") {
             // Under AppKit's server, express.json() has already consumed the
@@ -1208,30 +1089,6 @@ export function designVitePlugin({
               try {
                 body = JSON.parse(raw);
               } catch {}
-            }
-            const report = body as {
-              draft?: unknown;
-              reset?: unknown;
-              checked?: unknown;
-              block?: unknown;
-              component?: unknown;
-              error?: unknown;
-            };
-            if (typeof report?.draft === "string") {
-              const version = draftVersion(report.draft);
-              let entry = draftErrors.get(report.draft);
-              if (report.reset === true || entry?.version !== version) {
-                entry = { version, checked: false, errors: [] };
-                draftErrors.set(report.draft, entry);
-              }
-              if (report.checked === true) entry.checked = true;
-              if (typeof report.error === "string") {
-                entry.errors.push({
-                  block: typeof report.block === "number" ? report.block : -1,
-                  component: String(report.component ?? ""),
-                  error: report.error,
-                });
-              }
             }
             const r = body as {
               page?: unknown;
@@ -1273,35 +1130,6 @@ export function designVitePlugin({
           }
           res.setHeader("Content-Type", "application/json");
           res.setHeader("Cache-Control", "no-store");
-          const files = listDrafts(projectRoot);
-          const drafts: {
-            name: string;
-            path: string | null;
-            streamed?: true;
-            checked: boolean;
-            // null: not known yet (no page has rendered this version).
-            errors:
-              | { block: number; component: string; error: string }[]
-              | null;
-          }[] = files.map((d) => {
-            const entry = draftErrors.get(d.name);
-            const checked =
-              entry?.version === draftVersion(d.name) && entry.checked;
-            return { ...d, checked, errors: checked ? entry.errors : null };
-          });
-          // Drafts streamed from elsewhere (no file here) report errors too.
-          for (const [name, entry] of draftErrors) {
-            if (files.some((d) => d.name === name) || entry.version !== -1) {
-              continue;
-            }
-            drafts.push({
-              name,
-              path: null,
-              streamed: true,
-              checked: entry.checked,
-              errors: entry.checked ? entry.errors : null,
-            });
-          }
           const indexReport = pageReports.get("index");
           const status = designStatus(
             server.config.root,
@@ -1379,70 +1207,8 @@ export function designVitePlugin({
               compiled,
               ...(compileError ? { compileError } : {}),
               waitingFor,
-              drafts,
-              blockSchema: BLOCK_SCHEMA_PATH,
-              theme: DRAFT_THEME_PATH,
-              mock: DRAFT_MOCK_PATH,
-              hydrator: HYDRATOR_PATH,
               app,
             }),
-          );
-          return;
-        }
-
-        if (pathname === DRAFT_THEME_PATH) {
-          res.setHeader("Content-Type", "text/css; charset=utf-8");
-          res.setHeader("Cache-Control", "no-store");
-          res.end(draftTheme());
-          return;
-        }
-
-        if (pathname === DRAFT_MOCK_PATH) {
-          // Served as written: while the agent is still writing it, the
-          // hydrator fails to parse it and asks again.
-          const file = path.join(draftsDir, "mock.json");
-          res.setHeader("Cache-Control", "no-store");
-          if (!fs.existsSync(file)) {
-            res.statusCode = 404;
-            res.setHeader("Content-Type", "text/plain");
-            res.end("No drafts/mock.json yet.");
-            return;
-          }
-          res.setHeader("Content-Type", "application/json");
-          res.end(fs.readFileSync(file, "utf-8"));
-          return;
-        }
-
-        if (pathname === BLOCK_SCHEMA_PATH) {
-          res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify(dataAppkitSchema(), null, 2));
-          return;
-        }
-
-        const draft = DRAFT_ROUTE.exec(pathname)?.[1];
-        if (draft) {
-          const file = draftFile(projectRoot, draft);
-          if (!file) {
-            res.statusCode = 404;
-            res.setHeader("Content-Type", "text/plain");
-            res.end(`No draft at drafts/${draft}.html.`);
-            return;
-          }
-          streamingDrafts.set(draft, (streamingDrafts.get(draft) ?? 0) + 1);
-          streamDraft(
-            file,
-            // The theme inline in the first bytes: the page has the app's
-            // colors (dark too) from its first paint, before any stylesheet
-            // the draft links has loaded.
-            `<style data-appkit-theme>${draftTheme().replaceAll("</", "<\\/")}</style>` +
-              hydratorTag(
-                `/@id/__x00__${HYDRATOR_PREFIX}${draft}${ENTRY_SUFFIX}`,
-              ),
-            res,
-            (mtime) => {
-              streamingDrafts.set(draft, (streamingDrafts.get(draft) ?? 1) - 1);
-              streamedVersion.set(draft, mtime);
-            },
           );
           return;
         }

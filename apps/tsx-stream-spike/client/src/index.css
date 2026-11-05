@@ -1,4 +1,0 @@
-@import "@databricks/appkit-ui/styles.css";
-
-/* Drafts are gitignored, and Tailwind skips gitignored files unless named here. */
-@source "./design/pages/*.tsx";

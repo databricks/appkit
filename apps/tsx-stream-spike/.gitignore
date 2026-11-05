@@ -1,5 +1,0 @@
-# Written by the replay (streamed drafts and their mocks) and by scripts/record.ts.
-client/src/design/pages/
-client/src/design/mock*.ts
-client/src/design/.staging/
-measure-out/
