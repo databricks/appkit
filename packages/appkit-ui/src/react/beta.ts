@@ -79,3 +79,9 @@ export type {
 // Readiness hint for pages served by the dev-only `design` plugin, which
 // ships at beta from '@databricks/appkit/beta'.
 export { useDesignReady } from "./hooks/use-design-ready";
+export {
+  DesignPage,
+  type DesignPageProps,
+  DraftPlaceholder,
+  type DraftPlaceholderKind,
+} from "./design-page";

@@ -173,6 +173,19 @@ export function closeOpen(src: string): string | null {
       (JSX_AFTER.has(prev) ||
         JSX_AFTER_WORD.test(src.slice(Math.max(0, i - 12), i).trimEnd()))
     ) {
+      // `<T extends X>(` and `<T,>(` are a generic arrow's type parameters
+      // in TSX, not a tag: skip to their closing `>`.
+      if (/^<[\w$]+\s*(?:\bextends\b|,)/.test(src.slice(i, i + 80))) {
+        let depth = 0;
+        for (; i < n; i++) {
+          if (src[i] === "<") depth++;
+          else if (src[i] === ">" && src[i - 1] !== "=" && --depth === 0) break;
+        }
+        if (i >= n) return null;
+        i++;
+        prev = ">";
+        continue;
+      }
       i++;
       stack.push({ k: "tag", name: readName() });
       continue;
@@ -224,10 +237,20 @@ function stripFence(src: string): string {
 const DECLARED =
   /(?:function|class|const|let|var)\s+([A-Z][\w$]*)|import\s+([A-Z][\w$]*)|import\s*\{([^}]*)\}|import\s+\*\s+as\s+([A-Z][\w$]*)/g;
 
+/** The skeleton shape a stubbed component gets, from its name. */
+export function placeholderKind(
+  name: string,
+): "chart" | "table" | "card" | "generic" {
+  if (/Chart|Graph|Trend|Spark|Plot|Heatmap/.test(name)) return "chart";
+  if (/Table|List|Grid|Rows|Log|Board|Feed|Queue/.test(name)) return "table";
+  if (/Card|Kpi|KPI|Stat|Tile|Metric|Summary|Panel/.test(name)) return "card";
+  return "generic";
+}
+
 /**
  * Components used as JSX tags but not declared or imported yet (helpers a
- * writer defines below the page), stubbed to render nothing so the page
- * renders before they arrive.
+ * writer defines below the page), stubbed with appkit-ui's DraftPlaceholder:
+ * a skeleton of the right shape until they arrive.
  */
 function stubComponents(code: string): string {
   const declared = new Set<string>();
@@ -243,12 +266,17 @@ function stubComponents(code: string): string {
     }
   }
   const missing = new Set<string>();
-  for (const m of code.matchAll(/(?<![\w$])<([A-Z][\w$]*)/g)) {
+  for (const m of code.matchAll(
+    /(?<![\w$])<([A-Z][\w$]*)(?!\s*(?:extends\b|,))/g,
+  )) {
     if (!declared.has(m[1])) missing.add(m[1]);
   }
-  return missing.size === 0
-    ? code
-    : `${code}\n${[...missing].map((name) => `function ${name}() { return null; }`).join("\n")}\n`;
+  if (missing.size === 0) return code;
+  const stubs = [...missing].map(
+    (name) =>
+      `function ${name}() { return <__DraftPlaceholder kind="${placeholderKind(name)}" />; }`,
+  );
+  return `import { DraftPlaceholder as __DraftPlaceholder } from "@databricks/appkit-ui/react/beta";\n${code}\n${stubs.join("\n")}\n`;
 }
 
 /** Checks that a candidate parses; the dev server's own TSX transform. */
@@ -272,7 +300,17 @@ export async function renderablePartial(
   {
     page = true,
     complete = false,
-  }: { page?: boolean; complete?: boolean } = {},
+    boundary = false,
+  }: {
+    page?: boolean;
+    complete?: boolean;
+    /**
+     * Only cuts with nothing left open: complete top-level declarations, so
+     * the page shows once its whole component has arrived (the component
+     * boundary fallback, measured against the default).
+     */
+    boundary?: boolean;
+  } = {},
 ): Promise<string | null> {
   const src = stripFence(source);
   if (complete && (await isValid(src))) return src;
@@ -283,7 +321,7 @@ export async function renderablePartial(
     const cut = lines.slice(0, end).join("\n");
     if (page && !/export\s+default\b/.test(cut)) return null;
     const closed = closeOpen(cut);
-    if (closed === null) continue;
+    if (closed === null || (boundary && closed !== cut)) continue;
     const code = page ? stubComponents(closed) : closed;
     if (await isValid(code)) return code;
   }
@@ -307,9 +345,31 @@ export function mockImports(page: string, mock = "mock"): string[] {
 }
 
 /**
- * The partial mock module plus an empty-array stub for every value a
- * streamed page imports that the mock hasn't defined yet, so the page module
- * links (a missing named export is a SyntaxError) and renders what it can.
+ * A value that can't make a page throw: any property or call gives it back,
+ * it iterates as empty and converts to "" or 0, and React renders it as
+ * nothing (it's a function). Stands in for mock values not written yet.
+ */
+const DRAFT_VALUE = `const __draftValue: any = (() => {
+  const target: any = function () {};
+  const value: any = new Proxy(target, {
+    get: (_t, key) =>
+      key === Symbol.toPrimitive
+        ? (hint: string) => (hint === "number" ? 0 : "")
+        : key === Symbol.iterator
+          ? function* () {}
+          : key === "then"
+            ? undefined
+            : value,
+    apply: () => value,
+    construct: () => value,
+  });
+  return value;
+})();`;
+
+/**
+ * The partial mock module plus a placeholder for every value a streamed page
+ * imports that the mock hasn't defined yet, so the page module links (a
+ * missing named export is a SyntaxError) and renders what it can.
  *
  * @internal
  */
@@ -324,17 +384,18 @@ export function stubMock(mock: string, imported: Iterable<string>): string {
   const stubs = [...new Set(imported)].filter((name) => !exported.has(name));
   return stubs.length === 0
     ? mock
-    : `${mock}\n${stubs.map((name) => `export const ${name}: any = [];`).join("\n")}\n`;
+    : `${mock}\n${DRAFT_VALUE}\n${stubs.map((name) => `export const ${name}: any = __draftValue;`).join("\n")}\n`;
 }
 
 /**
  * Browser entry of `/design/__stream/<name>`: renders the streamed page
  * `src/design/pages/<name>.tsx` as the dev server publishes versions of it
- * (each one a hot update, applied by Fast Refresh). A version that throws
- * while rendering is never shown: its error boundary renders a copy of the
- * last good frame in the same commit, and the next version retries. Vite's
- * error overlay is removed. Frames are reported to an embedding page as
- * `appkit:stream-frame` messages (same origin), for measuring.
+ * (each one a hot update, applied by Fast Refresh), through appkit-ui's
+ * DesignPage like every design page: a version that throws is never shown,
+ * the last good frame stays (nothing before the first one), and the next
+ * version retries. Vite's error overlay is removed. Frames are reported to an
+ * embedding page as `appkit:stream-frame` messages (same origin), for
+ * measuring.
  *
  * @internal
  */
@@ -342,6 +403,7 @@ export function streamHostModule(name: string): string {
   return `
 import { Component, createElement } from "react";
 import { createRoot } from "react-dom/client";
+import { DesignPage } from "@databricks/appkit-ui/react/beta";
 import.meta.glob("/src/index.css", { eager: true });
 
 const NAME = ${JSON.stringify(name)};
@@ -352,64 +414,46 @@ const report = (msg) => {
   }
 };
 
-// The last good frame: a copy of the page's DOM, canvases (charts) as pixels.
-let snapshot = null;
-function takeSnapshot() {
-  const nodes = [...rootEl.childNodes].map((n) => n.cloneNode(true));
-  const pixels = [...rootEl.querySelectorAll("canvas")].map((c) => {
-    const copy = document.createElement("canvas");
-    copy.width = c.width;
-    copy.height = c.height;
-    copy.style.cssText = c.style.cssText;
-    copy.getContext("2d")?.drawImage(c, 0, 0);
-    return copy;
-  });
-  snapshot = { nodes, pixels };
-}
-function restoreSnapshot(holder) {
-  if (!holder || !snapshot) return;
-  holder.replaceChildren(...snapshot.nodes.map((n) => n.cloneNode(true)));
-  holder.querySelectorAll("canvas").forEach((c, i) => {
-    const px = snapshot.pixels[i];
-    if (!px) return;
-    c.width = px.width;
-    c.height = px.height;
-    c.getContext("2d")?.drawImage(px, 0, 0);
-  });
-}
-
-let boundary = null;
-class Keep extends Component {
-  state = { error: null, generation: 0 };
-  static getDerivedStateFromError(error) {
-    return { error };
-  }
+let host = null;
+class Host extends Component {
+  // reset retries after an error; generation remounts the page.
+  state = { reset: 0, generation: 0 };
+  failed = false;
   componentDidMount() {
-    boundary = this;
+    host = this;
   }
-  componentDidCatch(error) {
+  onError = (error) => {
+    this.failed = true;
     report({ kind: "kept", error: String(error?.message ?? error) });
+  };
+  retry() {
+    if (!this.failed) return;
+    this.failed = false;
+    this.setState((s) => ({ reset: s.reset + 1 }));
+  }
+  remount() {
+    this.failed = false;
+    this.setState((s) => ({ reset: s.reset + 1, generation: s.generation + 1 }));
   }
   render() {
-    if (this.state.error) {
-      return createElement("div", { style: { display: "contents" }, ref: restoreSnapshot });
-    }
-    return createElement(this.props.page, { key: this.state.generation });
+    return createElement(
+      DesignPage,
+      { onError: this.onError, resetKey: this.state.reset, errorFallback: () => null },
+      createElement(this.props.page, { key: this.state.generation }),
+    );
   }
 }
 
 // A visible update: the page's DOM changed (charts draw on canvases, so
-// their animation isn't one). Reported once per painted frame, with a copy
-// kept as the last good frame.
+// their animation isn't one). Reported once per painted frame.
 let pending = false;
 new MutationObserver(() => {
-  if (pending || boundary?.state.error) return;
+  if (pending) return;
   pending = true;
   requestAnimationFrame(() =>
     setTimeout(() => {
       pending = false;
-      if (boundary?.state.error) return;
-      takeSnapshot();
+      if (host?.failed) return;
       report({
         kind: "frame",
         chars: rootEl.innerText.trim().length,
@@ -434,16 +478,16 @@ const remount = (ms) => {
   clearTimeout(remountTimer);
   remountTimer = setTimeout(() => {
     final = false;
-    boundary?.setState((s) => ({ error: null, generation: s.generation + 1 }));
+    host?.remount();
     report({ kind: "final" });
   }, ms);
 };
 import.meta.hot?.on("vite:afterUpdate", () => {
   report({ kind: "update" });
   if (final) remount(100);
-  // Fast Refresh applies the update a moment later; then a boundary showing
-  // the last good frame retries with the new version.
-  setTimeout(() => boundary?.state.error && boundary.setState({ error: null }), 50);
+  // Fast Refresh applies the update a moment later; then a page showing the
+  // last good frame retries with the new version.
+  setTimeout(() => host?.retry(), 50);
 });
 
 let mounted = false;
@@ -453,7 +497,7 @@ async function mount() {
     const mod = await import(/* @vite-ignore */ "/src/design/pages/" + NAME + ".tsx?t=" + Date.now());
     if (mounted) return;
     mounted = true;
-    createRoot(rootEl).render(createElement(Keep, { page: mod.default }));
+    createRoot(rootEl).render(createElement(Host, { page: mod.default }));
   } catch {}
 }
 import.meta.hot?.on("appkit:stream", (data) => {

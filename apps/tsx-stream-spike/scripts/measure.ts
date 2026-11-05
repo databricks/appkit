@@ -26,6 +26,17 @@ const ctx = await browser.newContext({
 const page = await ctx.newPage();
 const errors: string[] = [];
 page.on("pageerror", (e) => errors.push(e.message));
+// Errors React reports from the drafts (render errors kept back are expected
+// while streaming; anything after the final file is not).
+const consoleErrors: { t: number; url: string; text: string }[] = [];
+page.on("console", (m) => {
+  if (m.type() === "error")
+    consoleErrors.push({
+      t: Date.now(),
+      url: m.location().url,
+      text: m.text().slice(0, 600),
+    });
+});
 await page.goto(`${a.url}/replay.html?autostart&app=${a.app}`);
 // Grid screenshots once a second, to look for broken frames by eye.
 let n = 0;
@@ -53,7 +64,9 @@ const norm = (html: string) =>
     .replace(/_echarts_instance_="[^"]*"/g, "")
     .replace(/ style="(animation-duration: 0s;)?"/g, "")
     .replace(/_r_[a-z0-9]+_/g, "")
-    .replace(/size-sensor-id="\d+"/g, "");
+    .replace(/size-sensor-id="\d+"/g, "")
+    .replace(/ {2,}/g, " ")
+    .replace(/ >/g, ">");
 for (const r of results) {
   const name = r.page as string;
   const frame = page
@@ -83,8 +96,16 @@ for (const r of results) {
     viewport: { width: 1280, height: 900 },
     colorScheme: a.theme === "dark" ? "dark" : "light",
   });
-  await ref.goto(`${a.url}/design/${name}`);
-  await ref.waitForSelector("#root > *");
+  // A cold dev server may still be optimizing dependencies: load again.
+  for (let attempt = 0; ; attempt++) {
+    await ref.goto(`${a.url}/design/${name}`);
+    const ok = await ref.waitForSelector("#root > *", { timeout: 30_000 }).then(
+      () => true,
+      () => false,
+    );
+    if (ok) break;
+    if (attempt === 2) throw new Error(`/design/${name} didn't render`);
+  }
   await ref.waitForTimeout(2500);
   const compiled = await ref.screenshot();
   const compiledHtml = norm(
@@ -94,7 +115,6 @@ for (const r of results) {
   await writeFile(path.join(out, `${name}-streamed-final.png`), streamed);
   await writeFile(path.join(out, `${name}-compiled.png`), compiled);
   r.domIdentical = streamedHtml === compiledHtml;
-  r.pixelsIdentical = streamed.equals(compiled);
   // Differing pixels (any channel off by more than 8), counted in a canvas.
   r.pixelsDiffering = await page.evaluate(
     async ([x, y]) => {
@@ -131,7 +151,7 @@ for (const r of results) {
 }
 await writeFile(
   path.join(out, "results.json"),
-  JSON.stringify({ results, errors }, null, 2),
+  JSON.stringify({ results, errors, consoleErrors }, null, 2),
 );
 console.table(results);
 if (errors.length) console.log("page errors:", errors);

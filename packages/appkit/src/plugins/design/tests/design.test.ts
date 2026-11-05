@@ -203,11 +203,16 @@ describe("entryModule", () => {
     expect(code).toContain(
       "const placeholder = mod.designPlaceholder === true",
     );
-    expect(code).toContain("ok: !this.state.error && !placeholder");
-    // A render error anywhere in the page's tree un-readies the server, with
-    // its message.
+    expect(code).toContain("current = { name, ok: !placeholder };");
+    // Every page renders through appkit-ui's DesignPage (theme, last good
+    // frame), and a render error anywhere in the page's tree un-readies the
+    // server, with its message.
     expect(code).toContain(
-      "postStatus(name, false, this.state.error?.message ?? String(this.state.error))",
+      'import { DesignPage } from "@databricks/appkit-ui/react/beta";',
+    );
+    expect(code).toContain("createElement(\n        DesignPage,");
+    expect(code).toContain(
+      "postStatus(name, false, error?.message ?? String(error))",
     );
     // A hot update (e.g. a fix in an imported component) drops the page's
     // earlier errors before it reports again.
@@ -216,9 +221,7 @@ describe("entryModule", () => {
     );
     // ...and retries a boundary still showing the old error, so a fix in an
     // imported component renders the page again.
-    expect(code).toContain(
-      "if (boundary.state.error) boundary.setState({ error: null });",
-    );
+    expect(code).toContain("if (boundary.failed) boundary.retry();");
   });
 });
 
