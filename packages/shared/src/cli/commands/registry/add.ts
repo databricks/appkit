@@ -70,7 +70,7 @@ function findFrontendRoot(cwd: string): string {
 }
 
 /** Locates the server root for plugins (the server/ subdir, else cwd). */
-function findServerRoot(cwd: string): string {
+export function findServerRoot(cwd: string): string {
   for (const sub of SERVER_SUBDIRS) {
     if (isDir(path.join(cwd, sub))) return path.join(cwd, sub);
   }
