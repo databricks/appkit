@@ -129,7 +129,6 @@ function pageVersion(clientRoot: string, name: string): number | undefined {
   );
   return file ? fs.statSync(file).mtimeMs : undefined;
 }
-const indexVersion = (clientRoot: string) => pageVersion(clientRoot, "index");
 
 /** The app's entry module, from the `<script type="module" src>` of index.html. */
 function appEntry(clientRoot: string): string | undefined {
@@ -166,7 +165,8 @@ export function designStatus(
     !!index && PLACEHOLDER_EXPORT.test(fs.readFileSync(index, "utf-8"));
   const real = !!index && !placeholder;
   const painted =
-    paintedVersion !== undefined && paintedVersion === indexVersion(clientRoot);
+    paintedVersion !== undefined &&
+    paintedVersion === pageVersion(clientRoot, "index");
   return {
     ready: real && painted,
     placeholder,
@@ -1179,18 +1179,15 @@ export function designVitePlugin({
             errors: appReport ? appReport.errors : null,
           };
           // `ready` needs a browser to paint /design. `compiled` doesn't: it
-          // builds the index page (and resolves its imports) server-side, so
-          // an agent can wait on it without a browser.
+          // is the index page's server-side build from `pages` above, so an
+          // agent can wait on it without a browser.
           const index = resolveDesignPage(server.config.root, "/design");
-          let compiled = false;
-          let compileError: string | undefined;
-          if (index && !status.placeholder) {
-            compileError = await compileGraph(
-              server,
-              `/${path.relative(server.config.root, index).split(path.sep).join("/")}`,
-            );
-            compiled = compileError === undefined;
-          }
+          const indexPage =
+            index && !status.placeholder
+              ? pages.find((page) => page.name === "index")
+              : undefined;
+          const compiled = indexPage?.compiled ?? false;
+          const compileError = indexPage?.compileError;
           const waitingFor = !index
             ? "index"
             : status.placeholder
