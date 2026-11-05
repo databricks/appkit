@@ -282,12 +282,9 @@ export async function renderablePartial(
   {
     page = true,
     complete = false,
-    boundary = false,
   }: {
     page?: boolean;
     complete?: boolean;
-    /** Only cuts with nothing open (complete top-level declarations). */
-    boundary?: boolean;
   } = {},
 ): Promise<string | null> {
   const src = stripFence(source);
@@ -299,7 +296,7 @@ export async function renderablePartial(
     const cut = lines.slice(0, end).join("\n");
     if (page && !/export\s+default\b/.test(cut)) return null;
     const closed = closeOpen(cut);
-    if (closed === null || (boundary && closed !== cut)) continue;
+    if (closed === null) continue;
     const code = page ? stubComponents(closed) : closed;
     if (await isValid(code)) return code;
   }
@@ -362,7 +359,7 @@ export function stubMock(mock: string, imported: Iterable<string>): string {
 
 /**
  * Browser entry of `/design/__stream/<name>`: renders each published version
- * through DesignPage, and reports frames as `appkit:stream-frame` (same origin).
+ * through DesignPage.
  *
  * @internal
  */
@@ -375,11 +372,6 @@ import.meta.glob("/src/index.css", { eager: true });
 
 const NAME = ${JSON.stringify(name)};
 const rootEl = document.getElementById("root");
-const report = (msg) => {
-  if (window.parent !== window) {
-    window.parent.postMessage({ type: "appkit:stream-frame", name: NAME, t: performance.timeOrigin + performance.now(), ...msg }, location.origin);
-  }
-};
 
 let host = null;
 class Host extends Component {
@@ -389,9 +381,8 @@ class Host extends Component {
   componentDidMount() {
     host = this;
   }
-  onError = (error) => {
+  onError = () => {
     this.failed = true;
-    report({ kind: "kept", error: String(error?.message ?? error) });
   };
   retry() {
     if (!this.failed) return;
@@ -411,26 +402,6 @@ class Host extends Component {
   }
 }
 
-// A visible update (a DOM change), reported once per painted frame.
-let pending = false;
-new MutationObserver(() => {
-  if (pending) return;
-  pending = true;
-  requestAnimationFrame(() =>
-    setTimeout(() => {
-      pending = false;
-      if (host?.failed) return;
-      report({
-        kind: "frame",
-        chars: rootEl.innerText.trim().length,
-        height: rootEl.scrollHeight,
-        empty: rootEl.childElementCount === 0,
-        overlay: !!document.querySelector("vite-error-overlay"),
-      });
-    }, 0),
-  );
-}).observe(rootEl, { subtree: true, childList: true, characterData: true, attributes: true });
-
 // Removes Vite's error overlay: a version that doesn't build stays unpublished.
 new MutationObserver(() => document.querySelector("vite-error-overlay")?.remove()).observe(document.body, { childList: true });
 
@@ -442,11 +413,9 @@ const remount = (ms) => {
   remountTimer = setTimeout(() => {
     final = false;
     host?.remount();
-    report({ kind: "final" });
   }, ms);
 };
 import.meta.hot?.on("vite:afterUpdate", () => {
-  report({ kind: "update" });
   if (final) remount(100);
   // Fast Refresh applies the update a moment later; then retry.
   setTimeout(() => host?.retry(), 50);
@@ -464,7 +433,6 @@ async function mount() {
 }
 import.meta.hot?.on("appkit:stream", (data) => {
   if (data?.name !== NAME) return;
-  report({ kind: "stream", ...data });
   if (data.done) {
     final = true;
     remount(1000);
@@ -472,6 +440,5 @@ import.meta.hot?.on("appkit:stream", (data) => {
   mount();
 });
 mount();
-report({ kind: "host-ready" });
 `;
 }

@@ -26,8 +26,6 @@ const DESIGN_ROUTE = /^\/design(?:\/([A-Za-z0-9_-]+))?\/?$/;
 const STATUS_PATH = "/design/__status";
 /** `/design/__stream/<name>`: a TSX draft rendered while it's being written. */
 const STREAM_ROUTE = /^\/design\/__stream\/([A-Za-z0-9_-]+)\/?$/;
-/** SPIKE: `APPKIT_DESIGN_STREAM_MODE=boundary` publishes only at complete top-level declarations. */
-const STREAM_MODE = process.env.APPKIT_DESIGN_STREAM_MODE;
 /** At most one published version per stream in this long. */
 const STREAM_INTERVAL_MS = 150;
 const EXTENSIONS = [".tsx", ".jsx"];
@@ -686,10 +684,7 @@ export function designVitePlugin({
       return;
     }
     const mock = name === "mock";
-    const code = await renderablePartial(raw, isValid, {
-      page: !mock,
-      boundary: STREAM_MODE === "boundary",
-    });
+    const code = await renderablePartial(raw, isValid, { page: !mock });
     if (code === null || code === s.code) return;
     s.code = code;
     s.last = Date.now();

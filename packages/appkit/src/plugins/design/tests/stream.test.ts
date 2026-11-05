@@ -121,18 +121,6 @@ describe("renderablePartial", () => {
     expect(code).not.toContain("__DraftPlaceholder");
   });
 
-  test("component-boundary mode only takes cuts with nothing open", async () => {
-    const inside = PAGE.slice(0, PAGE.indexOf("      <Footer />"));
-    expect(
-      await renderablePartial(inside, parses, { boundary: true }),
-    ).toBeNull();
-    const after = PAGE.slice(0, PAGE.indexOf("function Row"));
-    const code = (await renderablePartial(after, parses, {
-      boundary: true,
-    })) as string;
-    expect(code).toContain("<Footer />\n    </div>\n  );\n}");
-  });
-
   test("nothing before the default export", async () => {
     expect(
       await renderablePartial(PAGE.slice(0, PAGE.indexOf("export")), parses),
