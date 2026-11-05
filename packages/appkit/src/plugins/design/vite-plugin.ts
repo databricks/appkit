@@ -11,11 +11,7 @@ import {
   stubMock,
 } from "./stream";
 
-/**
- * One virtual entry per page: `virtual:appkit-design-page:<file>.mjs`. The
- * `.mjs` keeps @vitejs/plugin-react from treating the entry as a `.tsx`
- * component module and injecting Fast Refresh code that imports it by id.
- */
+/** Virtual page entry; `.mjs` so plugin-react doesn't inject Fast Refresh into it. */
 const ENTRY_PREFIX = "virtual:appkit-design-page:";
 const ENTRY_SUFFIX = ".mjs";
 /** Script added to the app's own pages (not /design) to post appkit:app-ready. */
@@ -23,33 +19,20 @@ const APP_READY_ID = "virtual:appkit-app-ready.mjs";
 /** Host page of a streamed TSX draft: `virtual:appkit-design-stream:<name>.mjs`. */
 const STREAM_HOST_PREFIX = "virtual:appkit-design-stream:";
 
-/**
- * Marks the app template's default home page. While an element carrying it
- * is on screen the app isn't reported ready, so a builder never reveals the
- * placeholder home page. Remove it with the page when the app gets real
- * content.
- */
+/** Marks the template's placeholder home: the app isn't reported ready while it's shown. */
 const TEMPLATE_HOME_ATTR = "data-appkit-template-home";
 const PAGE_FILE = /^(index|pages\/[A-Za-z0-9_-]+)\.(tsx|jsx)$/;
 const DESIGN_ROUTE = /^\/design(?:\/([A-Za-z0-9_-]+))?\/?$/;
 const STATUS_PATH = "/design/__status";
 /** `/design/__stream/<name>`: a TSX draft rendered while it's being written. */
 const STREAM_ROUTE = /^\/design\/__stream\/([A-Za-z0-9_-]+)\/?$/;
-/**
- * SPIKE: `APPKIT_DESIGN_STREAM_MODE=boundary` publishes a streamed page only
- * at component boundaries (complete top-level declarations) instead of at
- * any line, for comparing the two.
- */
+/** SPIKE: `APPKIT_DESIGN_STREAM_MODE=boundary` publishes only at complete top-level declarations. */
 const STREAM_MODE = process.env.APPKIT_DESIGN_STREAM_MODE;
 /** At most one published version per stream in this long. */
 const STREAM_INTERVAL_MS = 150;
 const EXTENSIONS = [".tsx", ".jsx"];
 
-/**
- * `pages/index.tsx` would collide with the root page, and `__*` with the
- * plugin's own endpoints (`/design/__status`, `/design/__stream/<name>`), so
- * those names aren't pages.
- */
+/** `pages/index` would collide with `/design`, `__*` with the plugin's endpoints. */
 const isReservedName = (name: string) =>
   name === "index" || name.startsWith("__");
 
@@ -61,11 +44,7 @@ const PAGE_GLOBS = [
   "!/src/design/pages/__*",
 ];
 
-/**
- * Marks the template's starter page. A page exporting it is never reported
- * as ready, so a builder doesn't reveal the starter while the real design is
- * still being written. Delete the export when replacing the page.
- */
+/** Marks the template's starter page: never reported ready while exported. */
 const PLACEHOLDER_EXPORT = /export\s+const\s+designPlaceholder\s*=\s*true/;
 
 /** A design page as listed in the status and ready payloads. */
@@ -77,10 +56,8 @@ interface DesignPageInfo {
 }
 
 /**
- * Maps a request path to its design page file under `<clientRoot>/src/design`:
- * `/design` → `index.tsx`, `/design/<name>` → `pages/<name>.tsx`.
- * Returns `undefined` for paths outside `/design`, and `null` for anything
- * under `/design` that isn't an existing page (served as 404).
+ * `/design` → `index.tsx`, `/design/<name>` → `pages/<name>.tsx`; `undefined` outside
+ * `/design`, `null` for a missing page (404).
  *
  * @internal
  */
@@ -150,9 +127,8 @@ function appEntry(clientRoot: string): string | undefined {
 type ReportedError = { error: string };
 
 /**
- * `/design/__status`: ready once `index.tsx` exists, isn't the template
- * placeholder, and has rendered in a browser (visible or not) since it last
- * changed (`paintedVersion` is the file's mtime when that was reported).
+ * Ready: a real (non-placeholder) `index.tsx` rendered since it last changed
+ * (`paintedVersion` is its mtime at that report).
  *
  * @internal
  */
@@ -174,14 +150,7 @@ export function designStatus(
   };
 }
 
-/**
- * A design page's state in `/design/__status`, from what the plugin knows:
- * `compile-error` (its module graph doesn't build), `rendering` (builds, no
- * browser has rendered this version yet), `ready` (rendered, no errors) or
- * `failed` (a browser reported errors).
- *
- * @internal
- */
+/** @internal `compile-error`, `rendering` (not rendered yet), `ready` or `failed` (errors reported). */
 export function pageState(page: {
   compiled: boolean;
   rendered: boolean;
@@ -193,11 +162,8 @@ export function pageState(page: {
 }
 
 /**
- * Whether the page entry can use react-router 7+ (the template ships it):
- * Node's resolution from the design page, i.e. the app's own copy. Not from
- * this plugin's folder (pnpm may hoist an older react-router there), and not
- * through Vite, which returns its pre-bundled copy in node_modules/.vite/deps,
- * whose package.json has no name or version.
+ * Node's resolution from the design page (the app's own copy): this plugin's
+ * folder may see a hoisted older version, and Vite returns its nameless pre-bundle.
  */
 function hasReactRouter(clientRoot: string): boolean {
   let entry: string;
@@ -222,21 +188,12 @@ function hasReactRouter(clientRoot: string): boolean {
   return false;
 }
 
-/**
- * Browser code shared by the design-page entry and the app-ready script:
- * `settled(isCurrent)` resolves once the page shows its real content (web
- * fonts loaded, no `useDesignReady(false)` holder, no page fetch in flight,
- * no DOM change for 300 ms, then two frames). Expects the including module to
- * define `schedule()`, which it calls when a fetch completes.
- */
+/** Browser code for page and app scripts: `settled()`; the includer defines `schedule()`. */
 const SETTLE_SNIPPET = `
-// Shared with appkit-ui's useDesignReady(): components holding readiness back
-// bump \`blockers\` and call \`changed()\` when they let go.
-// CONTRACT: keep the key and shape in sync with appkit-ui's use-design-ready.ts.
+// CONTRACT: same key and shape as appkit-ui's use-design-ready.ts.
 const host = (window.__appkitDesign ??= { blockers: 0 });
 
-// In-flight fetches started by the page (chart data and the like). Our own
-// status POSTs are not counted.
+// Fetches the page started (not our status POSTs).
 let pendingFetches = 0;
 const realFetch = window.fetch.bind(window);
 window.fetch = (input, init) => {
@@ -245,16 +202,14 @@ window.fetch = (input, init) => {
   pendingFetches++;
   return realFetch(input, init).finally(() => {
     pendingFetches--;
-    // The response still has to be read and rendered: count its arrival as
-    // activity so the quiet window starts after it, not before.
+    // Its response still has to render: the quiet window starts after it.
     lastMutation = performance.now();
     schedule();
   });
 };
 
 const QUIET_MS = 300;
-// Automatic waits (fetches, DOM changes) give up after this, so a stream that
-// never ends can't hold the page back forever. useDesignReady(false) has no cap.
+// Automatic waits give up after this; useDesignReady(false) has no cap.
 const SETTLE_CAP_MS = 10000;
 const frame = () => new Promise((r) => requestAnimationFrame(r));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -267,13 +222,10 @@ new MutationObserver(() => (lastMutation = performance.now())).observe(document.
   attributes: true,
 });
 
-// Two frames (painted), or 100 ms without them: a builder may keep the page
-// hidden (a preview it reveals when ready), and hidden frames get none.
+// Hidden frames (a builder's preview) get no animation frames: 100 ms fallback.
 const painted = () => Promise.race([frame().then(frame), sleep(100)]);
 
-// Resolves once the page shows its real content: fonts loaded, no fetch in
-// flight, no DOM change for QUIET_MS, then painted (or hidden). Nothing here
-// looks at pixels: it's the same for any page.
+// Fonts, no fetch in flight, a quiet DOM, then painted (or hidden).
 async function settled(isCurrent) {
   await document.fonts?.ready;
   const start = performance.now();
@@ -286,8 +238,7 @@ async function settled(isCurrent) {
   await painted();
 }
 
-// Reports to ${STATUS_PATH}, one at a time and in order (a late report must
-// not overtake a newer one).
+// In order: a late report must not overtake a newer one.
 let statusQueue = Promise.resolve();
 function sendStatus(body) {
   statusQueue = statusQueue.then(() =>
@@ -299,8 +250,7 @@ function sendStatus(body) {
   );
 }
 
-// Errors outside React's render (or without an error boundary): uncaught
-// errors, unhandled promise rejections, and Vite's compile errors.
+// Errors outside React's render: uncaught, unhandled rejections, Vite's.
 function watchErrors(report) {
   addEventListener("error", (e) => report(e.error?.message ?? e.message ?? "Script error"));
   addEventListener("unhandledrejection", (e) =>
@@ -311,14 +261,8 @@ function watchErrors(report) {
 `;
 
 /**
- * Entry for one page. The requested page is imported directly; the other
- * pages only load when navigated to, so an unfinished draft can't break this
- * one. With react-router, pages share a router whose basename is `/design`,
- * so `<Link to="/orders">` stays at `/design/orders`.
- *
- * After first paint it reports the page (unless it's the placeholder) to the
- * dev server and posts `appkit:design-ready` to the embedding builder, only
- * to the configured origins.
+ * Entry for one page; other pages load when navigated to, so an unfinished one
+ * can't break this one. With react-router, the basename is `/design`.
  *
  * @internal
  */
@@ -363,8 +307,7 @@ const initialPage = pageName("/src/design/${file}");
 sendStatus({ page: initialPage, reset: true });
 watchErrors((error) => sendStatus({ page: current?.name ?? initialPage, error }));
 
-// (Re)starts the wait for the current page; a newer render or update cancels
-// an older wait, so only the latest state can be reported.
+// A newer render or update cancels an older wait.
 function schedule() {
   if (!current?.ok) return;
   const mine = ++run;
@@ -392,11 +335,7 @@ function Pending() {
   return null;
 }
 
-// Reports readiness only from a successful render. Every page renders
-// through appkit-ui's DesignPage: the app's theme from the first paint, and a
-// boundary that keeps the last good frame on screen when a render throws. The
-// error is reported here, so a failure in any component the page uses
-// un-readies it.
+// Ready only after a successful render (DesignPage keeps the last good frame).
 // Mounted pages, so a hot update can retry the ones that hit an error.
 const boundaries = new Set();
 function withReady(mod, name) {
@@ -439,16 +378,10 @@ function withReady(mod, name) {
   };
 }
 
-// Hot edits re-render in place without remounting; once React has applied
-// the edit, wait for the page to settle again before reporting it.
-// (Adding or removing the placeholder export reloads the page instead.)
-// Errors from before the edit are dropped: what's still wrong reports again
-// (a render error as React re-renders, a compile error from Vite).
+// After a hot edit: drop earlier errors, settle and report again.
 import.meta.hot?.on("vite:afterUpdate", () => {
   sendStatus({ page: current?.name ?? initialPage, reset: true });
-  // Fast Refresh re-renders only the edited modules, and applies them a
-  // moment after this event: then a boundary holding an earlier error renders
-  // the page again (and catches it again if the edit didn't fix it).
+  // Fast Refresh applies the edit a moment later; then retry errored boundaries.
   setTimeout(() => {
     for (const boundary of boundaries) {
       if (boundary.failed) boundary.retry();
@@ -483,10 +416,8 @@ createRoot(document.getElementById("root")).render(createElement(RouterProvider,
 }
 
 /**
- * Added to the app's own pages in development when a builder origin is set.
- * Once the page has settled (see SETTLE_SNIPPET), and again after client-side
- * navigation or a hot update, it posts `appkit:app-ready` v1 to the embedding
- * builder, unless the template's default home page is on screen.
+ * App pages in development: reports to `/design/__status`, and posts
+ * `appkit:app-ready` v1 to builder origins (not on the template home).
  *
  * @internal
  */
@@ -504,8 +435,7 @@ function schedule() {
   const mine = ++run;
   settled(() => mine === run).then(() => {
     if (mine !== run || host.blockers > 0) return;
-    // Rendered: something is mounted (a crash without an error boundary
-    // leaves the root empty, and its error is reported above).
+    // A crash without an error boundary leaves #root empty.
     const ok = (document.getElementById("root")?.childElementCount ?? 0) > 0;
     const template = !!document.querySelector("[${TEMPLATE_HOME_ATTR}]");
     sendStatus({ app: location.pathname, ok, template });
@@ -531,8 +461,7 @@ for (const method of ["pushState", "replaceState"]) {
   };
 }
 addEventListener("popstate", schedule);
-// E.g. the default home page being replaced by the real one. Errors from
-// before the edit are dropped: what's still wrong reports again.
+// E.g. the template home replaced: drop earlier errors, report again.
 import.meta.hot?.on("vite:afterUpdate", () => {
   sendStatus({ app: location.pathname, reset: true });
   setTimeout(schedule, 50);
@@ -545,13 +474,8 @@ schedule();
 const COMPILE_GRAPH_LIMIT = 500;
 
 /**
- * Compiles `url` and every module of the app it imports, transitively
- * (dependencies in node_modules and virtual modules are skipped), the way a
- * browser loading the page would. Returns the first error, or undefined when
- * the whole graph builds.
- *
- * `transformRequest` alone only compiles the one module; its imports are only
- * resolved, so a syntax error in an imported component would go unnoticed.
+ * Compiles `url` and the app modules it imports, transitively (`transformRequest`
+ * alone only resolves imports). Returns the first error.
  *
  * @internal
  */
@@ -569,8 +493,7 @@ export async function compileGraph(
       await server.transformRequest(next);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      // Name the failing module (Vite's location when it has one), since the
-      // error can come from deep in the graph and may not say where.
+      // Name the failing module: the error may not say where.
       const loc = (error as { loc?: { file?: string; line?: number } }).loc;
       const where = loc?.file
         ? `${loc.file}${loc.line ? `:${loc.line}` : ""}`
@@ -612,39 +535,27 @@ const pageHtml = (title: string, entryUrl: string) => `<!doctype html>
 </html>
 `;
 
-/**
- * Serves `/design` (the default export of `client/src/design/index.tsx`),
- * `/design/<name>` (`client/src/design/pages/<name>.tsx`) and the
- * `/design/__status` readiness endpoint.
- *
- * @internal
- */
+/** @internal `/design`, `/design/<name>`, `/design/__stream/<name>` and `/design/__status`. */
 export function designVitePlugin({
   builderOrigins = [],
 }: { builderOrigins?: string[] } = {}): Plugin {
   let root = process.cwd();
   // The app folder (the dev server's working directory).
   const projectRoot = process.cwd();
-  // What a browser reported for each design page, for one version of its file:
-  // rendered (mounted, settled; visible or not) and the errors it hit.
+  // Per design page, for one version of its file: rendered and errors.
   const pageReports = new Map<
     string,
     { version: number | undefined; rendered: boolean; errors: ReportedError[] }
   >();
-  // The same for the app's own pages, per path (since its last load or hot
-  // update), and the path reported last.
+  // The app's pages, per path, and the path reported last.
   const appReports = new Map<
     string,
     { rendered: boolean; template: boolean; errors: ReportedError[] }
   >();
   let appPath: string | undefined;
 
-  // Streamed TSX drafts. A builder appends each draft's source as it
-  // arrives to src/design/.staging/<name>.tsx (the shared mock's to
-  // .staging/mock.ts), and writes the finished file to pages/<name>.tsx
-  // (mock.ts) once it type-checks. Until then the page's module is the
-  // latest renderable version of its staging file. By name ("mock" for the
-  // mock): the version published, and the staging file's mtime it came from.
+  // Streamed drafts (.staging/<name>.tsx, .staging/mock.ts): by name, the
+  // published version and the staging mtime it came from.
   const streams = new Map<
     string,
     {
@@ -681,8 +592,7 @@ export function designVitePlugin({
     "node_modules/.appkit-design-stream",
   );
   const streamCssIds = new Set<string>();
-  // Words seen in streamed string literals: Tailwind only needs a rebuild
-  // when a version brings new ones (possible class names).
+  // Words in streamed string literals: Tailwind rebuilds only for new ones.
   const streamTokens = new Set<string>();
   const newTokens = (code: string) => {
     let added = false;
@@ -700,18 +610,14 @@ export function designVitePlugin({
   /** The published version of a page while it streams, else null (from disk). */
   const streamedCode = (name: string) => {
     const code = streams.get(name)?.code ?? null;
-    // The staging file is checked too: a builder starting the draft over
-    // deletes it, and the watcher reports that a moment later.
+    // A builder starting over deletes it; the watcher reports that later.
     return code !== null &&
       fs.existsSync(stagingFile(name)) &&
       !fs.existsSync(finalFile(name))
       ? code
       : null;
   };
-  /**
-   * The mock while mock.ts isn't written yet and something streams: what
-   * .staging/mock.ts has so far, plus stubs for what streaming pages import.
-   */
+  /** The mock before mock.ts exists: .staging/mock.ts so far, plus stubs. */
   const mockCode = (): string | null => {
     if (fs.existsSync(finalFile("mock"))) return null;
     const pages = [...streams.keys()]
@@ -730,8 +636,7 @@ export function designVitePlugin({
   let servedMock: string | null = null;
   const reloadFile = async (file: string) => {
     for (const mod of viteServer?.moduleGraph.getModulesByFile(file) ?? []) {
-      // Nothing imports it (a page closed): a hot update would find no
-      // boundary and reload every open page.
+      // Not imported (page closed): a hot update would reload every page.
       if (mod.importers.size === 0 && !mod.isSelfAccepting) continue;
       await viteServer?.reloadModule(mod);
     }
@@ -908,9 +813,7 @@ export function designVitePlugin({
     },
 
     transformIndexHtml(_html, ctx) {
-      // App pages only: design pages report themselves. Always added, so
-      // /design/__status knows the app rendered (and its errors) also without
-      // a builder; it posts appkit:app-ready only to builder origins.
+      // App pages only (design pages report themselves); also without a builder.
       if (resolveDesignPage(root, ctx.path.split("?")[0]) !== undefined) return;
       return [
         {
@@ -935,8 +838,7 @@ export function designVitePlugin({
           ? streamHostModule(name)
           : undefined;
       }
-      // A streamed page or mock: its latest renderable version until the
-      // finished file is written.
+      // A streamed page or mock: its latest renderable version.
       const loaded = id.split("?")[0];
       const streamed =
         loaded === finalFile("mock")
@@ -955,9 +857,7 @@ export function designVitePlugin({
       }
     },
 
-    // A builder deleting a draft (to write it again) would make Vite reload
-    // every open page: the module graph still has it, imported by pages since
-    // closed. A page showing it keeps its last frame instead.
+    // A deleted draft still in the graph would reload every page.
     hotUpdate({ type, file, modules }) {
       const name = streamName(file);
       if (
@@ -965,17 +865,14 @@ export function designVitePlugin({
         name &&
         (file === finalFile(name) || file === stagingFile(name))
       ) {
-        // Forget its transform, so the next import doesn't get the old file,
-        // and that it imported the mock: a hot update of the mock would find
-        // this (no longer hot-accepting) importer and reload every page.
+        // Forget it, and its mock import, or a mock update reloads every page.
         for (const mod of modules) {
           this.environment.moduleGraph.invalidateModule(mod);
           for (const dep of mod.importedModules) dep.importers.delete(mod);
         }
         return [];
       }
-      // A finished draft (or mock.ts) landing while nothing imports it yet:
-      // with no boundary to update, Vite would reload every open page.
+      // Nothing imports it yet: no boundary, Vite would reload every page.
       if (name && file === finalFile(name)) {
         const live = modules.filter(
           (mod) => mod.importers.size > 0 || mod.isSelfAccepting,
@@ -984,8 +881,7 @@ export function designVitePlugin({
       }
     },
 
-    // Tailwind only scans files for class names: point it at the copies of
-    // streamed versions too, so their classes exist before the file does.
+    // Tailwind scans files: point it at the streamed versions too.
     transform: {
       order: "pre",
       handler(code, id) {
@@ -1008,8 +904,7 @@ export function designVitePlugin({
       const onFile = (file: string) => {
         const name = streamName(file);
         if (!name) return;
-        // Never let a draft's file (deleted mid-way, unreadable) take the
-        // dev server down.
+        // A draft file must never take the dev server down.
         const failed = (error: unknown) =>
           server.config.logger.warn(
             `[appkit-design] ${name}: ${String(error)}`,
@@ -1028,9 +923,7 @@ export function designVitePlugin({
       server.middlewares.use(async (req, res, next) => {
         const pathname = req.url?.split("?")[0] ?? "";
 
-        // A streamed page deleted a moment ago (a builder starting the draft
-        // over): Vite would serve its cached transform until the watcher
-        // reports the delete, and it checks that cache before any plugin.
+        // Deleted a moment ago: drop Vite's cached transform.
         const deleted = /^\/src\/design\/pages\/([A-Za-z0-9_-]+)\.tsx$/.exec(
           pathname,
         )?.[1];
@@ -1080,8 +973,7 @@ export function designVitePlugin({
 
         if (pathname === STATUS_PATH) {
           if (req.method === "POST") {
-            // Under AppKit's server, express.json() has already consumed the
-            // stream into `req.body`; a bare Vite server leaves it unread.
+            // express.json() may have parsed it already (AppKit's server).
             let body = (req as { body?: { page?: unknown } }).body;
             if (body === undefined) {
               let raw = "";
@@ -1135,9 +1027,7 @@ export function designVitePlugin({
             server.config.root,
             indexReport?.rendered ? indexReport.version : undefined,
           );
-          // Per page, for the version on disk: null until a browser reported.
-          // Each page is compiled server-side like the index below, so a
-          // builder can tell a draft that doesn't build without a browser.
+          // Per page, for the version on disk (null until a browser reported).
           const pages = await Promise.all(
             status.pages.map(async (page) => {
               const report = pageReports.get(page.name);
@@ -1161,8 +1051,7 @@ export function designVitePlugin({
               return { ...info, state: pageState(info) };
             }),
           );
-          // The app's own pages: compiled server-side from index.html's entry
-          // module, rendered and errors as its pages report them.
+          // The app: compiled from index.html's entry, plus its reports.
           const entry = appEntry(server.config.root);
           const appCompileError = entry
             ? await compileGraph(server, entry)
@@ -1178,9 +1067,7 @@ export function designVitePlugin({
             template: appReport?.template ?? false,
             errors: appReport ? appReport.errors : null,
           };
-          // `ready` needs a browser to paint /design. `compiled` doesn't: it
-          // is the index page's server-side build from `pages` above, so an
-          // agent can wait on it without a browser.
+          // `compiled`: the index page's server-side build, no browser needed.
           const index = resolveDesignPage(server.config.root, "/design");
           const indexPage =
             index && !status.placeholder

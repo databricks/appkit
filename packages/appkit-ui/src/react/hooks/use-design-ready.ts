@@ -1,29 +1,15 @@
 import { useLayoutEffect } from "react";
 
-/**
- * Readiness bookkeeping shared with the `/design` page entry served by the
- * `design()` plugin.
- *
- * CONTRACT: the design page entry and the app-ready script
- * (packages/appkit/src/plugins/design/vite-plugin.ts) create
- * `window.__appkitDesign` and read `blockers` / `changed`. Keep the key and
- * shape in sync with them.
- */
+/** CONTRACT: same key and shape as `window.__appkitDesign` in the design plugin's vite-plugin.ts. */
 interface DesignHost {
   blockers: number;
   changed?: () => void;
 }
 
 /**
- * Holds back a `/design` page's readiness while `ready` is `false`, for
- * content the page can't detect on its own: data that loads after a delay,
- * a chart that draws asynchronously, an animation that must finish first.
- * While any mounted component passes `false`, the page isn't reported ready
- * to an embedding app builder (`appkit:design-ready` and `/design/__status` on
- * `/design`, `appkit:app-ready` on the app's own pages in development).
- *
- * Without the `design()` plugin's dev scripts (production, tests) it does
- * nothing.
+ * Holds back a page's readiness (`/design/__status`, `appkit:design-ready`,
+ * `appkit:app-ready`) while `ready` is `false`, for content the page can't
+ * detect on its own. Does nothing without the `design()` plugin's dev scripts.
  *
  * @example
  * ```tsx

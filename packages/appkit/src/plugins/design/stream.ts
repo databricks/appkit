@@ -1,14 +1,6 @@
 /**
- * Streamed TSX drafts: makes the growing source of a design page renderable
- * at every step, so a page can be shown while a writer is still producing it.
- *
- * SPIKE (KIT-40). A builder appends a draft's source to
- * `src/design/.staging/<name>.tsx` as it streams. The dev server holds the
- * latest renderable version of it under the page's real module id
- * (`src/design/pages/<name>.tsx`) and pushes it to the browser as a hot
- * update, so React Fast Refresh swaps it in place (state and chart instances
- * survive). Once the builder writes the finished file there, the same module
- * id loads it from disk.
+ * Streamed TSX drafts (SPIKE, KIT-40): the latest renderable version of
+ * `.staging/<name>.tsx` is served as `pages/<name>.tsx` and hot-swapped in place.
  */
 
 type Frame =
@@ -44,10 +36,8 @@ const JSX_AFTER = new Set([
 const JSX_AFTER_WORD = /(?:^|[^\w$])(?:return|yield|default|case)$/;
 
 /**
- * Appends whatever closes the constructs still open at the end of `src`
- * (brackets, template literals, JSX tags and expression containers). Returns
- * null when `src` ends inside a string or comment, or has a stray closer: such
- * a cut can't be closed, a shorter one has to be tried.
+ * Closes the brackets, template literals and JSX still open at the end of `src`;
+ * null when it ends inside a string or comment, or has a stray closer.
  *
  * @internal
  */
@@ -173,8 +163,7 @@ export function closeOpen(src: string): string | null {
       (JSX_AFTER.has(prev) ||
         JSX_AFTER_WORD.test(src.slice(Math.max(0, i - 12), i).trimEnd()))
     ) {
-      // `<T extends X>(` and `<T,>(` are a generic arrow's type parameters
-      // in TSX, not a tag: skip to their closing `>`.
+      // `<T extends X>(` / `<T,>(` is a generic arrow's type parameters, not a tag.
       if (/^<[\w$]+\s*(?:\bextends\b|,)/.test(src.slice(i, i + 80))) {
         let depth = 0;
         for (; i < n; i++) {
@@ -247,11 +236,7 @@ export function placeholderKind(
   return "generic";
 }
 
-/**
- * Components used as JSX tags but not declared or imported yet (helpers a
- * writer defines below the page), stubbed with appkit-ui's DraftPlaceholder:
- * a skeleton of the right shape until they arrive.
- */
+/** Undeclared JSX components (helpers not written yet), stubbed with DraftPlaceholder. */
 function stubComponents(code: string): string {
   const declared = new Set<string>();
   for (const m of code.matchAll(DECLARED)) {
@@ -286,11 +271,8 @@ type IsValid = (code: string) => Promise<boolean>;
 const MAX_CUTS = 60;
 
 /**
- * The longest renderable version of a streamed page (or module): the source
- * cut at a line boundary (an unfinished last line dropped, then earlier cuts
- * until one closes and parses), its open constructs closed, and undeclared
- * JSX components stubbed. A page must have its default export. Null when no
- * cut works yet.
+ * The longest renderable line-boundary cut of a streamed page, open constructs
+ * closed and undeclared components stubbed; null until one works.
  *
  * @internal
  */
@@ -304,11 +286,7 @@ export async function renderablePartial(
   }: {
     page?: boolean;
     complete?: boolean;
-    /**
-     * Only cuts with nothing left open: complete top-level declarations, so
-     * the page shows once its whole component has arrived (the component
-     * boundary fallback, measured against the default).
-     */
+    /** Only cuts with nothing open (complete top-level declarations). */
     boundary?: boolean;
   } = {},
 ): Promise<string | null> {
@@ -344,11 +322,7 @@ export function mockImports(page: string, mock = "mock"): string[] {
   return names;
 }
 
-/**
- * A value that can't make a page throw: any property or call gives it back,
- * it iterates as empty and converts to "" or 0, and React renders it as
- * nothing (it's a function). Stands in for mock values not written yet.
- */
+/** Stands in for mock values not written yet: never throws, renders as nothing. */
 const DRAFT_VALUE = `const __draftValue: any = (() => {
   const target: any = function () {};
   const value: any = new Proxy(target, {
@@ -367,9 +341,8 @@ const DRAFT_VALUE = `const __draftValue: any = (() => {
 })();`;
 
 /**
- * The partial mock module plus a placeholder for every value a streamed page
- * imports that the mock hasn't defined yet, so the page module links (a
- * missing named export is a SyntaxError) and renders what it can.
+ * The partial mock plus a placeholder for each value a page imports from it that
+ * isn't defined yet (a missing named export would be a SyntaxError).
  *
  * @internal
  */
@@ -388,14 +361,8 @@ export function stubMock(mock: string, imported: Iterable<string>): string {
 }
 
 /**
- * Browser entry of `/design/__stream/<name>`: renders the streamed page
- * `src/design/pages/<name>.tsx` as the dev server publishes versions of it
- * (each one a hot update, applied by Fast Refresh), through appkit-ui's
- * DesignPage like every design page: a version that throws is never shown,
- * the last good frame stays (nothing before the first one), and the next
- * version retries. Vite's error overlay is removed. Frames are reported to an
- * embedding page as `appkit:stream-frame` messages (same origin), for
- * measuring.
+ * Browser entry of `/design/__stream/<name>`: renders each published version
+ * through DesignPage, and reports frames as `appkit:stream-frame` (same origin).
  *
  * @internal
  */
@@ -444,8 +411,7 @@ class Host extends Component {
   }
 }
 
-// A visible update: the page's DOM changed (charts draw on canvases, so
-// their animation isn't one). Reported once per painted frame.
+// A visible update (a DOM change), reported once per painted frame.
 let pending = false;
 new MutationObserver(() => {
   if (pending) return;
@@ -468,10 +434,7 @@ new MutationObserver(() => {
 // Removes Vite's error overlay: a version that doesn't build stays unpublished.
 new MutationObserver(() => document.querySelector("vite-error-overlay")?.remove()).observe(document.body, { childList: true });
 
-// The finished file is mounted afresh, so it renders exactly as the compiled
-// page: kept chart instances merge new options into old ones (a series an
-// earlier version had can stay drawn). Its hot update lands a moment after
-// the stream's end is announced.
+// The finished file mounts afresh, so kept chart state can't carry over.
 let final = false;
 let remountTimer;
 const remount = (ms) => {
@@ -485,8 +448,7 @@ const remount = (ms) => {
 import.meta.hot?.on("vite:afterUpdate", () => {
   report({ kind: "update" });
   if (final) remount(100);
-  // Fast Refresh applies the update a moment later; then a page showing the
-  // last good frame retries with the new version.
+  // Fast Refresh applies the update a moment later; then retry.
   setTimeout(() => host?.retry(), 50);
 });
 

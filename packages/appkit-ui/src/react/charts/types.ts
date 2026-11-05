@@ -38,17 +38,10 @@ export type ChartType =
 /** Data that can be passed to unified charts */
 export type ChartData = Table | Record<string, unknown>[];
 
-/**
- * One row of chart data. Has an index signature, so it can annotate plain data
- * modules (`export const trips: ChartRow[] = [...]`).
- */
+/** One row of chart data (indexable, to type plain data modules). */
 export type ChartRow = Record<string, unknown>;
 
-/**
- * What a chart's `data` prop accepts: an Arrow Table or rows. Rows may be
- * typed with an interface (no index signature needed) and may be readonly
- * (`as const`), so existing data modules work as they are.
- */
+/** A chart's `data`: an Arrow Table, or rows (interfaces and `as const` arrays too). */
 export type ChartDataInput = Table | readonly object[];
 
 /** Formats a measure value for chart axes, tooltips, and value labels. */
@@ -91,10 +84,7 @@ export interface ChartBaseProps {
   colorPalette?: ChartColorPalette;
   /** Custom colors for series (overrides colorPalette) */
   colors?: string[];
-  /**
-   * Chart height in pixels. By default the chart fills its parent's height
-   * (at least 160px), so it fits the card or grid cell it's in.
-   */
+  /** Chart height in pixels. Defaults to filling its parent (see `chartSizeStyle`). */
   height?: number;
   /** Additional CSS classes */
   className?: string;

@@ -7,22 +7,15 @@ import { designVitePlugin } from "./vite-plugin";
 
 const isDev = () => process.env.NODE_ENV === "development";
 
-/**
- * Builder origin(s) when `builderOrigin` isn't passed: set by the builder's
- * runtime, so a scaffolded `design()` with no options still posts to it.
- * One origin, or several separated by commas.
- */
+/** Set by a builder's runtime, so a scaffolded `design()` needs no options. */
 const BUILDER_ORIGIN_ENV = "APPKIT_DESIGN_BUILDER_ORIGIN";
 
 interface DesignConfig extends BasePluginConfig {
   /**
    * Origin(s) of the app builder that embeds the app, e.g.
-   * `"https://builder.example.com"`. After a design page first paints, an
-   * `appkit:design-ready` message is posted to the embedding window
-   * (`window.parent`, else `window.opener`), targeted at exactly these
-   * origins. `"*"` and anything that isn't a bare origin are rejected.
-   * Defaults to the `APPKIT_DESIGN_BUILDER_ORIGIN` environment variable (one
-   * origin, or several separated by commas).
+   * `"https://builder.example.com"`: the only targets of the ready messages.
+   * Bare origins only (`"*"` is rejected). Defaults to the
+   * `APPKIT_DESIGN_BUILDER_ORIGIN` environment variable (comma-separated).
    */
   builderOrigin?: string | string[];
 }
@@ -50,22 +43,13 @@ function parseOrigins(value: DesignConfig["builderOrigin"]): string[] {
 }
 
 /**
- * Dev-only design pages.
+ * Dev-only design pages: `/design` (`client/src/design/index.tsx`),
+ * `/design/<name>` (`pages/<name>.tsx`), `/design/__stream/<name>` (a draft
+ * while it's written) and `GET /design/__status`. Outside development,
+ * `/design` answers 404.
  *
- * In development it serves `/design` (the default export of
- * `client/src/design/index.tsx`) and `/design/<name>`
- * (`client/src/design/pages/<name>.tsx`) at full size. Elements carry the
- * dev server's `data-source="file:line:col"` attributes, so an inspector can
- * map them back to source. `GET /design/__status` and an
- * `appkit:design-ready` message tell an embedding builder when the design is
- * ready to show (never while it's the template placeholder) and which pages
- * exist. A TSX draft can be shown while it's written: a builder appends it
- * to `client/src/design/.staging/<name>.tsx`, and `/design/__stream/<name>`
- * renders its latest renderable version.
- *
- * In any other environment it does nothing except answer `/design` with 404.
- * The manifest is deliberately not `devOnly`: a dropped plugin couldn't claim
- * `/design`, and the SPA fallback would serve the app's index.html for it.
+ * Not `devOnly` in the manifest: a dropped plugin couldn't claim `/design`, and
+ * the SPA fallback would answer it with index.html.
  */
 class DesignPlugin extends Plugin<DesignConfig> {
   static manifest = defineManifest<"design">(manifest);
