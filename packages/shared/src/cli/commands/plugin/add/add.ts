@@ -8,7 +8,7 @@ import { parseDocument } from "yaml";
 import { z } from "zod";
 
 import { APP_YAML_FILE } from "../../../deploy-config";
-import { profileFromEnv } from "../../registry/add";
+import { findServerRoot, profileFromEnv } from "../../registry/add";
 import type { ConfigPlan } from "../../registry/config-plan";
 import {
   assertBundleApp,
@@ -41,7 +41,6 @@ import {
 import { discoverIndexColumns, resolveDerivedValues } from "./resolve";
 
 const MANIFEST_FILE = "appkit.plugins.json";
-const SERVER_SUBDIRS = ["server", "api", "backend"];
 
 interface AddOptions {
   set: string[];
@@ -116,10 +115,7 @@ async function promptOptional(
   return picked;
 }
 
-/**
- * As `apps init`: one question for the app, and for "Mixed" one per
- * OBO-capable resource. Resources without --set authMode only.
- */
+/** As `apps init`: one question, then one per resource for "Mixed". */
 async function promptAuthModes(
   resources: ManifestResource[],
 ): Promise<Record<string, AuthMode>> {
@@ -189,11 +185,7 @@ async function fillMissing(
   }
 }
 
-/**
- * Columns for the aiSearch default index: discovered from the workspace, else
- * prompted. Without a terminal it fails before anything is written, since the
- * app would not start in production without them.
- */
+/** aiSearch's default index columns (production won't start without them): discovered, else prompted. */
 async function aiSearchColumns(
   values: Record<string, string>,
   profile: string | undefined,
@@ -237,10 +229,17 @@ async function aiSearchColumns(
 /** The env var agents falls back to for its model; serving binds it too. */
 const AGENTS_MODEL_ENV = "DATABRICKS_SERVING_ENDPOINT_NAME";
 
-/**
- * Env names in the plan already bound to something else: a different
- * non-empty value in .env, or an app.yaml entry with another valueFrom/value.
- */
+/** What an app.yaml env entry points at, for comparing two entries. */
+function entryKey(e: { valueFrom?: string; value?: string }): string {
+  return JSON.stringify([e.valueFrom, e.value]);
+}
+
+/** The first item per key, in order. */
+function firstBy<T>(xs: T[], key: (x: T) => string): T[] {
+  return xs.filter((x, i) => xs.findIndex((y) => key(y) === key(x)) === i);
+}
+
+/** Env names the plan would set differently from .env, app.yaml or earlier plugins. */
 export function envConflicts(
   cwd: string,
   plan: AddPlan,
@@ -258,21 +257,13 @@ export function envConflicts(
       | { name?: string; valueFrom?: string; value?: string }[]
       | undefined;
     for (const e of env ?? []) {
-      if (e?.name) appEnv.set(e.name, JSON.stringify([e.valueFrom, e.value]));
+      if (e?.name) appEnv.set(e.name, entryKey(e));
     }
   }
   for (const p of pending) {
     for (const e of p.dotEnv) if (!dotEnv[e.env]) dotEnv[e.env] = e.value;
     for (const e of p.appYamlEnv) {
-      if (!appEnv.has(e.name)) {
-        appEnv.set(
-          e.name,
-          JSON.stringify([
-            "valueFrom" in e ? e.valueFrom : undefined,
-            "value" in e ? e.value : undefined,
-          ]),
-        );
-      }
+      if (!appEnv.has(e.name)) appEnv.set(e.name, entryKey(e));
     }
   }
   const out = new Set<string>();
@@ -280,12 +271,8 @@ export function envConflicts(
     if (dotEnv[e.env] && e.value && dotEnv[e.env] !== e.value) out.add(e.env);
   }
   for (const e of plan.appYamlEnv) {
-    const want = JSON.stringify([
-      "valueFrom" in e ? e.valueFrom : undefined,
-      "value" in e ? e.value : undefined,
-    ]);
     const have = appEnv.get(e.name);
-    if (have !== undefined && have !== want) out.add(e.name);
+    if (have !== undefined && have !== entryKey(e)) out.add(e.name);
   }
   return [...out];
 }
@@ -303,11 +290,7 @@ interface PreparedPlugin {
   config?: Record<string, unknown>;
 }
 
-/**
- * Everything for one plugin short of writing: prompts, derived values, the
- * file plan and its registration config. Throws on conflicts with the app's
- * files or with earlier plugins of the run (`pending`).
- */
+/** Plans one plugin without writing: prompts, derived values, file plan, registration config. */
 async function preparePlugin(
   cwd: string,
   req: PluginRequest,
@@ -387,8 +370,6 @@ async function preparePlugin(
 
   const plan = buildAddPlan(plugin, resources, values, modes);
 
-  // An env var holds one value: if another resource already binds one of
-  // these names to something else, the new value would never reach the app.
   const conflicts = envConflicts(cwd, plan, pending);
   const model = values["agents-serving-endpoint.name"];
   if (
@@ -446,10 +427,7 @@ const dataPlanSchema = z.object({
       z.object({
         name: z.string().min(1),
         authMode: z.enum([AUTH_MODE_OBO, AUTH_MODE_SP]).optional(),
-        /**
-         * `resourceKey.field` (or `resourceKey.authMode`) → value; the full
-         * --set key with the plugin prefix is accepted too.
-         */
+        /** --set keys, with or without the plugin prefix. */
         set: z.record(z.string(), z.string()).optional(),
       }),
     )
@@ -470,8 +448,7 @@ export function requestsFromPlan(file: string): PluginRequest[] {
     name: p.name,
     authMode: p.authMode,
     set: Object.entries(p.set ?? {}).map(([k, v]) => {
-      // Prefixed = 3+ parts led by the plugin name; counting parts keeps
-      // "files.path" (resourceKey "files") unprefixed.
+      // Count parts: "files.path" (resourceKey "files") is unprefixed.
       const parts = k.split(".");
       const prefixed = parts.length >= 3 && parts[0] === p.name;
       return `${prefixed ? k : `${p.name}.${k}`}=${v}`;
@@ -479,11 +456,7 @@ export function requestsFromPlan(file: string): PluginRequest[] {
   }));
 }
 
-/**
- * Adds every requested plugin in one pass: all are planned first (nothing is
- * written if any fails), then each file is written at most once, so a dev
- * server watching them restarts once.
- */
+/** Plans every plugin, then writes each file once (one dev-server restart). */
 async function runPluginAdd(names: string[], opts: AddOptions): Promise<void> {
   const cwd = opts.cwd ? path.resolve(opts.cwd) : process.cwd();
   if (
@@ -506,8 +479,7 @@ async function runPluginAdd(names: string[], opts: AddOptions): Promise<void> {
     seen.add(r.name);
   }
 
-  // agents is planned last: it is the one plugin that adapts to an env clash
-  // (see preparePlugin), so it must see the others' entries in any order.
+  // agents last: it adapts to env clashes, so it must see the others' entries.
   const ordered = [
     ...requests.filter((r) => r.name !== "agents"),
     ...requests.filter((r) => r.name === "agents"),
@@ -546,14 +518,20 @@ async function runPluginAdd(names: string[], opts: AddOptions): Promise<void> {
     plans.flatMap((p) => p.dotEnv),
   );
 
-  // Plugins can share a resource (same env var, variable and binding);
-  // envConflicts already rejected any that differ, so keep the first.
-  const byName = <T extends { name: string }>(xs: T[]) =>
-    xs.filter((x, i) => xs.findIndex((y) => y.name === x.name) === i);
+  // Shared resources: envConflicts already rejected differing ones.
   const merged: ConfigPlan = {
-    appYamlEnv: byName(plans.flatMap((p) => p.appYamlEnv)),
-    bundleVariables: byName(plans.flatMap((p) => p.bundleVariables)),
-    resourceBindings: byName(plans.flatMap((p) => p.resourceBindings)),
+    appYamlEnv: firstBy(
+      plans.flatMap((p) => p.appYamlEnv),
+      (x) => x.name,
+    ),
+    bundleVariables: firstBy(
+      plans.flatMap((p) => p.bundleVariables),
+      (x) => x.name,
+    ),
+    resourceBindings: firstBy(
+      plans.flatMap((p) => p.resourceBindings),
+      (x) => x.name,
+    ),
     userApiScopes: [...new Set(plans.flatMap((p) => p.userApiScopes ?? []))],
     unverifiedTypes: [...new Set(plans.flatMap((p) => p.unverifiedTypes))],
   };
@@ -566,10 +544,7 @@ async function runPluginAdd(names: string[], opts: AddOptions): Promise<void> {
   }
 }
 
-/**
- * Adds the entries to .env in one write: empty placeholders (`KEY=`) are
- * filled in place, new names appended, set values kept.
- */
+/** One .env write: fills empty `KEY=` placeholders, appends new names, keeps set values. */
 async function writeDotEnv(
   cwd: string,
   entries: { env: string; value: string }[],
@@ -577,9 +552,7 @@ async function writeDotEnv(
   const { readEnvFile } = await import("../../registry/env-writer.js");
   const envPath = path.join(cwd, ".env");
   const existing = readEnvFile(envPath);
-  const dotEnv = entries.filter(
-    (e, i) => entries.findIndex((x) => x.env === e.env) === i,
-  );
+  const dotEnv = firstBy(entries, (e) => e.env);
   const filled = dotEnv.filter((e) => existing[e.env] === "" && e.value);
   const newEnv = dotEnv.filter((e) => !(e.env in existing));
   if (filled.length === 0 && newEnv.length === 0) return;
@@ -606,13 +579,7 @@ async function writeDotEnv(
 const AUTH_OPTION_PLUGINS = new Set(["files", "aiSearch", "agents"]);
 const OBO = "on-behalf-of-user";
 
-/**
- * The `createApp` config for the plugin, or undefined for none. An OBO plan
- * leaves the service principal unbound, so plugins that default to it must be
- * told: files and agents read a plugin-level `auth`, aiSearch reads it per index. The
- * aiSearch `default` index takes DATABRICKS_VS_INDEX_NAME, and production
- * refuses to start without its `columns`.
- */
+/** The `createApp` config an OBO plan needs (the SP is unbound), plus aiSearch columns. */
 export function pluginConfig(
   plugin: ManifestPlugin,
   resources: ManifestResource[],
@@ -621,10 +588,7 @@ export function pluginConfig(
 ): Record<string, unknown> | undefined {
   let obo = false;
   if (AUTH_OPTION_PLUGINS.has(plugin.name)) {
-    // The resources whose access the option governs. For agents that is the
-    // model endpoint: skills load from their volume as the service principal
-    // at boot whatever `auth` is, and the tracing experiment can't be OBO.
-    // Elsewhere, every resource that can be accessed on behalf of the user.
+    // For agents only the model counts: skills load as the SP at boot.
     const governed = resources.filter(
       (r) =>
         oboCapable(r) &&
@@ -643,8 +607,7 @@ export function pluginConfig(
         }
       }
     }
-    // files takes auth per volume too: a volume's key is the lowercased
-    // suffix of its DATABRICKS_VOLUME_<KEY> env var (FilesPlugin.discoverVolumes).
+    // files also takes auth per volume.
     if (plugin.name === "files" && oboRes.length > 0 && !obo) {
       const keys = oboRes.map((r) => filesVolumeKey(r));
       if (keys.every(Boolean)) {
@@ -670,7 +633,7 @@ export function pluginConfig(
   return obo ? { auth: OBO } : undefined;
 }
 
-/** The files plugin's volume key for a volume resource, from its env var. */
+/** Volume key as FilesPlugin.discoverVolumes derives it from DATABRICKS_VOLUME_<KEY>. */
 function filesVolumeKey(r: ManifestResource): string | undefined {
   const prefix = "DATABRICKS_VOLUME_";
   const env = Object.values(r.fields ?? {})
@@ -696,10 +659,7 @@ async function registerInServer(
   cwd: string,
   prepared: PreparedPlugin[],
 ): Promise<void> {
-  const serverRoot =
-    SERVER_SUBDIRS.map((s) => path.join(cwd, s)).find((p) =>
-      fs.existsSync(p),
-    ) ?? cwd;
+  const serverRoot = findServerRoot(cwd);
   // Lazy: server-register pulls in the @ast-grep/napi native addon.
   const { findServerFile, registerPluginsInServer } =
     await import("../../registry/server-register.js");
@@ -710,8 +670,7 @@ async function registerInServer(
       plugin.stability === "beta" && plugin.package === "@databricks/appkit"
         ? `${plugin.package}/beta`
         : plugin.package;
-    // Local plugins are recorded relative to the app root; imports resolve
-    // relative to the server file.
+    // Local packages are app-root relative; imports are server-file relative.
     if (plugin.package.startsWith(".")) {
       const from = path.dirname(serverFile ?? serverRoot);
       const rel = path

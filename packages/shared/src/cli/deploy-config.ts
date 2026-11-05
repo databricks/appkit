@@ -10,11 +10,7 @@ export const DATABRICKS_YML_FILE = "databricks.yml";
 /** Canonical Databricks Apps runtime config file name. */
 export const APP_YAML_FILE = "app.yaml";
 
-/**
- * An `app.yaml` env entry: `- name: <env>` with `valueFrom: <binding name>`,
- * or a literal `value` (resources accessed only on behalf of the user have no
- * binding to reference).
- */
+/** An `app.yaml` env entry: `valueFrom` a binding, or a literal `value` (OBO-only resources). */
 export type AppYamlEnvEntry =
   | { name: string; valueFrom: string }
   | { name: string; value: string };

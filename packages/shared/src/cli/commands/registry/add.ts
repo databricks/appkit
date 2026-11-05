@@ -70,7 +70,7 @@ function findFrontendRoot(cwd: string): string {
 }
 
 /** Locates the server root for plugins (the server/ subdir, else cwd). */
-function findServerRoot(cwd: string): string {
+export function findServerRoot(cwd: string): string {
   for (const sub of SERVER_SUBDIRS) {
     if (isDir(path.join(cwd, sub))) return path.join(cwd, sub);
   }
@@ -487,8 +487,7 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
     }
   }
 
-  // The deploy-config write refuses an ambiguous bundle: check before any
-  // file, and only when an item has resources to write (UI items don't).
+  // Before any write, and only when an item has resources (UI items don't).
   if (
     opts.resources !== false &&
     items.some((i) => extractRequirements(i).length > 0)
