@@ -14,8 +14,7 @@
     "@databricks/appkit-ui": "workspace:*",
     "lucide-react": "0.546.0",
     "react": "19.2.0",
-    "react-dom": "19.2.0",
-    "react-router": "7.18.0"
+    "react-dom": "19.2.0"
   },
   "devDependencies": {
     "@playwright/test": "1.61.0",
