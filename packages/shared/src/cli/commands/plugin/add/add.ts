@@ -519,12 +519,19 @@ async function runPluginAdd(names: string[], opts: AddOptions): Promise<void> {
   );
 
   // Shared resources: envConflicts already rejected differing ones.
-  const byName = <T extends { name: string }>(xs: T[]) =>
-    firstBy(xs, (x) => x.name);
   const merged: ConfigPlan = {
-    appYamlEnv: byName(plans.flatMap((p) => p.appYamlEnv)),
-    bundleVariables: byName(plans.flatMap((p) => p.bundleVariables)),
-    resourceBindings: byName(plans.flatMap((p) => p.resourceBindings)),
+    appYamlEnv: firstBy(
+      plans.flatMap((p) => p.appYamlEnv),
+      (x) => x.name,
+    ),
+    bundleVariables: firstBy(
+      plans.flatMap((p) => p.bundleVariables),
+      (x) => x.name,
+    ),
+    resourceBindings: firstBy(
+      plans.flatMap((p) => p.resourceBindings),
+      (x) => x.name,
+    ),
     userApiScopes: [...new Set(plans.flatMap((p) => p.userApiScopes ?? []))],
     unverifiedTypes: [...new Set(plans.flatMap((p) => p.unverifiedTypes))],
   };
