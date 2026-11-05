@@ -1,12 +1,6 @@
 import type { ManifestResource } from "./plan";
 
-/**
- * Derived values for fields with a `resolve` key, a port of the Databricks
- * CLI's ResolvePostgresValues (libs/apps/prompt): the branch's read-write
- * endpoint gives `postgres:host` and `postgres:endpointPath`, the database
- * gives `postgres:databaseName`. Returns `resourceKey.field` → value for the
- * fields it could resolve; throws on API errors.
- */
+/** Values for `postgres:*` resolver fields, as the Databricks CLI's ResolvePostgresValues. */
 export async function resolveDerivedValues(
   r: ManifestResource,
   values: Record<string, string>,
@@ -48,13 +42,7 @@ export async function resolveDerivedValues(
   return out;
 }
 
-/**
- * Columns for an AI Search index: the Delta Sync source table's columns minus
- * embedding vectors, limited to `columnsToSync` (or its alias `columnsToIndex`) when the index syncs a subset
- * (other source columns aren't in the index, and querying them fails).
- * Production refuses to start without `columns`, so they are written into the
- * plugin config at add time. Throws when the index has no source table.
- */
+/** An AI Search index's synced source columns, minus embedding vectors. */
 export async function discoverIndexColumns(
   indexName: string,
   profile: string | undefined,

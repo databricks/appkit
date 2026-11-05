@@ -79,11 +79,7 @@ function ensureMap(
   return node;
 }
 
-/**
- * Key of the bundle's app under `resources.apps`: the only one there (apps
- * are often named after the project, not `app`), else `app`. Throws when
- * several apps exist and none is `app`, rather than guess or add a new one.
- */
+/** The bundle's only app, else `app`; throws on several apps with none named `app`. */
 function appKey(doc: ReturnType<typeof parseDocument>): string {
   const keys = Object.keys(doc.toJSON()?.resources?.apps ?? {});
   if (keys.length === 1) return keys[0];
@@ -93,7 +89,7 @@ function appKey(doc: ReturnType<typeof parseDocument>): string {
   );
 }
 
-/** Throws (see {@link appKey}) when databricks.yml has no single target app. */
+/** Throws when databricks.yml has no single target app (see appKey). */
 export function assertBundleApp(cwd: string): void {
   appKey(loadDoc(path.join(cwd, DATABRICKS_YML_FILE)));
 }
