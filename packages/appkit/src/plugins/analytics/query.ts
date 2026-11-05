@@ -16,7 +16,7 @@ export class QueryProcessor {
   ): Promise<Record<string, SQLParameterValue>> {
     const processed = { ...parameters };
 
-    // extract all params from the query (not :x inside literals or comments)
+    // extract all params from the query
     const queryParams = new Set(extractParameters(query));
 
     // auto-inject workspaceId if needed and not provided
@@ -41,7 +41,7 @@ export class QueryProcessor {
     const sqlParameters: StatementParameter[] = [];
 
     if (parameters) {
-      // extract all params from the query (not :x inside literals or comments)
+      // extract all params from the query
       const queryParams = new Set(extractParameters(query));
 
       // only allow parameters that exist in the query

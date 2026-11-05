@@ -1,16 +1,7 @@
 /**
- * Spans of a SQL statement where `:name` is not a parameter:
- *   '...'   string literal (`''` or `\'` escapes)
- *   "..."   string literal (Databricks SQL allows double quotes; `""` or `\"`)
- *   `...`   quoted identifier (`` `` `` escapes)
- *   --...   single-line comment
- *
- * The regex scans left-to-right and the first branch matching at a position
- * wins, so a quote opens a literal before any `--` or other quote inside it
- * can match. E.g. in `date_format(ts, "yyyy-MM-dd'T'HH:mm:ss")` the whole
- * double-quoted literal is one span, so `:mm` / `:ss` aren't parameters.
- *
- * V1: no block-comment support.
+ * Spans where `:name` isn't a parameter: '...' and "..." literals, `...`
+ * identifiers and `--` comments (not block comments). The first branch to
+ * match wins, so `"HH:mm'T'"` is one span.
  */
 const PROTECTED_RANGE_RE =
   /'(?:[^'\\]|\\.|'')*'|"(?:[^"\\]|\\.|"")*"|`(?:[^`]|``)*`|--[^\n]*/g;

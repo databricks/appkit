@@ -127,10 +127,8 @@ export const FALLBACK_UI_TOKENS: ChartUITokens = {
 export const CHART_MIN_HEIGHT = 160;
 
 /**
- * Size of a chart's box. With an explicit `height` (pixels) the chart is
- * exactly that tall. Without one it fills its parent's height, so it fits the
- * card or grid cell it's placed in, and falls back to {@link CHART_MIN_HEIGHT}
- * when the parent's height comes from its content.
+ * A chart's box: exactly `height` pixels, or its parent's height, at least
+ * {@link CHART_MIN_HEIGHT} when that comes from its content.
  */
 export function chartSizeStyle(height?: number): {
   height: number | string;

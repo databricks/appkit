@@ -3,10 +3,7 @@ import { Component, type ReactNode, useLayoutEffect, useRef } from "react";
 import { useDesignReady } from "./hooks/use-design-ready";
 import { Skeleton } from "./ui/skeleton";
 
-/**
- * `?theme=dark` / `?theme=light` on the page URL, else the system setting.
- * Applied before the first paint, so a dark page never flashes light.
- */
+/** `?theme=dark|light`, else the system setting, applied before the first paint. */
 function useDesignTheme() {
   useLayoutEffect(() => {
     const param = new URLSearchParams(location.search).get("theme");
@@ -68,11 +65,7 @@ interface LastGoodFrameProps {
   errorFallback: (error: Error) => ReactNode;
 }
 
-/**
- * On a render error, shows a copy of the last good frame in the same commit
- * (never a broken one), or `errorFallback` when nothing rendered yet, and
- * holds the page's readiness back. A new `resetKey` retries.
- */
+/** On a render error, shows the last good frame (or `errorFallback`) and holds readiness back. */
 interface LastGoodFrameState {
   error: Error | null;
   resetKey: unknown;
@@ -135,12 +128,8 @@ export interface DesignPageProps {
 }
 
 /**
- * The shell every `/design` page renders through, whether it's streaming,
- * finished or locked in: the app's theme (dark mode included) from the first
- * paint, and an error boundary that keeps the last good frame on screen
- * (holding readiness back, see `useDesignReady`) instead of a broken page.
- *
- * Used by the dev-only `design()` plugin; pages don't render it themselves.
+ * The shell the `design()` plugin renders every `/design` page in: the app's
+ * theme from the first paint, and the last good frame instead of a broken one.
  */
 export function DesignPage({
   children,
@@ -151,8 +140,7 @@ export function DesignPage({
   useDesignTheme();
   const root = useRef<HTMLDivElement>(null);
   const frame = useRef<Frame | null>(null);
-  // Keeps a copy of every frame that rendered: edits arrive as hot updates,
-  // which re-render the page without this component.
+  // Hot updates re-render the page without this component: copy every frame.
   useLayoutEffect(() => {
     const el = root.current;
     if (!el) return;
@@ -201,11 +189,7 @@ export function DesignPage({
 
 export type DraftPlaceholderKind = "chart" | "table" | "card" | "generic";
 
-/**
- * Stands in for a component a streaming draft uses before its definition has
- * arrived: a skeleton of the right shape, so the layout fills in instead of
- * jumping. The `design()` plugin substitutes it; pages don't use it.
- */
+/** Skeleton the `design()` plugin shows for a component a streaming draft hasn't defined yet. */
 export function DraftPlaceholder({
   kind = "generic",
 }: {

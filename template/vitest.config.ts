@@ -9,10 +9,7 @@ export default defineConfig({
     exclude: ['**/node_modules/**', '**/dist/**', '**/.databricks/**'],
     server: {
       deps: {
-        // Transform appkit-ui and echarts-for-react instead of letting Node
-        // load them: echarts-for-react's ESM build uses extensionless
-        // imports, which Node's ESM loader rejects, so a test importing an
-        // appkit-ui chart would fail to load.
+        // echarts-for-react's ESM build has extensionless imports Node rejects.
         inline: [/@databricks\/appkit-ui/, 'echarts-for-react'],
       },
     },

@@ -124,10 +124,7 @@ export interface BaseChartProps {
   yKey?: string | string[];
   /** Chart orientation @default "vertical" */
   orientation?: Orientation;
-  /**
-   * Chart height in pixels. By default the chart fills its parent's height
-   * (at least 160px).
-   */
+  /** Chart height in pixels. Defaults to filling its parent (see `chartSizeStyle`). */
   height?: number;
   /** Chart title */
   title?: string;
