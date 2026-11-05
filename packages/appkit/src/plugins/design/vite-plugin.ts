@@ -14,6 +14,12 @@ import {
   streamDraft,
   themeCss,
 } from "./drafts";
+import {
+  mockImports,
+  renderablePartial,
+  streamHostModule,
+  stubMock,
+} from "./stream";
 
 /**
  * One virtual entry per page: `virtual:appkit-design-page:<file>.mjs`. The
@@ -26,6 +32,8 @@ const ENTRY_SUFFIX = ".mjs";
 const HYDRATOR_PREFIX = "virtual:appkit-draft-hydrator:";
 /** Script added to the app's own pages (not /design) to post appkit:app-ready. */
 const APP_READY_ID = "virtual:appkit-app-ready.mjs";
+/** Host page of a streamed TSX draft: `virtual:appkit-design-stream:<name>.mjs`. */
+const STREAM_HOST_PREFIX = "virtual:appkit-design-stream:";
 
 /**
  * Marks the app template's default home page. While an element carrying it
@@ -43,6 +51,10 @@ const DRAFT_THEME_PATH = "/design/drafts/theme.css";
 const DRAFT_MOCK_PATH = "/design/drafts/mock.json";
 /** Stable URL of the draft hydrator, for drafts streamed from elsewhere. */
 const HYDRATOR_PATH = "/design/drafts/__hydrator.js";
+/** `/design/__stream/<name>`: a TSX draft rendered while it's being written. */
+const STREAM_ROUTE = /^\/design\/__stream\/([A-Za-z0-9_-]+)\/?$/;
+/** At most one published version per stream in this long. */
+const STREAM_INTERVAL_MS = 150;
 /** Vite's default dev CORS origins (localhost), kept when builders are added. */
 const LOCALHOST_ORIGIN =
   /^https?:\/\/(?:(?:[^:]+\.)?localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/;
@@ -655,6 +667,221 @@ export function designVitePlugin({
     return file ? fs.statSync(file).mtimeMs : -1;
   };
 
+  // Streamed TSX drafts. A builder appends each draft's source as it
+  // arrives to src/design/.staging/<name>.tsx (the shared mock's to
+  // .staging/mock.ts), and writes the finished file to pages/<name>.tsx
+  // (mock.ts) once it type-checks. Until then the page's module is the
+  // latest renderable version of its staging file. By name ("mock" for the
+  // mock): the version published, and the staging file's mtime it came from.
+  const streams = new Map<
+    string,
+    {
+      code: string | null;
+      // The last watcher event: the staging file's mtime then, and when it came.
+      written: number;
+      seen: number;
+      busy: boolean;
+      pending: boolean;
+      last: number;
+    }
+  >();
+  const stagingFile = (name: string) =>
+    path.join(
+      root,
+      "src/design/.staging",
+      name === "mock" ? "mock.ts" : `${name}.tsx`,
+    );
+  const finalFile = (name: string) =>
+    name === "mock"
+      ? path.join(root, "src/design/mock.ts")
+      : path.join(root, "src/design/pages", `${name}.tsx`);
+  const streamName = (file: string): string | undefined => {
+    const rel = path
+      .relative(path.join(root, "src/design"), file)
+      .split(path.sep)
+      .join("/");
+    if (rel === ".staging/mock.ts" || rel === "mock.ts") return "mock";
+    const name = /^(?:\.staging|pages)\/([A-Za-z0-9_-]+)\.tsx$/.exec(rel)?.[1];
+    return name && !isReservedName(name) ? name : undefined;
+  };
+  const streamCssDir = path.join(
+    projectRoot,
+    "node_modules/.appkit-design-stream",
+  );
+  const streamCssIds = new Set<string>();
+  // Words seen in streamed string literals: Tailwind only needs a rebuild
+  // when a version brings new ones (possible class names).
+  const streamTokens = new Set<string>();
+  const newTokens = (code: string) => {
+    let added = false;
+    for (const m of code.matchAll(/["'`]([^"'`\n]*)["'`]/g)) {
+      for (const token of m[1].split(/\s+/)) {
+        if (token && !streamTokens.has(token)) {
+          streamTokens.add(token);
+          added = true;
+        }
+      }
+    }
+    return added;
+  };
+  let viteServer: ViteDevServer | undefined;
+  /** The published version of a page while it streams, else null (from disk). */
+  const streamedCode = (name: string) => {
+    const code = streams.get(name)?.code ?? null;
+    // The staging file is checked too: a builder starting the draft over
+    // deletes it, and the watcher reports that a moment later.
+    return code !== null &&
+      fs.existsSync(stagingFile(name)) &&
+      !fs.existsSync(finalFile(name))
+      ? code
+      : null;
+  };
+  /**
+   * The mock while mock.ts isn't written yet and something streams: what
+   * .staging/mock.ts has so far, plus stubs for what streaming pages import.
+   */
+  const mockCode = (): string | null => {
+    if (fs.existsSync(finalFile("mock"))) return null;
+    const pages = [...streams.keys()]
+      .filter((n) => n !== "mock")
+      .map(streamedCode)
+      .filter((c): c is string => c !== null);
+    const mock = fs.existsSync(stagingFile("mock"))
+      ? (streams.get("mock")?.code ?? null)
+      : null;
+    if (mock === null && pages.length === 0) return null;
+    return stubMock(
+      mock ?? "",
+      pages.flatMap((p) => mockImports(p)),
+    );
+  };
+  let servedMock: string | null = null;
+  const reloadFile = async (file: string) => {
+    for (const mod of viteServer?.moduleGraph.getModulesByFile(file) ?? []) {
+      // Nothing imports it (a page closed): a hot update would find no
+      // boundary and reload every open page.
+      if (mod.importers.size === 0 && !mod.isSelfAccepting) continue;
+      await viteServer?.reloadModule(mod);
+    }
+  };
+  const reloadMock = async () => {
+    const code = mockCode();
+    if (code === servedMock) return;
+    servedMock = code;
+    await reloadFile(finalFile("mock"));
+  };
+  const reloadCss = async () => {
+    for (const id of streamCssIds) {
+      const mod = await viteServer?.moduleGraph.getModuleById(id);
+      if (mod) await viteServer?.reloadModule(mod);
+    }
+  };
+  const isValid = async (code: string) => {
+    const vite = (await import("vite")) as typeof import("vite") & {
+      transformWithOxc?: (
+        code: string,
+        file: string,
+        opts: object,
+      ) => Promise<unknown>;
+    };
+    try {
+      if (vite.transformWithOxc) {
+        await vite.transformWithOxc(code, "draft.tsx", { lang: "tsx" });
+      } else {
+        await vite.transformWithEsbuild(code, "draft.tsx", { loader: "tsx" });
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  /** Publishes the renderable version of a staging file, if it changed. */
+  const publish = async (name: string) => {
+    const s = streams.get(name);
+    if (!s) return;
+    const wait = s.last + STREAM_INTERVAL_MS - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    if (fs.existsSync(finalFile(name))) return;
+    let raw: string;
+    try {
+      raw = fs.readFileSync(stagingFile(name), "utf-8");
+    } catch {
+      return;
+    }
+    const mock = name === "mock";
+    const code = await renderablePartial(raw, isValid, { page: !mock });
+    if (code === null || code === s.code) return;
+    s.code = code;
+    s.last = Date.now();
+    // Styles first, so the version never shows without its classes.
+    if (!mock && newTokens(code)) {
+      fs.writeFileSync(path.join(streamCssDir, `${name}.tsx`), code);
+      await reloadCss();
+    }
+    if (!mock) await reloadFile(finalFile(name));
+    await reloadMock();
+    viteServer?.ws.send({
+      type: "custom",
+      event: "appkit:stream",
+      // Times for measuring: written (staging mtime), seen by the watcher, published.
+      data: { name, written: s.written, seen: s.seen, published: Date.now() },
+    });
+  };
+  const onStagingChange = async (name: string) => {
+    const seen = Date.now();
+    let s = streams.get(name);
+    if (!s) {
+      s = {
+        code: null,
+        written: 0,
+        seen: 0,
+        busy: false,
+        pending: false,
+        last: 0,
+      };
+      streams.set(name, s);
+    }
+    s.seen = seen;
+    try {
+      s.written = fs.statSync(stagingFile(name)).mtimeMs;
+    } catch {}
+    if (s.busy) {
+      s.pending = true;
+      return;
+    }
+    s.busy = true;
+    try {
+      do {
+        s.pending = false;
+        await publish(name);
+      } while (s.pending);
+    } finally {
+      s.busy = false;
+    }
+  };
+  /** The finished file landed: Vite hot-updates the module from disk. */
+  const onFinal = async (name: string) => {
+    const file = finalFile(name);
+    if (name !== "mock") {
+      const code = fs.readFileSync(file, "utf-8");
+      if (newTokens(code)) {
+        fs.writeFileSync(path.join(streamCssDir, `${name}.tsx`), code);
+        await reloadCss();
+      }
+    }
+    await reloadMock();
+    viteServer?.ws.send({
+      type: "custom",
+      event: "appkit:stream",
+      data: {
+        name,
+        done: true,
+        written: fs.statSync(file).mtimeMs,
+        seen: Date.now(),
+      },
+    });
+  };
+
   return {
     name: "appkit-design",
     apply: "serve",
@@ -673,14 +900,39 @@ export function designVitePlugin({
       root = config.root;
     },
 
-    resolveId(id) {
-      if (
-        id.startsWith(ENTRY_PREFIX) ||
-        id.startsWith(HYDRATOR_PREFIX) ||
-        id === APP_READY_ID
-      ) {
-        return `\0${id}`;
-      }
+    resolveId: {
+      // Before Vite's resolver, which can't find a streamed file not on disk yet.
+      order: "pre",
+      handler(id, importer) {
+        if (
+          id.startsWith(ENTRY_PREFIX) ||
+          id.startsWith(HYDRATOR_PREFIX) ||
+          id.startsWith(STREAM_HOST_PREFIX) ||
+          id === APP_READY_ID
+        ) {
+          return `\0${id}`;
+        }
+        const clean = id.split("?")[0];
+        // As the host imports it, or by file (Fast Refresh imports itself).
+        const page =
+          /^(?:\/src\/design\/pages\/|.*\/src\/design\/pages\/)([A-Za-z0-9_-]+)\.tsx$/.exec(
+            clean,
+          )?.[1];
+        if (
+          page &&
+          (clean.startsWith("/src/") || clean === finalFile(page)) &&
+          streamedCode(page) !== null
+        ) {
+          return finalFile(page);
+        }
+        if (
+          /^\.\.\/mock(?:\.ts)?$/.test(clean) &&
+          importer?.startsWith(path.join(root, "src/design/pages")) &&
+          mockCode() !== null
+        ) {
+          return finalFile("mock");
+        }
+      },
     },
 
     transformIndexHtml(_html, ctx) {
@@ -699,21 +951,29 @@ export function designVitePlugin({
 
     async load(id) {
       if (id === `\0${APP_READY_ID}`) return appReadyModule(builderOrigins);
-      if (id.startsWith(`\0${HYDRATOR_PREFIX}`) && id.endsWith(ENTRY_SUFFIX)) {
-        const draft = id.slice(
-          HYDRATOR_PREFIX.length + 1,
+      if (
+        id.startsWith(`\0${STREAM_HOST_PREFIX}`) &&
+        id.endsWith(ENTRY_SUFFIX)
+      ) {
+        const name = id.slice(
+          STREAM_HOST_PREFIX.length + 1,
           -ENTRY_SUFFIX.length,
         );
-        if (/^[A-Za-z0-9_-]+$/.test(draft)) {
-          return hydratorModule(
-            draft,
-            builderOrigins,
-            STATUS_PATH,
-            DRAFT_MOCK_PATH,
-          );
-        }
-        return;
+        return /^[A-Za-z0-9_-]+$/.test(name)
+          ? streamHostModule(name)
+          : undefined;
       }
+      // A streamed page or mock: its latest renderable version until the
+      // finished file is written.
+      const loaded = id.split("?")[0];
+      const streamed =
+        loaded === finalFile("mock")
+          ? mockCode()
+          : streams.has(path.basename(loaded, ".tsx")) &&
+              loaded === finalFile(path.basename(loaded, ".tsx"))
+            ? streamedCode(path.basename(loaded, ".tsx"))
+            : null;
+      if (streamed !== null) return streamed;
       if (!id.startsWith(`\0${ENTRY_PREFIX}`)) return;
       if (!id.endsWith(ENTRY_SUFFIX)) return;
       const file = id.slice(ENTRY_PREFIX.length + 1, -ENTRY_SUFFIX.length);
@@ -723,7 +983,62 @@ export function designVitePlugin({
       }
     },
 
+    // A builder deleting a draft (to write it again) would make Vite reload
+    // every open page: the module graph still has it, imported by pages since
+    // closed. A page showing it keeps its last frame instead.
+    hotUpdate({ type, file, modules }) {
+      const name = streamName(file);
+      if (
+        type === "delete" &&
+        name &&
+        (file === finalFile(name) || file === stagingFile(name))
+      ) {
+        // Forget its transform, so the next import doesn't get the old file,
+        // and that it imported the mock: a hot update of the mock would find
+        // this (no longer hot-accepting) importer and reload every page.
+        for (const mod of modules) {
+          this.environment.moduleGraph.invalidateModule(mod);
+          for (const dep of mod.importedModules) dep.importers.delete(mod);
+        }
+        return [];
+      }
+    },
+
+    // Tailwind only scans files for class names: point it at the copies of
+    // streamed versions too, so their classes exist before the file does.
+    transform: {
+      order: "pre",
+      handler(code, id) {
+        const file = id.split("?")[0];
+        if (
+          !file.endsWith(".css") ||
+          !file.startsWith(path.join(root, "src")) ||
+          !code.includes("@import")
+        ) {
+          return;
+        }
+        streamCssIds.add(id);
+        return `${code}\n@source "${streamCssDir}";\n`;
+      },
+    },
+
     configureServer(server) {
+      viteServer = server;
+      fs.mkdirSync(streamCssDir, { recursive: true });
+      const onFile = (file: string) => {
+        const name = streamName(file);
+        if (!name) return;
+        if (file === stagingFile(name)) void onStagingChange(name);
+        else if (file === finalFile(name) && streams.has(name))
+          void onFinal(name);
+      };
+      server.watcher?.on("add", onFile);
+      server.watcher?.on("change", onFile);
+      // A new draft by the same name starts from nothing.
+      server.watcher?.on("unlink", (file) => {
+        const name = streamName(file);
+        if (name && file === stagingFile(name)) streams.delete(name);
+      });
       // The app's theme tokens (light and dark) for drafts, from appkit-ui's
       // styles as the app resolves them.
       const draftTheme = () => {
@@ -774,6 +1089,24 @@ export function designVitePlugin({
       server.middlewares.use(async (req, res, next) => {
         const pathname = req.url?.split("?")[0] ?? "";
 
+        // A streamed page deleted a moment ago (a builder starting the draft
+        // over): Vite would serve its cached transform until the watcher
+        // reports the delete, and it checks that cache before any plugin.
+        const deleted = /^\/src\/design\/pages\/([A-Za-z0-9_-]+)\.tsx$/.exec(
+          pathname,
+        )?.[1];
+        if (
+          deleted &&
+          streamedCode(deleted) === null &&
+          !fs.existsSync(finalFile(deleted))
+        ) {
+          for (const mod of server.moduleGraph.getModulesByFile(
+            finalFile(deleted),
+          ) ?? []) {
+            server.moduleGraph.invalidateModule(mod);
+          }
+        }
+
         // The plugin's own endpoints are also used by builder pages on other
         // origins (a streamed draft posts errors, loads the hydrator).
         const origin = req.headers?.origin;
@@ -795,6 +1128,20 @@ export function designVitePlugin({
             res.end();
             return;
           }
+        }
+
+        const streamPage = STREAM_ROUTE.exec(pathname)?.[1];
+        if (streamPage && !isReservedName(streamPage)) {
+          const html = await server.transformIndexHtml(
+            req.url ?? pathname,
+            pageHtml(
+              `Streaming: ${streamPage}`,
+              `/@id/__x00__${STREAM_HOST_PREFIX}${streamPage}${ENTRY_SUFFIX}`,
+            ),
+          );
+          res.setHeader("Content-Type", "text/html");
+          res.end(html);
+          return;
         }
 
         if (pathname === HYDRATOR_PATH) {
