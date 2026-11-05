@@ -8,7 +8,7 @@ import { parseDocument } from "yaml";
 import { z } from "zod";
 
 import { APP_YAML_FILE } from "../../../deploy-config";
-import { profileFromEnv } from "../../registry/add";
+import { findServerRoot, profileFromEnv } from "../../registry/add";
 import type { ConfigPlan } from "../../registry/config-plan";
 import {
   assertBundleApp,
@@ -41,7 +41,6 @@ import {
 import { discoverIndexColumns, resolveDerivedValues } from "./resolve";
 
 const MANIFEST_FILE = "appkit.plugins.json";
-const SERVER_SUBDIRS = ["server", "api", "backend"];
 
 interface AddOptions {
   set: string[];
@@ -237,6 +236,16 @@ async function aiSearchColumns(
 /** The env var agents falls back to for its model; serving binds it too. */
 const AGENTS_MODEL_ENV = "DATABRICKS_SERVING_ENDPOINT_NAME";
 
+/** What an app.yaml env entry points at, for comparing two entries. */
+function entryKey(e: { valueFrom?: string; value?: string }): string {
+  return JSON.stringify([e.valueFrom, e.value]);
+}
+
+/** The first item per key, in order. */
+function firstBy<T>(xs: T[], key: (x: T) => string): T[] {
+  return xs.filter((x, i) => xs.findIndex((y) => key(y) === key(x)) === i);
+}
+
 /**
  * Env names in the plan already bound to something else: a different
  * non-empty value in .env, or an app.yaml entry with another valueFrom/value.
@@ -258,21 +267,13 @@ export function envConflicts(
       | { name?: string; valueFrom?: string; value?: string }[]
       | undefined;
     for (const e of env ?? []) {
-      if (e?.name) appEnv.set(e.name, JSON.stringify([e.valueFrom, e.value]));
+      if (e?.name) appEnv.set(e.name, entryKey(e));
     }
   }
   for (const p of pending) {
     for (const e of p.dotEnv) if (!dotEnv[e.env]) dotEnv[e.env] = e.value;
     for (const e of p.appYamlEnv) {
-      if (!appEnv.has(e.name)) {
-        appEnv.set(
-          e.name,
-          JSON.stringify([
-            "valueFrom" in e ? e.valueFrom : undefined,
-            "value" in e ? e.value : undefined,
-          ]),
-        );
-      }
+      if (!appEnv.has(e.name)) appEnv.set(e.name, entryKey(e));
     }
   }
   const out = new Set<string>();
@@ -280,12 +281,8 @@ export function envConflicts(
     if (dotEnv[e.env] && e.value && dotEnv[e.env] !== e.value) out.add(e.env);
   }
   for (const e of plan.appYamlEnv) {
-    const want = JSON.stringify([
-      "valueFrom" in e ? e.valueFrom : undefined,
-      "value" in e ? e.value : undefined,
-    ]);
     const have = appEnv.get(e.name);
-    if (have !== undefined && have !== want) out.add(e.name);
+    if (have !== undefined && have !== entryKey(e)) out.add(e.name);
   }
   return [...out];
 }
@@ -549,7 +546,7 @@ async function runPluginAdd(names: string[], opts: AddOptions): Promise<void> {
   // Plugins can share a resource (same env var, variable and binding);
   // envConflicts already rejected any that differ, so keep the first.
   const byName = <T extends { name: string }>(xs: T[]) =>
-    xs.filter((x, i) => xs.findIndex((y) => y.name === x.name) === i);
+    firstBy(xs, (x) => x.name);
   const merged: ConfigPlan = {
     appYamlEnv: byName(plans.flatMap((p) => p.appYamlEnv)),
     bundleVariables: byName(plans.flatMap((p) => p.bundleVariables)),
@@ -577,9 +574,7 @@ async function writeDotEnv(
   const { readEnvFile } = await import("../../registry/env-writer.js");
   const envPath = path.join(cwd, ".env");
   const existing = readEnvFile(envPath);
-  const dotEnv = entries.filter(
-    (e, i) => entries.findIndex((x) => x.env === e.env) === i,
-  );
+  const dotEnv = firstBy(entries, (e) => e.env);
   const filled = dotEnv.filter((e) => existing[e.env] === "" && e.value);
   const newEnv = dotEnv.filter((e) => !(e.env in existing));
   if (filled.length === 0 && newEnv.length === 0) return;
@@ -696,10 +691,7 @@ async function registerInServer(
   cwd: string,
   prepared: PreparedPlugin[],
 ): Promise<void> {
-  const serverRoot =
-    SERVER_SUBDIRS.map((s) => path.join(cwd, s)).find((p) =>
-      fs.existsSync(p),
-    ) ?? cwd;
+  const serverRoot = findServerRoot(cwd);
   // Lazy: server-register pulls in the @ast-grep/napi native addon.
   const { findServerFile, registerPluginsInServer } =
     await import("../../registry/server-register.js");

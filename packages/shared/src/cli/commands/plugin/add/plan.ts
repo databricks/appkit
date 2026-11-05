@@ -121,11 +121,10 @@ export function validSetKeys(
   return keys;
 }
 
-/** Throws unless the key is one the plugin manifest declares. */
-function assertDeclared(plugin: ManifestPlugin, sv: string, key: string): void {
+/** The error for a --set key the plugin manifest doesn't declare. */
+function undeclaredKey(plugin: ManifestPlugin, sv: string): Error {
   const keys = validSetKeys(plugin);
-  if (keys.has(key)) return;
-  throw new Error(
+  return new Error(
     `--set "${sv}" does not match a resource declared by plugin "${plugin.name}"; valid keys: ${[...keys.keys()].join(", ") || "(none, the plugin declares no resources)"}`,
   );
 }
@@ -176,7 +175,9 @@ export function parseSetValues(
         `unknown plugin "${pluginName}" in --set "${sv}"; this command adds "${plugin.name}"`,
       );
     }
-    assertDeclared(plugin, sv, `${pluginName}.${resourceKey}.${field}`);
+    if (!validSetKeys(plugin).has(`${pluginName}.${resourceKey}.${field}`)) {
+      throw undeclaredKey(plugin, sv);
+    }
     rv[`${resourceKey}.${field}`] = value;
   }
 
@@ -210,8 +211,7 @@ export function parseSetAuthModes(
       );
     }
     const r = allResources(plugin).find((x) => x.resourceKey === resourceKey);
-    if (!r)
-      throw assertDeclared(plugin, sv, `${pluginName}.${resourceKey}.${field}`);
+    if (!r) throw undeclaredKey(plugin, sv);
     if (
       value !== AUTH_MODE_SP &&
       value !== AUTH_MODE_OBO &&
