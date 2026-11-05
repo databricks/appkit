@@ -1,0 +1,225 @@
+{
+  "$comment": "Stand-in for App Builder's components.schema.json: appkit-ui components a draft page may use. All import from \"@databricks/appkit-ui/react\".",
+  "components": {
+    "Card": {
+      "parts": [
+        "Card",
+        "CardHeader",
+        "CardTitle",
+        "CardDescription",
+        "CardAction",
+        "CardContent",
+        "CardFooter"
+      ],
+      "props": { "className": "string" }
+    },
+    "Button": {
+      "props": {
+        "variant": [
+          "default",
+          "destructive",
+          "outline",
+          "secondary",
+          "ghost",
+          "link"
+        ],
+        "size": ["default", "sm", "lg", "icon", "icon-sm", "icon-lg"],
+        "asChild": "boolean",
+        "onClick": "() => void",
+        "disabled": "boolean"
+      }
+    },
+    "Badge": {
+      "props": { "variant": ["default", "secondary", "destructive", "outline"] }
+    },
+    "Alert": {
+      "parts": ["Alert", "AlertTitle", "AlertDescription"],
+      "props": { "variant": ["default", "destructive"] }
+    },
+    "Tabs": {
+      "parts": ["Tabs", "TabsList", "TabsTrigger", "TabsContent"],
+      "props": {
+        "defaultValue": "string",
+        "value": "string",
+        "onValueChange": "(v: string) => void"
+      },
+      "childProps": {
+        "TabsTrigger": { "value": "string" },
+        "TabsContent": { "value": "string" }
+      }
+    },
+    "Table": {
+      "parts": [
+        "Table",
+        "TableHeader",
+        "TableBody",
+        "TableFooter",
+        "TableRow",
+        "TableHead",
+        "TableCell",
+        "TableCaption"
+      ],
+      "props": {}
+    },
+    "Input": {
+      "props": {
+        "type": "string",
+        "value": "string",
+        "onChange": "(e: React.ChangeEvent<HTMLInputElement>) => void",
+        "placeholder": "string",
+        "id": "string"
+      }
+    },
+    "Textarea": {
+      "props": {
+        "value": "string",
+        "onChange": "(e: React.ChangeEvent<HTMLTextAreaElement>) => void",
+        "rows": "number"
+      }
+    },
+    "Label": { "props": { "htmlFor": "string" } },
+    "Select": {
+      "parts": [
+        "Select",
+        "SelectTrigger",
+        "SelectValue",
+        "SelectContent",
+        "SelectGroup",
+        "SelectLabel",
+        "SelectItem",
+        "SelectSeparator"
+      ],
+      "props": {
+        "value": "string",
+        "defaultValue": "string",
+        "onValueChange": "(v: string) => void"
+      },
+      "childProps": {
+        "SelectItem": { "value": "string (non-empty)" },
+        "SelectValue": { "placeholder": "string" }
+      }
+    },
+    "Checkbox": {
+      "props": {
+        "checked": "boolean",
+        "onCheckedChange": "(v: boolean | \"indeterminate\") => void",
+        "id": "string"
+      }
+    },
+    "Switch": {
+      "props": {
+        "checked": "boolean",
+        "onCheckedChange": "(v: boolean) => void",
+        "id": "string"
+      }
+    },
+    "RadioGroup": {
+      "parts": ["RadioGroup", "RadioGroupItem"],
+      "props": { "value": "string", "onValueChange": "(v: string) => void" },
+      "childProps": { "RadioGroupItem": { "value": "string", "id": "string" } }
+    },
+    "Slider": {
+      "props": {
+        "value": "number[]",
+        "onValueChange": "(v: number[]) => void",
+        "min": "number",
+        "max": "number",
+        "step": "number"
+      }
+    },
+    "Progress": { "props": { "value": "number (0-100)" } },
+    "Separator": { "props": { "orientation": ["horizontal", "vertical"] } },
+    "Skeleton": { "props": { "className": "string" } },
+    "Tooltip": {
+      "parts": [
+        "TooltipProvider",
+        "Tooltip",
+        "TooltipTrigger",
+        "TooltipContent"
+      ],
+      "props": {},
+      "childProps": { "TooltipTrigger": { "asChild": "boolean" } }
+    },
+    "ToggleGroup": {
+      "parts": ["ToggleGroup", "ToggleGroupItem"],
+      "props": {
+        "type": ["single", "multiple"],
+        "value": "string (single) | string[] (multiple)",
+        "onValueChange": "(v) => void"
+      },
+      "childProps": { "ToggleGroupItem": { "value": "string" } }
+    },
+    "Field": {
+      "parts": [
+        "FieldSet",
+        "FieldLegend",
+        "FieldGroup",
+        "Field",
+        "FieldLabel",
+        "FieldDescription",
+        "FieldError",
+        "FieldContent",
+        "FieldTitle",
+        "FieldSeparator"
+      ],
+      "props": { "orientation": ["vertical", "horizontal", "responsive"] }
+    },
+    "Empty": {
+      "parts": [
+        "Empty",
+        "EmptyHeader",
+        "EmptyMedia",
+        "EmptyTitle",
+        "EmptyDescription",
+        "EmptyContent"
+      ],
+      "childProps": { "EmptyMedia": { "variant": ["default", "icon"] } }
+    },
+    "Item": {
+      "parts": [
+        "ItemGroup",
+        "Item",
+        "ItemMedia",
+        "ItemContent",
+        "ItemTitle",
+        "ItemDescription",
+        "ItemActions",
+        "ItemSeparator"
+      ],
+      "props": {
+        "variant": ["default", "outline", "muted"],
+        "size": ["default", "sm"]
+      }
+    },
+    "Kbd": { "props": {} },
+    "Charts": {
+      "parts": [
+        "BarChart",
+        "LineChart",
+        "AreaChart",
+        "PieChart",
+        "DonutChart",
+        "ScatterChart",
+        "HeatmapChart",
+        "RadarChart"
+      ],
+      "props": {
+        "data": "Record<string, string | number>[] (REQUIRED for drafts; never pass queryKey)",
+        "xKey": "string",
+        "yKey": "string | string[]",
+        "title": "string",
+        "height": "number (px, default 300)",
+        "showLegend": "boolean",
+        "colorPalette": ["categorical", "sequential", "diverging"],
+        "valueFormatter": "(value: number, field: string) => string",
+        "orientation": "\"vertical\" | \"horizontal\" (BarChart only)",
+        "stacked": "boolean (BarChart/AreaChart)",
+        "smooth": "boolean (LineChart/AreaChart)",
+        "innerRadius": "number 0-100 (DonutChart)"
+      }
+    }
+  },
+  "icons": {
+    "$comment": "Any lucide-react icon, e.g. import { Car, TrendingUp } from \"lucide-react\""
+  }
+}
