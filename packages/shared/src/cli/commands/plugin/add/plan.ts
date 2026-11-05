@@ -3,12 +3,7 @@ import type { AppYamlEnvEntry, ResourceBinding } from "../../../deploy-config";
 import type { BundleVariable, ConfigPlan } from "../../registry/config-plan";
 import { isValidEnvName } from "../../registry/requirements";
 
-/**
- * Pure planning for `appkit plugin add`: a port of the Databricks CLI's
- * `apps init` resource handling (cmd/apps/init.go + libs/apps/generator), so a
- * plugin added later gets the same .env, app.yaml and databricks.yml entries
- * (and the same --set / --auth-mode semantics) it would have had at init.
- */
+// Port of the Databricks CLI's `apps init` resource handling (cmd/apps/init.go, libs/apps/generator).
 
 export const AUTH_MODE_SP = "sp";
 export const AUTH_MODE_OBO = "obo";
@@ -50,11 +45,7 @@ interface Binding {
   staticFields?: readonly FieldPair[];
 }
 
-/**
- * The resource's databricks.yml binding: the manifest's, else the built-in
- * one for its type (`binding` is optional in the manifest schema; the
- * Databricks CLI generator falls back the same way).
- */
+/** The manifest's binding, else the built-in one for the type (as the CLI generator does). */
 function bindingOf(r: ManifestResource): Binding | undefined {
   return (
     r.binding ??
@@ -94,12 +85,7 @@ function bindingVarFields(r: ManifestResource): string[] {
   return (bindingOf(r)?.varFields ?? []).map(([f]) => f);
 }
 
-/**
- * The --set keys the plugin manifest declares, each with its valid values:
- * `plugin.resourceKey.field` for every declared field and binding var field
- * (any value), plus `plugin.resourceKey.authMode` for resources that are not
- * app-only (obo/both only when the resource declares a user scope).
- */
+/** The --set keys the manifest declares, each with its allowed auth modes (null = any value). */
 export function validSetKeys(
   plugin: ManifestPlugin,
 ): Map<string, AuthMode[] | null> {
@@ -156,12 +142,7 @@ function splitSetKey(sv: string): {
   };
 }
 
-/**
- * Parses `--set plugin.resourceKey.field=value` into `resourceKey.field` → value,
- * validating plugin, resource and field against the manifest and that
- * multi-field resources are set together. `authMode` pairs are skipped (see
- * {@link parseSetAuthModes}).
- */
+/** `--set plugin.resourceKey.field=value` → `resourceKey.field` → value; authMode pairs are skipped. */
 export function parseSetValues(
   setValues: string[],
   plugin: ManifestPlugin,
@@ -241,11 +222,7 @@ export function oboCapable(r: ManifestResource): boolean {
   return Boolean(r.scope) && !r.appOnly;
 }
 
-/**
- * Auth mode per resource. Precedence: --set authMode, the prompted choice, the
- * --auth-mode default, then sp. The obo default only applies to OBO-capable
- * resources; the others are returned in `keptSP`. Only obo/both are stored.
- */
+/** Precedence: --set authMode, prompt, --auth-mode, sp; obo/both only are stored. */
 export function resolveAuthModes(
   resources: ManifestResource[],
   setModes: Record<string, AuthMode>,
@@ -281,10 +258,7 @@ export function resourceConfigured(
   );
 }
 
-/**
- * The resources that end up in the app: every required one, plus optional
- * ones that have a value.
- */
+/** Required resources plus optional ones that have a value. */
 export function selectResources(
   plugin: ManifestPlugin,
   values: Record<string, string>,
@@ -302,13 +276,7 @@ export interface MissingValue {
   setKey: string;
 }
 
-/**
- * Values still needed, in prompt order: for each resource bound to the service
- * principal (sp/both), every field its binding references; for resources
- * accessed only on behalf of the user, every field with an env var (its
- * app.yaml entry carries the literal value). Fields with a resolver (e.g.
- * Lakebase PGHOST) are always needed: local .env must carry them to connect.
- */
+/** Unset values: binding fields (sp/both) or env fields (obo), plus resolver fields local .env needs. */
 export function findMissingValues(
   pluginName: string,
   resources: ManifestResource[],
@@ -357,13 +325,7 @@ export interface AddPlan extends ConfigPlan {
   dotEnv: { env: string; value: string }[];
 }
 
-/**
- * Builds the file changes for a plugin's resources, mirroring the CLI
- * generator: OBO-only resources get a literal app.yaml `value` and no bundle
- * binding; sp/both resources get variables, a binding and `valueFrom`;
- * obo/both resources add their scope, and the plugin always adds its own, to
- * user_api_scopes.
- */
+/** The file changes for the resources, as the CLI generator: OBO-only gets a literal value, no binding. */
 export function buildAddPlan(
   plugin: ManifestPlugin,
   resources: ManifestResource[],
@@ -426,8 +388,7 @@ export function buildAddPlan(
     });
   }
 
-  // Plugin scopes (e.g. genie) cover routes that always run on behalf of the
-  // user, so they apply whatever the resources' auth mode is.
+  // Plugin scopes (e.g. genie) cover always-OBO routes, whatever the resources' mode.
   scopes.push(...(plugin.scopes ?? []));
   return {
     dotEnv,

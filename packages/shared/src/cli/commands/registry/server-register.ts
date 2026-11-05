@@ -28,11 +28,7 @@ export function findServerFile(serverRoot: string): string | null {
   return null;
 }
 
-/**
- * The named-imports node (`{ a, b }`) of a value import from `module`, to
- * extend with a new name instead of adding a second import line. Type-only
- * imports are skipped: a value added there would be erased at compile time.
- */
+/** `{ a, b }` of a value import from `module`; type-only imports are erased at compile time. */
 function namedImportsFrom(stmts: SgNode[], module: string): SgNode | null {
   for (const stmt of stmts) {
     const source = stmt.field("source")?.text().slice(1, -1);
@@ -102,11 +98,11 @@ function importBindingNames(stmt: SgNode): Set<string> {
  * standard shape (a `plugins: [...]` array literal); returns `skipped` otherwise
  * so the caller can fall back to printing manual instructions. Idempotent.
  */
-/** A plugin to register: `import { exportName } from importPath` + `exportName(callArgs)`. */
+/** `import { exportName } from importPath`, registered as `exportName(callArgs)`. */
 export interface RegisterEntry {
   importPath: string;
   exportName: string;
-  /** Call arguments, e.g. `{ auth: "on-behalf-of-user" }` (CLI-built, never registry data). */
+  /** CLI-built, never registry data. */
   callArgs?: string;
 }
 
@@ -121,11 +117,7 @@ export function registerPluginInServer(
   ])[0];
 }
 
-/**
- * Registers several plugins in the server entry, writing the file once (a
- * dev server watching it restarts once). Entries apply in order; each
- * result is per entry.
- */
+/** Registers the entries in order with a single write, so a dev server restarts once. */
 export function registerPluginsInServer(
   serverRoot: string,
   entries: RegisterEntry[],
@@ -159,8 +151,7 @@ function registerInSource(
   // exportName and importPath are interpolated into the user's server source.
   // Registry items are untrusted, so refuse anything that isn't a plain JS
   // identifier / clean relative module path — prevents code injection via a
-  // crafted export name or import path. Plugins declared by an npm package
-  // (AppKit's or another) import from a plain package specifier.
+  // crafted export name or import path. npm plugins use a plain package specifier.
   if (!JS_IDENTIFIER.test(exportName)) {
     return { status: "skipped", reason: "invalid plugin export name" };
   }
