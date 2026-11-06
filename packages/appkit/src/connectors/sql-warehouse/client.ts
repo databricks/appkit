@@ -1,5 +1,6 @@
 import type { TelemetryOptions } from "shared";
 
+import { normalizeIdentityError } from "../../context/execution-context";
 import {
   AppKitError,
   ConfigurationError,
@@ -1252,8 +1253,9 @@ export class SQLWarehouseConnector {
 
   /**
    * Normalize an error caught during statement execution/polling and rethrow.
-   * Abort and already-structured `AppKitError`s pass through untouched;
-   * anything else is wrapped as an `ExecutionError`, preserving the SDK's
+   * Abort and already-structured `AppKitError`s pass through untouched; a
+   * rejected caller token becomes `IdentityExpiredError`; anything else is
+   * wrapped as an `ExecutionError`, preserving the SDK's
    * structured `ApiError.errorCode` (e.g. "INVALID_PARAMETER_VALUE",
    * "BAD_REQUEST") so callers can branch on a stable identifier rather than
    * substring-matching the message.
@@ -1264,6 +1266,12 @@ export class SQLWarehouseConnector {
     }
     if (error instanceof AppKitError) {
       throw error;
+    }
+    // Classify before wrapping: the wrapper drops the HTTP status, so a
+    // rejected caller token would otherwise surface as a 500 ExecutionError.
+    const identityError = normalizeIdentityError(error);
+    if (identityError !== error) {
+      throw identityError;
     }
     // The legacy SDK exposed the Databricks error code as `errorCode`; the
     // modular SDK's `ApiError` carries it as `code` (e.g. "INVALID_PARAMETER_VALUE").

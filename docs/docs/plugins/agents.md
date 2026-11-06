@@ -343,7 +343,7 @@ In markdown, set `auth: on-behalf-of-user` in the frontmatter. A per-agent value
 An on-behalf-of-user agent fails closed:
 
 - No forwarded user token: `401` before any model or tool call, in production and in development. There is no service-principal fallback.
-- A `401` from the model mid-run becomes an `IDENTITY_EXPIRED` error event and the stream ends. The run is not retried as the service principal.
+- A `401` (or an invalid-token `403`) from the model mid-run becomes an `IDENTITY_EXPIRED` error event and the stream ends. The run is not retried as the service principal.
 - A sub-agent never widens: under an on-behalf-of-user parent, a mixed sub-agent also runs as the user.
 
 **Exceptions.** MLflow tracing, the thread store, and catalog skills (see [Catalog skills](#catalog-skills-unity-catalog-volume)) are app-owned and stay service principal in every mode. Thread rows are keyed by the user id.
