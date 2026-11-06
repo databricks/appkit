@@ -75,3 +75,12 @@ export type {
   UseDatabaseWriteOptions,
   UseDatabaseWriteState,
 } from "./hooks/use-database-write";
+
+// For pages of the dev-only `design` plugin ('@databricks/appkit/beta').
+export { useDesignReady } from "./hooks/use-design-ready";
+export {
+  DesignPage,
+  type DesignPageProps,
+  DraftPlaceholder,
+  type DraftPlaceholderKind,
+} from "./design-page";

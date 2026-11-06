@@ -7,6 +7,12 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     exclude: ['**/node_modules/**', '**/dist/**', '**/.databricks/**'],
+    server: {
+      deps: {
+        // echarts-for-react's ESM build has extensionless imports Node rejects.
+        inline: [/@databricks\/appkit-ui/, 'echarts-for-react'],
+      },
+    },
   },
   resolve: {
     alias: {

@@ -7,6 +7,7 @@ import express from "express";
 import getPort, { portNumbers } from "get-port";
 import type { PluginClientConfigs, PluginPhase } from "shared";
 import { camelToKebab } from "shared";
+import type { PluginOption } from "vite";
 
 import { AppKitError, ServerError } from "../../errors";
 import { httpStatusOf } from "../../errors/http-status";
@@ -344,10 +345,14 @@ export class ServerPlugin extends Plugin {
 
     // auto-detection based on environment
     if (isDev) {
+      const vitePlugins = [
+        ...(this.context?.getPlugins().values() ?? []),
+      ].flatMap((plugin) => plugin.vitePlugins?.() ?? []);
       this.viteDevServer = new ViteDevServer(
         this.serverApplication,
         endpoints,
         pluginConfigs,
+        vitePlugins as PluginOption[],
       );
       await this.viteDevServer.setup();
       return;
