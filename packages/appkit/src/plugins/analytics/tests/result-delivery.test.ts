@@ -496,4 +496,17 @@ describe("deliverJsonResult — coerceScalars", () => {
     expect(coerceScalarCells(rows, undefined, ["LONG"])).toEqual([{ n: "1" }]);
     expect(coerceScalarCells(rows, ["n"], undefined)).toEqual([{ n: "1" }]);
   });
+
+  test("keeps NaN and ±Infinity as the warehouse strings (JSON has no number for them)", () => {
+    const rows = [
+      { d: "NaN", f: "NaN" },
+      { d: "Infinity", f: "1.25" },
+      { d: "-Infinity", f: "1.0E20" },
+    ];
+    expect(coerceScalarCells(rows, ["d", "f"], ["DOUBLE", "FLOAT"])).toEqual([
+      { d: "NaN", f: "NaN" },
+      { d: "Infinity", f: 1.25 },
+      { d: "-Infinity", f: 1e20 },
+    ]);
+  });
 });

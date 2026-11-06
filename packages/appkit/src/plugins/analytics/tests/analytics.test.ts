@@ -739,9 +739,11 @@ describe("Analytics Plugin", () => {
       // plus the manifest names/types the connector attaches.
       (plugin as any).SQLClient.executeStatement = vi.fn().mockResolvedValue({
         result: {
-          data: [{ trips: "42", fare: "12.50", ok: "true", zip: "10001" }],
-          columnNames: ["trips", "fare", "ok", "zip"],
-          columnTypes: ["LONG", "DECIMAL", "BOOLEAN", "STRING"],
+          data: [
+            { trips: "42", fare: "12.50", ok: "true", zip: "10001", r: "NaN" },
+          ],
+          columnNames: ["trips", "fare", "ok", "zip", "r"],
+          columnTypes: ["LONG", "DECIMAL", "BOOLEAN", "STRING", "DOUBLE"],
         },
       });
 
@@ -758,7 +760,7 @@ describe("Analytics Plugin", () => {
 
       expect(mockRes.write).toHaveBeenCalledWith(
         expect.stringContaining(
-          '"data":[{"trips":42,"fare":12.5,"ok":true,"zip":"10001"}]',
+          '"data":[{"trips":42,"fare":12.5,"ok":true,"zip":"10001","r":"NaN"}]',
         ),
       );
     });
