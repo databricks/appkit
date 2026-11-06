@@ -677,21 +677,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/TypeAlias.DatabaseApiConfig",
-          label: "DatabaseApiConfig"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/TypeAlias.DatabaseApiWriteOperation",
-          label: "DatabaseApiWriteOperation"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/TypeAlias.DatabaseApiWritesConfig",
-          label: "DatabaseApiWritesConfig"
-        },
-        {
-          type: "doc",
           id: "api/appkit/TypeAlias.DatabaseExports",
           label: "DatabaseExports"
         },

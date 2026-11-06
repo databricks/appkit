@@ -70,17 +70,9 @@ createApp({
     ...(process.env.LAKEBASE_ENDPOINT ? [lakebase()] : []),
     lakebaseExamples(),
     // Setup queries the database before publishing anything, so the plugin
-    // only joins the app once an instance is actually configured.
-    ...(process.env.LAKEBASE_ENDPOINT
-      ? [
-          // The schema is loaded from config/database/schema.ts.
-          database({
-            // Reads are generated for all three tables. Only boards and notes
-            // accept HTTP writes; note_events is exposed read-only.
-            api: { writes: { tables: ["boards", "notes"] } },
-          }),
-        ]
-      : []),
+    // only joins the app once an instance is actually configured. It serves
+    // the named operations in server/database/routes/ over HTTP.
+    ...(process.env.LAKEBASE_ENDPOINT ? [database()] : []),
     files({
       volumes: {
         // Smart Dashboard saved views land here. Backed by

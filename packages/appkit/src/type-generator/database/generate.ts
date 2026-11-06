@@ -54,8 +54,8 @@ declare module "@databricks/appkit" {
 `;
 
 /**
- * Bind the schema to AppKit and to a global interface the optional UI package
- * extends. Server-only apps need not install appkit-ui or enable skipLibCheck.
+ * Bind the schema to AppKit. Browser code reads operation contracts instead,
+ * so server-only apps need not install appkit-ui or enable skipLibCheck.
  */
 function render(schema: Schema): string {
   const entries = walkSchema(schema)
@@ -71,8 +71,6 @@ function render(schema: Schema): string {
     api: {
       insert: ${entry.api.insert};
       update: ${entry.api.update};
-      filters: ${entry.api.filters};
-      orderable: ${entry.api.orderable};
       key: ${entry.api.key};
     };
   };`,
@@ -92,10 +90,6 @@ ${entries}
 
 declare module "@databricks/appkit" {
   interface DatabaseRegistry extends GeneratedDatabaseRegistry {}
-}
-
-declare global {
-  interface DatabricksAppKitDatabaseRegistry extends GeneratedDatabaseRegistry {}
 }
 `;
 }
