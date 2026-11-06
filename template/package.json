@@ -13,7 +13,7 @@
     "build:client": "tsc -b tsconfig.client.json && vite build --config client/vite.config.ts",
     "build:server": "tsc -b tsconfig.server.json && tsdown -c tsdown.server.config.ts",
     "build": "pnpm run build:server && pnpm run build:client",
-    "typecheck": "tsc -b tsconfig.server.json && tsc -b tsconfig.client.json",
+    "typecheck": "tsc -b",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "lint:ast-grep": "appkit lint",
