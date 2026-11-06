@@ -11,7 +11,7 @@ const OPERATION_NAME =
   /^[A-Za-z][A-Za-z0-9_-]{0,63}(?:\.[A-Za-z][A-Za-z0-9_-]{0,63})*$/;
 
 /** Longest operation name, so a request path stays bounded. */
-const MAX_OPERATION_NAME_LENGTH = 255;
+export const MAX_OPERATION_NAME_LENGTH = 255;
 
 /** Names a plain object cannot hold as its own key, as the boot payload does. */
 const RESERVED_NAMES: ReadonlySet<string> = new Set([

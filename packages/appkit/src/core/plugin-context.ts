@@ -73,6 +73,7 @@ export class PluginContext {
     LifecycleEvent,
     Set<() => void | Promise<void>>
   >();
+  private serviceApi: Readonly<Record<string, unknown>> | undefined;
   private telemetry: ITelemetry;
   private createCallerContext: typeof ServiceContext.createCallerContext;
 
@@ -183,6 +184,23 @@ export class PluginContext {
    */
   registerPlugin(name: string, instance: BasePlugin): void {
     this.plugins.set(name, instance);
+  }
+
+  /**
+   * Publish the service-principal handle: each plugin's exports, read the way
+   * `appkit.<name>` reads them.
+   * @internal Called once by AppKit core after every plugin is registered.
+   */
+  registerServiceApi(api: Readonly<Record<string, unknown>>): void {
+    this.serviceApi = api;
+  }
+
+  /**
+   * The service-principal handle keyed by plugin name, for plugins that run
+   * application code against sibling plugins. `undefined` outside AppKit core.
+   */
+  getServiceApi(): Readonly<Record<string, unknown>> | undefined {
+    return this.serviceApi;
   }
 
   /**
