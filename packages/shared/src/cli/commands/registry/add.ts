@@ -22,6 +22,7 @@ import {
   planHasContent,
 } from "./config-plan";
 import {
+  assertBundleApp,
   reportConfigWrite,
   validateBundle,
   writeConfig,
@@ -69,7 +70,7 @@ function findFrontendRoot(cwd: string): string {
 }
 
 /** Locates the server root for plugins (the server/ subdir, else cwd). */
-function findServerRoot(cwd: string): string {
+export function findServerRoot(cwd: string): string {
   for (const sub of SERVER_SUBDIRS) {
     if (isDir(path.join(cwd, sub))) return path.join(cwd, sub);
   }
@@ -484,6 +485,14 @@ async function runAdd(refs: string[], opts: AddOptions): Promise<void> {
       );
       process.exit(1);
     }
+  }
+
+  // Before any write, and only when an item has resources (UI items don't).
+  if (
+    opts.resources !== false &&
+    items.some((i) => extractRequirements(i).length > 0)
+  ) {
+    assertBundleApp(cwd);
   }
 
   const hasUi = items.some((i) => !isPluginItem(i));

@@ -83,4 +83,30 @@ describe("registry add package manager", () => {
       );
     },
   );
+
+  it("adds a UI-only item to a bundle with several apps", async () => {
+    fs.writeFileSync(
+      path.join(cwd, "databricks.yml"),
+      "resources:\n  apps:\n    frontend: {}\n    backend: {}\n",
+    );
+    vi.mocked(fetchRegistryItem).mockResolvedValue({
+      name: "pm-fixture",
+      files: [
+        {
+          type: "registry:component",
+          path: "banner.tsx",
+          target: "components/banner.tsx",
+          content: "export {};\n",
+        },
+      ],
+    });
+
+    await addCommand.parseAsync(["pm-fixture", "--cwd", cwd, "--yes"], {
+      from: "user",
+    });
+
+    expect(fs.existsSync(path.join(cwd, "components", "banner.tsx"))).toBe(
+      true,
+    );
+  });
 });
