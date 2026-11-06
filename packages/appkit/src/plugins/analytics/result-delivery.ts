@@ -374,7 +374,8 @@ const NUMERIC_TYPE_NAMES = new Set([
  * `boolean`). `columnNames`/`columnTypes` are the parallel manifest arrays the
  * connector attaches; without them rows are returned unchanged. Mutates the
  * freshly built rows in place. NULL cells stay `null`; nested types stay as
- * delivered.
+ * delivered. DOUBLE/FLOAT `"NaN"`, `"Infinity"` and `"-Infinity"` stay strings:
+ * JSON has no number for them, and the SSE JSON would send `null` (SQL NULL).
  *
  * shortcut: LONG beyond 2^53 and DECIMAL beyond ~15 significant digits lose
  * precision as JS numbers; switch those to string/bigint if apps need exact values.
@@ -385,12 +386,17 @@ export function coerceScalarCells(
   columnTypes: Array<string | undefined> | undefined,
 ): Record<string, unknown>[] | undefined {
   if (!rows || !columnNames || !columnTypes) return rows;
-  const coercions: Array<[string, (v: string) => number | boolean]> = [];
+  const toNumber = (v: string) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : v;
+  };
+  const coercions: Array<[string, (v: string) => number | boolean | string]> =
+    [];
   columnNames.forEach((name, i) => {
     const typeName = columnTypes[i];
     if (typeName === "BOOLEAN") coercions.push([name, (v) => v === "true"]);
     else if (typeName && NUMERIC_TYPE_NAMES.has(typeName))
-      coercions.push([name, Number]);
+      coercions.push([name, toNumber]);
   });
   if (coercions.length === 0) return rows;
   for (const row of rows) {
