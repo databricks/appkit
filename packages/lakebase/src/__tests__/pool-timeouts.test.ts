@@ -35,3 +35,30 @@ describe("PostgreSQL pool timeouts", () => {
     },
   );
 });
+
+// LakebasePoolConfig extends pg's PoolConfig, so these options always
+// type-check. These tests catch getLakebasePgConfig() copying only a fixed list
+// of keys and silently dropping the rest.
+describe("PostgreSQL pool option pass-through", () => {
+  test.each([
+    ["application_name", "my-lakebase-app"],
+    ["keepAlive", true],
+    ["query_timeout", 15_000],
+    ["options", "-c search_path=app"],
+    ["maxLifetimeSeconds", 900],
+  ] as const)("passes %s through to pg.Pool", async (key, value) => {
+    const pool = createLakebasePool({
+      host: "localhost",
+      database: "test",
+      user: "test",
+      password: "test-only",
+      sslMode: "disable",
+      [key]: value,
+    });
+    try {
+      expect(pool.options[key]).toEqual(value);
+    } finally {
+      await pool.end();
+    }
+  });
+});
