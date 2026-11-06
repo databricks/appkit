@@ -1,13 +1,15 @@
 import type { CacheStorage } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { initializeLakebasePool } from "@/connectors/lakebase";
+
 import { CacheManager } from "../../index";
 
-// Mock createLakebasePool
+// Mock initializeLakebasePool
 const mockPoolQuery = vi.fn();
 const mockPoolEnd = vi.fn();
 vi.mock("@/connectors/lakebase", () => ({
-  createLakebasePool: vi.fn().mockImplementation(() => ({
+  initializeLakebasePool: vi.fn().mockImplementation(async () => ({
     query: mockPoolQuery,
     end: mockPoolEnd.mockResolvedValue(undefined),
   })),
@@ -1096,6 +1098,15 @@ describe("CacheManager", () => {
   });
 
   describe("lakebase default storage", () => {
+    // Lakebase is only tried when configured
+    beforeEach(() => {
+      vi.stubEnv("LAKEBASE_ENDPOINT", "projects/p/branches/b/endpoints/e");
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
     test("should use Lakebase when no storage provided and Lakebase is available", async () => {
       // Reset singleton
       (CacheManager as any).instance = null;
@@ -1112,6 +1123,8 @@ describe("CacheManager", () => {
       // Storage should be persistent (Lakebase)
       const storage = (cache as any).storage;
       expect(storage.isPersistent()).toBe(true);
+      // The startup helper resolves the Postgres user (PGUSER, then currentUser.me())
+      expect(initializeLakebasePool).toHaveBeenCalledOnce();
     });
 
     test("should fallback to in-memory when Lakebase is unavailable", async () => {
@@ -1223,6 +1236,25 @@ describe("CacheManager", () => {
 
         expect((cache as any).storage.isPersistent()).toBe(false);
         expect(warn).not.toHaveBeenCalled();
+        // No user lookup (SCIM Me call) for apps without Lakebase
+        expect(initializeLakebasePool).not.toHaveBeenCalled();
+      });
+
+      test("warns when the Postgres user cannot be resolved", async () => {
+        vi.stubEnv("LAKEBASE_ENDPOINT", "projects/p/branches/b/endpoints/e");
+        vi.mocked(initializeLakebasePool).mockRejectedValueOnce(
+          new Error(
+            "Could not determine the PostgreSQL user from the current Databricks credentials.",
+          ),
+        );
+
+        const cache = await CacheManager.getInstance({});
+
+        expect((cache as any).storage.isPersistent()).toBe(false);
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][1]).toContain(
+          "Could not determine the PostgreSQL user",
+        );
       });
 
       test("warns that the cache is disabled under strictPersistence", async () => {

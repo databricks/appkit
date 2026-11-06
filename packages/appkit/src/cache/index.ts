@@ -3,8 +3,7 @@ import { createHash } from "node:crypto";
 import type { Pool } from "pg";
 import type { CacheConfig, CacheEntry, CacheStorage } from "shared";
 
-import { createLakebasePool } from "../connectors/lakebase";
-import { getClientOptions } from "../context/client-options";
+import { initializeLakebasePool } from "../connectors/lakebase";
 import { getCurrentPrincipalKey } from "../context/execution-context";
 import { AppKitError, ExecutionError, InitializationError } from "../errors";
 import { httpStatusOf } from "../errors/http-status";
@@ -12,7 +11,7 @@ import { createLogger } from "../logging/logger";
 import type { Counter, TelemetryProvider } from "../telemetry";
 import { SpanStatusCode, TelemetryManager } from "../telemetry";
 import { deepMerge } from "../utils";
-import { ApiError, createWorkspaceClient } from "../workspace-client";
+import { ApiError } from "../workspace-client";
 import { cacheDefaults } from "./defaults";
 import { InMemoryStorage, PersistentStorage } from "./storage";
 
@@ -186,34 +185,32 @@ export class CacheManager {
       return new CacheManager(new InMemoryStorage(config), config);
     }
 
-    // try to use lakebase storage
-    let pool: Pool | undefined;
-    try {
-      const workspaceClient = createWorkspaceClient({
-        clientOptions: getClientOptions(),
-      });
-      pool = createLakebasePool({ workspaceClient });
-      const persistentStorage = new PersistentStorage(config, pool);
+    // No Lakebase env and no strictPersistence: persistence was never asked for.
+    if (
+      !config.strictPersistence &&
+      !process.env.LAKEBASE_ENDPOINT &&
+      !process.env.PGHOST
+    ) {
+      logger.debug("Lakebase not configured, %s", fallback);
+    } else {
+      let pool: Pool | undefined;
+      try {
+        // Resolves the Postgres user like the lakebase plugin: PGUSER,
+        // DATABRICKS_CLIENT_ID, then currentUser.me().
+        pool = await initializeLakebasePool();
+        const persistentStorage = new PersistentStorage(config, pool);
 
-      // Query directly: healthCheck() returns a bare false and drops the cause.
-      await pool.query("SELECT 1");
-      await persistentStorage.initialize();
-      return new CacheManager(persistentStorage, config);
-    } catch (error) {
-      await pool?.end().catch(() => {});
-      // No Lakebase env and no strictPersistence: persistence was never asked for.
-      if (
-        config.strictPersistence ||
-        process.env.LAKEBASE_ENDPOINT ||
-        process.env.PGHOST
-      ) {
+        // Query directly: healthCheck() returns a bare false and drops the cause.
+        await pool.query("SELECT 1");
+        await persistentStorage.initialize();
+        return new CacheManager(persistentStorage, config);
+      } catch (error) {
+        await pool?.end().catch(() => {});
         logger.warn(
           "Lakebase cache storage unavailable, %s: %O",
           fallback,
           error,
         );
-      } else {
-        logger.debug("Lakebase not configured, %s", fallback);
       }
     }
 
