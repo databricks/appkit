@@ -121,6 +121,31 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
       const result = await transform(connector, response);
       expect(result.result.data[0].metadata).toEqual({ key: "value" });
     });
+
+    test("attaches manifest column names and types, leaving cells as delivered", async () => {
+      const connector = createConnector();
+      const response = {
+        statementId: "stmt-1",
+        status: { state: "SUCCEEDED" },
+        manifest: {
+          format: "JSON_ARRAY",
+          schema: {
+            columns: [
+              { name: "trips", typeText: "BIGINT", typeName: "LONG" },
+              { name: "", typeText: "BOOLEAN", typeName: "BOOLEAN" },
+            ],
+          },
+        },
+        result: {
+          dataArray: [["42", "true"]],
+        },
+      } as unknown as StatementResponse;
+
+      const result = await transform(connector, response);
+      expect(result.result.data).toEqual([{ trips: "42", column_1: "true" }]);
+      expect(result.result.columnNames).toEqual(["trips", "column_1"]);
+      expect(result.result.columnTypes).toEqual(["LONG", "BOOLEAN"]);
+    });
   });
 
   describe("classic warehouse (EXTERNAL_LINKS + ARROW_STREAM)", () => {

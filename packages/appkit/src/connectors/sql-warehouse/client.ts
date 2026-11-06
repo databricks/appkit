@@ -54,6 +54,19 @@ function arrowColumnNames(response: StatementResponse): string[] | undefined {
 }
 
 /**
+ * Manifest type names (`LONG`, `DECIMAL`, `BOOLEAN`, …), parallel to
+ * {@link arrowColumnNames}. Lets the analytics query route turn JSON_ARRAY's
+ * all-string cells into the JS types the generated query types promise.
+ */
+function columnTypeNames(
+  response: StatementResponse,
+): Array<string | undefined> | undefined {
+  const cols = response.manifest?.schema?.columns;
+  if (!cols || cols.length === 0) return undefined;
+  return cols.map((c) => c.typeName);
+}
+
+/**
  * Coerce the modular SDK's `bigint` row/byte counts back to `number` (the type
  * the legacy SDK used). AppKit never does arithmetic on these — they are purely
  * informational — but a stray `bigint` makes `JSON.stringify` throw ("Do not
@@ -1037,6 +1050,8 @@ export class SQLWarehouseConnector {
       result: {
         ...restResult,
         data: transformedData,
+        columnNames: arrowColumnNames(response),
+        columnTypes: columnTypeNames(response),
       },
     };
   }
@@ -1084,6 +1099,7 @@ export class SQLWarehouseConnector {
           ...(response.result as ResultData & {
             attachment?: string;
             columnNames?: string[];
+            columnTypes?: Array<string | undefined>;
           }),
           // `statementId` is a top-level field, not on `ResultData` — carry it
           // onto the result (as the EXTERNAL_LINKS path does) so the route can
@@ -1092,6 +1108,7 @@ export class SQLWarehouseConnector {
           // contract), sourced from the modular SDK's camelCase `statementId`.
           statement_id: response.statementId,
           columnNames,
+          columnTypes: columnTypeNames(response),
         },
       };
     }
