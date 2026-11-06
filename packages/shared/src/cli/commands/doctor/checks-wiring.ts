@@ -7,7 +7,9 @@
  *    `name` — otherwise the platform has nothing to inject and the env var the
  *    plugin reads stays empty at runtime;
  *  - every bundle-managed `${resources.<type>.<key>.*}` binding must reference a
- *    resource actually declared in the bundle — otherwise deploy fails.
+ *    resource actually declared in the bundle — otherwise deploy fails;
+ *  - every env var a used plugin reads must have an `app.yaml` entry, either
+ *    `valueFrom` or a literal `value` — otherwise it's unset once deployed.
  *
  * Runs regardless of auth; these are declaration problems, not connectivity.
  */
@@ -59,7 +61,7 @@ export function checkWiring(
   // it's a warning.
   for (const target of targets) {
     for (const envVar of target.envVars) {
-      if (!info.envToBinding.has(envVar)) {
+      if (!info.wiredEnvVars.has(envVar)) {
         findings.push({
           status: target.required ? "error" : "warn",
           code: "ENV_UNWIRED",
