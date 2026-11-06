@@ -1,0 +1,80 @@
+# DonutChart
+
+Donut Chart component (Pie chart with inner radius).
+
+
+## Example
+
+```tsx
+"use client";
+
+import { DonutChart } from "@databricks/appkit-ui/react";
+
+export default function DonutChartExample() {
+  return (
+    <DonutChart
+      data={[
+        { name: "Engineering", value: 450 },
+        { name: "Marketing", value: 250 },
+        { name: "Sales", value: 300 },
+        { name: "Operations", value: 200 },
+      ]}
+      height={300}
+    />
+  );
+}
+
+```
+
+
+## DonutChart
+
+Donut Chart component (Pie chart with inner radius).
+
+**Important:** This component uses Apache ECharts architecture. Configure it via props, not by passing child components.
+
+**Best Practice:** Use the built-in data fetching by passing `queryKey` and `parameters` props instead of pre-fetching data with `useAnalyticsQuery`.
+
+Supports both query mode (queryKey + parameters) and data mode (static data).
+
+
+**Source:** [`packages/appkit-ui/src/react/charts/pie/index.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/charts/pie/index.tsx)
+
+
+### Props
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `queryKey` | `string` |  | - | Analytics query key registered with analytics plugin |
+| `parameters` | `Record<string, unknown>` |  | - | Query parameters passed to the analytics endpoint |
+| `format` | `"auto" \| "json_array" \| "arrow_stream" \| "json" \| "arrow"` |  | `"auto"` | Data format to use - "json_array": Use JSON format (smaller payloads, simpler) - "arrow_stream": Use Arrow format (faster for large datasets) - "auto": Automatically select based on expected data size |
+| `transformer` | `(<T>(data: T) => T)` |  | - | Transform raw data before rendering |
+| `data` | `ChartData` |  | - | Arrow Table or JSON array |
+| `title` | `string` |  | - | Chart title |
+| `showLegend` | `boolean` |  | - | Show legend |
+| `colorPalette` | `"categorical" \| "sequential" \| "diverging"` |  | - | Color palette to use. Auto-selected based on chart type if not specified. - "categorical": Distinct colors for different categories (bar, pie, line) - "sequential": Gradient for magnitude/intensity (heatmap) - "diverging": Two-tone for positive/negative values |
+| `colors` | `string[]` |  | - | Custom colors for series (overrides colorPalette) |
+| `height` | `number` |  | `300` | Chart height in pixels |
+| `className` | `string` |  | - | Additional CSS classes |
+| `xKey` | `string` |  | - | X-axis field key. Auto-detected from schema if not provided. |
+| `yKey` | `string \| string[]` |  | - | Y-axis field key(s). Auto-detected from schema if not provided. |
+| `ariaLabel` | `string` |  | - | Accessibility label for screen readers |
+| `testId` | `string` |  | - | Test ID for automated testing |
+| `options` | `Record<string, unknown>` |  | - | Additional ECharts options to merge |
+| `valueFormatter` | `ChartValueFormatter` |  | - | Formats measure values in the chart's built-in value axes, tooltips, and value labels. `field` is the corresponding `yKey`, so one formatter can select a different format for each series. |
+| `onDataClick` | `((datum: ChartClickDatum) => void)` |  | - | Pointer-only: charts render to &lt;canvas&gt;, so this does not fire for keyboard users. Provide a keyboard-accessible equivalent (e.g. a table row action) for the same action. |
+| `selected` | `string \| string[]` |  | - | Controlled selection by category name. Matching data element(s) render at full prominence while the rest are dimmed. Drive it from your own state to reflect a cross-filter or selection. Categorical charts (bar, pie/donut) show emphasis; other chart types ignore it. |
+| `innerRadius` | `number` |  | `0` | Inner radius for donut charts (0-100%) |
+| `showLabels` | `boolean` |  | `true` | Show labels on slices |
+| `labelPosition` | `"center" \| "outside" \| "inside"` |  | `"outside"` | Label position |
+
+
+
+### Usage
+
+```tsx
+import { DonutChart } from '@databricks/appkit-ui';
+
+<DonutChart /* props */ />
+```
+

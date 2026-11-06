@@ -55,17 +55,17 @@ import { HoverCard } from '@databricks/appkit-ui';
 | `onFocusOutside` | `((event: FocusOutsideEvent) => void)` |  | - | Event handler called when the focus moves outside of the `HoverCard`. Can be prevented. |
 | `onInteractOutside` | `((event: FocusOutsideEvent \| PointerDownOutsideEvent) => void)` |  | - | Event handler called when an interaction happens outside the `HoverCard`. Specifically, when a `pointerdown` event happens outside or focus moves outside of it. Can be prevented. |
 | `asChild` | `boolean` |  | - | - |
-| `side` | `enum` |  | - | - |
+| `side` | `"top" \| "right" \| "bottom" \| "left"` |  | - | - |
 | `sideOffset` | `number` |  | - | - |
-| `align` | `enum` |  | - | - |
+| `align` | `"center" \| "start" \| "end"` |  | - | - |
 | `alignOffset` | `number` |  | - | - |
 | `arrowPadding` | `number` |  | - | - |
 | `avoidCollisions` | `boolean` |  | - | - |
 | `collisionBoundary` | `Boundary \| Boundary[]` |  | - | - |
 | `collisionPadding` | `number \| Partial<Record<"top" \| "right" \| "bottom" \| "left", number>>` |  | - | - |
-| `sticky` | `enum` |  | - | - |
+| `sticky` | `"partial" \| "always"` |  | - | - |
 | `hideWhenDetached` | `boolean` |  | - | - |
-| `updatePositionStrategy` | `enum` |  | - | - |
+| `updatePositionStrategy` | `"always" \| "optimized"` |  | - | - |
 
 
 
