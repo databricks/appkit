@@ -282,6 +282,95 @@ On failure it emits an `error` event instead.
 
 Editing `definitions.json` is picked up on the next request — no server restart is needed. A previously malformed file that you fix likewise starts working on the next request.
 
+## Query tags
+
+Every statement issued by the `/query` and `/metric` routes and by the `query` agent tool carries [query tags](https://docs.databricks.com/aws/en/sql/user/queries/query-tags). Tags are recorded in the `query_tags` column of `system.query.history`, so warehouse owners can attribute load and latency to the app and query that caused it.
+
+AppKit adds these tags automatically:
+
+| Tag                | Value                                                                  |
+| ------------------ | ---------------------------------------------------------------------- |
+| `appkit_app`       | `DATABRICKS_APP_NAME` (omitted when unset, e.g. local development)     |
+| `appkit_query_key` | The query key (`/query`) or metric key (`/metric`)                     |
+| `appkit_route`     | `query`, `metric`, or `agent_tool`                                     |
+| `appkit_lane`      | `sp` (service principal) or `obo` (on behalf of the user)              |
+
+The user's identity is never tagged. On-behalf-of statements already run as that user, so `system.query.history` attributes them.
+
+### Custom tags
+
+Add your own tags with the `queryTags` config, as a static map or a function evaluated per request:
+
+```ts
+analytics({
+  // static
+  queryTags: { team: "finance" },
+});
+
+analytics({
+  // per request: ctx has route, queryKey, lane, req, and the client's tags
+  queryTags: ({ req }) => {
+    const tenant = req?.header("x-tenant");
+    return tenant ? { tenant } : undefined;
+  },
+});
+```
+
+The same query can run on several pages, so the client can also tag each request. A typical use is naming the page that issued it:
+
+```tsx
+useAnalyticsQuery("revenue", params, { queryTags: { page: "sales_overview" } });
+useMetricView("orders", { measures: ["revenue"], queryTags: { page: "orders" } });
+```
+
+Client tags are untrusted input, so any user of the app can set them. How they're handled depends on the `queryTags` config:
+
+- **No config, or a static map:** validated client tags are sent. On a key collision, the config wins.
+- **A function:** its return value is the whole custom set. The function receives the validated client tags as `ctx.clientTags`, and they're only sent if it returns them. To keep a client's `page` tag but nothing else:
+
+```ts
+analytics({
+  queryTags: ({ clientTags, req }) => {
+    const tags: Record<string, string> = {};
+    if (clientTags.page) tags.page = clientTags.page;
+    const tenant = req?.header("x-tenant");
+    if (tenant) tags.tenant = tenant;
+    return tags;
+  },
+});
+```
+
+Use a function whenever a tag feeds chargeback or governance, so a client can't fill in a key you left out. Set `clientQueryTags: false` to ignore client tags entirely.
+
+**Rules:**
+
+- Precedence on collisions: automatic `appkit_*` tags, then the `queryTags` config, then client tags. The `appkit_` prefix is reserved (in any letter case) and can't be set by config or the client.
+- At most 20 tags are sent per statement, with automatic tags first.
+- Keys must not contain `,` `:` `-` `/` `=` `.` or control characters, start with `@@`, or have leading or trailing spaces. Keys and values are limited to 128 characters; longer values are truncated. A `null` value records a key-only tag.
+- Invalid tags are dropped, never failing the query. Invalid config tags log a warning.
+- Tags are stored as plain text. Never put secrets or PII in them.
+- Tags aren't part of the cache key. Cached results never reach the warehouse, so they're not tagged. Concurrent identical requests share one in-flight statement, which carries the tags of the request that arrived first. For per-page or per-request tags, that means only the request that actually ran the statement is recorded, and other requests served by that run go uncounted.
+
+| Option            | Type                           | Default | Description                                                        |
+| ----------------- | ------------------------------ | ------- | ------------------------------------------------------------------ |
+| `queryTags`       | `QueryTagMap \| (ctx) => QueryTagMap` | —       | Custom tags for every statement                                    |
+| `autoQueryTags`   | `boolean`                      | `true`  | Add the automatic `appkit_*` tags                                  |
+| `clientQueryTags` | `boolean`                      | `true`  | Forward validated tags sent by `useAnalyticsQuery`/`useMetricView` |
+
+To find slow pages, for example:
+
+```sql
+SELECT
+  query_tags['appkit_query_key'] AS query_key,
+  query_tags['page'] AS page,
+  count(*) AS runs,
+  percentile(total_duration_ms, 0.9) AS p90_ms
+FROM system.query.history
+WHERE query_tags['appkit_app'] = 'my-app'
+GROUP BY ALL
+ORDER BY p90_ms DESC;
+```
+
 ## Frontend usage
 
 ### useAnalyticsQuery
@@ -316,6 +405,7 @@ const { data, loading, error } = useAnalyticsQuery(
 | `format`            | `"JSON" \| "ARROW"` | `"JSON"` | Response format                         |
 | `maxParametersSize` | `number`            | `102400` | Max serialized parameters size in bytes |
 | `autoStart`         | `boolean`           | `true`   | Start query on mount                    |
+| `queryTags`         | `AnalyticsQueryTags` | —       | Query tags for this request (see [Query tags](#query-tags)) |
 
 ### Warehouse readiness
 
@@ -562,6 +652,7 @@ Time-series queries should explicitly order their selected time dimension ascend
 | `orderBy`       | `{field, direction?}[]`     | no       | Sort keys. `field` is narrowed to the measures/dimensions this call selected, so ordering by an unselected column is a type error. See [Deterministic results with `limit`](#deterministic-results-with-limit). |
 | `limit`         | `number`                    | no       | Positive integer row cap.                                                                        |
 | `autoStart`     | `boolean`                   | no       | Start the metric query automatically. Defaults to `true`; set to `false` to defer it until the option becomes `true`. |
+| `queryTags`     | `AnalyticsQueryTags`        | no       | Query tags for this request (see [Query tags](#query-tags)). |
 
 **Return type:**
 

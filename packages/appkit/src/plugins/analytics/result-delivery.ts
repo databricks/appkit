@@ -4,7 +4,7 @@ import type { SQLTypeMarker } from "shared";
 import { ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import type { RefreshChunkLink } from "../../stream/arrow-stream-processor";
-import type { ExternalLink } from "../../workspace-client";
+import type { ExternalLink, QueryTag } from "../../workspace-client";
 
 /**
  * Centralized disposition/format fallback for analytics result delivery.
@@ -33,7 +33,11 @@ export interface QueryExecutor {
   query(
     query: string,
     parameters: Record<string, SQLTypeMarker | null | undefined> | undefined,
-    formatParameters: { disposition: string; format: string },
+    formatParameters: {
+      disposition: string;
+      format: string;
+      queryTags?: QueryTag[];
+    },
     signal?: AbortSignal,
   ): Promise<
     | {

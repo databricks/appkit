@@ -785,6 +785,13 @@ describe("Analytics Plugin", () => {
         disposition: "EXTERNAL_LINKS",
         format: "ARROW_STREAM",
       });
+      // Both attempts carry the query tags, not just the first.
+      for (const call of executeMock.mock.calls) {
+        expect(call[1].queryTags).toContainEqual({
+          key: "appkit_query_key",
+          value: "test_query",
+        });
+      }
       // Streams the pre-signed links from the execute response (no re-fetch).
       expect(streamExternalLinksMock).toHaveBeenCalledTimes(1);
       expect(streamExternalLinksMock.mock.calls[0][0]).toBe(links);
@@ -1336,6 +1343,13 @@ describe("Analytics Plugin", () => {
         disposition: "INLINE",
         format: "ARROW_STREAM",
       });
+      // Both attempts carry the query tags, not just the first.
+      for (const call of executeMock.mock.calls) {
+        expect(call[1].queryTags).toContainEqual({
+          key: "appkit_query_key",
+          value: "test_query",
+        });
+      }
 
       // The SSE wire payload must look like a JSON_ARRAY result, not an
       // arrow message — the caller asked for JSON_ARRAY and the server has
@@ -1810,6 +1824,153 @@ describe("Analytics Plugin", () => {
       expect(mockRes.json).toHaveBeenCalledWith({
         error: "Query not found",
       });
+    });
+  });
+
+  describe("query tags", () => {
+    function setup(pluginConfig: IAnalyticsConfig = config) {
+      const plugin = new AnalyticsPlugin(pluginConfig);
+      const { router, getHandler } = createMockRouter();
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+      const executeMock = vi.fn().mockResolvedValue({
+        result: { data: [{ id: 1 }] },
+      });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+      plugin.injectRoutes(router);
+      return {
+        plugin,
+        executeMock,
+        handler: getHandler("POST", "/query/:query_key"),
+      };
+    }
+
+    function sentTags(executeMock: ReturnType<typeof vi.fn>) {
+      return executeMock.mock.calls[0][1].queryTags;
+    }
+
+    test("tags JSON queries with automatic, config, and client tags", async () => {
+      const { executeMock, handler } = setup({
+        ...config,
+        queryTags: { team: "finance" },
+      });
+
+      await handler(
+        createMockRequest({
+          params: { query_key: "revenue" },
+          body: { parameters: {}, queryTags: { page: "overview" } },
+        }),
+        createMockResponse(),
+      );
+
+      expect(sentTags(executeMock)).toEqual(
+        expect.arrayContaining([
+          { key: "appkit_query_key", value: "revenue" },
+          { key: "appkit_route", value: "query" },
+          { key: "appkit_lane", value: "sp" },
+          { key: "team", value: "finance" },
+          { key: "page", value: "overview" },
+        ]),
+      );
+    });
+
+    test("tags ARROW_STREAM queries", async () => {
+      const { executeMock, handler } = setup();
+
+      await handler(
+        createMockRequest({
+          params: { query_key: "revenue" },
+          body: { parameters: {}, format: "ARROW_STREAM" },
+        }),
+        createMockResponse(),
+      );
+
+      expect(sentTags(executeMock)).toEqual(
+        expect.arrayContaining([
+          { key: "appkit_query_key", value: "revenue" },
+          { key: "appkit_route", value: "query" },
+        ]),
+      );
+    });
+
+    test("tags .obo.sql queries with the obo lane", async () => {
+      const { plugin, executeMock, handler } = setup();
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: true,
+      });
+
+      await handler(
+        createMockRequest({
+          params: { query_key: "mine" },
+          body: { parameters: {} },
+          headers: {
+            "x-forwarded-access-token": "user-token",
+            "x-forwarded-user": "user-123",
+          },
+        }),
+        createMockResponse(),
+      );
+
+      expect(sentTags(executeMock)).toEqual(
+        expect.arrayContaining([{ key: "appkit_lane", value: "obo" }]),
+      );
+    });
+
+    test("spoofed client tags for reserved keys are ignored", async () => {
+      const { executeMock, handler } = setup();
+
+      await handler(
+        createMockRequest({
+          params: { query_key: "revenue" },
+          body: {
+            parameters: {},
+            queryTags: { appkit_query_key: "spoofed", "bad.key": "x" },
+          },
+        }),
+        createMockResponse(),
+      );
+
+      const tags = sentTags(executeMock);
+      expect(tags).toContainEqual({
+        key: "appkit_query_key",
+        value: "revenue",
+      });
+      expect(tags.map((t: { key: string }) => t.key)).not.toContain("bad.key");
+    });
+
+    test("sends no tags when automatic tags are off and none are configured", async () => {
+      const { executeMock, handler } = setup({
+        ...config,
+        autoQueryTags: false,
+      });
+
+      await handler(
+        createMockRequest({
+          params: { query_key: "revenue" },
+          body: { parameters: {} },
+        }),
+        createMockResponse(),
+      );
+
+      expect(sentTags(executeMock)).toBeUndefined();
+    });
+
+    test("tags agent tool queries", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const executeMock = vi.fn().mockResolvedValue({ result: { data: [] } });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+
+      await (plugin as any).tools.query.execute({ query: "SELECT 1" });
+
+      expect(sentTags(executeMock)).toEqual(
+        expect.arrayContaining([
+          { key: "appkit_route", value: "agent_tool" },
+          { key: "appkit_lane", value: "sp" },
+        ]),
+      );
     });
   });
 

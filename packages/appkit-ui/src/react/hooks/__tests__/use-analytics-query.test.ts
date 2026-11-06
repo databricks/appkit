@@ -320,6 +320,49 @@ describe("useAnalyticsQuery", () => {
     expect(mockConnectSSE).toHaveBeenCalledTimes(1);
   });
 
+  describe("queryTags", () => {
+    test("serializes queryTags into the POST body", () => {
+      renderHook(() =>
+        useAnalyticsQuery("q", null, { queryTags: { page: "overview" } }),
+      );
+
+      expect(JSON.parse(lastConnectArgs.payload)).toEqual({
+        parameters: null,
+        format: "JSON_ARRAY",
+        queryTags: { page: "overview" },
+      });
+    });
+
+    test("omits queryTags from the body when undefined", () => {
+      renderHook(() => useAnalyticsQuery("q", null));
+
+      expect(JSON.parse(lastConnectArgs.payload)).not.toHaveProperty(
+        "queryTags",
+      );
+    });
+
+    test("does not refetch when an equal queryTags object is passed on re-render", () => {
+      const { rerender } = renderHook(
+        ({ page }) => useAnalyticsQuery("q", null, { queryTags: { page } }),
+        { initialProps: { page: "overview" } },
+      );
+      rerender({ page: "overview" });
+
+      expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+    });
+
+    test("issues separate requests for different queryTags", () => {
+      renderHook(() =>
+        useAnalyticsQuery("q", null, { queryTags: { page: "a" } }),
+      );
+      renderHook(() =>
+        useAnalyticsQuery("q", null, { queryTags: { page: "b" } }),
+      );
+
+      expect(mockConnectSSE).toHaveBeenCalledTimes(2);
+    });
+  });
+
   describe("warehouse_status", () => {
     test("surfaces warehouseStatus while waiting and clears loading on result", async () => {
       let capturedOnMessage:

@@ -125,12 +125,14 @@ export function useAnalyticsQuery<
   }
 
   const stableParameters = useStableParams(parameters);
+  const stableQueryTags = useStableParams(options?.queryTags);
 
   const payload = useMemo(() => {
     try {
       const serialized = JSON.stringify({
         parameters: stableParameters,
         format,
+        queryTags: stableQueryTags,
       });
       const sizeInBytes = new Blob([serialized]).size;
       if (sizeInBytes > maxParametersSize) {
@@ -144,10 +146,11 @@ export function useAnalyticsQuery<
       console.error("useAnalyticsQuery: Failed to serialize parameters", error);
       return null;
     }
-  }, [stableParameters, format, maxParametersSize]);
+  }, [stableParameters, format, stableQueryTags, maxParametersSize]);
 
   // Cache key shared across hook instances. `payload` already serializes
-  // `{ parameters, format }`, so identical requests collapse to one key.
+  // `{ parameters, format, queryTags }`, so identical requests collapse to one
+  // key.
   // On a serialization failure (`payload === null`) the key stays unused: no
   // request is retained and the store reports the stable idle snapshot.
   const cacheKey = `${urlSuffix}::${payload}`;

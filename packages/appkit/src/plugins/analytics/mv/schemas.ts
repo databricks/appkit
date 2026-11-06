@@ -152,6 +152,9 @@ const metricRequestSchema = z
       })
       .optional(),
     format: z.enum(["JSON_ARRAY", "ARROW_STREAM", "JSON", "ARROW"]).optional(),
+    // Validated leniently by `resolveQueryTags`: a malformed tag is dropped,
+    // never a 400, matching the `/query` route.
+    queryTags: z.unknown().optional(),
   })
   .strict()
   .superRefine((value, ctx) => {

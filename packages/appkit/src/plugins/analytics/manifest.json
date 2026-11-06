@@ -53,6 +53,16 @@
           "type": "boolean",
           "default": true,
           "description": "When true, a STOPPED SQL warehouse is auto-started on the first analytics request. Set to false for cost-controlled deployments where billable warehouse starts must not be triggered by user requests."
+        },
+        "autoQueryTags": {
+          "type": "boolean",
+          "default": true,
+          "description": "When true, statements are tagged with appkit_app, appkit_query_key, appkit_route and appkit_lane so warehouse usage can be attributed in system.query.history."
+        },
+        "clientQueryTags": {
+          "type": "boolean",
+          "default": true,
+          "description": "When true, query tags sent by the client are forwarded after validation. Server tags win on key collisions."
         }
       }
     }

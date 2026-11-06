@@ -713,6 +713,42 @@ describe("analytics metric route", () => {
       expect(mockRes.end).toHaveBeenCalled();
     });
 
+    test("tags metric statements with the metric key and client tags", async () => {
+      const plugin = pluginForDir(
+        config,
+        registryDir({
+          revenue: {
+            key: "revenue",
+            source: "cat.sch.revenue_metrics",
+            lane: "sp",
+          },
+        }),
+      );
+      const { router, getHandler } = createMockRouter();
+      const executeMock = vi.fn().mockResolvedValue({
+        result: { data: [{ arr: 1 }] },
+      });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+      plugin.injectRoutes(router);
+
+      await getHandler("POST", "/metric/:key")(
+        createMockRequest({
+          params: { key: "revenue" },
+          body: { measures: ["arr"], queryTags: { page: "overview" } },
+        }),
+        createMockResponse(),
+      );
+
+      expect(executeMock.mock.calls[0][1].queryTags).toEqual(
+        expect.arrayContaining([
+          { key: "appkit_query_key", value: "revenue" },
+          { key: "appkit_route", value: "metric" },
+          { key: "appkit_lane", value: "sp" },
+          { key: "page", value: "overview" },
+        ]),
+      );
+    });
+
     test("emits warehouse_status before result", async () => {
       const plugin = pluginForDir(
         config,
