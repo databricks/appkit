@@ -53,6 +53,12 @@ export const DEFAULT_FIELDS_BY_TYPE: Record<
       description: "Serving endpoint ID",
     },
   },
+  model_service: {
+    name: {
+      env: "DATABRICKS_MODEL_SERVICE_NAME",
+      description: "Model service full name (catalog.schema.name)",
+    },
+  },
   volume: {
     name: { env: "VOLUME_NAME", description: "Volume name" },
   },

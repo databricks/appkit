@@ -2,7 +2,9 @@ import { describe, expect, test } from "vitest";
 
 import {
   APP_ONLY_RESOURCE_TYPES,
+  DABS_BINDING_BY_TYPE,
   pluginManifestSchema,
+  resourceRequirementSchema,
   SCOPE_BY_TYPE,
 } from "./manifest";
 
@@ -12,6 +14,37 @@ const manifest = {
   description: "A test plugin",
   resources: { required: [], optional: [] },
 };
+
+describe("model_service resource", () => {
+  const modelService = {
+    type: "model_service",
+    alias: "LLM",
+    resourceKey: "llm",
+    description: "Model service",
+    permission: "EXECUTE",
+    fields: { name: { env: "DATABRICKS_MODEL_SERVICE_NAME" } },
+  };
+
+  test("accepts EXECUTE and rejects other permissions", () => {
+    expect(resourceRequirementSchema.safeParse(modelService).success).toBe(
+      true,
+    );
+    expect(
+      resourceRequirementSchema.safeParse({
+        ...modelService,
+        permission: "CAN_QUERY",
+      }).success,
+    ).toBe(false);
+  });
+
+  test("binds as a MODEL_SERVICE uc_securable", () => {
+    expect(DABS_BINDING_BY_TYPE.model_service).toEqual({
+      yamlKey: "uc_securable",
+      varFields: [["name", "securable_full_name"]],
+      staticFields: [["securable_type", "MODEL_SERVICE"]],
+    });
+  });
+});
 
 describe("manifest execution capabilities", () => {
   test("only maps resource types with confirmed user scopes", () => {

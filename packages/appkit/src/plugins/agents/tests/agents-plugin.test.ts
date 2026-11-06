@@ -143,6 +143,27 @@ describe("AgentsPlugin", () => {
     expect(api.getDefault()).toBe("support");
   });
 
+  test("defaults to the model_service env through the AI Gateway", async () => {
+    const { DatabricksAdapter } = await import("../../../agents/databricks");
+    const gateway = vi
+      .spyOn(DatabricksAdapter, "fromAiGateway")
+      .mockResolvedValue(stubAdapter() as never);
+    vi.stubEnv("DATABRICKS_MODEL_SERVICE_NAME", "main.default.chat");
+    vi.stubEnv("DATABRICKS_SERVING_ENDPOINT_NAME", "legacy-endpoint");
+    try {
+      const plugin = instantiate({
+        agents: { support: { instructions: "Help." } },
+      });
+      await plugin.setup();
+      expect(gateway).toHaveBeenCalledWith(
+        expect.objectContaining({ model: "main.default.chat" }),
+      );
+    } finally {
+      vi.unstubAllEnvs();
+      gateway.mockRestore();
+    }
+  });
+
   test("loads markdown agents from a directory", async () => {
     writeMarkdownAgent(
       tmpDir,

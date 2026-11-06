@@ -13,7 +13,7 @@ This page covers the full lifecycle. For the hand-written primitives (`tool()`, 
 ## Requirements
 
 :::info Streaming-capable serving endpoints only
-The agents plugin drives the LLM over Server-Sent Events. Foundation Model APIs (Claude, Llama, GPT, etc.) and other chat-style endpoints support streaming and work out of the box. Custom model endpoints that return a single JSON response (e.g. typical `sklearn` or MLflow `pyfunc` deployments) do **not** stream — pointing an agent at one will fail with "Response body is null — streaming not supported" on the first turn. If you list a serving endpoint in `apps init`, pick one whose model implements the chat-completions streaming protocol; the agents plugin reads its name from `DATABRICKS_SERVING_ENDPOINT_NAME` whenever an agent doesn't pin `model:` itself.
+The agents plugin drives the LLM over Server-Sent Events. Foundation Model APIs (Claude, Llama, GPT, etc.) and other chat-style endpoints support streaming and work out of the box. Custom model endpoints that return a single JSON response (e.g. typical `sklearn` or MLflow `pyfunc` deployments) do **not** stream — pointing an agent at one will fail with "Response body is null — streaming not supported" on the first turn. Whenever an agent doesn't pin `model:` itself, the agents plugin uses its optional `model_service` resource: a Unity Catalog model service (`EXECUTE`) whose full name (`catalog.schema.name`) it reads from `DATABRICKS_MODEL_SERVICE_NAME` and calls through the AI Gateway. The legacy `DATABRICKS_SERVING_ENDPOINT_NAME` is still read as a fallback. A string `model` containing a dot routes to the AI Gateway; any other name is a serving endpoint.
 
 `fromModelServing` (the serving-endpoint adapter) uses the OpenAI **chat-completions** streaming protocol, so it drives chat-completions serving endpoints (task type `agent/*/chat`) and Databricks foundation models. An endpoint on the Responses API (task type `agent/*/responses`, e.g. a `ResponsesAgent`) rejects a chat-completions request, so `fromModelServing` can't drive it.
 
@@ -67,7 +67,7 @@ On startup the plugin:
 
 1. Discovers `server/agents/assistant/agent.md` and registers agent id `assistant`.
 2. Parses the YAML frontmatter and markdown body as the agent's `instructions`.
-3. Resolves the adapter from `endpoint` (or falls back to `DATABRICKS_SERVING_ENDPOINT_NAME`).
+3. Resolves the adapter from `endpoint` (or falls back to `DATABRICKS_MODEL_SERVICE_NAME`, then `DATABRICKS_SERVING_ENDPOINT_NAME`).
 4. Mounts the agent at the default name (`assistant`).
 
 The agent starts with **no tools**. Tools are opt-in — declare them in frontmatter (Level 2 below) or opt into auto-inherit explicitly with `agents({ autoInheritTools: { file: true } })`. See "Auto-inherit posture" further down for what that costs and why it's off by default.
@@ -348,7 +348,7 @@ An on-behalf-of-user agent fails closed:
 
 **Exceptions.** MLflow tracing, the thread store, and catalog skills (see [Catalog skills](#catalog-skills-unity-catalog-volume)) are app-owned and stay service principal in every mode. Thread rows are keyed by the user id.
 
-**Pre-built adapters.** The user's client is applied when AppKit builds the adapter from a model string (`model: "my-endpoint"`, `defaultModel`, or `DATABRICKS_SERVING_ENDPOINT_NAME`). If you build a `DatabricksAdapter` yourself with a fixed `workspaceClient`, an on-behalf-of-user agent throws at boot instead of running the model as the service principal. Pass a provider so the client resolves per call, or use a model string. Mixed agents accept fixed-client adapters as before:
+**Pre-built adapters.** The user's client is applied when AppKit builds the adapter from a model string (`model: "my-endpoint"`, `defaultModel`, `DATABRICKS_MODEL_SERVICE_NAME` or `DATABRICKS_SERVING_ENDPOINT_NAME`). If you build a `DatabricksAdapter` yourself with a fixed `workspaceClient`, an on-behalf-of-user agent throws at boot instead of running the model as the service principal. Pass a provider so the client resolves per call, or use a model string. Mixed agents accept fixed-client adapters as before:
 
 ```ts
 DatabricksAdapter.fromModelServing("my-endpoint", {
