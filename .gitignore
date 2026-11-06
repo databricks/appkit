@@ -13,6 +13,9 @@ appkit-template-*.zip
 
 coverage
 
+# Scratch dirs written by appkit-ui type-probe tests
+.type-probe-*
+
 *.tsbuildinfo
 
 .turbo

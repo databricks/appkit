@@ -260,7 +260,7 @@ export function createMockResponse() {
     headersSent: false,
     status: vi.fn().mockReturnThis(),
     json: vi.fn().mockReturnThis(),
-    send: vi.fn(function (this: Any) {
+    send: vi.fn(function (this: Any, _body?: unknown) {
       this.headersSent = true;
       return this;
     }),
@@ -286,7 +286,7 @@ export function createMockResponse() {
       // backpressure (`if (res.write(buf)) …`) then take the no-wait path.
       return this;
     }),
-    setHeader: vi.fn(function (this: Any) {
+    setHeader: vi.fn(function (this: Any, _name: string, _value: unknown) {
       this.headersSent = true;
       return this;
     }),

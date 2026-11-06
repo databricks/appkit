@@ -1,51 +1,14 @@
-import path from "node:path";
-
-import ts from "typescript";
 import { expect, test, vi } from "vitest";
 
-const packageRoot =
-  path.basename(process.cwd()) === "appkit-ui"
-    ? process.cwd()
-    : path.join(process.cwd(), "packages", "appkit-ui");
+import { compileTypeProbe } from "./type-probe";
 
-// Each probe type-checks the package with the TypeScript compiler, which can
-// exceed Vitest's 5s default on CI's 2-core runners.
+// Each probe runs the tsc binary over the package, which can exceed
+// Vitest's 5s default on CI's 2-core runners.
 vi.setConfig({ testTimeout: 30_000 });
 
-function compileTypeProbe(source: string): readonly ts.Diagnostic[] {
-  const configPath = path.join(packageRoot, "tsconfig.json");
-  const config = ts.readConfigFile(configPath, ts.sys.readFile);
-  const parsed = ts.parseJsonConfigFileContent(
-    config.config,
-    ts.sys,
-    packageRoot,
-  );
-  parsed.options.types = [...(parsed.options.types ?? []), "vite/client"];
-  const filename = path.join(packageRoot, "__type-tests__", "metric-view.ts");
-  const host = ts.createCompilerHost(parsed.options);
-  const getSourceFile = host.getSourceFile.bind(host);
-
-  host.fileExists = (candidate) =>
-    candidate === filename || ts.sys.fileExists(candidate);
-  host.readFile = (candidate) =>
-    candidate === filename ? source : ts.sys.readFile(candidate);
-  host.getSourceFile = (candidate, languageVersion, onError, shouldCreate) =>
-    candidate === filename
-      ? ts.createSourceFile(
-          candidate,
-          source,
-          languageVersion,
-          true,
-          ts.ScriptKind.TS,
-        )
-      : getSourceFile(candidate, languageVersion, onError, shouldCreate);
-
-  const program = ts.createProgram([filename], parsed.options, host);
-  return ts.getPreEmitDiagnostics(program);
-}
-
 test("useMetricView keeps omitted dimensions out of rows and requires a grain target", () => {
-  const diagnostics = compileTypeProbe(`
+  const diagnostics = compileTypeProbe(
+    `
     import { useMetricView } from "../src/react/hooks/use-metric-view";
     import type {
       MetricOrderBy,
@@ -130,11 +93,9 @@ test("useMetricView keeps omitted dimensions out of rows and requires a grain ta
     // @ts-expect-error timeDimension must be selected in dimensions
     const unselectedTarget: NoDimensionOptions = { measures: ["arr"], timeDimension: "created_at", timeGrain: "month" };
     void unselectedTarget;
-  `);
+  `,
+    { types: ["vite/client"] },
+  );
 
-  expect(
-    diagnostics.map((diagnostic) =>
-      ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
-    ),
-  ).toEqual([]);
+  expect(diagnostics).toEqual([]);
 });

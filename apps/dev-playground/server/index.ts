@@ -23,7 +23,6 @@ function createMockClient() {
   const client = createWorkspaceClient({
     host: "http://localhost",
     token: "e2e",
-    authType: "pat",
   });
   client.currentUser.me = async () => ({ id: "e2e-test-user" });
   return client;
@@ -437,6 +436,7 @@ createApp({
           const pngs = new Map<string, (typeof entries)[number]>();
           const metas = new Map<string, (typeof entries)[number]>();
           for (const e of entries) {
+            if (!e.path) continue;
             if (e.path.endsWith(".png")) {
               pngs.set(e.path.replace(/\.png$/, ""), e);
             } else if (e.path.endsWith(".json")) {

@@ -567,7 +567,6 @@ async function compileConsumer(
         resolveJsonModule: true,
         skipLibCheck,
         ...(isolated ? { types: [] } : {}),
-        baseUrl: options.root,
         paths: {
           "@databricks/appkit": [
             isolated

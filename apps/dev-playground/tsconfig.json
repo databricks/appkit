@@ -1,12 +1,14 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "baseUrl": ".",
     "outDir": "./build",
+    // DOM for the Playwright specs, whose page callbacks run in the browser.
+    "lib": ["ES2022", "DOM"],
     "declaration": false,
     "declarationMap": false,
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true
   },
+  "include": ["server", "shared", "tests", "*.ts"],
   "exclude": ["node_modules", "build"]
 }

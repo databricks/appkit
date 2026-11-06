@@ -1,5 +1,5 @@
 import { createLakebasePool, getLakebaseOrmConfig } from "@databricks/appkit";
-import type { IAppRouter } from "shared";
+import type { IAppRouter } from "@databricks/appkit";
 import {
   Column,
   CreateDateColumn,

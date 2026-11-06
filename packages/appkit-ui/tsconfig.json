@@ -2,9 +2,10 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "outDir": "dist",
+    // Sources from shared are compiled in.
+    "rootDir": "..",
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM"],
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
       "@databricks/appkit-ui/*": ["./src/*"],

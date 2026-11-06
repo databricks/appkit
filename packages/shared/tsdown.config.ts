@@ -24,5 +24,8 @@ export default defineConfig({
   }),
   exports: {
     devExports: "development",
+    // tsdown 0.23 turns entries with a shebang into a `bin` field; the CLI
+    // ships through packages/shared/bin instead.
+    bin: false,
   },
 });
