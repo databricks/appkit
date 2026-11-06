@@ -41,6 +41,7 @@ export interface QueryExecutor {
         data?: Record<string, unknown>[];
         external_links?: ExternalLink[];
         columnNames?: string[];
+        columnTypes?: Array<string | undefined>;
         statement_id?: string;
         status?: unknown;
         refreshChunkLink?: RefreshChunkLink;
@@ -294,13 +295,27 @@ interface JsonResult {
  *    attachment to plain rows server-side so the caller's JSON contract holds.
  *
  * EXTERNAL_LINKS is never used for the JSON fallback.
+ *
+ * Both paths yield the warehouse's all-string scalar cells. `coerceScalars`
+ * converts numeric and BOOLEAN columns to JS numbers/booleans (see
+ * {@link coerceScalarCells}); the query route sets it, the metric route keeps
+ * its documented `string | null` wire values.
  */
 export async function deliverJsonResult(
   executor: QueryExecutor,
   query: string,
   processedParams: Record<string, SQLTypeMarker | null | undefined> | undefined,
   signal?: AbortSignal,
+  options: { coerceScalars?: boolean } = {},
 ): Promise<JsonResult> {
+  const coerce = (
+    rows: Record<string, unknown>[] | undefined,
+    result: Awaited<ReturnType<QueryExecutor["query"]>>,
+  ) =>
+    options.coerceScalars
+      ? coerceScalarCells(rows, result?.columnNames, result?.columnTypes)
+      : rows;
+
   try {
     const result = await executor.query(
       query,
@@ -309,7 +324,7 @@ export async function deliverJsonResult(
       signal,
     );
     return {
-      data: result?.data,
+      data: coerce(result?.data, result),
       status: result?.status,
       statement_id: result?.statement_id,
     };
@@ -336,10 +351,61 @@ export async function deliverJsonResult(
     arrowResult.columnNames,
   );
   return {
-    data: rows,
+    data: coerce(rows, arrowResult),
     status: arrowResult.status,
     statement_id: arrowResult.statement_id,
   };
+}
+
+/** Manifest `typeName`s whose JSON_ARRAY string cells parse to a JS number. */
+const NUMERIC_TYPE_NAMES = new Set([
+  "BYTE",
+  "SHORT",
+  "INT",
+  "LONG",
+  "FLOAT",
+  "DOUBLE",
+  "DECIMAL",
+]);
+
+/**
+ * Convert JSON_ARRAY's string cells for numeric and BOOLEAN columns to JS
+ * numbers/booleans so rows match the generated query types (`number` /
+ * `boolean`). `columnNames`/`columnTypes` are the parallel manifest arrays the
+ * connector attaches; without them rows are returned unchanged. Mutates the
+ * freshly built rows in place. NULL cells stay `null`; nested types stay as
+ * delivered. DOUBLE/FLOAT `"NaN"`, `"Infinity"` and `"-Infinity"` stay strings:
+ * JSON has no number for them, and the SSE JSON would send `null` (SQL NULL).
+ *
+ * shortcut: LONG beyond 2^53 and DECIMAL beyond ~15 significant digits lose
+ * precision as JS numbers; switch those to string/bigint if apps need exact values.
+ */
+export function coerceScalarCells(
+  rows: Record<string, unknown>[] | undefined,
+  columnNames: string[] | undefined,
+  columnTypes: Array<string | undefined> | undefined,
+): Record<string, unknown>[] | undefined {
+  if (!rows || !columnNames || !columnTypes) return rows;
+  const toNumber = (v: string) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : v;
+  };
+  const coercions: Array<[string, (v: string) => number | boolean | string]> =
+    [];
+  columnNames.forEach((name, i) => {
+    const typeName = columnTypes[i];
+    if (typeName === "BOOLEAN") coercions.push([name, (v) => v === "true"]);
+    else if (typeName && NUMERIC_TYPE_NAMES.has(typeName))
+      coercions.push([name, toNumber]);
+  });
+  if (coercions.length === 0) return rows;
+  for (const row of rows) {
+    for (const [name, convert] of coercions) {
+      const value = row[name];
+      if (typeof value === "string") row[name] = convert(value);
+    }
+  }
+  return rows;
 }
 
 // ────────────────────────────────────────────────────────────────────────────

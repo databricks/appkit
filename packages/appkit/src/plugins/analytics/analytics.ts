@@ -399,12 +399,14 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
               // warehouse only accepts ARROW_STREAM for INLINE, retries as
               // ARROW_STREAM and decodes server-side — returning the SSE
               // `result` message with plain rows. (ARROW_STREAM requests are
-              // handled earlier via `_handleArrowStreamQuery`.)
+              // handled earlier via `_handleArrowStreamQuery`.) Numeric and
+              // BOOLEAN cells are coerced to match the generated query types.
               return await self._executeJsonArrayPath(
                 executor,
                 query,
                 processedParams,
                 sig,
+                { coerceScalars: true },
               );
             } catch (err) {
               originalError = err;
@@ -760,12 +762,14 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       | Record<string, SQLTypeMarker | null | undefined>
       | undefined,
     signal?: AbortSignal,
+    options?: { coerceScalars?: boolean },
   ): Promise<AnalyticsSseMessage> {
     const result = await deliverJsonResult(
       executor,
       query,
       processedParams,
       signal,
+      options,
     );
     return makeResultMessage(result.data, {
       status: result.status,

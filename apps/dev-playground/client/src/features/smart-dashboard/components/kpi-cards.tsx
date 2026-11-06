@@ -172,11 +172,8 @@ function formatNumber(n: number): string {
 
 /** Percent delta between the last `tail` window and the previous window. */
 function windowedTrend(values: number[], tail: number): number | undefined {
-  // Drop nulls/undefined/NaN (e.g. days with no trips after a fare filter) and
-  // coerce everything to Number defensively — some drivers hand back DECIMAL
-  // columns as strings, and `0 + "12.35"` would silently string-concat and
-  // render "NaN%" once we tried to divide.
-  const clean = values.map((v) => Number(v)).filter(Number.isFinite);
+  // Drop nulls/undefined/NaN (e.g. days with no trips after a fare filter).
+  const clean = values.filter(Number.isFinite);
   if (clean.length < tail * 2) return undefined;
   const recent = clean.slice(-tail);
   const prior = clean.slice(-tail * 2, -tail);
@@ -189,16 +186,10 @@ function windowedTrend(values: number[], tail: number): number | undefined {
 }
 
 export function KPICards({ data, sparklines, isLoading }: KPICardsProps) {
-  // Coerce on intake so downstream sparkline paths and trend math stay purely
-  // numeric — avoids surprises if a driver ever hands back DECIMAL-as-string.
-  const toNum = (v: unknown) => {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : 0;
-  };
-  const tripSeries = sparklines.map((r) => toNum(r.trip_count));
-  const fareSeries = sparklines.map((r) => toNum(r.avg_fare));
-  const distSeries = sparklines.map((r) => toNum(r.avg_distance));
-  const revenueSeries = sparklines.map((r) => toNum(r.total_revenue));
+  const tripSeries = sparklines.map((r) => r.trip_count);
+  const fareSeries = sparklines.map((r) => r.avg_fare);
+  const distSeries = sparklines.map((r) => r.avg_distance);
+  const revenueSeries = sparklines.map((r) => r.total_revenue);
 
   const TREND_WINDOW = 7;
 
@@ -229,11 +220,8 @@ export function KPICards({ data, sparklines, isLoading }: KPICardsProps) {
         subtitle={
           revenueSeries.length > 0
             ? `$${formatNumber(
-                // Explicit Number() wrap on each accumulator step defends
-                // against a single stray string in the series silently
-                // turning the whole sum into a concatenated blob.
                 revenueSeries.reduce<number>(
-                  (a, b) => a + (Number.isFinite(b) ? Number(b) : 0),
+                  (a, b) => a + (Number.isFinite(b) ? b : 0),
                   0,
                 ),
               )} revenue`
