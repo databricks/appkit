@@ -158,6 +158,10 @@ jobs:
       # The generated database registry must reach appkit-ui's built declarations.
       - name: Typecheck database components
         run: pnpm --filter=dev-playground typecheck:database
+      - name: Typecheck built database operation declarations
+        run: pnpm exec vitest run --project appkit packages/appkit/src/plugins/database/tests/operations.types.test.ts
+      - name: Run a built database server without sources
+        run: pnpm exec tsx tools/verify-database-bundle.ts
       - name: Run Integration Tests
         run: pnpm --filter=dev-playground test:integration
         env:
