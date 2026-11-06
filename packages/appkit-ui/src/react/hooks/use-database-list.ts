@@ -6,7 +6,7 @@ import {
   type ExactDatabaseParams,
 } from "shared";
 
-import { isDatabaseListPage } from "@/js/database/client";
+import { isDatabaseListPage } from "@/js/database/entity-client";
 import type {
   DatabaseEntity,
   DatabaseKeyedEntity,
