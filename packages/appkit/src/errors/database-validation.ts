@@ -10,9 +10,10 @@ export interface DatabaseValidationIssue {
 }
 
 /**
- * Deliberate validation failure raised by a database mutation hook. Generated
- * routes answer `422` and echo only the issues naming a public column; every
- * other failure raised inside a hook stays an opaque server error.
+ * Deliberate validation failure. An explicit transaction callback can throw it,
+ * and the transaction rethrows that same error. Generated routes answer `422`
+ * and echo only the issues naming a public column. Every other failure stays
+ * an opaque server error.
  */
 export class DatabaseValidationError extends AppKitError {
   readonly code = "DATABASE_VALIDATION_ERROR";

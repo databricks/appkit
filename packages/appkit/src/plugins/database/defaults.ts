@@ -23,7 +23,7 @@ export const STATEMENT_TIMEOUT_MS = 30_000;
 /** Server-side limit for an idle open transaction, independent of JS timers (ms). */
 export const IDLE_IN_TRANSACTION_TIMEOUT_MS = 30_000;
 
-/** Deadline for the transaction callback, not cancellation of arbitrary hook work (ms). */
+/** Deadline for one explicit transaction callback (ms). */
 export const TRANSACTION_TIMEOUT_MS = 30_000;
 
 // Generated-read limits. The wire caps a typed caller shares with HTTP live in
@@ -45,10 +45,9 @@ export const MAX_OFFSET = 10_000;
 /** Max rows one generated read may materialize across its include tree. */
 export const MAX_MATERIALIZED_NODES = 10_000;
 
-// Response shaping: bounds trusted output on its way to the wire.
-/** Max nesting depth of read-serializer output. */
+/** Max nesting depth of one bounded JSON value. */
 export const MAX_SERIALIZED_DEPTH = 32;
-/** Max node count of read-serializer output. */
+/** Max node count of one bounded JSON value. */
 export const MAX_SERIALIZED_NODES = 10_000;
 /** Max UTF-8 byte length of one generated read response body. */
 export const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;

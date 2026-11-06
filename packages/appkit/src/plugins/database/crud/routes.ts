@@ -11,8 +11,6 @@ import type {
   Row,
   WhereClause,
 } from "../../../database/runtime";
-import type { ReadSerializer } from "../types";
-import type { JsonValue } from "./codecs";
 import type { CrudTable } from "./contract";
 import { decodeDetailQuery, decodeListQuery } from "./query";
 import { decodeCreateBody, decodeId, decodeUpdateBody } from "./request";
@@ -41,7 +39,6 @@ export interface CrudRouteDeps {
   readonly table: CrudTable;
   /** Resolved per request so a draining plugin cannot serve a stale client. */
   entity(): CrudEntity;
-  readonly serialize?: ReadSerializer;
   runRouteSpan(
     operation: CrudOperation,
     route: string,
@@ -76,20 +73,6 @@ function stableOrder(
     );
   }
   return order;
-}
-
-function serializeRow(
-  deps: CrudRouteDeps,
-  operation: "list" | "detail",
-  row: Row,
-): JsonValue {
-  const projected = deps.table.projectPublicRow(row);
-  if (!deps.serialize) return projected;
-  const shaped = deps.serialize(projected as Record<string, unknown>, {
-    entity: deps.table.name,
-    operation,
-  });
-  return deps.table.sanitizeSerializedRow(shaped);
 }
 
 /**
@@ -131,7 +114,7 @@ export function createListHandler(deps: CrudRouteDeps): RouteHandler {
         sendListPage(
           res,
           rows,
-          (row) => serializeRow(deps, "list", row),
+          (row) => deps.table.projectPublicRow(row),
           decoded.limit,
           decoded.offset,
         );
@@ -157,7 +140,7 @@ export function createDetailHandler(deps: CrudRouteDeps): RouteHandler {
 
         const row = await query.find(id);
         if (row === null) throw new DatabasePluginError("NOT_FOUND", "read");
-        sendJson(res, 200, serializeRow(deps, "detail", row));
+        sendJson(res, 200, deps.table.projectPublicRow(row));
       });
     } catch (error) {
       sendError(res, deps.table, "read", error);
@@ -165,10 +148,7 @@ export function createDetailHandler(deps: CrudRouteDeps): RouteHandler {
   };
 }
 
-/**
- * `POST /:table` — the created row at `201`. A mutation answers the row the
- * database actually holds, so a read serializer never reshapes it.
- */
+/** `POST /:table` — the created row at `201`. */
 export function createCreateHandler(deps: CrudRouteDeps): RouteHandler {
   const route = `/${deps.table.name}`;
 
