@@ -1,5 +1,5 @@
 import type { UnityCatalogLocation } from "@mlflow/core";
-import { SpanKind } from "@opentelemetry/api";
+import { type SpanContext, SpanKind } from "@opentelemetry/api";
 import type { SpanProcessor } from "@opentelemetry/sdk-trace-base";
 
 import { normalizeIdentityError } from "../../context/execution-context";
@@ -27,6 +27,28 @@ let ucLocation: UnityCatalogLocation | undefined;
 let gatedProcessor: GatedMlflowSpanProcessor | undefined;
 
 /**
+ * A parentless view of a span whose parent is remote, else the span itself.
+ * The Apps proxy forwards `traceparent`, so each request's first span here has
+ * a remote parent — but @mlflow/core roots a trace only at a span with no
+ * parent at all, so without this no deployed request ever becomes a trace.
+ * The real span keeps its remote parent, so OTLP still joins the caller's trace.
+ * shortcut: works around @mlflow/core 0.4.0 ignoring `isRemote`; drop once upstream roots at remote parents.
+ */
+function asLocalRoot<T extends { parentSpanContext?: SpanContext }>(
+  span: T,
+): T {
+  if (!span.parentSpanContext?.isRemote) return span;
+  return new Proxy(span, {
+    get(target, prop) {
+      if (prop === "parentSpanContext") return undefined;
+      const value = Reflect.get(target, prop, target);
+      // Bind to the real span so mlflow's writes (setAttribute) land on it.
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+/**
  * Wraps mlflow's OTel `SpanProcessor` and scopes it to agent traces. Two jobs:
  *
  * 1. Stay inert until ready. The classic processor's `onStart` calls its own
@@ -48,7 +70,8 @@ let gatedProcessor: GatedMlflowSpanProcessor | undefined;
  *    type; otherwise `popTrace` to discard the trace mlflow built in memory. The
  *    real span type is set after `onStart` (the constructor stamps UNKNOWN
  *    first), and children end before their root, so the flag is set by the time
- *    the root decides.
+ *    the root decides. A span whose parent is remote (the Apps proxy's
+ *    `traceparent`) is a root here too: mlflow sees it via {@link asLocalRoot}.
  *
  * It also drops the exporters' own outbound spans at `onStart` (parentless
  * CLIENT — outgoing requests made outside any agent turn, e.g. mlflow/OTLP
@@ -65,8 +88,9 @@ export class GatedMlflowSpanProcessor implements SpanProcessor {
   #inner: SpanProcessor;
   #ready = false;
   // Spans we forwarded `onStart` for, so `onEnd` stays balanced — mlflow never
-  // sees an end without a matching start.
-  #forwarded = new WeakSet<object>();
+  // sees an end without a matching start. Maps each to what mlflow was handed
+  // (the span, or its asLocalRoot view), so both callbacks see the same object.
+  #forwarded = new WeakMap<object, Parameters<SpanProcessor["onStart"]>[0]>();
   // OTel trace ids that contained at least one mlflow (AGENT/TOOL) span, so the
   // root's `onEnd` exports rather than discards. Cleared as each root ends.
   #agentTraceIds = new Set<string>();
@@ -108,20 +132,22 @@ export class GatedMlflowSpanProcessor implements SpanProcessor {
     parentContext: Parameters<SpanProcessor["onStart"]>[1],
   ): void {
     if (!this.#ready) return;
+    const view = asLocalRoot(span);
     // Drop the exporters' own outbound calls. A parentless (root) CLIENT span is
     // an outgoing request made outside any agent turn — e.g. mlflow or OTLP
     // shipping a trace. Forwarding those would loop: each upload is itself an
     // HTTP call that auto-instrumentation turns into a new span to trace and
     // upload.
-    if (span.kind === SpanKind.CLIENT && !span.parentSpanContext?.spanId) {
+    if (span.kind === SpanKind.CLIENT && !view.parentSpanContext?.spanId) {
       return;
     }
-    this.#forwarded.add(span);
-    this.#inner.onStart(span, parentContext);
+    this.#forwarded.set(span, view);
+    this.#inner.onStart(view, parentContext);
   }
 
   onEnd(span: Parameters<SpanProcessor["onEnd"]>[0]): void {
-    if (!this.#forwarded.has(span)) return;
+    const view = this.#forwarded.get(span);
+    if (!view) return;
     const traceId = span.spanContext().traceId;
     // An AGENT/TOOL span ended in this trace — mark it for export. mlflow stamps
     // `mlflow.spanType` on every span (UNKNOWN by default), so match the value,
@@ -145,15 +171,15 @@ export class GatedMlflowSpanProcessor implements SpanProcessor {
       }
       this.#agentTraceIds.add(traceId);
     }
-    if (span.parentSpanContext?.spanId) {
+    if (view.parentSpanContext?.spanId) {
       // Non-root: mlflow's own `onEnd` early-returns, but forward for balance.
-      this.#inner.onEnd(span);
+      this.#inner.onEnd(view);
       return;
     }
     // Root span: export only agent traces; discard everything else so plain HTTP
     // requests never become MLflow traces. `delete` reports whether it was agent.
     if (this.#agentTraceIds.delete(traceId)) {
-      this.#inner.onEnd(span);
+      this.#inner.onEnd(view);
     } else {
       this.#popTrace(traceId);
     }
