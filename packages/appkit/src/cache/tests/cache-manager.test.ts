@@ -1060,6 +1060,8 @@ describe("CacheManager", () => {
       (CacheManager as any).instance = null;
       (CacheManager as any).initPromise = null;
 
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
       // Pass an unhealthy storage, should fallback to in-memory
       const cache = await CacheManager.getInstance({
         storage: createUnhealthyMockStorage(),
@@ -1070,6 +1072,11 @@ describe("CacheManager", () => {
       await cache.set("test-key", "value");
       const result = await cache.get("test-key");
       expect(result).toBe("value");
+      expect(warn).toHaveBeenCalledWith(
+        "[appkit:cache]",
+        "Configured cache storage failed its health check, using in-memory cache",
+      );
+      warn.mockRestore();
     });
 
     test("should use in-memory storage when provided storage health check fails", async () => {
@@ -1176,6 +1183,56 @@ describe("CacheManager", () => {
       // Should be using in-memory storage
       const storage = (cache as any).storage;
       expect(storage.isPersistent()).toBe(false);
+    });
+
+    describe("fallback logging", () => {
+      let warn: ReturnType<typeof vi.spyOn>;
+
+      beforeEach(() => {
+        warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        vi.stubEnv("LAKEBASE_ENDPOINT", "");
+        vi.stubEnv("PGHOST", "");
+      });
+
+      afterEach(() => {
+        warn.mockRestore();
+        vi.unstubAllEnvs();
+      });
+
+      test("warns with the cause and closes the pool when configured Lakebase fails", async () => {
+        vi.stubEnv("LAKEBASE_ENDPOINT", "projects/p/branches/b/endpoints/e");
+        mockPoolQuery.mockRejectedValue(
+          new Error('database "missing" does not exist'),
+        );
+
+        const cache = await CacheManager.getInstance({});
+
+        expect((cache as any).storage.isPersistent()).toBe(false);
+        expect(mockPoolEnd).toHaveBeenCalled();
+        expect(warn).toHaveBeenCalledTimes(1);
+        const [prefix, message] = warn.mock.calls[0];
+        expect(prefix).toBe("[appkit:cache]");
+        expect(message).toContain(
+          "Lakebase cache storage unavailable, using in-memory cache",
+        );
+        expect(message).toContain('database "missing" does not exist');
+      });
+
+      test("stays quiet when Lakebase is not configured", async () => {
+        const cache = await CacheManager.getInstance({});
+
+        expect((cache as any).storage.isPersistent()).toBe(false);
+        expect(warn).not.toHaveBeenCalled();
+      });
+
+      test("warns that the cache is disabled under strictPersistence", async () => {
+        await CacheManager.getInstance({ strictPersistence: true });
+
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][1]).toContain(
+          "Lakebase cache storage unavailable, cache disabled (strictPersistence)",
+        );
+      });
     });
   });
 });

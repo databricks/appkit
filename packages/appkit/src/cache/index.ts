@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import type { Pool } from "pg";
 import type { CacheConfig, CacheEntry, CacheStorage } from "shared";
 
 import { createLakebasePool } from "../connectors/lakebase";
@@ -159,12 +160,20 @@ export class CacheManager {
     userConfig?: Partial<CacheConfig>,
   ): Promise<CacheManager> {
     const config = deepMerge(cacheDefaults, userConfig);
+    const fallback = config.strictPersistence
+      ? "cache disabled (strictPersistence)"
+      : "using in-memory cache";
 
     if (config.storage) {
       const isHealthy = await config.storage.healthCheck();
       if (isHealthy) {
         return new CacheManager(config.storage, config);
       }
+
+      logger.warn(
+        "Configured cache storage failed its health check, %s",
+        fallback,
+      );
 
       if (config.strictPersistence) {
         const disabledConfig = { ...config, enabled: false };
@@ -178,23 +187,34 @@ export class CacheManager {
     }
 
     // try to use lakebase storage
+    let pool: Pool | undefined;
     try {
       const workspaceClient = createWorkspaceClient({
         clientOptions: getClientOptions(),
       });
-      const pool = createLakebasePool({ workspaceClient });
+      pool = createLakebasePool({ workspaceClient });
       const persistentStorage = new PersistentStorage(config, pool);
 
-      const isHealthy = await persistentStorage.healthCheck();
-      if (isHealthy) {
-        await persistentStorage.initialize();
-        return new CacheManager(persistentStorage, config);
+      // Query directly: healthCheck() returns a bare false and drops the cause.
+      await pool.query("SELECT 1");
+      await persistentStorage.initialize();
+      return new CacheManager(persistentStorage, config);
+    } catch (error) {
+      await pool?.end().catch(() => {});
+      // No Lakebase env and no strictPersistence: persistence was never asked for.
+      if (
+        config.strictPersistence ||
+        process.env.LAKEBASE_ENDPOINT ||
+        process.env.PGHOST
+      ) {
+        logger.warn(
+          "Lakebase cache storage unavailable, %s: %O",
+          fallback,
+          error,
+        );
+      } else {
+        logger.debug("Lakebase not configured, %s", fallback);
       }
-
-      // Health check failed, close the pool and fallback
-      await pool.end();
-    } catch {
-      // lakebase unavailable, continue with in-memory storage
     }
 
     if (config.strictPersistence) {
