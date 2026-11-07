@@ -347,6 +347,73 @@
   --radius: var(--radius);
 }
 
+/* -----------------------------
+   Density
+   Spacing for cards, controls, tables, overlays and forms, plus the base
+   heading scale. The :root values are the default ("comfortable") look.
+   Set data-density="compact" on <html> for tighter spacing that matches
+   the Databricks product (32px controls, 16px card padding). Put it on
+   <html> rather than a wrapper so portaled overlays (dialogs, popovers,
+   menus) pick it up too. Class names passed to a component still win,
+   e.g. <Card className="py-2">.
+----------------------------- */
+:root,
+[data-density="comfortable"] {
+  --card-spacing: 1.5rem;
+  --card-header-gap: 0.5rem;
+  --card-radius: 0.75rem;
+  --card-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --control-height: 2.25rem;
+  --control-height-sm: 2rem;
+  --control-height-lg: 2.5rem;
+  --control-padding-x: 0.75rem;
+  --button-padding-x: 1rem;
+  --table-head-height: 2.5rem;
+  --table-cell-padding-y: 0.5rem;
+  --dialog-padding: 1.5rem;
+  --popover-padding: 1rem;
+  --alert-padding-x: 1rem;
+  --alert-padding-y: 0.75rem;
+  --accordion-padding-y: 1rem;
+  --field-set-gap: 1.5rem;
+  --field-group-gap: 1.75rem;
+  --field-gap: 0.75rem;
+  --heading-1-size: 2.25rem;
+  --heading-2-size: 1.875rem;
+  --heading-3-size: 1.5rem;
+  --heading-4-size: 1.25rem;
+  --heading-5-size: 1.125rem;
+  --paragraph-line-height: 1.75rem;
+}
+
+[data-density="compact"] {
+  --card-spacing: 1rem;
+  --card-header-gap: 0.25rem;
+  --card-radius: 0.5rem;
+  --card-shadow: 0 0 #0000;
+  --control-height: 2rem;
+  --control-height-sm: 1.75rem;
+  --control-height-lg: 2.25rem;
+  --control-padding-x: 0.625rem;
+  --button-padding-x: 0.75rem;
+  --table-head-height: 2.25rem;
+  --table-cell-padding-y: 0.375rem;
+  --dialog-padding: 1.25rem;
+  --popover-padding: 0.75rem;
+  --alert-padding-x: 0.75rem;
+  --alert-padding-y: 0.625rem;
+  --accordion-padding-y: 0.75rem;
+  --field-set-gap: 1rem;
+  --field-group-gap: 1rem;
+  --field-gap: 0.5rem;
+  --heading-1-size: 1.5rem;
+  --heading-2-size: 1.25rem;
+  --heading-3-size: 1.125rem;
+  --heading-4-size: 1rem;
+  --heading-5-size: 0.9375rem;
+  --paragraph-line-height: 1.5;
+}
+
 @layer base {
   * {
     border-color: var(--border);
@@ -380,25 +447,25 @@
   }
 
   h1 {
-    font-size: 2.25rem;
+    font-size: var(--heading-1-size);
     line-height: 1.2;
   }
   h2 {
-    font-size: 1.875rem;
+    font-size: var(--heading-2-size);
     line-height: 1.3;
   }
   h3 {
-    font-size: 1.5rem;
+    font-size: var(--heading-3-size);
     line-height: 1.4;
   }
   h4 {
-    font-size: 1.25rem;
+    font-size: var(--heading-4-size);
   }
   h5 {
-    font-size: 1.125rem;
+    font-size: var(--heading-5-size);
   }
   p {
-    line-height: 1.75rem;
+    line-height: var(--paragraph-line-height);
   }
 
   :focus-visible {

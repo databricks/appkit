@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-router";
 import { ArrowRightIcon, SparklesIcon } from "lucide-react";
 
+import { DensitySelector } from "@/components/density-selector";
 import { ThemeSelector } from "@/components/theme-selector";
 import { ALL_NAV_ITEMS, NAV_GROUPS, type NavItem } from "@/lib/nav";
 
@@ -27,7 +28,8 @@ export const Route = createFileRoute("/")({
 function IndexRoute() {
   return (
     <div className="min-h-screen bg-background">
-      <div className="absolute top-4 right-4 z-10">
+      <div className="absolute top-4 right-4 z-10 flex items-center gap-1">
+        <DensitySelector />
         <ThemeSelector />
       </div>
 

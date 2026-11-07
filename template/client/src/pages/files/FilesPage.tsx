@@ -281,7 +281,7 @@ export function FilesPage() {
   };
 
   return (
-    <div className="space-y-6 w-full max-w-7xl mx-auto">
+    <div className="space-y-4 w-full max-w-7xl mx-auto">
       <div>
         <h2 className="text-2xl font-bold text-foreground">Files</h2>
         <p className="text-sm text-muted-foreground mt-1">
@@ -351,7 +351,7 @@ export function FilesPage() {
         </div>
       </div>
 
-      <div className="flex flex-col md:flex-row gap-4 md:gap-6">
+      <div className="flex flex-col md:flex-row gap-4">
         <DirectoryList
           className="flex-2 min-w-0"
           entries={entries}

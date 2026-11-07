@@ -28,9 +28,9 @@ export function AnalyticsPage() {
   const salesParameters = { max_month_num: sql.number(maxMonthNum) };
 
   return (
-    <div className="space-y-6 w-full max-w-7xl mx-auto">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="shadow-lg">
+    <div className="space-y-4 w-full max-w-7xl mx-auto">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card>
           <CardHeader>
             <CardTitle>SQL Query Result</CardTitle>
           </CardHeader>
@@ -52,7 +52,7 @@ export function AnalyticsPage() {
           </CardContent>
         </Card>
 
-        <Card className="shadow-lg md:col-span-2">
+        <Card className="md:col-span-2">
           <CardHeader>
             <CardTitle>Sales Data Filter</CardTitle>
           </CardHeader>
@@ -77,7 +77,7 @@ export function AnalyticsPage() {
           </CardContent>
         </Card>
 
-        <Card className="shadow-lg flex min-w-0">
+        <Card className="flex min-w-0">
           <CardHeader>
             <CardTitle>Sales Trend Area Chart</CardTitle>
           </CardHeader>
@@ -85,7 +85,7 @@ export function AnalyticsPage() {
             <AreaChart queryKey="mocked_sales" parameters={salesParameters} />
           </CardContent>
         </Card>
-        <Card className="shadow-lg flex min-w-0">
+        <Card className="flex min-w-0">
           <CardHeader>
             <CardTitle>Sales Trend Line Chart</CardTitle>
           </CardHeader>
@@ -93,7 +93,7 @@ export function AnalyticsPage() {
             <LineChart queryKey="mocked_sales" parameters={salesParameters} />
           </CardContent>
         </Card>
-        <Card className="shadow-lg flex min-w-0">
+        <Card className="flex min-w-0">
           <CardHeader>
             <CardTitle>Sales Trend Radar Chart</CardTitle>
           </CardHeader>

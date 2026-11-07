@@ -146,7 +146,7 @@ export function JobsPage() {
   );
 
   return (
-    <div className="space-y-6 w-full max-w-4xl mx-auto">
+    <div className="space-y-4 w-full max-w-4xl mx-auto">
       <div>
         <h2 className="text-2xl font-bold text-foreground">Lakeflow Jobs</h2>
         <p className="text-sm text-muted-foreground mt-1">
@@ -190,7 +190,7 @@ export function JobsPage() {
       )}
 
       {status && (
-        <Card className="shadow-lg">
+        <Card>
           <CardHeader>
             <CardTitle>Last Run Status</CardTitle>
           </CardHeader>
@@ -214,7 +214,7 @@ export function JobsPage() {
       )}
 
       {runs.length > 0 && (
-        <Card className="shadow-lg">
+        <Card>
           <CardHeader>
             <CardTitle>Recent Runs</CardTitle>
           </CardHeader>
@@ -268,7 +268,7 @@ export function JobsPage() {
       )}
 
       {streamLog.length > 0 && (
-        <Card className="shadow-lg">
+        <Card>
           <CardHeader>
             <CardTitle>Run Stream</CardTitle>
           </CardHeader>

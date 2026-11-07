@@ -83,8 +83,8 @@ export function LakebasePage() {
   const completedCount = todos.filter((t) => t.completed).length;
 
   return (
-    <div className="space-y-6 w-full max-w-2xl mx-auto">
-      <Card className="shadow-lg">
+    <div className="space-y-4 w-full max-w-2xl mx-auto">
+      <Card>
         <CardHeader>
           <CardTitle>Todo List</CardTitle>
         </CardHeader>
