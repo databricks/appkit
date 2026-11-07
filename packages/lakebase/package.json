@@ -48,7 +48,7 @@
     "build:watch": "tsdown --config tsdown.config.ts --watch",
     "clean:full": "rm -rf dist node_modules tmp",
     "clean": "rm -rf dist tmp",
-    "dist": "tsx ../../tools/dist-lakebase.ts",
+    "dist": "tsx ../../tools/dist-standalone-package.ts",
     "tarball": "rm -rf tmp && pnpm dist && npm pack ./tmp --pack-destination ./tmp",
     "tarball:prerelease": "rm -rf tmp && SHORTSHA=$(git rev-parse --short HEAD) && pnpm dist --prerelease $SHORTSHA && npm pack ./tmp --pack-destination ./tmp",
     "typecheck": "tsc --noEmit",

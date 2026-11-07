@@ -16,6 +16,7 @@ type PackageJson = {
 
 // Packages whose direct dependencies we want to include in published artifacts
 const PUBLISHED_PACKAGES = [
+  "packages/app-analytics",
   "packages/appkit",
   "packages/appkit-ui",
   "packages/lakebase",
