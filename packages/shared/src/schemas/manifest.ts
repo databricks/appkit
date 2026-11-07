@@ -49,6 +49,7 @@ export const resourceTypeSchema = z
     "genie_space",
     "experiment",
     "app",
+    "model_service",
   ])
   .describe("Type of Databricks resource");
 
@@ -165,6 +166,11 @@ export const DABS_BINDING_BY_TYPE = {
     varFields: [["id", "securable_full_name"]],
     staticFields: [["securable_type", "TABLE"]],
   },
+  model_service: {
+    yamlKey: "uc_securable",
+    varFields: [["name", "securable_full_name"]],
+    staticFields: [["securable_type", "MODEL_SERVICE"]],
+  },
 } as const satisfies Partial<Record<ResourceType, ResourceBinding>>;
 
 /** Capabilities that need a user_api_scope but have no resource ID. */
@@ -257,6 +263,10 @@ export const experimentPermissionSchema = z
 export const appPermissionSchema = z
   .enum(["CAN_USE"])
   .describe("Permission for Databricks App resources");
+
+export const modelServicePermissionSchema = z
+  .enum(["EXECUTE"])
+  .describe("Permission for Unity AI Gateway model service resources");
 
 // ── Discovery descriptor (discriminated union) ───────────────────────────
 
@@ -674,6 +684,10 @@ export const resourceRequirementSchema = z
     makeResourceVariant(z.literal("genie_space"), genieSpacePermissionSchema),
     makeResourceVariant(z.literal("experiment"), experimentPermissionSchema),
     makeResourceVariant(z.literal("app"), appPermissionSchema),
+    makeResourceVariant(
+      z.literal("model_service"),
+      modelServicePermissionSchema,
+    ),
   ])
   .describe(
     "Declares a resource requirement for a plugin. Can be defined statically in a manifest or dynamically via getResourceRequirements().",
@@ -1091,6 +1105,10 @@ export const templateResourceRequirementSchema = z
       experimentPermissionSchema,
     ),
     makeTemplateResourceVariant(z.literal("app"), appPermissionSchema),
+    makeTemplateResourceVariant(
+      z.literal("model_service"),
+      modelServicePermissionSchema,
+    ),
   ])
   .describe(
     "Resource requirement with template-specific field entries (includes computed origin).",

@@ -2172,6 +2172,169 @@
                   "permission"
                 ],
                 "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "model_service"
+                  },
+                  "alias": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Human-readable label for UI/display only. Deduplication uses resourceKey, not alias."
+                  },
+                  "resourceKey": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]*$",
+                    "description": "Stable key for machine use: deduplication, env naming, composite keys, app.yaml. Required for registry lookup."
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Human-readable description of why this resource is needed"
+                  },
+                  "fields": {
+                    "description": "Map of field name to env and optional description. Single-value types use one key (e.g. id); multi-value (database, secret) use multiple (e.g. instance_name, database_name or scope, key).",
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "env": {
+                          "description": "Environment variable name for this field",
+                          "type": "string",
+                          "pattern": "^[A-Z][A-Z0-9_]*$"
+                        },
+                        "description": {
+                          "description": "Human-readable description for this field",
+                          "type": "string"
+                        },
+                        "bundleIgnore": {
+                          "description": "When true, this field is excluded from Databricks bundle configuration (databricks.yml) generation.",
+                          "type": "boolean"
+                        },
+                        "examples": {
+                          "description": "Example values showing the expected format for this field",
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "localOnly": {
+                          "description": "When true, this field is only generated for local .env files. The Databricks Apps platform auto-injects it at deploy time.",
+                          "type": "boolean"
+                        },
+                        "value": {
+                          "description": "Static value for this field. Used when no prompted or resolved value exists.",
+                          "type": "string"
+                        },
+                        "resolve": {
+                          "description": "Named resolver prefixed by resource type (e.g., 'postgres:host'). The CLI resolves this value during the init prompt flow.",
+                          "type": "string",
+                          "pattern": "^[a-z_]+:[a-zA-Z]+$"
+                        },
+                        "discovery": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "kind",
+                                  "description": "Discriminator: 'kind' uses the AppKit-owned command map for the named resourceKind."
+                                },
+                                "resourceKind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "warehouse",
+                                    "genie_space",
+                                    "postgres_project",
+                                    "postgres_branch",
+                                    "postgres_database",
+                                    "volume"
+                                  ],
+                                  "description": "Reference to a well-known Databricks resource kind. AppKit owns the CLI command, response shape, and unwrap rules."
+                                },
+                                "select": {
+                                  "description": "Field name in the parsed CLI response used as the selected value (e.g., 'id'). Defaults to the kind's natural identifier when omitted.",
+                                  "type": "string"
+                                },
+                                "display": {
+                                  "description": "Field name in the parsed CLI response shown to the user in selection UI. Defaults to `select` if omitted.",
+                                  "type": "string"
+                                },
+                                "dependsOn": {
+                                  "description": "Name of a sibling field within the same resource that must be resolved first. Used to express ordering dependencies between resource fields.",
+                                  "type": "string"
+                                },
+                                "shortcut": {
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "resourceKind"],
+                              "additionalProperties": false,
+                              "description": "Discovery via a well-known resource kind. AppKit owns the CLI command and unwrap rules for the named kind."
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "cli",
+                                  "description": "Discriminator: 'cli' uses a free-form Databricks CLI command supplied by the plugin."
+                                },
+                                "cliCommand": {
+                                  "type": "string",
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
+                                },
+                                "selectField": {
+                                  "type": "string",
+                                  "description": "jq-style path to the field used as the selected value (e.g., '.id', '.name')."
+                                },
+                                "displayField": {
+                                  "description": "jq-style path to the field shown to the user in selection UI. Defaults to selectField if omitted.",
+                                  "type": "string"
+                                },
+                                "dependsOn": {
+                                  "description": "Name of a sibling field within the same resource that must be resolved first. Used to express ordering dependencies between resource fields.",
+                                  "type": "string"
+                                },
+                                "shortcut": {
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "cliCommand", "selectField"],
+                              "additionalProperties": false,
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
+                            }
+                          ],
+                          "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "description": "Defines a single field for a resource. Each field has its own environment variable and optional description. Single-value types use one key (e.g. id); multi-value types (database, secret) use multiple (e.g. instance_name, database_name or scope, key)."
+                    }
+                  },
+                  "permission": {
+                    "type": "string",
+                    "enum": ["EXECUTE"],
+                    "description": "Required permission level. Validated per resource type."
+                  }
+                },
+                "required": [
+                  "type",
+                  "alias",
+                  "resourceKey",
+                  "description",
+                  "permission"
+                ],
+                "additionalProperties": false
               }
             ],
             "description": "Declares a resource requirement for a plugin. Can be defined statically in a manifest or dynamically via getResourceRequirements()."
@@ -4289,6 +4452,169 @@
                   "permission": {
                     "type": "string",
                     "enum": ["CAN_USE"],
+                    "description": "Required permission level. Validated per resource type."
+                  }
+                },
+                "required": [
+                  "type",
+                  "alias",
+                  "resourceKey",
+                  "description",
+                  "permission"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "model_service"
+                  },
+                  "alias": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Human-readable label for UI/display only. Deduplication uses resourceKey, not alias."
+                  },
+                  "resourceKey": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]*$",
+                    "description": "Stable key for machine use: deduplication, env naming, composite keys, app.yaml. Required for registry lookup."
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Human-readable description of why this resource is needed"
+                  },
+                  "fields": {
+                    "description": "Map of field name to env and optional description. Single-value types use one key (e.g. id); multi-value (database, secret) use multiple (e.g. instance_name, database_name or scope, key).",
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "env": {
+                          "description": "Environment variable name for this field",
+                          "type": "string",
+                          "pattern": "^[A-Z][A-Z0-9_]*$"
+                        },
+                        "description": {
+                          "description": "Human-readable description for this field",
+                          "type": "string"
+                        },
+                        "bundleIgnore": {
+                          "description": "When true, this field is excluded from Databricks bundle configuration (databricks.yml) generation.",
+                          "type": "boolean"
+                        },
+                        "examples": {
+                          "description": "Example values showing the expected format for this field",
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "localOnly": {
+                          "description": "When true, this field is only generated for local .env files. The Databricks Apps platform auto-injects it at deploy time.",
+                          "type": "boolean"
+                        },
+                        "value": {
+                          "description": "Static value for this field. Used when no prompted or resolved value exists.",
+                          "type": "string"
+                        },
+                        "resolve": {
+                          "description": "Named resolver prefixed by resource type (e.g., 'postgres:host'). The CLI resolves this value during the init prompt flow.",
+                          "type": "string",
+                          "pattern": "^[a-z_]+:[a-zA-Z]+$"
+                        },
+                        "discovery": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "kind",
+                                  "description": "Discriminator: 'kind' uses the AppKit-owned command map for the named resourceKind."
+                                },
+                                "resourceKind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "warehouse",
+                                    "genie_space",
+                                    "postgres_project",
+                                    "postgres_branch",
+                                    "postgres_database",
+                                    "volume"
+                                  ],
+                                  "description": "Reference to a well-known Databricks resource kind. AppKit owns the CLI command, response shape, and unwrap rules."
+                                },
+                                "select": {
+                                  "description": "Field name in the parsed CLI response used as the selected value (e.g., 'id'). Defaults to the kind's natural identifier when omitted.",
+                                  "type": "string"
+                                },
+                                "display": {
+                                  "description": "Field name in the parsed CLI response shown to the user in selection UI. Defaults to `select` if omitted.",
+                                  "type": "string"
+                                },
+                                "dependsOn": {
+                                  "description": "Name of a sibling field within the same resource that must be resolved first. Used to express ordering dependencies between resource fields.",
+                                  "type": "string"
+                                },
+                                "shortcut": {
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection.",
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "resourceKind"],
+                              "additionalProperties": false,
+                              "description": "Discovery via a well-known resource kind. AppKit owns the CLI command and unwrap rules for the named kind."
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "cli",
+                                  "description": "Discriminator: 'cli' uses a free-form Databricks CLI command supplied by the plugin."
+                                },
+                                "cliCommand": {
+                                  "type": "string",
+                                  "description": "Databricks CLI command that lists resources. Must include <PROFILE>. Shell metacharacters (;|&`$ and newlines) are rejected; for first-party Databricks resources prefer the `kind` variant which uses AppKit's typed command map."
+                                },
+                                "selectField": {
+                                  "type": "string",
+                                  "description": "jq-style path to the field used as the selected value (e.g., '.id', '.name')."
+                                },
+                                "displayField": {
+                                  "description": "jq-style path to the field shown to the user in selection UI. Defaults to selectField if omitted.",
+                                  "type": "string"
+                                },
+                                "dependsOn": {
+                                  "description": "Name of a sibling field within the same resource that must be resolved first. Used to express ordering dependencies between resource fields.",
+                                  "type": "string"
+                                },
+                                "shortcut": {
+                                  "description": "Single-value fast-path command that returns exactly one value, skipping interactive selection. Shell metacharacters are rejected.",
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "cliCommand", "selectField"],
+                              "additionalProperties": false,
+                              "description": "Discovery via a free-form Databricks CLI command. Escape hatch — prefer the `kind` variant when a typed resourceKind covers the resource. This shape is intentionally minimal and may tighten further in future versions."
+                            }
+                          ],
+                          "description": "Describes how the CLI discovers values for a resource field. 'kind' references a well-known Databricks resource kind whose command is owned by AppKit; 'cli' is the escape hatch carrying a free-form Databricks CLI command."
+                        }
+                      },
+                      "additionalProperties": false,
+                      "description": "Defines a single field for a resource. Each field has its own environment variable and optional description. Single-value types use one key (e.g. id); multi-value types (database, secret) use multiple (e.g. instance_name, database_name or scope, key)."
+                    }
+                  },
+                  "permission": {
+                    "type": "string",
+                    "enum": ["EXECUTE"],
                     "description": "Required permission level. Validated per resource type."
                   }
                 },

@@ -12,6 +12,7 @@ import {
   experimentPermissionSchema,
   genieSpacePermissionSchema,
   jobPermissionSchema,
+  modelServicePermissionSchema,
   postgresPermissionSchema,
   resourceTypeSchema,
   secretPermissionSchema,
@@ -60,6 +61,7 @@ const PERMISSION_SCHEMAS_BY_TYPE = {
   genie_space: genieSpacePermissionSchema,
   experiment: experimentPermissionSchema,
   app: appPermissionSchema,
+  model_service: modelServicePermissionSchema,
 } as const;
 
 /**
