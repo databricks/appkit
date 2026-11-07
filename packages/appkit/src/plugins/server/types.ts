@@ -15,4 +15,14 @@ export interface ServerConfig extends BasePluginConfig {
    * your app routinely posts larger JSON bodies.
    */
   bodyLimit?: string;
+  /**
+   * Serve the App Analytics relay at `POST /_analytics/v1/logs`, the default
+   * endpoint of the App Analytics browser library. The relay accepts OTLP logs
+   * JSON bodies up to 64 KiB and 100 records, and forwards them unchanged to
+   * the Databricks Apps OTel Collector when App telemetry is on. It counts its
+   * outcomes in the `app_analytics.relay.requests` metric. Defaults to `true`.
+   * Set to `false` to remove the route, for example to mount your own relay at
+   * another path with `server.extend()`.
+   */
+  appAnalytics?: boolean;
 }

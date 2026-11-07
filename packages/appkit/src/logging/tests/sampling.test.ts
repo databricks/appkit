@@ -50,6 +50,19 @@ describe("Sampling", () => {
       expect(shouldSample(event, DEFAULT_SAMPLING_CONFIG)).toBe(false);
     });
 
+    test("should exclude the App Analytics relay, even when it answers with an error", () => {
+      for (const status_code of [204, 413, 502]) {
+        const event: WideEventData = {
+          ...baseEvent,
+          method: "POST",
+          path: "/_analytics/v1/logs",
+          status_code,
+        };
+
+        expect(shouldSample(event, DEFAULT_SAMPLING_CONFIG)).toBe(false);
+      }
+    });
+
     test("should always sample events with errors", () => {
       const event: WideEventData = {
         ...baseEvent,
