@@ -7,3 +7,4 @@
 
 export { agents } from "./agents";
 export { aiSearch } from "./ai-search";
+export { omnigent } from "./omnigent";
