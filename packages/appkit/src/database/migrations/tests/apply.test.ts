@@ -524,8 +524,9 @@ describe("applyPendingMigrations", () => {
     ]);
   });
 
-  test("a server that cannot check client connections still migrates", async () => {
+  test("a server that cannot check client connections still migrates, and warns how to end a killed instance's statement", async () => {
     const folder = twoMigrations();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { pool, client } = fakePool({
       recorded: null,
       failOn: /client_connection_check_interval/,
@@ -537,6 +538,10 @@ describe("applyPendingMigrations", () => {
     expect(result.applied).toHaveLength(2);
     expect(client.statements).not.toContain(
       "RESET client_connection_check_interval",
+    );
+    expect(warn.mock.calls.flat().map(String).join(" ")).toContain(
+      "client_connection_check_interval not set (statement failed). If this instance dies while a migration statement runs, the server notices only once the statement ends, and the statement keeps its locks until then. " +
+        "To end it sooner, find its pid in pg_stat_activity (application_name 'appkit-migrate') and run select pg_terminate_backend(pid).",
     );
   });
 
