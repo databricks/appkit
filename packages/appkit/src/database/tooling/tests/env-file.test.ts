@@ -107,6 +107,31 @@ describe("updateEnvFile", () => {
     });
   });
 
+  test("a `KEY: value` entry, which dotenv reads, is replaced like `KEY=value`; `KEY:value` is not an entry", () => {
+    const root = tempApp({
+      ".env": [
+        "PGHOST=first",
+        "export PGHOST:\told",
+        "PGPORT: 1",
+        "KEEP:not-an-entry",
+      ].join("\n"),
+    });
+    const file = path.join(root, ".env");
+
+    updateEnvFile(file, { PGHOST: "new.example.com", PGPORT: "6543" });
+
+    const text = fs.readFileSync(file, "utf-8");
+    expect(text).toBe(
+      ["PGHOST=new.example.com", "PGPORT=6543", "KEEP:not-an-entry", ""].join(
+        "\n",
+      ),
+    );
+    expect(dotenv.parse(text)).toEqual({
+      PGHOST: "new.example.com",
+      PGPORT: "6543",
+    });
+  });
+
   test("a value whose quote never closes is a single line, as dotenv reads it", () => {
     const root = tempApp({ ".env": 'NOTE="open\nPGHOST=old\n' });
     const file = path.join(root, ".env");
