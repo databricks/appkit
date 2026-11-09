@@ -14,6 +14,11 @@ import {
   MigrationApplyError,
 } from "../migrations/apply";
 import { readJournal } from "../migrations/paths";
+import {
+  catalogSqlOf,
+  detectTablesLeftInPublic,
+} from "../migrations/tables-left-in-public";
+import type { Schema } from "../schema-builder";
 import { type DbContext, NO_ENV_BRANCH, withBranchPool } from "./context";
 import { notYourBranch, resolveEnvBranch, takesWrites } from "./guard";
 import { type HistoryLock, withHistoryLock } from "./history-lock";
@@ -101,16 +106,22 @@ async function applyBlocker(ctx: DbContext): Promise<string | undefined> {
 async function applyToEnvBranch(
   ctx: DbContext,
   folder: string,
-  schemaName: string,
+  schema: Schema,
 ): Promise<ApplyOutcome> {
   const blocker = readJournal(folder)
     ? await applyBlocker(ctx)
     : "no migrations to apply — schema.ts declares no tables yet";
   if (blocker) return { applied: [], notApplied: blocker };
   return withBranchPool(ctx, async (pool) => {
+    // The deployed app refuses this case on start; refuse it here first.
+    const leftInPublic = await detectTablesLeftInPublic(
+      catalogSqlOf(pool),
+      schema,
+    );
+    if (leftInPublic) throw new Error(`Did not apply: ${leftInPublic}`);
     const { applied, adopted } = await applyPendingMigrations(pool, {
       migrationsFolder: folder,
-      schemaName,
+      schemaName: schema.$schemaName,
     });
     return { applied, ...(adopted.length > 0 ? { adopted } : {}) };
   });
@@ -151,7 +162,7 @@ async function migrateHolding(
 
   let outcome: ApplyOutcome;
   try {
-    outcome = await applyToEnvBranch(ctx, lock.folder, schema.$schemaName);
+    outcome = await applyToEnvBranch(ctx, lock.folder, schema);
   } catch (error) {
     if (!generated) throw error;
     const file = path.relative(ctx.root, generated.file);
