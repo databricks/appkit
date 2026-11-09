@@ -9,6 +9,7 @@ import type { WarehouseState } from "../warehouse-status";
 const mocks = vi.hoisted(() => ({
   existsSync: vi.fn((_file: unknown) => true),
   generateDatabaseTypes: vi.fn(),
+  generateDatabaseOperations: vi.fn(),
   generateFromEntryPoint: vi.fn(),
   getWarehouseState: vi.fn(),
   startWarehouse: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock("../database", async (importOriginal) => {
   return {
     ...actual,
     generateDatabaseTypes: mocks.generateDatabaseTypes,
+    generateDatabaseOperations: mocks.generateDatabaseOperations,
   };
 });
 
@@ -76,6 +78,8 @@ beforeEach(() => {
   mocks.existsSync.mockReturnValue(true);
   mocks.generateDatabaseTypes.mockReset();
   mocks.generateDatabaseTypes.mockResolvedValue(undefined);
+  mocks.generateDatabaseOperations.mockReset();
+  mocks.generateDatabaseOperations.mockResolvedValue(undefined);
 });
 
 // The plugin hooks are loosely typed on Vite's Plugin; cast to the shapes we
@@ -457,7 +461,28 @@ describe("appKitTypesPlugin — single-flight generate", () => {
     expect(mocks.getWarehouseState).not.toHaveBeenCalled();
   });
 
-  test("ignores database non-source files and prefix-collision siblings", async () => {
+  test.each(["add", "change", "unlink"])(
+    "%s on shared operation schemas and policies regenerates contracts",
+    async (event) => {
+      const plugin = makeConfiguredPlugin();
+      const { server, watcher } = makeFakeServer();
+      getHook<ConfigureServerHook>(plugin, "configureServer")(server);
+      watcher.emit(
+        event,
+        path.join(process.cwd(), "server", "database", "rows.ts"),
+      );
+      await flush();
+      expect(mocks.generateDatabaseOperations).toHaveBeenCalledTimes(1);
+      watcher.emit(
+        event,
+        path.join(process.cwd(), "server", "database", "policies.ts"),
+      );
+      await flush();
+      expect(mocks.generateDatabaseOperations).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  test("ignores generated database outputs, non-source files, and prefix-collision siblings", async () => {
     mocks.generateFromEntryPoint.mockResolvedValue(undefined);
     const plugin = makeConfiguredPlugin();
     const { server, watcher } = makeFakeServer();
@@ -467,6 +492,9 @@ describe("appKitTypesPlugin — single-flight generate", () => {
       path.join(process.cwd(), "config", "database-copy", "schema.ts"),
       path.join(process.cwd(), "config", "database", "README.md"),
       path.join(process.cwd(), "other", "database", "schema.ts"),
+      path.join(process.cwd(), "server", "database-copy", "rows.ts"),
+      path.join(process.cwd(), "server", "database", "routes.gen.ts"),
+      path.join(process.cwd(), "server", "database", "types.d.ts"),
     ]) {
       watcher.emit("change", file);
     }

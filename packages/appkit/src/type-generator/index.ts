@@ -914,7 +914,9 @@ export const ANALYTICS_TYPES_FILE = "analytics.d.ts";
 export const SERVING_TYPES_FILE = "serving.d.ts";
 export const METRIC_TYPES_FILE = "metric-views.d.ts";
 export {
+  DATABASE_OPERATIONS_TYPES_FILE,
   DATABASE_TYPES_FILE,
   DatabaseTypegenError,
+  generateDatabaseOperations,
   generateDatabaseTypes,
 } from "./database";
