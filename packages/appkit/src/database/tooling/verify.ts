@@ -264,13 +264,47 @@ function readCommitted(folder: string): CommittedMigration[] {
 }
 
 /**
+ * The deployed journal's entries: each a migration with a tag, an idx and a
+ * when, and no tag listed twice. A journal that breaks that is not evidence
+ * of anything, so it throws rather than matching.
+ */
+function parseDeployedJournal(bytes: Buffer, label: string): JournalEntry[] {
+  let json: unknown;
+  try {
+    json = JSON.parse(bytes.toString("utf-8"));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${label} is not JSON: ${message}`, { cause: error });
+  }
+  const entries = parseJournal(json, label).entries;
+  const seen = new Set<string>();
+  entries.forEach((entry, index) => {
+    if (
+      typeof entry?.tag !== "string" ||
+      !entry.tag ||
+      typeof entry.idx !== "number" ||
+      typeof entry.when !== "number"
+    ) {
+      throw new Error(
+        `entry ${index} of ${label} is not a migration journal entry`,
+      );
+    }
+    if (seen.has(entry.tag)) {
+      throw new Error(`${label} lists ${entry.tag} twice`);
+    }
+    seen.add(entry.tag);
+  });
+  return entries;
+}
+
+/**
  * The committed migrations against the snapshot of the source the active
  * deployment runs: each needs the same journal entry (idx, when,
- * breakpoints) and byte-identical SQL there, and the snapshot may have no
- * migration the checkout does not commit. A snapshot that exists without a
- * journal has no migration. Only that snapshot is evidence. Anything verify
- * cannot read in it, or a snapshot that does not exist, makes the result
- * unavailable, never a match.
+ * breakpoints, and its place in the journal) and byte-identical SQL there,
+ * and the snapshot may have no migration the checkout does not commit. A
+ * snapshot that exists without a journal has no migration. Only that
+ * snapshot is evidence. Anything verify cannot read in it, or a snapshot
+ * that does not exist, makes the result unavailable, never a match.
  */
 async function readDeployedMigrations(
   ctx: DbContext,
@@ -305,23 +339,10 @@ async function readDeployedMigrations(
     if (!journal && !(await workspacePathExists(ctx, snapshot))) {
       throw new Error(`the source snapshot ${snapshot} does not exist`);
     }
-    if (journal) {
-      let json: unknown;
-      try {
-        json = JSON.parse(journal.toString("utf-8"));
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`${journalPath} is not JSON: ${message}`, {
-          cause: error,
-        });
-      }
-      deployed = parseJournal(json, journalPath).entries;
-    }
+    if (journal) deployed = parseDeployedJournal(journal, journalPath);
     const committedTags = new Set(committed.map(({ entry }) => entry.tag));
     const unknown = deployed.flatMap((entry) =>
-      typeof entry?.tag === "string" && !committedTags.has(entry.tag)
-        ? [entry.tag]
-        : [],
+      committedTags.has(entry.tag) ? [] : [entry.tag],
     );
     if (committed.length === 0) {
       if (deployed.length === 0) return null;
@@ -331,11 +352,17 @@ async function readDeployedMigrations(
         reason: `the deployment has ${unknown.join(", ")}, and this checkout commits none in config/database/migrations next to databricks.yml: pull ${them}, then run verify again`,
       };
     }
+    const deployedByTag = new Map(deployed.map((entry) => [entry.tag, entry]));
+    // The app applies the journal in order, so when both sides list the same
+    // tags each must also be at the same place.
+    const sameTags =
+      unknown.length === 0 && deployed.length === committed.length;
     const compared = await Promise.all(
-      committed.map(async ({ entry, sql }) => {
-        const found = deployed.find((other) => other?.tag === entry.tag);
+      committed.map(async ({ entry, sql }, index) => {
+        const found = deployedByTag.get(entry.tag);
         if (!found) return "missing";
         if (
+          (sameTags && deployed[index]?.tag !== entry.tag) ||
           found.idx !== entry.idx ||
           found.when !== entry.when ||
           found.breakpoints !== entry.breakpoints
