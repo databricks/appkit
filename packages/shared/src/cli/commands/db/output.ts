@@ -42,20 +42,24 @@ export function fail(error: unknown): void {
   process.exitCode = 1;
 }
 
+/** Statements of a written migration that break instances still running the previous release. */
+export function warnBreaking(tag: string, breaking: readonly string[]): void {
+  if (breaking.length === 0) return;
+  warn(
+    `${tag} breaks instances still running the previous release, which keep serving while the new one migrates on start: ${breaking.join(" ")} ` +
+      "Deploy code that works with both the old and the new schema first, then this change in a later deploy.",
+  );
+}
+
 export function printMigrateReport(report: MigrateReport): void {
   if (report.generated) {
     const count = report.generated.statements.length;
     ok(
       `Generated ${relative(report.generated.file)} (${count} statement${count === 1 ? "" : "s"})`,
     );
+    warnBreaking(report.generated.tag, report.breaking ?? []);
   } else {
     info("No schema changes since the last migration");
-  }
-  if (report.generated && report.breaking?.length) {
-    warn(
-      `${report.generated.tag} breaks instances still running the previous release, which keep serving while the new one migrates on start: ${report.breaking.join(" ")} ` +
-        "Deploy code that works with both the old and the new schema first, then this change in a later deploy.",
-    );
   }
 
   if (report.adopted?.length) {
