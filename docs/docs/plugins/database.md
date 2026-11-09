@@ -131,6 +131,28 @@ session branch. A session branch name includes a hash of the user who created
 it, so a `.env` copied from another developer does not make their session branch
 yours.
 
+### Your branch's data
+
+`npx appkit db init` creates your dev branch, or this checkout's session branch
+with `--session`, as a fork of the project's default branch, and points `.env`
+at it. A fork copies every row of its source, production data included. A
+branch `init` forked starts without them: `init` drops the app schema and
+recreates it from the committed migrations. Without
+`config/database/schema.ts`, `init` first writes it and `0000_baseline.sql`
+from the fork's schema, then rebuilds the schema from that baseline. Until the
+rebuild has run, `.env` names the branch in `APPKIT_DB_NEW_BRANCH`, so a run
+that stops early is finished by the next `init`.
+
+To keep the copied rows on a new branch, pass `--schema migrate`, or
+`--schema introspect` without `schema.ts`. A branch `init` reuses keeps its
+data: `init` migrates it, or introspects it without `schema.ts`.
+`--schema clean` rebuilds a reused branch too, after a confirmation or with
+`--yes`.
+
+In schema `public`, `init` and `clean` remove only the objects your role owns.
+On a fork of the deploy branch the app's service principal owns the tables, so
+they stay with their rows, and the report lists them as kept.
+
 ### Branches `databricks.yml` deploys to
 
 `migrate` never applies migrations to a branch that `databricks.yml` deploys to.
