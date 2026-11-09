@@ -94,13 +94,14 @@ function writeAtomically(file: string, contents: string): void {
 }
 
 /**
- * Replace `KEY=…` entries and append missing keys. Comments, blank lines,
- * other keys, their order, `export ` prefixes and CRLF line endings are kept.
- * Written 0600 through a temporary file; a symbolic link is refused.
+ * Replace `KEY=…` entries, append missing keys, and remove the keys whose
+ * value is null. Comments, blank lines, other keys, their order, `export `
+ * prefixes and CRLF line endings are kept. Written 0600 through a temporary
+ * file; a symbolic link is refused.
  */
 export function updateEnvFile(
   file: string,
-  values: Readonly<Record<string, string>>,
+  values: Readonly<Record<string, string | null>>,
 ): void {
   refuseSymlink(file);
   const text = fs.existsSync(file) ? fs.readFileSync(file, "utf-8") : "";
@@ -116,13 +117,16 @@ export function updateEnvFile(
       out.push(...entry.lines);
       continue;
     }
+    const value = values[key];
     // Later duplicates of a managed key are dropped, so the value is unambiguous.
-    if (written.has(key)) continue;
+    if (value === null || written.has(key)) continue;
     written.add(key);
-    out.push(`${entry.prefix}${key}=${formatValue(key, values[key] ?? "")}`);
+    out.push(`${entry.prefix}${key}=${formatValue(key, value ?? "")}`);
   }
   for (const [key, value] of Object.entries(values)) {
-    if (!written.has(key)) out.push(`${key}=${formatValue(key, value)}`);
+    if (value !== null && !written.has(key)) {
+      out.push(`${key}=${formatValue(key, value)}`);
+    }
   }
   writeAtomically(file, `${out.join(eol)}${eol}`);
 }
