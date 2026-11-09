@@ -422,6 +422,39 @@ describe("runIntrospect", () => {
     },
   );
 
+  test.each([
+    ["schema.ts", SCHEMA, previousSchema],
+    ["schema.ts.bak", `${SCHEMA}.bak`, "// an older backup\n"],
+  ])(
+    "a symlinked %s is refused before anything is read or written, since introspect does not write through links",
+    async (_label, file, contents) => {
+      catalog = authorsOnly();
+      const root = tempApp({
+        [SCHEMA]: previousSchema,
+        "elsewhere/target.ts": contents,
+      });
+      const link = path.join(root, file);
+      fs.rmSync(link, { force: true });
+      fs.symlinkSync(path.join(root, "elsewhere/target.ts"), link);
+      const before = tree(root);
+
+      const error = await refusal(root);
+
+      expect(error).toBeInstanceOf(IntrospectRefusedError);
+      expect(error.message).toBe(
+        `Refusing to introspect: config/database/${_label} is a symbolic link, and introspect replaces files instead of writing through links. Replace it with a regular file, then rerun.`,
+      );
+      expect(resolveEnvBranch).not.toHaveBeenCalled();
+      expect(catalog.calls).toEqual([]);
+      expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+      expect(
+        fs.readFileSync(path.join(root, "elsewhere/target.ts"), "utf-8"),
+      ).toBe(contents);
+      expect(tree(root)).toEqual(before);
+      expect(markMigrationsApplied).not.toHaveBeenCalled();
+    },
+  );
+
   test("--schema-name public is written explicitly, so the app never looks for the tables in the default app schema", async () => {
     const root = tempApp();
 
