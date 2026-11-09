@@ -7,6 +7,7 @@ import {
 } from "../../../plugins/database/load-schema";
 import { writeDatabaseTypes } from "../../../type-generator/database";
 import {
+  editedReason,
   markMigrationsApplied,
   readMigrationDrift,
 } from "../../migrations/apply";
@@ -197,7 +198,8 @@ async function introspectHolding(
   return withBranchPool(ctx, async (pool) => {
     // The diff starts from the latest committed snapshot, so the branch must
     // record exactly the committed migrations: one it lacks would come out
-    // reversed, and one the checkout lacks would come out again.
+    // reversed, one the checkout lacks would come out again, and one whose
+    // file changed after it ran left the branch where the snapshot is not.
     const drift = await readMigrationDrift(pool, migrationOptions);
     const refuse = (reason: string, advice: string) =>
       new IntrospectRefusedError(
@@ -213,6 +215,12 @@ async function introspectHolding(
       throw refuse(
         `it skipped ${drift.stranded.join(", ")}`,
         "Run `appkit db migrate`, which says how to fix it.",
+      );
+    }
+    if (drift.edited.length > 0) {
+      throw refuse(
+        editedReason(drift.edited),
+        `Restore ${drift.edited.length === 1 ? "the file" : "the files"} to what the branch ran and put the change in a new migration, or recreate the branch.`,
       );
     }
     // An interrupted run leaves its migration written but not recorded.

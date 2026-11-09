@@ -581,6 +581,8 @@ interface MigrationDrift {
   readonly pending: readonly string[];
   /** Committed, not recorded, older than the last recorded one. */
   readonly stranded: readonly string[];
+  /** Recorded, but the committed file changed since: the branch ran another version. */
+  readonly edited: readonly string[];
   /** Recorded rows no committed migration matches: the branch is ahead of the checkout. */
   readonly unknown: number;
 }
@@ -591,6 +593,7 @@ function driftOf(
   return {
     pending: tags(history.pending),
     stranded: tags(history.stranded),
+    edited: tags(history.edited),
     unknown: history.unknown.length,
   };
 }
@@ -613,6 +616,11 @@ export async function readMigrationDrift(
   );
 }
 
+/** The branch ran these migrations as they were before an edit, so the committed history is not what it holds. */
+export function editedReason(edited: readonly string[]): string {
+  return `it applied ${edited.join(", ")} before ${edited.length === 1 ? "its file" : "their files"} changed`;
+}
+
 /** Why the branch's history is not the committed one plus toRecord; undefined when it is. */
 function driftReason(
   drift: MigrationDrift,
@@ -625,6 +633,7 @@ function driftReason(
       ? `it records ${drift.unknown} migration${drift.unknown === 1 ? "" : "s"} this checkout does not have`
       : "",
     drift.stranded.length > 0 ? `it skipped ${drift.stranded.join(", ")}` : "",
+    drift.edited.length > 0 ? editedReason(drift.edited) : "",
     notApplied.length > 0 ? `it has not applied ${notApplied.join(", ")}` : "",
     recorded.length > 0 ? `it already records ${recorded.join(", ")}` : "",
   ].filter(Boolean);
