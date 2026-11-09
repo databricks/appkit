@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 
-import { deleteDatabaseRow } from "@/js/database/client";
+import { deleteDatabaseRow } from "@/js/database/entity-client";
 import type { DatabaseApiError } from "@/js/database/errors";
 import type { DatabaseId, DatabaseKeyedEntity } from "@/js/database/types";
 
