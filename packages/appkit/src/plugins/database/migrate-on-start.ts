@@ -8,6 +8,7 @@ import {
   MigrationApplyError,
   MigrationBaselineMismatchError,
   MigrationHistoryError,
+  MigrationJournalError,
 } from "../../database/migrations/apply";
 import {
   journalFile,
@@ -98,6 +99,7 @@ export async function migrateOnStart(
       error instanceof MigrationApplyError ||
       error instanceof MigrationBaselineMismatchError ||
       error instanceof MigrationHistoryError ||
+      error instanceof MigrationJournalError ||
       error instanceof MigrationFilesError
     ) {
       throw databaseSetupFailed(error.message);

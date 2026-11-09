@@ -212,8 +212,27 @@ describe("migrateOnStart", () => {
     ],
     [
       "a stranded migration",
-      new apply.MigrationHistoryError("app", ["0001_parallel"], "0002_b"),
+      new apply.MigrationHistoryError("app", {
+        stranded: ["0001_parallel"],
+        last: "0002_b",
+      }),
       "Migration 0001_parallel is older than 0002_b",
+    ],
+    [
+      "a view at the journal's name",
+      new apply.MigrationJournalError(
+        "app",
+        {
+          relkind: "v",
+          owner: "mallory",
+          schemaOwner: "app-sp",
+          currentUser: "app-sp",
+          rowSecurity: false,
+          trusted: false,
+        },
+        "kind",
+      ),
+      '"app"."__drizzle_migrations" is a view owned by "mallory"',
     ],
     [
       "a baseline that only partly matches",
