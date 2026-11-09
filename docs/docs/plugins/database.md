@@ -99,7 +99,8 @@ Earlier releases put tables in `public` by default. An app that created its
 tables there fails setup after the upgrade, and the error says the tables are in
 `public`. With `APPKIT_DB_MIGRATE_ON_START=true`, startup refuses before any
 migration runs when `defineSchema()` was given no `schemaName`, none of the
-declared tables exist in `app`, and some exist in `public`. Otherwise the first
+declared tables exist in `app`, and some exist in `public`; `npx appkit db migrate`
+refuses to apply on a dev branch in the same case. Otherwise the first
 migration would create empty copies in `app`, the check would pass, and the app
 would serve the empty tables. Keep the tables in `public` with:
 
@@ -114,8 +115,8 @@ export const schema = defineSchema(
 
 To use `app` instead, move the tables first
 (`ALTER TABLE public.notes SET SCHEMA app`). When the tables in `public` belong
-to another app, pass `{ schemaName: "app" }` explicitly and startup does not
-refuse.
+to another app, pass `{ schemaName: "app" }` explicitly and neither startup nor
+`migrate` refuses.
 
 Migrations applied on start into `public` also need
 `GRANT CREATE ON SCHEMA public` to the app's service principal, because it does
