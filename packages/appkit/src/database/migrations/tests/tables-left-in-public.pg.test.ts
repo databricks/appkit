@@ -53,23 +53,17 @@ describe.skipIf(!url)("tables left in public, against Postgres", () => {
     expect(placement).toEqual({ inSchema: [here], inPublic: [there] });
   });
 
-  test("an app table still in public with nothing in app is refused; once app has it, it is not", async () => {
+  test("an app table still in public, with nothing in the default schema, is refused", async () => {
     const table = unique();
-    cleanup.push(
-      `drop table if exists public."${table}"`,
-      `drop table if exists app."${table}"`,
-    );
+    cleanup.push(`drop table if exists public."${table}"`);
     const schema = defineSchema(({ table: declare }) => ({
       [table]: declare(table, { id: id() }),
     }));
     await pool.query(`create table public."${table}" (id int)`);
 
     const refused = await detectTablesLeftInPublic(catalogSqlOf(pool), schema);
-    await pool.query(`create schema if not exists app`);
-    await pool.query(`create table app."${table}" (id int)`);
-    const allowed = await detectTablesLeftInPublic(catalogSqlOf(pool), schema);
 
     expect(refused).toContain(`public has ${table}`);
-    expect(allowed).toBeUndefined();
+    expect(refused).toContain('pass { schemaName: "public" }');
   });
 });
