@@ -239,7 +239,7 @@ export async function introspectHolding(
     if (drift.edited.length > 0) {
       throw refuse(
         editedReason(drift.edited),
-        `Restore ${drift.edited.length === 1 ? "the file" : "the files"} to what the branch ran and put the change in a new migration, or recreate the branch.`,
+        `Restore ${drift.edited.length === 1 ? "the file" : "the files"} to what the branch ran and put the change in a new migration, or rebuild the branch with \`appkit db clean\`.`,
       );
     }
     // An interrupted run leaves its migration written but not recorded.

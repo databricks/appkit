@@ -705,7 +705,7 @@ export const schema = defineSchema(({ table }) => ({
 
     expect(error).toBeInstanceOf(IntrospectRefusedError);
     expect(error.message).toBe(
-      'Refusing to introspect dev-alice-3f9a2c: it applied 0000_migration before its file changed in schema "app". Restore the file to what the branch ran and put the change in a new migration, or recreate the branch.',
+      'Refusing to introspect dev-alice-3f9a2c: it applied 0000_migration before its file changed in schema "app". Restore the file to what the branch ran and put the change in a new migration, or rebuild the branch with `appkit db clean`.',
     );
     expect(catalog.calls).toEqual([]);
     expect(tree(root)).toEqual(before);
