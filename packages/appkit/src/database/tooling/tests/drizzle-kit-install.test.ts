@@ -7,7 +7,10 @@ import { drizzleKitInstall, ensureDrizzleKit } from "../drizzle-kit-install";
 import { DRIZZLE_KIT_VERSION } from "../migrations";
 import { cleanupTempApps, tempApp } from "./fakes";
 
-afterEach(cleanupTempApps);
+afterEach(() => {
+  cleanupTempApps();
+  vi.unstubAllEnvs();
+});
 
 const SPEC = `drizzle-kit@${DRIZZLE_KIT_VERSION}`;
 
@@ -34,6 +37,35 @@ describe("drizzleKitInstall", () => {
       "apps/web/package.json": "{}",
     });
     expect(drizzleKitInstall(path.join(root, "apps/web")).command).toBe("pnpm");
+  });
+
+  test("the packageManager field wins over a conflicting lockfile, in the app and in its workspace root", () => {
+    const declared = tempApp({
+      "package.json": JSON.stringify({ packageManager: "yarn@4.0.0" }),
+      "package-lock.json": "{}",
+    });
+    expect(drizzleKitInstall(declared).command).toBe("yarn");
+
+    const workspace = tempApp({
+      "package.json": JSON.stringify({ packageManager: "bun@1.1.0" }),
+      "package-lock.json": "{}",
+      "apps/web/package.json": "{}",
+    });
+    expect(drizzleKitInstall(path.join(workspace, "apps/web")).command).toBe(
+      "bun",
+    );
+  });
+
+  test("without a field or lockfile anywhere, the launcher's manager is used, else npm", () => {
+    const root = tempApp({ "package.json": "{}" });
+    vi.stubEnv("npm_config_user_agent", "yarn/4.0.0 npm/? node/v22");
+    expect(drizzleKitInstall(root).command).toBe("yarn");
+
+    vi.stubEnv("npm_config_user_agent", undefined);
+    expect(drizzleKitInstall(root)).toEqual({
+      command: "npm",
+      args: ["install", "--save-dev", "--save-exact", SPEC],
+    });
   });
 });
 

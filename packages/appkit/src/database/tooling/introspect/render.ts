@@ -7,6 +7,7 @@ import type { AppKitTable, Schema } from "../../schema-builder/types";
 import type {
   IntrospectedColumn,
   IntrospectedForeignKey,
+  IntrospectedSequence,
   IntrospectedTable,
 } from "./catalog";
 
@@ -181,6 +182,9 @@ function baseType(
     if (column.enum.values.length === 0) {
       return `enum type "${column.enum.name}" has no values`;
     }
+    if (column.enum.values.includes("")) {
+      return `enum type "${column.enum.name}" has an empty label, which the builder does not accept`;
+    }
     return {
       call: `enumType(${q(column.enum.name)}, [${column.enum.values.map(q).join(", ")}])`,
       importName: "",
@@ -239,6 +243,54 @@ function baseType(
 const isSequenceDefault = (expr: string | null) =>
   !!expr && /^nextval\(/.test(expr);
 
+/** id()/bigid(), whose sequence drizzle-kit writes with Postgres' defaults up to the type's bound. */
+const SERVER_KEYS = {
+  integer: {
+    base: { call: "id()", importName: "id", storage: "id" },
+    max: "2147483647",
+  },
+  bigint: {
+    base: { call: "bigid()", importName: "bigid", storage: "bigid" },
+    max: "9223372036854775807",
+  },
+} as const satisfies Record<string, { base: BaseType; max: string }>;
+const SEQUENCE_DEFAULTS = { start: "1", increment: "1", min: "1", cache: "1" };
+const SEQUENCE_CLAUSES: ReadonlyArray<
+  [Exclude<keyof IntrospectedSequence, "cycle">, string]
+> = [
+  ["start", "START WITH"],
+  ["increment", "INCREMENT BY"],
+  ["min", "MINVALUE"],
+  ["max", "MAXVALUE"],
+  ["cache", "CACHE"],
+];
+
+/** What `sequence` has that the defaults do not, and the defaults in its place; null when it has the defaults. */
+function sequenceDifferences(
+  sequence: IntrospectedSequence,
+  max: string,
+): { has: string; declared: string } | null {
+  const defaults = { ...SEQUENCE_DEFAULTS, max };
+  const has: string[] = [];
+  const declared: string[] = [];
+  for (const [option, clause] of SEQUENCE_CLAUSES) {
+    if (sequence[option] === defaults[option]) continue;
+    has.push(`${clause} ${sequence[option]}`);
+    declared.push(`${clause} ${defaults[option]}`);
+  }
+  if (sequence.cycle) {
+    has.push("CYCLE");
+    declared.push("NO CYCLE");
+  }
+  return has.length > 0 ? { has: list(has), declared: list(declared) } : null;
+}
+
+/**
+ * A quoted literal, with the cast pg_get_expr adds: `'x'::text`, `'x'::character
+ * varying`, `'x'::app."order-status"`. A quoted name holds any character but `"`.
+ */
+const LITERAL_WITH_CAST = /^'((?:[^']|'')*)'(?:::(?:[\w .]|"(?:[^"]|"")*")+)?$/;
+
 /** A builder default call, or why the database default cannot be expressed. */
 function defaultCall(
   expr: string,
@@ -269,7 +321,7 @@ function defaultCall(
     case "text":
     case "varchar":
     case "enum": {
-      const match = /^'((?:[^']|'')*)'(?:::[\w." ]+)?$/.exec(expr);
+      const match = LITERAL_WITH_CAST.exec(expr);
       if (!match) return unsupported;
       const value = (match[1] ?? "").replace(/''/g, "'");
       if (
@@ -433,11 +485,11 @@ export function renderSchemaSource(
     const tableApproximated: string[] = [];
     const tableRenamed: string[] = [];
     const columnReasons = new Map<string, string>();
-    /** Single-column unique constraints: column → constraint name. */
+    /** Single-column unique constraints, by column. */
     const singleUnique = new Map(
       table.unique
         .filter((unique) => unique.columns.length === 1)
-        .map((unique) => [unique.columns[0] as string, unique.name]),
+        .map((unique) => [unique.columns[0] as string, unique]),
     );
     const tableUnexpressed: Unexpressed[] = [];
     for (const unique of table.unique.filter((u) => u.columns.length > 1)) {
@@ -507,10 +559,17 @@ export function renderSchemaSource(
           `${qualified(table.name, column.name)}: ${base.approximation}`,
         );
       }
-      const uniqueName = singleUnique.get(column.name);
+      const unique = singleUnique.get(column.name);
       const migrationsUnique = pgName(`${table.name}_${column.name}_unique`);
-      if (columnPlan.isUnique && uniqueName !== migrationsUnique) {
-        tableRenamed.push(`${uniqueName} (${migrationsUnique})`);
+      if (columnPlan.isUnique && unique) {
+        if (unique.name !== migrationsUnique) {
+          tableRenamed.push(`${unique.name} (${migrationsUnique})`);
+        }
+        if (unique.deferrable) {
+          tableApproximated.push(
+            `${qualified(table.name, column.name)}: the unique constraint is declared without DEFERRABLE`,
+          );
+        }
       }
       const generatesKey =
         column.identity !== "" || isSequenceDefault(column.defaultExpr);
@@ -520,13 +579,19 @@ export function renderSchemaSource(
         (base.storage === "integer" || base.storage === "bigint")
       ) {
         // A serial or identity key is the builder's server-generated id()/bigid().
-        columnPlan.base =
-          base.storage === "integer"
-            ? { call: "id()", importName: "id", storage: "id" }
-            : { call: "bigid()", importName: "bigid", storage: "bigid" };
+        const serverKey = SERVER_KEYS[base.storage];
+        columnPlan.base = serverKey.base;
         if (column.identity !== "d") {
           tableApproximated.push(
-            `${qualified(table.name, column.name)}: ${column.identity === "a" ? "GENERATED ALWAYS AS IDENTITY" : "a serial key"} is declared as ${columnPlan.base.call}, an identity generated BY DEFAULT`,
+            `${qualified(table.name, column.name)}: ${column.identity === "a" ? "GENERATED ALWAYS AS IDENTITY" : "a serial key"} is declared as ${serverKey.base.call}, an identity generated BY DEFAULT`,
+          );
+        }
+        const differences = column.sequence
+          ? sequenceDifferences(column.sequence, serverKey.max)
+          : null;
+        if (differences) {
+          tableApproximated.push(
+            `${qualified(table.name, column.name)}: the key's sequence has ${differences.has}; ${serverKey.base.call} declares the defaults (${differences.declared})`,
           );
         }
       } else if (column.defaultExpr) {
@@ -617,6 +682,10 @@ export function renderSchemaSource(
       return "foreign keys over several columns are not supported";
     }
     if (!source) return "its column is skipped";
+    if (source.fk) {
+      // One fk() per column; declared keys come first, so a refresh keeps the declared one.
+      return `its column already keeps the foreign key to ${source.fk.table}(${source.fk.column})`;
+    }
     if (foreignKey.schema !== schemaName) {
       return `it references schema "${foreignKey.schema}"`;
     }

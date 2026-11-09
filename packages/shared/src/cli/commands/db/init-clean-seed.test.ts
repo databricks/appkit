@@ -228,6 +228,7 @@ describe("appkit db init", () => {
           branch: report.branch,
           schemaName: "app",
           dependents: ["view reports.summary"],
+          kept: [],
         },
         migrate,
       },
@@ -240,6 +241,94 @@ describe("appkit db init", () => {
       "Also removed, because they depended on it: view reports.summary",
     );
     expect(printed).toContain("Applied 0000_migration to the .env branch");
+  });
+
+  test("a rebuild without --schema says the copied rows went and how to keep them; with --schema clean it does not", async () => {
+    const rebuilt = {
+      ...report,
+      start: {
+        kind: "clean",
+        clean: {
+          branch: report.branch,
+          schemaName: "app",
+          dependents: [],
+          kept: [],
+        },
+        migrate,
+      },
+    };
+    tooling.runInit.mockResolvedValue(rebuilt);
+    await init();
+    expect(output(log)).toContain(
+      "A branch init forked starts without the rows it copied: the app schema was rebuilt from the committed migrations. `appkit db init --schema migrate` keeps them.",
+    );
+
+    log.mockClear();
+    resetOptionValues();
+    await init("--schema", "clean", "--yes");
+    expect(output(log)).toContain("Dropped schema app on dev-alice-3f9a2c");
+    expect(output(log)).not.toContain("A branch init forked starts without");
+  });
+
+  test("an introspect start with a rebuild prints what introspect wrote, the drop, the migrations, and names --schema introspect to keep the rows", async () => {
+    tooling.runInit.mockResolvedValue({
+      ...report,
+      start: {
+        kind: "introspect",
+        introspect: {
+          branch: report.branch,
+          schemaName: "app",
+          tables: ["notes"],
+          schemaFile: `${process.cwd()}/config/database/schema.ts`,
+          backupFile: null,
+          skipped: [],
+          warnings: [],
+          approximated: ["notes.body: check constraint"],
+          migration: {
+            tag: "0000_baseline",
+            file: `${process.cwd()}/config/database/migrations/0000_baseline.sql`,
+            statements: ["CREATE TABLE"],
+          },
+          recorded: ["0000_baseline"],
+          typesFile: migrate.typesFile,
+        },
+        rebuilt: {
+          clean: {
+            branch: report.branch,
+            schemaName: "app",
+            dependents: [],
+            kept: [],
+          },
+          migrate: { ...migrate, applied: ["0000_baseline"] },
+        },
+      },
+    });
+    await init();
+
+    const printed = output(log);
+    expect(printed).toContain(
+      "`appkit db init --schema introspect` keeps them",
+    );
+    expect(printed).toContain(
+      "Wrote config/database/schema.ts from schema app",
+    );
+    expect(printed).toContain(
+      "The rebuild gave this branch what schema.ts declares",
+    );
+    expect(printed).not.toContain("This branch keeps the approximated objects");
+    expect(printed).toContain("Dropped schema app on dev-alice-3f9a2c");
+    expect(printed).toContain("Applied 0000_baseline to the .env branch");
+  });
+
+  test("--schema's help says what the default does with a new and a reused branch", () => {
+    const command = dbCommand.commands.find((c) => c.name() === "init");
+    const schema = command?.options.find((o) => o.long === "--schema");
+    expect(schema?.description).toBe(
+      "how the schema starts (default: a new branch is rebuilt from the migrations, a reused one is migrated; introspect without schema.ts)",
+    );
+    expect(command?.helpInformation()).not.toContain(
+      "start with a copy of its rows",
+    );
   });
 
   test("--schema clean without a TTY needs --yes, and stops before any API call", async () => {
@@ -286,6 +375,7 @@ describe("appkit db clean", () => {
     branch: "projects/p/branches/dev-a",
     schemaName: "app",
     dependents: [],
+    kept: [],
   };
 
   test("refuses without --yes when there is no TTY, before any API call", async () => {
@@ -325,14 +415,21 @@ describe("appkit db clean", () => {
     expect(output(log)).toContain("Dropped schema app on dev-a");
   });
 
-  test("--yes cleans without asking; public says only your objects went", async () => {
-    tooling.runClean.mockResolvedValue({ ...cleaned, schemaName: "public" });
+  test("--yes cleans without asking; public says only your objects went, and what other roles' objects stayed", async () => {
+    tooling.runClean.mockResolvedValue({
+      ...cleaned,
+      schemaName: "public",
+      kept: ["table notes", "table orders"],
+    });
     await clean("--yes");
 
     expect(tooling.previewClean).not.toHaveBeenCalled();
     expect(prompts.confirm).not.toHaveBeenCalled();
     expect(output(log)).toContain(
       "Removed your objects in schema public on dev-a",
+    );
+    expect(output(log)).toContain(
+      "Kept in schema public, with their rows, because other roles own them: table notes, table orders",
     );
   });
 

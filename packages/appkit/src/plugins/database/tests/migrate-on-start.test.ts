@@ -25,7 +25,7 @@ const schema = defineSchema(({ table }) => ({
   notes: table("notes", { id: id() }),
 }));
 const roots: string[] = [];
-const pool = { connect: vi.fn() };
+const pool = { connect: vi.fn(), query: vi.fn() };
 const deployEnv = {
   LAKEBASE_ENDPOINT: "projects/p/branches/production/endpoints/primary",
   PGHOST: "ep-abc.database.cloud.databricks.com",
@@ -64,6 +64,9 @@ beforeEach(async () => {
   applyPendingMigrations.mockReset();
   applyPendingMigrations.mockImplementation(actual.applyPendingMigrations);
   pool.connect.mockReset();
+  pool.query.mockReset();
+  // A fresh database: the catalog holds none of the declared tables anywhere.
+  pool.query.mockResolvedValue({ rows: [] });
 });
 
 afterEach(() => {
@@ -209,8 +212,27 @@ describe("migrateOnStart", () => {
     ],
     [
       "a stranded migration",
-      new apply.MigrationHistoryError("app", ["0001_parallel"], "0002_b"),
+      new apply.MigrationHistoryError("app", {
+        stranded: ["0001_parallel"],
+        last: "0002_b",
+      }),
       "Migration 0001_parallel is older than 0002_b",
+    ],
+    [
+      "a view at the journal's name",
+      new apply.MigrationJournalError(
+        "app",
+        {
+          relkind: "v",
+          owner: "mallory",
+          schemaOwner: "app-sp",
+          currentUser: "app-sp",
+          rowSecurity: false,
+          trusted: false,
+        },
+        "kind",
+      ),
+      '"app"."__drizzle_migrations" is a view owned by "mallory"',
     ],
     [
       "a baseline that only partly matches",
@@ -255,5 +277,70 @@ describe("migrateOnStart", () => {
     await expect(
       migrateOnStart(pool, schema, appRootWithMigrations(), deployEnv),
     ).rejects.toBe(raw);
+  });
+});
+
+describe("migrateOnStart: tables an earlier release left in public", () => {
+  // An upgraded app: public.notes holds its rows, app.notes does not exist.
+  const notesInPublic = {
+    rows: [{ schema_name: "public", table_name: "notes" }],
+  };
+
+  test("the default schema and every declared table in public: refused, nothing applied", async () => {
+    pool.query.mockResolvedValue(notesInPublic);
+    applyPendingMigrations.mockResolvedValueOnce(nothingDone);
+
+    const error = await migrateOnStart(
+      pool,
+      schema,
+      appRootWithMigrations(),
+      deployEnv,
+    ).catch((caught: unknown) => caught);
+
+    expect(applyPendingMigrations).not.toHaveBeenCalled();
+    expect(error).toBeInstanceOf(DatabasePluginError);
+    expect(error).toMatchObject({ category: "SETUP_FAILED", phase: "setup" });
+    expect((error as Error).message).toContain("public has notes");
+    expect((error as Error).message).toContain(
+      'pass { schemaName: "public" } as the second argument of defineSchema()',
+    );
+  });
+
+  test('schemaName "app" named explicitly is migrated, whatever public holds', async () => {
+    const explicit = defineSchema(
+      ({ table }) => ({ notes: table("notes", { id: id() }) }),
+      { schemaName: "app" },
+    );
+    pool.query.mockResolvedValue(notesInPublic);
+    applyPendingMigrations.mockResolvedValueOnce(nothingDone);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await migrateOnStart(pool, explicit, appRootWithMigrations(), deployEnv);
+
+    expect(applyPendingMigrations).toHaveBeenCalledTimes(1);
+  });
+
+  test("a declared table already in app: migrated, whatever public holds", async () => {
+    pool.query.mockResolvedValue({
+      rows: [
+        { schema_name: "app", table_name: "notes" },
+        { schema_name: "public", table_name: "notes" },
+      ],
+    });
+    applyPendingMigrations.mockResolvedValueOnce(nothingDone);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await migrateOnStart(pool, schema, appRootWithMigrations(), deployEnv);
+
+    expect(applyPendingMigrations).toHaveBeenCalledTimes(1);
+  });
+
+  test("no committed journal: nothing to apply, so the catalog is not consulted", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    pool.query.mockResolvedValue(notesInPublic);
+
+    await migrateOnStart(pool, schema, appRoot(), deployEnv);
+
+    expect(pool.query).not.toHaveBeenCalled();
   });
 });

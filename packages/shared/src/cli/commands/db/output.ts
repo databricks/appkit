@@ -55,20 +55,24 @@ export function fail(error: unknown): void {
   process.exitCode = 1;
 }
 
+/** Statements of a written migration that break instances still running the previous release. */
+export function warnBreaking(tag: string, breaking: readonly string[]): void {
+  if (breaking.length === 0) return;
+  warn(
+    `${tag} breaks instances still running the previous release, which keep serving while the new one migrates on start: ${breaking.join(" ")} ` +
+      "Deploy code that works with both the old and the new schema first, then this change in a later deploy.",
+  );
+}
+
 export function printMigrateReport(report: MigrateReport): void {
   if (report.generated) {
     const count = report.generated.statements.length;
     ok(
       `Generated ${relative(report.generated.file)} (${count} statement${count === 1 ? "" : "s"})`,
     );
+    warnBreaking(report.generated.tag, report.breaking ?? []);
   } else {
     info("No schema changes since the last migration");
-  }
-  if (report.generated && report.breaking?.length) {
-    warn(
-      `${report.generated.tag} breaks instances still running the previous release, which keep serving while the new one migrates on start: ${report.breaking.join(" ")} ` +
-        "Deploy code that works with both the old and the new schema first, then this change in a later deploy.",
-    );
   }
 
   if (report.adopted?.length) {
@@ -98,6 +102,11 @@ export function printCleanReport(report: CleanReport): void {
       `Also removed, because they depended on it: ${report.dependents.join(", ")}`,
     );
   }
+  if (report.kept.length > 0) {
+    warn(
+      `Kept in schema public, with their rows, because other roles own them: ${report.kept.join(", ")}`,
+    );
+  }
 }
 
 const REBUILD =
@@ -105,13 +114,20 @@ const REBUILD =
 
 /** The one next step for a failed local verify, most fundamental gap first. */
 function localVerifyHint(report: LocalVerifyReport): string {
+  // Tables left in public: migrating would create empty copies in the app schema.
+  if (report.schemaAdvice) return report.schemaAdvice;
   if (report.editedMigrations.length > 0) {
     return "Restore the edited migrations from version control, and put the change in a new migration.";
   }
   if (report.unknownMigrations > 0) {
     return `${REBUILD}. If the branch ran migrations you have not pulled yet, pull them instead.`;
   }
-  if (report.strandedMigrations.length > 0) return `${REBUILD}.`;
+  // The same guidance the deployed app's MigrationHistoryError gives: the
+  // history itself is wrong, so rebuilding the local branch would not fix it.
+  if (report.strandedMigrations.length > 0) {
+    const its = report.strandedMigrations.length === 1 ? "its" : "their";
+    return `Delete ${its} .sql file, snapshot and journal entry, then run \`appkit db migrate\` to generate the migration again from schema.ts, after the recorded ones.`;
+  }
   // Pending migrations explain the gap; without them, schema.ts changed or the branch was edited.
   return report.pendingMigrations.length > 0
     ? "Run `appkit db migrate` to apply the pending migrations."
@@ -139,7 +155,7 @@ function printLocalVerifyReport(report: LocalVerifyReport): void {
   }
   for (const tag of report.strandedMigrations) {
     warn(
-      `Never runs: ${tag}: it is older than a migration the branch already ran (merged out of order); the deployed app skips it too once it ran a newer one`,
+      `Never runs: ${tag}: it is older than a migration the branch already ran (merged out of order), and the deployed app refuses to start on that history`,
     );
   }
   for (const tag of report.editedMigrations) {
@@ -168,7 +184,7 @@ function printDeployVerifyReport(report: DeployVerifyReport): void {
     );
     if (report.migrations?.evidence === "verified") {
       ok(
-        "Its active deployment has every committed migration, with the same SQL",
+        "Its deployed source has every committed migration, with the same journal entry and SQL",
       );
     }
     return;
@@ -200,7 +216,10 @@ export function printCheckReport(report: CheckReport): void {
   );
 }
 
-export function printIntrospectReport(report: IntrospectReport): void {
+export function printIntrospectReport(
+  report: IntrospectReport,
+  options: { rebuilt?: boolean } = {},
+): void {
   const count = report.tables.length;
   ok(
     `Wrote ${relative(report.schemaFile)} from schema ${report.schemaName} on ${shortName(report.branch)} (${count} table${count === 1 ? "" : "s"})${report.backupFile ? `; the previous file is ${relative(report.backupFile)}` : ""}`,
@@ -218,7 +237,9 @@ export function printIntrospectReport(report: IntrospectReport): void {
   }
   if (report.approximated.length > 0) {
     info(
-      "This branch keeps the approximated objects as they are; a database the migrations create gets what schema.ts declares.",
+      options.rebuilt
+        ? "The rebuild gave this branch what schema.ts declares, as a database the migrations create gets."
+        : "This branch keeps the approximated objects as they are; a database the migrations create gets what schema.ts declares.",
     );
   }
   if (report.migration) {

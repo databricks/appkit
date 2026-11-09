@@ -37,6 +37,14 @@ export class FakeLakebase {
     return branch;
   }
 
+  addDatabase(branch: string, databaseId: string, postgresDatabase: string) {
+    const name = `${branch}/databases/${databaseId}`;
+    this.databases.set(name, {
+      name,
+      status: { postgres_database: postgresDatabase },
+    });
+  }
+
   addRole(
     branch: string,
     roleId: string,
@@ -117,7 +125,7 @@ export class FakeLakebase {
           name,
           fake.autoEndpoint ? [fake.endpoint(name, "primary")] : [],
         );
-        // A fork copies the parent's roles.
+        // A fork copies the parent's roles and databases.
         fake.roles.set(
           name,
           (fake.roles.get(spec.source_branch) ?? []).map((role) => ({
@@ -125,6 +133,12 @@ export class FakeLakebase {
             name: `${name}/roles/${role.name.split("/").pop()}`,
           })),
         );
+        for (const database of fake.databases.values()) {
+          if (!database.name.startsWith(`${spec.source_branch}/databases/`))
+            continue;
+          const copied = `${name}/databases/${database.name.split("/").pop()}`;
+          fake.databases.set(copied, { ...database, name: copied });
+        }
         return branch;
       },
       async listEndpoints(branch: string) {
