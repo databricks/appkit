@@ -37,7 +37,7 @@ import {
 export interface IntrospectOptions {
   /** false: an ambiguous rename against existing history throws instead of prompting. */
   readonly interactive: boolean;
-  /** Schema to read; defaults to DEFAULT_SCHEMA_NAME. */
+  /** Schema to read. Default: the one schema.ts declares, else DEFAULT_SCHEMA_NAME. */
   readonly schemaName?: string;
   /** Module the written schema.ts imports the builder from. Default "@databricks/appkit/beta". */
   readonly importSource?: string;
@@ -154,9 +154,10 @@ async function readPreviousSchema(root: string): Promise<Schema | null> {
 }
 
 /**
- * `appkit db introspect`: read the `.env` branch's app schema from pg_catalog,
- * write schema.ts (the previous file goes to schema.ts.bak), write the
- * migration that brings history up to the database, and record it as applied.
+ * `appkit db introspect`: read the `.env` branch's app schema from pg_catalog
+ * (the one schema.ts declares, unless `--schema-name` names another), write
+ * schema.ts (the previous file goes to schema.ts.bak), write the migration
+ * that brings history up to the database, and record it as applied.
  * Columns the previous schema.ts declares keep their privacy; new ones are
  * written private, and a foreign key it does not declare is refused. Runs only
  * on your dev or session branch, and only when the branch records exactly the
@@ -180,7 +181,8 @@ async function introspectHolding(
 ): Promise<IntrospectReport> {
   const schemaFile = path.join(ctx.root, DEFAULT_SCHEMA_FILE);
   const previousSchema = await readPreviousSchema(ctx.root);
-  const schemaName = options.schemaName || DEFAULT_SCHEMA_NAME;
+  const schemaName =
+    options.schemaName || previousSchema?.$schemaName || DEFAULT_SCHEMA_NAME;
   const { folder } = lock;
   const migrationOptions = { migrationsFolder: folder, schemaName };
   const hasHistory = (readJournal(folder)?.entries.length ?? 0) > 0;
