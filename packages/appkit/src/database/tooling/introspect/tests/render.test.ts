@@ -617,7 +617,9 @@ describe("renderSchemaSource", () => {
       [
         tableOf({
           ...keyed("u", [col("email", "text")]),
-          unique: [{ name: "u_email_unique", columns: ["email"] }],
+          unique: [
+            { name: "u_email_unique", columns: ["email"], deferrable: false },
+          ],
         }),
         keyed(
           "t",
@@ -637,7 +639,13 @@ describe("renderSchemaSource", () => {
         tableOf({
           ...keyed("t", [col(column, "text")]),
           // "t_" plus 30 two-byte characters is 62 bytes; one more would pass 63.
-          unique: [{ name: `t_${"ç".repeat(30)}`, columns: [column] }],
+          unique: [
+            {
+              name: `t_${"ç".repeat(30)}`,
+              columns: [column],
+              deferrable: false,
+            },
+          ],
         }),
       ],
       "app",
