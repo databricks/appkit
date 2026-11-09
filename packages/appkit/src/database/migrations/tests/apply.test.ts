@@ -388,6 +388,30 @@ describe("applyPendingMigrations", () => {
     expect(client.statements).not.toContain("SELECT 4;");
   });
 
+  test("two migrations with one timestamp, neither matching the row recorded at it, fail closed before taking the lock", async () => {
+    const folder = migrations([
+      { tag: "0000_a", when: 1000, sql: [`SELECT 1;`] },
+      { tag: "0001_b", when: 1000, sql: [`SELECT 2;`] },
+    ]);
+    const { pool, client } = fakePool({
+      recorded: [{ hash: "hash-of-0000_a-before-the-edit", created_at: 1000 }],
+    });
+
+    const error = await applyPendingMigrations(pool, options(folder)).catch(
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBeInstanceOf(MigrationHistoryError);
+    expect(error).toMatchObject({
+      ambiguous: ["0000_a", "0001_b"],
+      stranded: [],
+    });
+    expect((error as Error).message).toMatch(
+      /^Schema "app" recorded 1 migration at 1970-01-01T00:00:01\.000Z, and 2 are committed with that timestamp \(0000_a, 0001_b\), none with a recorded hash\./,
+    );
+    expect(steps(client.statements)).toEqual(["journal table?", "recorded?"]);
+  });
+
   test("an applied migration whose file changed is logged, and its change does not run", async () => {
     const folder = twoMigrations();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
