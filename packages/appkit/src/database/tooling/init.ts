@@ -17,7 +17,12 @@ import { classifyBranch, deployRefusal, takesWrites } from "./guard";
 import { handOffAppSchema } from "./hand-off";
 import { type HistoryLock, withHistoryLock } from "./history-lock";
 import { currentIdentity, type Identity } from "./identity";
-import { introspectHolding, type IntrospectReport } from "./introspect";
+import {
+  introspectHolding,
+  type IntrospectOptions,
+  type IntrospectReport,
+  IntrospectRefusedError,
+} from "./introspect";
 import {
   isAlreadyExists,
   isBranchLimit,
@@ -505,6 +510,33 @@ async function resolveDatabase(
   return database.status.postgres_database;
 }
 
+const SCHEMA_NAME_ADVICE = "Pass --schema-name <name> to read another schema.";
+
+/** introspectHolding, with advice an init user can follow: init has no --schema-name. */
+async function introspectForInit(
+  ctx: DbContext,
+  lock: HistoryLock,
+  options: IntrospectOptions,
+): Promise<IntrospectReport> {
+  try {
+    return await introspectHolding(ctx, lock, options);
+  } catch (error) {
+    if (
+      !(error instanceof IntrospectRefusedError) ||
+      !error.message.includes(SCHEMA_NAME_ADVICE)
+    ) {
+      throw error;
+    }
+    throw new IntrospectRefusedError(
+      error.message.replace(
+        SCHEMA_NAME_ADVICE,
+        "Run `appkit db introspect --schema-name <name>` to read another schema.",
+      ),
+      { cause: error },
+    );
+  }
+}
+
 /** The profile or host init authenticated with, for a .env that names neither. */
 async function authValues(
   ctx: DbContext,
@@ -694,7 +726,7 @@ async function initHolding(
       };
     } else if (startKind === "introspect") {
       onStep(`Writing schema.ts from schema ${schemaName} ${on}`);
-      const introspect = await introspectHolding(branchCtx, lock, {
+      const introspect = await introspectForInit(branchCtx, lock, {
         interactive,
         schemaName,
       });
