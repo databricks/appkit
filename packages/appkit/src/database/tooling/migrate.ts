@@ -68,7 +68,7 @@ type ApplyOutcome = Pick<MigrateReport, "applied" | "adopted" | "notApplied">;
  * stays for the next run, which generates nothing new, so this is the only
  * run that can report what the migration breaks.
  */
-export class UnappliedMigrationError extends Error {
+class UnappliedMigrationError extends Error {
   readonly generated: GeneratedMigration;
   /** Statements of the kept migration that break instances still running the previous release. */
   readonly breaking: readonly string[];
