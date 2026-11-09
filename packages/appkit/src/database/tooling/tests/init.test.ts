@@ -845,6 +845,25 @@ describe("runInit — .env", () => {
     expect(envFile(root).DATABRICKS_HOST).toBeUndefined();
   });
 
+  test.each(["prefer", "disable", "verify-full"])(
+    "PGSSLMODE=%s becomes require, and init says so; require stays",
+    async (weak) => {
+      const ctx = appOn(project(), { PGSSLMODE: weak });
+
+      const { steps } = await init(ctx, { schema: "none" });
+
+      expect(envFile(ctx.root).PGSSLMODE).toBe("require");
+      expect(steps).toContain(
+        `Setting PGSSLMODE=require in .env: it was ${weak}, and only require makes every connection use TLS and check the server's certificate`,
+      );
+
+      const strict = appOn(project(), { PGSSLMODE: "require" });
+      const kept = await init(strict, { schema: "none" });
+      expect(envFile(strict.root).PGSSLMODE).toBe("require");
+      expect(kept.steps.some((step) => step.includes("PGSSLMODE"))).toBe(false);
+    },
+  );
+
   test("a symlinked .env is refused before any API call", async () => {
     const lakebase = project();
     const ctx = appOn(lakebase, {}, { files: { "shared.env": "" } });
