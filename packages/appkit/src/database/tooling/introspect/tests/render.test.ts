@@ -9,6 +9,7 @@ import {
   id,
   integer,
   text,
+  uuid,
 } from "../../../schema-builder";
 import type { IntrospectedForeignKey, IntrospectedTable } from "../catalog";
 import { renderSchemaSource } from "../render";
@@ -50,6 +51,19 @@ const keyed = (
       col("id", "integer", { notNull: true, identity: "d" }),
       ...columns,
     ],
+  });
+
+/** A table with a uuid primary key plus the given columns and FKs. */
+const uuidKeyed = (
+  name: string,
+  columns: IntrospectedTable["columns"] = [],
+  foreignKeys: IntrospectedForeignKey[] = [],
+): IntrospectedTable =>
+  tableOf({
+    name,
+    primaryKey: ["id"],
+    foreignKeys,
+    columns: [col("id", "uuid", { notNull: true }), ...columns],
   });
 
 const body = (source: string) =>
@@ -288,6 +302,37 @@ describe("renderSchemaSource", () => {
       'u_id: fk(() => u.id).notNull().unique().default(1).onDelete("set default").onUpdate("cascade"),',
     );
   });
+
+  test.each([
+    ["identity", keyed, "integer"],
+    ["uuid", uuidKeyed, "uuid"],
+  ] as const)(
+    "a second foreign key on the same column (%s keys) is skipped, and the first is kept",
+    (_label, target, type) => {
+      const out = firstRender([
+        target("users"),
+        target("people"),
+        keyed(
+          "posts",
+          [col("author_id", type)],
+          [
+            fk("author_id", "users"),
+            fk("author_id", "people", { name: "posts_author_id_people_fkey" }),
+          ],
+        ),
+      ]);
+
+      expect(body(out.source)).toContain("author_id: fk(() => users.id),");
+      expect(out.skipped).toEqual([
+        {
+          table: "posts",
+          column: "author_id",
+          reason:
+            "foreign key to people(id) is not kept: its column already keeps the foreign key to users(id)",
+        },
+      ]);
+    },
+  );
 
   test("a table whose primary key cannot be expressed is skipped whole", () => {
     const out = firstRender(
@@ -784,6 +829,40 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
     expect(out.skipped.map((skip) => skip.reason)).toContain(
       'foreign key to users(id) is not kept: a second foreign key to "users" would make the relation ambiguous',
     );
+    expect(out.newRelations).toEqual([]);
+  });
+
+  test("of two foreign keys on one column, the one it declares is kept", () => {
+    const declared = defineSchema(({ table }) => {
+      const people = table("people", { id: uuid().primaryKey() });
+      const posts = table("posts", {
+        id: id(),
+        author_id: references(() => people.id),
+      });
+      return { people, posts };
+    });
+
+    const out = renderSchemaSource(
+      [
+        uuidKeyed("users"),
+        uuidKeyed("people"),
+        keyed(
+          "posts",
+          [col("author_id", "uuid")],
+          [
+            fk("author_id", "users"),
+            fk("author_id", "people", { name: "posts_author_id_people_fkey" }),
+          ],
+        ),
+      ],
+      "app",
+      { previous: declared },
+    );
+
+    expect(body(out.source)).toContain("author_id: fk(() => people.id),");
+    expect(out.skipped.map((skip) => skip.reason)).toEqual([
+      "foreign key to users(id) is not kept: its column already keeps the foreign key to people(id)",
+    ]);
     expect(out.newRelations).toEqual([]);
   });
 
