@@ -986,6 +986,24 @@ describe("runVerify --deployed", () => {
   });
 
   test.each([
+    ["none", { service_principal_client_id: undefined }],
+    ["an empty one", { service_principal_client_id: "" }],
+  ])(
+    "an app whose API response has %s for a service principal fails: its role cannot be checked",
+    async (_label, overrides) => {
+      const { ctx, lakebase } = deployedApp({ app: runningApp(overrides) });
+
+      expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+        problems: [
+          "the API reports no service principal for app my-app, so verify cannot tell whether it has a Postgres role on production: `databricks apps get my-app` shows the app; run verify again once it has one",
+        ],
+        ok: false,
+      });
+      expect(lakebase.calls).not.toContain(`listRoles ${PRODUCTION}`);
+    },
+  );
+
+  test.each([
     [
       "crashed",
       {
