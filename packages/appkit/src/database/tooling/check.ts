@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { z } from "zod";
+
 import {
   DEFAULT_SCHEMA_FILE,
   loadDefaultDatabaseSchema,
@@ -15,7 +17,7 @@ import {
 } from "../migrations/paths";
 import type { DbContext } from "./context";
 import { requireSchemaFile } from "./migrate";
-import { hasUnmigratedChanges } from "./migrations";
+import { hasUnmigratedChanges, ORIGIN_ID } from "./migrations";
 
 export interface CheckReport {
   /** Committed migrations, in journal order. */
@@ -37,8 +39,19 @@ function orderProblems(entries: readonly JournalEntry[]): string[] {
         `${entry.tag} is entry ${index} of meta/_journal.json, but its idx is ${entry.idx}, so drizzle-kit reads another snapshot for it. ${REWRITE}`,
       );
     }
+    // The journal is parsed, not validated, so `when` can hold anything.
+    if (!Number.isSafeInteger(entry.when)) {
+      problems.push(
+        `The when of ${entry.tag} in meta/_journal.json is ${JSON.stringify(entry.when) ?? "missing"}, not an integer timestamp, so the migrator never runs it. ${REWRITE}`,
+      );
+      return;
+    }
     const before = entries[index - 1];
-    if (before && entry.when <= before.when) {
+    if (
+      before &&
+      Number.isSafeInteger(before.when) &&
+      entry.when <= before.when
+    ) {
       problems.push(
         `${entry.tag} is listed after ${before.tag} but was generated before it, so a branch that ran ${before.tag} never runs ${entry.tag}. ${REWRITE}`,
       );
@@ -53,10 +66,25 @@ interface SnapshotLink {
   readonly prevId: string;
 }
 
+/** drizzle-kit's PostgreSQL v7 snapshot, as far as telling it from a stub needs. */
+const snapshotShape = z.object({
+  version: z.literal("7"),
+  dialect: z.literal("postgresql"),
+  id: z.string(),
+  prevId: z.string(),
+  tables: z.record(z.string(), z.unknown()),
+  enums: z.record(z.string(), z.unknown()),
+  schemas: z.record(z.string(), z.unknown()),
+});
+
+/** The empty database drizzle-kit diffs the first migration from. */
+const ORIGIN: SnapshotLink = { id: ORIGIN_ID, prevId: "" };
+
 /**
- * Each snapshot must follow the one before it. Two migrations generated from
- * the same snapshot on parallel branches both follow that one, so the later
- * one was written without the other's changes.
+ * Each snapshot must follow the one before it, and the first one the empty
+ * database. Two migrations generated from the same snapshot on parallel
+ * branches both follow that one, so the later one was written without the
+ * other's changes.
  */
 function chainProblems(
   entries: readonly JournalEntry[],
@@ -65,15 +93,23 @@ function chainProblems(
   const problems: string[] = [];
   entries.forEach((entry, index) => {
     const link = links[index];
-    const before = links[index - 1];
+    const before = index === 0 ? ORIGIN : links[index - 1];
     if (!link || !before || link.prevId === before.id) return;
+    if (index === 0) {
+      problems.push(
+        `${entry.tag} is the first entry of meta/_journal.json but was not generated from an empty database, so the migrations before it are missing. Restore them from version control.`,
+      );
+      return;
+    }
     const parent = links.findIndex((other) => other?.id === link.prevId);
     const after =
-      parent === -1
-        ? "a snapshot that is not committed"
-        : (entries[parent]?.tag ?? "an earlier snapshot");
+      link.prevId === ORIGIN_ID
+        ? "from an empty database"
+        : parent === -1
+          ? "after a snapshot that is not committed"
+          : `after ${entries[parent]?.tag ?? "an earlier snapshot"}`;
     problems.push(
-      `${entry.tag} was generated after ${after}, not after ${entries[index - 1]?.tag}: they were written on parallel branches, so ${entry.tag} lacks the other's changes. ${REWRITE}`,
+      `${entry.tag} was generated ${after}, not after ${entries[index - 1]?.tag}: they were written on parallel branches, so ${entry.tag} lacks the other's changes. ${REWRITE}`,
     );
   });
   return problems;
@@ -99,9 +135,9 @@ export async function runCheck(ctx: DbContext): Promise<CheckReport> {
       );
       return null;
     }
-    const link = readJsonFile<Partial<SnapshotLink> | null>(file);
-    if (typeof link?.id === "string" && typeof link.prevId === "string") {
-      return { id: link.id, prevId: link.prevId };
+    const snapshot = snapshotShape.safeParse(readJsonFile<unknown>(file));
+    if (snapshot.success) {
+      return { id: snapshot.data.id, prevId: snapshot.data.prevId };
     }
     problems.push(
       `${shown(file)}, the snapshot of ${entry.tag}, is not a drizzle-kit snapshot. Restore it from version control.`,

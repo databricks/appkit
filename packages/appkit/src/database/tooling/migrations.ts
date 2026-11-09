@@ -77,7 +77,8 @@ export class MigrationRenameAmbiguityError extends Error {
 
 /** drizzle-kit's statement separator in v7 migration files. */
 const BREAKPOINT = "--> statement-breakpoint\n";
-const ORIGIN_ID = "00000000-0000-0000-0000-000000000000";
+/** id of drizzle-kit's empty starting snapshot, so the prevId of every first migration. */
+export const ORIGIN_ID = "00000000-0000-0000-0000-000000000000";
 const TAG_NAME = /^[a-z0-9_]+$/;
 
 /** The parts of a drizzle-kit PostgreSQL snapshot this module reads. */
