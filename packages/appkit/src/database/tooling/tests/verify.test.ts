@@ -906,6 +906,30 @@ describe("runVerify --deployed", () => {
     });
   });
 
+  test("a workspace.host the checkout's files do not resolve is refused before any API call, naming where to set it", async () => {
+    const { ctx, lakebase, requests } = deployedApp({
+      yml: ymlWithHost("${var.host}"),
+      // Any check against this shell's workspace would pass here, so a pass would mean the check was skipped.
+      authenticatedHost: "https://other.cloud.databricks.com",
+    });
+
+    await expect(runVerify(ctx, DEPLOYED)).rejects.toThrow(
+      'No target workspace: workspace.host in target default is "${var.host}", which this checkout\'s files do not resolve to a host. Give the variable it names a value in databricks.yml, or in .databricks/bundle/default/variable-overrides.json, then rerun.',
+    );
+    expect(requests).toEqual([]);
+    expect(lakebase.calls).toEqual([]);
+
+    const overrides = path.join(
+      ctx.root,
+      ".databricks/bundle/default/variable-overrides.json",
+    );
+    fs.mkdirSync(path.dirname(overrides), { recursive: true });
+    fs.writeFileSync(overrides, JSON.stringify({ host: HOST }));
+    await expect(runVerify(ctx, DEPLOYED)).rejects.toThrow(
+      `Target default deploys to ${HOST}, but this shell is authenticated against https://other.cloud.databricks.com.`,
+    );
+  });
+
   test("a host written without a scheme or with a trailing slash matches", async () => {
     const { ctx } = deployedApp({
       yml: ymlWithHost("acme.cloud.databricks.com/"),

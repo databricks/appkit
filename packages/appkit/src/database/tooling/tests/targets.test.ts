@@ -394,13 +394,15 @@ targets:
 });
 
 describe("readBundle", () => {
-  test("resolves each target's app name and host; a name only a deploy resolves is null", () => {
+  test("resolves each target's app name and host; a name only a deploy resolves is null, and so is a host no file declares", () => {
     const root = tempApp({
       "databricks.yml": `bundle:
   name: shop
 variables:
   suffix:
     default: dev
+  host:
+    description: workspace host, set per deploy
 workspace:
   host: https://dev.cloud.databricks.com
 resources:
@@ -420,6 +422,9 @@ targets:
       apps:
         app:
           name: shop-\${workspace.current_user.short_name}
+  elsewhere:
+    workspace:
+      host: \${var.host}
 `,
     });
 
@@ -438,21 +443,21 @@ targets:
     ).toEqual([
       {
         name: "default",
-        host: "https://dev.cloud.databricks.com",
+        host: { kind: "resolved", name: "https://dev.cloud.databricks.com" },
         apps: [
           { declaredName: "${bundle.name}-${var.suffix}", name: "shop-dev" },
         ],
       },
       {
         name: "prod",
-        host: "https://prod.cloud.databricks.com",
+        host: { kind: "resolved", name: "https://prod.cloud.databricks.com" },
         apps: [
           { declaredName: "${bundle.name}-${var.suffix}", name: "shop-prod" },
         ],
       },
       {
         name: "mine",
-        host: "https://dev.cloud.databricks.com",
+        host: { kind: "resolved", name: "https://dev.cloud.databricks.com" },
         apps: [
           {
             declaredName: "shop-${workspace.current_user.short_name}",
@@ -460,6 +465,20 @@ targets:
           },
         ],
       },
+      {
+        name: "elsewhere",
+        host: { kind: "unresolved", written: "${var.host}" },
+        apps: [
+          { declaredName: "${bundle.name}-${var.suffix}", name: "shop-dev" },
+        ],
+      },
+    ]);
+
+    const noHost = tempApp({
+      "databricks.yml": "resources:\n  apps:\n    app:\n      name: my-app\n",
+    });
+    expect(readBundle(noHost)?.targets.map((target) => target.host)).toEqual([
+      null,
     ]);
   });
 });
