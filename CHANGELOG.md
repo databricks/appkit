@@ -192,6 +192,24 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+## [0.91.2](https://github.com/databricks/appkit/compare/v0.91.1...v0.91.2) (2026-11-09)
+
+### deps
+
+* **deps:** bump pinned dependencies with high/critical advisories ([#720](https://github.com/databricks/appkit/issues/720)) ([0311d71](https://github.com/databricks/appkit/commit/0311d71dd765df423539f6bc6b4962c9aac6ed07))
+
+
+## [0.91.1](https://github.com/databricks/appkit/compare/v0.91.0...v0.91.1) (2026-11-09)
+
+### appkit
+
+* **appkit:** skip JSON body parsing for parameterized skipBodyParsing routes ([#712](https://github.com/databricks/appkit/issues/712)) ([d0fbefb](https://github.com/databricks/appkit/commit/d0fbefb2cff8e9a539febbeb2c9093b540096c2b))
+
+
 ## [0.91.0](https://github.com/databricks/appkit/compare/v0.90.0...v0.91.0) (2026-11-09)
 
 ### shared

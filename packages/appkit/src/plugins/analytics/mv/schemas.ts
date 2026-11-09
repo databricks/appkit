@@ -399,6 +399,28 @@ function preCheckFilterDepth(filter: unknown): void {
   }
 }
 
+/**
+ * Field paths for an issue. zod reports a failed union as one `invalid_union`
+ * issue at the union's path, with each branch's issues nested in `errors`;
+ * report the closest branch (fewest issues) so the path names the offending
+ * field (e.g. `filter.values`) rather than just `filter`.
+ */
+function issuePaths(
+  issue: z.core.$ZodIssue,
+  prefix: PropertyKey[] = [],
+): string[] {
+  const path = [...prefix, ...issue.path];
+  if (issue.code === "invalid_union" && issue.errors.length > 0) {
+    const closest = issue.errors.reduce((a, b) =>
+      b.length < a.length ? b : a,
+    );
+    if (closest.length > 0) {
+      return closest.flatMap((nested) => issuePaths(nested, path));
+    }
+  }
+  return [path.map(String).join(".") || "(root)"];
+}
+
 export function validateMetricRequest(body: unknown): IAnalyticsMetricRequest {
   if (body != null && typeof body === "object") {
     preCheckFilterDepth((body as { filter?: unknown }).filter);
@@ -406,7 +428,7 @@ export function validateMetricRequest(body: unknown): IAnalyticsMetricRequest {
   const result = metricRequestSchema.safeParse(body);
   if (!result.success) {
     const fieldPaths = result.error.issues
-      .map((i) => i.path.join(".") || "(root)")
+      .flatMap((i) => issuePaths(i))
       .join(", ");
     throw new ValidationError(
       fieldPaths.length > 0
