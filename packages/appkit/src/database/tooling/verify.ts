@@ -75,7 +75,7 @@ type DeployedMigrations =
 interface DeployVerifyReport {
   readonly kind: "deploy";
   readonly target: string;
-  /** The target's workspace; null when databricks.yml names none. */
+  /** The target's workspace; null when databricks.yml declares none. */
   readonly host: string | null;
   readonly branch: string;
   /** The app the target deploys; null when it declares none. */
@@ -593,8 +593,14 @@ async function verifyDeploy(
       `No deploy database: ${declared ? `${declared.at}.database` : "variables.postgres_database"} in target ${target.name}${withFile} is "${databaseValue.written}", which this checkout's files do not resolve to a database.`,
     );
   }
+  if (deploy.host?.kind === "unresolved") {
+    throw new Error(
+      `No target workspace: workspace.host in target ${target.name}${withFile} is "${deploy.host.written}", which this checkout's files do not resolve to a host. Give the variable it names a value in ${file}, or in .databricks/bundle/${target.name}/variable-overrides.json, then rerun.`,
+    );
+  }
   const branch = branchValue.name;
   const database = databaseValue?.name ?? null;
+  const host = deploy.host?.name ?? null;
   const committed = readCommitted(migrationsFolder(ctx.root));
   const report = (
     name: string | null,
@@ -603,7 +609,7 @@ async function verifyDeploy(
   ): DeployVerifyReport => ({
     kind: "deploy",
     target: target.name,
-    host: deploy.host,
+    host,
     branch,
     app: name,
     migrations,
@@ -630,7 +636,7 @@ async function verifyDeploy(
   }
   const name = app.name;
 
-  await assertTargetWorkspace(ctx, target.name, deploy.host);
+  await assertTargetWorkspace(ctx, target.name, host);
   const api = ctx.api();
   const [branchFound, databaseFound, deployed] = await Promise.all([
     api.getBranch(branch),

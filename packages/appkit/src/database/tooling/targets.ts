@@ -94,12 +94,12 @@ function record(value: unknown): Yaml {
 }
 
 /**
- * A branch or database databricks.yml names, as far as the checkout's files
- * resolve it. A reference that is not declared at all has no value: the
- * binding or variable that holds it is absent instead.
+ * A branch, database or workspace host databricks.yml names, as far as the
+ * checkout's files resolve it. A reference that is not declared at all has no
+ * value: the binding, variable or host that holds it is absent instead.
  */
 type BundleValue =
-  /** A full resource name, e.g. "projects/p/branches/b". */
+  /** A full resource name, e.g. "projects/p/branches/b", or a workspace host. */
   | { readonly kind: "resolved"; readonly name: string }
   /** As written: a `${…}` only a deploy resolves, no value, or not a resource name. */
   | { readonly kind: "unresolved"; readonly written: string };
@@ -127,8 +127,8 @@ interface BundleApp {
 
 /** What one target binds with one set of variable values. */
 interface TargetBindings {
-  /** workspace.host of the target, else of the bundle; null when neither names one the files resolve. */
-  readonly host: string | null;
+  /** workspace.host of the target, else of the bundle; null when neither declares one. */
+  readonly host: BundleValue | null;
   readonly apps: readonly BundleApp[];
   /** The target's postgres_branch variable; null when the bundle declares none. */
   readonly postgresBranch: BundleValue | null;
@@ -338,6 +338,20 @@ function bundleValue(
   };
 }
 
+/** null when no host is declared; unresolved when one is declared and the files cannot resolve it. */
+function hostValue(
+  written: unknown,
+  resolve: (value: unknown) => string | null,
+): BundleValue | null {
+  if (written === undefined) return null;
+  const name = resolve(written);
+  if (name) return { kind: "resolved", name };
+  return {
+    kind: "unresolved",
+    written: typeof written === "string" ? written : "",
+  };
+}
+
 function bundleApps(
   apps: Record<string, unknown>,
   resolve: (value: unknown) => string | null,
@@ -454,8 +468,9 @@ export function readBundle(root: string): Bundle | null {
               )
             : null;
         return {
-          host: resolve(
+          host: hostValue(
             record(target?.workspace)?.host ?? record(bundle.workspace)?.host,
+            resolve,
           ),
           apps: bundleApps(apps ?? {}, resolve),
           postgresBranch: variable("postgres_branch", "branch"),
