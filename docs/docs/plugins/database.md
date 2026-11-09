@@ -98,7 +98,12 @@ tables the first one owns.
 
 Earlier releases put tables in `public` by default. An app that created its
 tables there fails setup after the upgrade, and the error says the tables are in
-`public`. Keep them there with:
+`public`. With `APPKIT_DB_MIGRATE_ON_START=true`, startup refuses before any
+migration runs when `defineSchema()` was given no `schemaName`, none of the
+declared tables exist in `app`, and some exist in `public`; `npx appkit db migrate`
+refuses to apply on a dev branch in the same case. Otherwise the first
+migration would create empty copies in `app`, the check would pass, and the app
+would serve the empty tables. Keep the tables in `public` with:
 
 ```ts
 export const schema = defineSchema(
@@ -108,6 +113,11 @@ export const schema = defineSchema(
   { schemaName: "public" },
 );
 ```
+
+To use `app` instead, move the tables first
+(`ALTER TABLE public.notes SET SCHEMA app`). When the tables in `public` belong
+to another app, pass `{ schemaName: "app" }` explicitly and neither startup nor
+`migrate` refuses.
 
 Migrations applied on start into `public` also need
 `GRANT CREATE ON SCHEMA public` to the app's service principal, because it does
@@ -202,6 +212,28 @@ databricks apps deploy           # the deployed app applies it on start
 npx appkit db verify --deployed  # the app runs, with every committed migration
 ```
 
+### Your branch's data
+
+`npx appkit db init` creates your dev branch, or this checkout's session branch
+with `--session`, as a fork of the project's default branch, and points `.env`
+at it. A fork copies every row of its source, production data included. A
+branch `init` forked starts without them: `init` drops the app schema and
+recreates it from the committed migrations. Without
+`config/database/schema.ts`, `init` first writes it and `0000_baseline.sql`
+from the fork's schema, then rebuilds the schema from that baseline. Until the
+rebuild has run, `.env` names the branch in `APPKIT_DB_NEW_BRANCH`, so a run
+that stops early is finished by the next `init`.
+
+To keep the copied rows on a new branch, pass `--schema migrate`, or
+`--schema introspect` without `schema.ts`. A branch `init` reuses keeps its
+data: `init` migrates it, or introspects it without `schema.ts`.
+`--schema clean` rebuilds a reused branch too, after a confirmation or with
+`--yes`.
+
+In schema `public`, `init` and `clean` remove only the objects your role owns.
+On a fork of the deploy branch the app's service principal owns the tables, so
+they stay with their rows, and the report lists them as kept.
+
 ### Branches `databricks.yml` deploys to
 
 `migrate` never applies migrations to a branch that `databricks.yml` deploys to.
@@ -214,11 +246,13 @@ checkout uses the file's value.
 
 If a branch or database reference has no value in those files, `migrate` cannot
 tell which branch the reference names. Examples are a target that leaves
-`postgres_branch` unset and `${workspace.current_user.short_name}`. While any such
-reference exists, `migrate` applies migrations to no branch, and `init`,
-`introspect`, `clean` and `seed` refuse every branch. The message names the
-target and where the reference is. To continue, give the reference a value in
-`databricks.yml`, or in the `variable-overrides.json` the message names. A
+`postgres_branch` unset and `${workspace.current_user.short_name}`. The same
+holds for a `${var.…}` reference in place of an app's `resources` list, one of
+its entries, or a `postgres` block, because the files do not say what it binds.
+While any such reference exists, `migrate` applies migrations to no branch, and
+`init`, `introspect`, `clean` and `seed` refuse every branch. The message names
+the target and where the reference is. To continue, give the reference a value
+in `databricks.yml`, or in the `variable-overrides.json` the message names. A
 `variable-overrides.json` that is not a JSON object stops these commands too.
 
 The check reads only this checkout's files. It does not see values passed at

@@ -1,4 +1,8 @@
 import { databaseSetupFailed } from "../../database/errors";
+import {
+  keepInPublicAdvice,
+  locateTables,
+} from "../../database/migrations/tables-left-in-public";
 import type { DataPath } from "../../database/runtime";
 import type { Schema } from "../../database/schema-builder";
 
@@ -14,19 +18,39 @@ interface SchemaCheck {
   readonly absent: string[];
 }
 
+/** What the database lacks, and the one cause the check can name. */
+interface SchemaDiagnosis {
+  readonly problems: readonly string[];
+  /**
+   * Every absent table is in schema public, with how to keep it there;
+   * migrating would create a second, empty copy. null when that is not the
+   * cause.
+   */
+  readonly advice: string | null;
+}
+
 /**
  * Every declared table or column the database lacks, and every declared table
- * that is a view or another non-table relation, as human-readable problems.
+ * that is a view or another non-table relation, as human-readable problems,
+ * with the advice for tables left in public. Setup and `appkit db verify`
+ * share it so both name that cause.
+ */
+export async function diagnoseSchema(
+  dataPath: Pick<DataPath, "raw">,
+  schema: Schema,
+): Promise<SchemaDiagnosis> {
+  const { problems, absent } = await checkSchema(dataPath, schema);
+  return {
+    problems,
+    advice:
+      (await inPublicInstead(dataPath, schema.$schemaName, absent)) ?? null,
+  };
+}
+
+/**
  * pg_catalog is read rather than information_schema, which hides objects the
  * role cannot access and would report a privilege gap as a missing column.
  */
-export async function findSchemaProblems(
-  dataPath: Pick<DataPath, "raw">,
-  schema: Schema,
-): Promise<string[]> {
-  return (await checkSchema(dataPath, schema)).problems;
-}
-
 async function checkSchema(
   dataPath: Pick<DataPath, "raw">,
   schema: Schema,
@@ -101,37 +125,29 @@ export async function assertSchemaMatchesDatabase(
   dataPath: DataPath,
   schema: Schema,
 ): Promise<void> {
-  const { problems, absent } = await checkSchema(dataPath, schema);
+  const { problems, advice } = await diagnoseSchema(dataPath, schema);
   if (problems.length > 0) {
-    const advice =
-      (await inPublicInstead(dataPath, schema.$schemaName, absent)) ??
-      "Run `npx appkit db migrate` locally, or commit migrations under config/database/migrations and set APPKIT_DB_MIGRATE_ON_START=true in app.yaml so the deployed app applies them on start.";
     throw databaseSetupFailed(
-      `the declared schema does not match the database: ${problems.join("; ")}. ${advice}`,
+      `the declared schema does not match the database: ${problems.join("; ")}. ${
+        advice ??
+        "Run `npx appkit db migrate` locally, or commit migrations under config/database/migrations and set APPKIT_DB_MIGRATE_ON_START=true in app.yaml so the deployed app applies them on start."
+      }`,
     );
   }
 }
 
 /**
  * Apps from before the default schema moved to `app` keep their tables in
- * `public`. Name that case; migrating would create a second, empty copy.
+ * `public`. Name that case when every absent table is there; the migration
+ * guard in database/migrations/tables-left-in-public.ts refuses it up front.
  */
 async function inPublicInstead(
-  dataPath: DataPath,
+  dataPath: Pick<DataPath, "raw">,
   schemaName: string,
   absent: readonly string[],
 ): Promise<string | undefined> {
   if (schemaName === "public" || absent.length === 0) return undefined;
-  const rows = await dataPath.raw<{ table_name: string }>`
-    select c.relname::text as table_name
-    from pg_catalog.pg_class c
-    join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-    where n.nspname = 'public'
-      and c.relname::text = any(${absent}::text[])
-      and c.relkind in ('r', 'p')`;
-  if (rows.length < absent.length) return undefined;
-  return (
-    `Schema public has ${absent.length === 1 ? "that table" : "those tables"}, but defineSchema() puts tables in schema "${schemaName}" unless told otherwise. ` +
-    'To keep them in public, pass { schemaName: "public" } as the second argument of defineSchema() in config/database/schema.ts.'
-  );
+  const { inPublic } = await locateTables(dataPath.raw, schemaName, absent);
+  if (inPublic.length < absent.length) return undefined;
+  return `Schema public has ${absent.length === 1 ? "that table" : "those tables"}, but ${keepInPublicAdvice(schemaName)}`;
 }

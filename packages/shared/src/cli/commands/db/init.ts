@@ -11,7 +11,12 @@ import {
   printMigrateReport,
   shortName,
 } from "./output";
-import type { InitOptions, InitReport, SchemaStart } from "./tooling-contract";
+import type {
+  InitOptions,
+  InitReport,
+  Rebuild,
+  SchemaStart,
+} from "./tooling-contract";
 
 interface InitFlags {
   readonly session?: boolean;
@@ -38,7 +43,15 @@ async function confirmClean(flags: InitFlags): Promise<boolean> {
   return !isCancel(answer) && answer;
 }
 
-function printInitReport(report: InitReport): void {
+function printRebuild(rebuild: Rebuild): void {
+  printCleanReport(rebuild.clean);
+  printMigrateReport(rebuild.migrate);
+}
+
+function printInitReport(
+  report: InitReport,
+  schemaFlag: SchemaStart | undefined,
+): void {
   const branch = shortName(report.branch);
   const expires = report.expireTime ? `, expires ${report.expireTime}` : "";
   ok(
@@ -62,12 +75,22 @@ function printInitReport(report: InitReport): void {
   if (report.installed) ok(`Installed drizzle-kit (${report.installed})`);
 
   const { start } = report;
-  if (start.kind === "introspect") printIntrospectReport(start.introspect);
-  else if (start.kind === "migrate") printMigrateReport(start.migrate);
-  else if (start.kind === "clean") {
-    printCleanReport(start.clean);
-    printMigrateReport(start.migrate);
-  } else info("Left the schema as it is");
+  // Without --schema, only a branch init forked gets a rebuild.
+  const rebuilt =
+    start.kind === "clean" || (start.kind === "introspect" && start.rebuilt);
+  if (rebuilt && schemaFlag === undefined) {
+    info(
+      `A branch init forked starts without the rows it copied: the app schema was rebuilt from the committed migrations. \`appkit db init --schema ${start.kind === "introspect" ? "introspect" : "migrate"}\` keeps them.`,
+    );
+  }
+  if (start.kind === "introspect") {
+    printIntrospectReport(start.introspect, {
+      rebuilt: start.rebuilt !== null,
+    });
+    if (start.rebuilt) printRebuild(start.rebuilt);
+  } else if (start.kind === "migrate") printMigrateReport(start.migrate);
+  else if (start.kind === "clean") printRebuild(start);
+  else info("Left the schema as it is");
 }
 
 async function runDbInit(flags: InitFlags): Promise<void> {
@@ -86,7 +109,10 @@ async function runDbInit(flags: InitFlags): Promise<void> {
       interactive: !flags.yes && isInteractive(),
       onStep: info,
     };
-    printInitReport(await tooling.runInit(tooling.createDbContext(), options));
+    printInitReport(
+      await tooling.runInit(tooling.createDbContext(), options),
+      flags.schema,
+    );
   } catch (error) {
     fail(error);
   }
@@ -115,7 +141,7 @@ export const dbInitCommand = new Command("init")
   .addOption(
     new Option(
       "--schema <start>",
-      "how the schema starts (default: migrate with schema.ts, introspect without)",
+      "how the schema starts (default: a new branch is rebuilt from the migrations, a reused one is migrated; introspect without schema.ts)",
     ).choices(["migrate", "introspect", "clean", "none"]),
   )
   .option(
@@ -126,10 +152,16 @@ export const dbInitCommand = new Command("init")
     "after",
     `
 init asks nothing. It keeps this checkout's session branch when .env points at
-one, and otherwise uses your dev branch (dev-<you>-<hash>). New branches fork
-the project's default branch, so they start with a copy of its rows, production
-data included. init never changes the default branch, a protected branch or a
-branch databricks.yml deploys to, and never edits databricks.yml.
+one, and otherwise uses your dev branch (dev-<you>-<hash>). A new branch forks
+the project's default branch, which copies its rows, production data included.
+init then rebuilds the app schema from the committed migrations (written first
+by introspect when there is no schema.ts), so the new branch starts without
+them; a run that stops before that finishes rebuilds on its rerun. --schema
+migrate, or --schema introspect without schema.ts, keeps the copied rows. A
+reused branch keeps its data: init migrates it. In schema public only your own
+objects go; what other roles own stays with its rows, and init lists it. init
+never changes the default branch, a protected branch or a branch databricks.yml
+deploys to, and never edits databricks.yml.
 
 With --schema none, init only sets up the branch and .env: the schema and its
 owner stay as the fork copied them. init never hands off schema public, which
@@ -142,6 +174,7 @@ one it authenticated with.
 
 Examples:
   $ appkit db init
+  $ appkit db init --schema migrate
   $ appkit db init --session --ttl 1h --schema clean --yes`,
   )
   .action(runDbInit);

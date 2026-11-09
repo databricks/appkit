@@ -35,6 +35,39 @@ export async function readRoleBlockers(
   return rows;
 }
 
+/**
+ * What the role owns in the current database besides the app schema and its
+ * contents, which a delete with reassign would hand over as well. System
+ * schemas are left out; a schema the role owns is listed by name.
+ */
+const OWNED_OUTSIDE_SQL = `
+select o.type || ' ' || o.identity as label
+  from pg_catalog.pg_shdepend s
+  cross join lateral pg_catalog.pg_identify_object(s.classid, s.objid, s.objsubid) o
+ where s.refclassid = 'pg_catalog.pg_authid'::regclass
+   and s.refobjid = (select oid from pg_catalog.pg_roles where rolname = $1)
+   and s.deptype = 'o'
+   and s.dbid = (select oid from pg_catalog.pg_database where datname = current_database())
+   and (o.schema is null
+        or (o.schema <> $2
+            and o.schema not in ('pg_catalog', 'information_schema')
+            and o.schema not like 'pg\\_toast%'
+            and o.schema not like 'pg\\_temp%'))
+   and not (o.type = 'schema' and o.identity = pg_catalog.quote_ident($2))
+ order by 1`;
+
+export async function readOwnedOutsideSchema(
+  client: Pick<PoolClient, "query">,
+  role: string,
+  schemaName: string,
+): Promise<string[]> {
+  const { rows } = await client.query<{ label: string }>(OWNED_OUTSIDE_SQL, [
+    role,
+    schemaName,
+  ]);
+  return rows.map((row) => row.label);
+}
+
 function describeBlockers(blockers: readonly RoleBlocker[]): string {
   return blockers
     .map(
@@ -59,8 +92,10 @@ interface HandOff {
  * A fork copies its parent's objects with their owners, so on a fork of the
  * deploy branch the app's service principal owns the app schema. Hand it to
  * you by deleting that owner's copy of its role on this branch, with its
- * objects reassigned to you. Only the app schema's owner is deleted. Returns
- * that owner; null when you already own the schema or it does not exist.
+ * objects reassigned to you. Only the app schema's owner is deleted, and only
+ * while the app schema is all it owns here: the reassign would hand over its
+ * other objects too, so those are listed and the delete is refused. Returns
+ * the owner; null when you already own the schema or it does not exist.
  * Schema public is never handed off: it belongs to the database
  * (pg_database_owner on PostgreSQL 15 and later, the bootstrap superuser
  * before), never to an app, so AppKit never deletes its owner or reassigns its
@@ -77,16 +112,25 @@ export async function handOffAppSchema(
       input.schemaName,
     );
     if (!owner || owner === currentUser) return null;
-    return { owner, blockers: await readRoleBlockers(pool, owner) };
+    return {
+      owner,
+      ownedOutside: await readOwnedOutsideSchema(pool, owner, input.schemaName),
+      blockers: await readRoleBlockers(pool, owner),
+    };
   });
   if (!found) return null;
 
-  const { owner, blockers } = found;
+  const { owner, ownedOutside, blockers } = found;
   const where = `schema ${input.schemaName} in database ${input.database} on ${resourceId(input.branch)}`;
   const role = input.roles.find((r) => r.status?.postgres_role === owner);
   if (!role) {
     throw new Error(
       `Cannot hand ${where} to you: it belongs to "${owner}", which is not a Lakebase-managed role. .env already points at the branch. Have "${owner}" transfer the schema and its objects to you (ALTER … OWNER TO), or set another schemaName in schema.ts, then rerun \`appkit db init\`.`,
+    );
+  }
+  if (ownedOutside.length > 0) {
+    throw new Error(
+      `Refusing to hand ${where} to you: deleting role "${owner}" would also give you what else it owns on this branch: ${ownedOutside.join(", ")}. .env already points at the branch. Reassign or drop them, or take them all with \`databricks postgres delete-role ${role.name} --reassign-owned-to ${input.developer.name}\`, then rerun \`appkit db init\`.`,
     );
   }
   input.onStep(

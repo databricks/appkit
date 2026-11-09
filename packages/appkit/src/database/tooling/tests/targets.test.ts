@@ -64,12 +64,14 @@ describe("readLocalTarget", () => {
         PGDATABASE: "databricks_postgres",
         PGUSER: "alice@example.com",
         APPKIT_DB_SESSION: "k2x9q0ab",
+        APPKIT_DB_NEW_BRANCH: "projects/p/branches/dev-alice-3f9a2c",
       }),
     ).toEqual({
       project: "projects/p",
       endpoint: "projects/p/branches/b/endpoints/primary",
       database: "databricks_postgres",
       session: "k2x9q0ab",
+      newBranch: "projects/p/branches/dev-alice-3f9a2c",
     });
   });
 
@@ -81,12 +83,14 @@ describe("readLocalTarget", () => {
         PGHOST: "your_postgres_host",
         PGDATABASE: "your_postgres_databaseName",
         APPKIT_DB_SESSION: "NOT VALID",
+        APPKIT_DB_NEW_BRANCH: "dev-alice-3f9a2c",
       }),
     ).toEqual({
       project: null,
       endpoint: null,
       database: null,
       session: null,
+      newBranch: null,
     });
   });
 });
@@ -240,6 +244,64 @@ resources:
     });
   });
 
+  test("a ${var…} in place of an app's resources, one of them, or its postgres block is unresolved, not unbound", () => {
+    const root = tempApp({
+      "databricks.yml": `variables:
+  app_resources:
+    type: complex
+  postgres_resource:
+    type: complex
+  postgres:
+    type: complex
+resources:
+  apps:
+    app:
+      resources: \${var.app_resources}
+    reports:
+      resources:
+        - \${var.postgres_resource}
+    archive:
+      resources:
+        - name: postgres
+          postgres: \${var.postgres}
+`,
+    });
+
+    const boundary = readDeployBoundary(root);
+
+    expect(boundary).toEqual({
+      branches: new Set(),
+      unresolved: [
+        {
+          target: "default",
+          at: "resources.apps.app.resources",
+          written: "${var.app_resources}",
+        },
+        {
+          target: "default",
+          at: "resources.apps.reports.resources[0]",
+          written: "${var.postgres_resource}",
+        },
+        {
+          target: "default",
+          at: "resources.apps.archive.resources[0].postgres",
+          written: "${var.postgres}",
+        },
+      ],
+    });
+    expect(
+      classifyBranch({
+        branch: {
+          name: `projects/p/branches/${devBranchId("alice@example.com")}`,
+          status: {},
+        },
+        userName: "alice@example.com",
+        sessionId: null,
+        boundary,
+      }).kind,
+    ).toBe("deploy-target");
+  });
+
   test("a variable-overrides.json value binds its target too, so the dev branch it names is a deploy target", () => {
     const dev = `projects/p/branches/${devBranchId("alice@example.com")}`;
     const root = tempApp({
@@ -368,6 +430,38 @@ targets:
     });
   });
 
+  test("a variable-overrides.json value wins, as it does for a deploy from this checkout", () => {
+    const root = tempApp({
+      "databricks.yml": databricksYml(
+        "projects/p/branches/production",
+        "projects/p/branches/production/databases/db",
+      ),
+      ".databricks/bundle/default/variable-overrides.json": JSON.stringify({
+        postgres_branch: "projects/q/branches/staging",
+        postgres_database: "projects/q/branches/staging/databases/staging-db",
+      }),
+    });
+
+    expect(readDeployTarget(root)).toEqual({
+      branch: "projects/q/branches/staging",
+      database: "projects/q/branches/staging/databases/staging-db",
+    });
+  });
+
+  test("a variable-overrides.json that leaves the branch unresolved gives no deploy target", () => {
+    const root = tempApp({
+      "databricks.yml": databricksYml(
+        "projects/p/branches/production",
+        "projects/p/branches/production/databases/db",
+      ),
+      ".databricks/bundle/default/variable-overrides.json": JSON.stringify({
+        postgres_branch: { lookup: { name: "dev" } },
+      }),
+    });
+
+    expect(readDeployTarget(root)).toBeNull();
+  });
+
   test("null without databricks.yml or without a postgres binding", () => {
     expect(readDeployTarget(tempApp())).toBeNull();
     expect(
@@ -394,13 +488,15 @@ targets:
 });
 
 describe("readBundle", () => {
-  test("resolves each target's app name and host; a name only a deploy resolves is null", () => {
+  test("resolves each target's app name and host; a name only a deploy resolves is null, and so is a host no file declares", () => {
     const root = tempApp({
       "databricks.yml": `bundle:
   name: shop
 variables:
   suffix:
     default: dev
+  host:
+    description: workspace host, set per deploy
 workspace:
   host: https://dev.cloud.databricks.com
 resources:
@@ -420,6 +516,9 @@ targets:
       apps:
         app:
           name: shop-\${workspace.current_user.short_name}
+  elsewhere:
+    workspace:
+      host: \${var.host}
 `,
     });
 
@@ -438,21 +537,21 @@ targets:
     ).toEqual([
       {
         name: "default",
-        host: "https://dev.cloud.databricks.com",
+        host: { kind: "resolved", name: "https://dev.cloud.databricks.com" },
         apps: [
           { declaredName: "${bundle.name}-${var.suffix}", name: "shop-dev" },
         ],
       },
       {
         name: "prod",
-        host: "https://prod.cloud.databricks.com",
+        host: { kind: "resolved", name: "https://prod.cloud.databricks.com" },
         apps: [
           { declaredName: "${bundle.name}-${var.suffix}", name: "shop-prod" },
         ],
       },
       {
         name: "mine",
-        host: "https://dev.cloud.databricks.com",
+        host: { kind: "resolved", name: "https://dev.cloud.databricks.com" },
         apps: [
           {
             declaredName: "shop-${workspace.current_user.short_name}",
@@ -460,6 +559,20 @@ targets:
           },
         ],
       },
+      {
+        name: "elsewhere",
+        host: { kind: "unresolved", written: "${var.host}" },
+        apps: [
+          { declaredName: "${bundle.name}-${var.suffix}", name: "shop-dev" },
+        ],
+      },
+    ]);
+
+    const noHost = tempApp({
+      "databricks.yml": "resources:\n  apps:\n    app:\n      name: my-app\n",
+    });
+    expect(readBundle(noHost)?.targets.map((target) => target.host)).toEqual([
+      null,
     ]);
   });
 });

@@ -115,6 +115,8 @@ function branch(state: {
   columns: Record<string, string[]>;
   /** The journal table's rows; "absent" without the table. */
   recorded: Array<{ hash: string; created_at: string }> | "absent";
+  /** Declared tables that exist in schema public instead. */
+  inPublic?: string[];
   failOn?: RegExp;
 }) {
   const statements: string[] = [];
@@ -122,6 +124,15 @@ function branch(state: {
     query: vi.fn(async (text: string, values?: unknown[]) => {
       statements.push(text);
       if (state.failOn?.test(text)) throw new Error("connection reset");
+      // locateTables: the declared tables found in the target schema or in public.
+      if (/n\.nspname::text in \(/.test(text)) {
+        return {
+          rows: (state.inPublic ?? []).map((table_name) => ({
+            schema_name: "public",
+            table_name,
+          })),
+        };
+      }
       if (/pg_catalog\.pg_attribute/.test(text)) {
         expect(values?.[0]).toBe("app");
         return {
@@ -135,7 +146,16 @@ function branch(state: {
         };
       }
       if (/from pg_catalog\.pg_class c\s+join/.test(text)) {
-        return { rows: state.recorded === "absent" ? [] : [{ "?column?": 1 }] };
+        // The app's own journal: an ordinary table its role owns.
+        const journalTable = {
+          relkind: "r",
+          owner: "app-sp",
+          schema_owner: "app-sp",
+          current_user: "app-sp",
+          row_security: false,
+          trusted: true,
+        };
+        return { rows: state.recorded === "absent" ? [] : [journalTable] };
       }
       if (/select hash, created_at from/.test(text)) {
         return { rows: state.recorded === "absent" ? [] : state.recorded };
@@ -186,6 +206,7 @@ describe("runVerify", () => {
     notYours: null,
     refusesEveryBranch: null,
     schemaProblems: [],
+    schemaAdvice: null,
     pendingMigrations: [],
     strandedMigrations: [],
     editedMigrations: [],
@@ -229,7 +250,26 @@ describe("runVerify", () => {
 
     expect(await runVerify(ctx)).toMatchObject({
       schemaProblems: ["table app.notes does not exist"],
+      schemaAdvice: null,
       pendingMigrations: ["0000_baseline"],
+      ok: false,
+    });
+  });
+
+  test("declared tables that exist in public are named as the cause, as the app's startup check does", async () => {
+    const ctx = app(two);
+    branch({
+      columns: {},
+      recorded: recordedAs(ctx, two),
+      inPublic: ["notes"],
+    });
+
+    expect(await runVerify(ctx)).toMatchObject({
+      ...clean,
+      schemaProblems: ["table app.notes does not exist"],
+      schemaAdvice:
+        `Schema public has that table, but defineSchema() puts tables in schema "app" unless told otherwise. ` +
+        'To keep them in public, pass { schemaName: "public" } as the second argument of defineSchema() in config/database/schema.ts.',
       ok: false,
     });
   });
@@ -848,6 +888,91 @@ describe("runVerify --deployed", () => {
     });
   });
 
+  test.each([
+    [
+      "lists a tag twice",
+      [
+        { tag: "0000_migration", when: 1000 },
+        { tag: "0001_migration", when: 2000 },
+        { tag: "0000_migration", when: 1000 },
+      ],
+      `${JOURNAL} lists 0000_migration twice`,
+    ],
+    [
+      "has an entry that is not a migration",
+      JSON.stringify({
+        version: "7",
+        dialect: "postgresql",
+        entries: [
+          { idx: 0, version: "7", when: 1000, tag: "0000_migration" },
+          { idx: 1, version: "7", when: 2000, tag: "0001_migration" },
+          {},
+        ],
+      }),
+      `entry 2 of ${JOURNAL} is not a migration journal entry`,
+    ],
+  ] as const)(
+    "a deployed journal that %s is unavailable, never a match",
+    async (_label, deployedJournal, reason) => {
+      const migrations = [
+        { tag: "0000_migration", when: 1000 },
+        { tag: "0001_migration", when: 2000 },
+      ];
+      const { ctx } = deployedApp({
+        migrations,
+        deployedJournal: deployedJournal as Migration[] | string,
+      });
+
+      expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+        migrations: { evidence: "unavailable", reason },
+        problems: [
+          `verify cannot tell whether app my-app's active deployment has the committed migrations: ${reason}`,
+        ],
+        ok: false,
+      });
+    },
+  );
+
+  test("the committed entries in another order in the deployed journal differ, even with the same idx and SQL", async () => {
+    const migrations = [
+      { tag: "0000_migration", when: 1000 },
+      { tag: "0001_migration", when: 2000 },
+    ];
+    const { ctx } = deployedApp({
+      migrations,
+      deployedJournal: JSON.stringify({
+        version: "7",
+        dialect: "postgresql",
+        entries: [
+          {
+            idx: 1,
+            version: "7",
+            when: 2000,
+            tag: "0001_migration",
+            breakpoints: true,
+          },
+          {
+            idx: 0,
+            version: "7",
+            when: 1000,
+            tag: "0000_migration",
+            breakpoints: true,
+          },
+        ],
+      }),
+    });
+
+    expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+      migrations: {
+        evidence: "differs",
+        missing: [],
+        changed: ["0000_migration", "0001_migration"],
+        unknown: [],
+      },
+      ok: false,
+    });
+  });
+
   test("a snapshot without a journal lacks every committed migration: deploy them", async () => {
     const { ctx } = deployedApp({
       migrations: [
@@ -992,6 +1117,30 @@ describe("runVerify --deployed", () => {
     });
   });
 
+  test("a workspace.host the checkout's files do not resolve is refused before any API call, naming where to set it", async () => {
+    const { ctx, lakebase, requests } = deployedApp({
+      yml: ymlWithHost("${var.host}"),
+      // Any check against this shell's workspace would pass here, so a pass would mean the check was skipped.
+      authenticatedHost: "https://other.cloud.databricks.com",
+    });
+
+    await expect(runVerify(ctx, DEPLOYED)).rejects.toThrow(
+      'No target workspace: workspace.host in target default is "${var.host}", which this checkout\'s files do not resolve to a host. Give the variable it names a value in databricks.yml, or in .databricks/bundle/default/variable-overrides.json, then rerun.',
+    );
+    expect(requests).toEqual([]);
+    expect(lakebase.calls).toEqual([]);
+
+    const overrides = path.join(
+      ctx.root,
+      ".databricks/bundle/default/variable-overrides.json",
+    );
+    fs.mkdirSync(path.dirname(overrides), { recursive: true });
+    fs.writeFileSync(overrides, JSON.stringify({ host: HOST }));
+    await expect(runVerify(ctx, DEPLOYED)).rejects.toThrow(
+      `Target default deploys to ${HOST}, but this shell is authenticated against https://other.cloud.databricks.com.`,
+    );
+  });
+
   test("a host written without a scheme or with a trailing slash matches", async () => {
     const { ctx } = deployedApp({
       yml: ymlWithHost("acme.cloud.databricks.com/"),
@@ -1070,6 +1219,24 @@ describe("runVerify --deployed", () => {
       `the app's service principal ${SP} has no Postgres role on production: \`databricks apps deploy\` creates it from the app's postgres resource`,
     ]);
   });
+
+  test.each([
+    ["none", { service_principal_client_id: undefined }],
+    ["an empty one", { service_principal_client_id: "" }],
+  ])(
+    "an app whose API response has %s for a service principal fails: its role cannot be checked",
+    async (_label, overrides) => {
+      const { ctx, lakebase } = deployedApp({ app: runningApp(overrides) });
+
+      expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+        problems: [
+          "the API reports no service principal for app my-app, so verify cannot tell whether it has a Postgres role on production: `databricks apps get my-app` shows the app; run verify again once it has one",
+        ],
+        ok: false,
+      });
+      expect(lakebase.calls).not.toContain(`listRoles ${PRODUCTION}`);
+    },
+  );
 
   test.each([
     [

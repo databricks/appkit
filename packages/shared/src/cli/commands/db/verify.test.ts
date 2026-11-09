@@ -35,6 +35,7 @@ const local = {
   notYours: null,
   refusesEveryBranch: null,
   schemaProblems: [],
+  schemaAdvice: null,
   pendingMigrations: [],
   strandedMigrations: [],
   editedMigrations: [],
@@ -177,7 +178,29 @@ describe("appkit db verify", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  test("a migration merged out of order is named, with how to rebuild the branch", async () => {
+  test("tables left in public: the hint is that cause, before any other, never to migrate", async () => {
+    const advice =
+      'Schema public has that table, but defineSchema() puts tables in schema "app" unless told otherwise. To keep them in public, pass { schemaName: "public" } as the second argument of defineSchema() in config/database/schema.ts.';
+    runVerify.mockResolvedValue({
+      ...local,
+      schemaProblems: ["table app.notes does not exist"],
+      schemaAdvice: advice,
+      editedMigrations: ["0000_migration"],
+      ok: false,
+    });
+
+    await dbCommand.parseAsync(["verify"], { from: "user" });
+
+    expect(output(log)).toContain("Schema: table app.notes does not exist");
+    const printed = output(error);
+    expect(printed).toContain(
+      `dev-alice-3f9a2c does not match config/database/schema.ts and the committed migrations. ${advice}`,
+    );
+    expect(printed).not.toContain("appkit db migrate");
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("a migration merged out of order is named, with how to regenerate it after the recorded ones", async () => {
     runVerify.mockResolvedValue({
       ...local,
       strandedMigrations: ["0001_parallel"],
@@ -187,11 +210,12 @@ describe("appkit db verify", () => {
     await dbCommand.parseAsync(["verify"], { from: "user" });
 
     expect(output(log)).toContain(
-      "Never runs: 0001_parallel: it is older than a migration the branch already ran (merged out of order); the deployed app skips it too once it ran a newer one",
+      "Never runs: 0001_parallel: it is older than a migration the branch already ran (merged out of order), and the deployed app refuses to start on that history",
     );
     expect(output(error)).toContain(
-      "`appkit db clean` and then `appkit db migrate` rebuild the branch from this checkout's migrations, in order.",
+      "Delete its .sql file, snapshot and journal entry, then run `appkit db migrate` to generate the migration again from schema.ts, after the recorded ones.",
     );
+    expect(output(error)).not.toContain("`appkit db clean`");
     expect(process.exitCode).toBe(1);
   });
 
@@ -255,7 +279,7 @@ describe("appkit db verify", () => {
         "app my-app (target prod on https://acme.cloud.databricks.com) is running, bound to production with CAN_CONNECT_AND_CREATE, and its service principal has a role there",
       );
       expect(printed).toContain(
-        "Its active deployment has every committed migration, with the same SQL",
+        "Its deployed source has every committed migration, with the same journal entry and SQL",
       );
       expect(error).not.toHaveBeenCalled();
       expect(process.exitCode).toBeUndefined();
