@@ -14,19 +14,39 @@ interface SchemaCheck {
   readonly absent: string[];
 }
 
+/** What the database lacks, and the one cause the check can name. */
+interface SchemaDiagnosis {
+  readonly problems: readonly string[];
+  /**
+   * Every absent table is in schema public, with how to keep it there;
+   * migrating would create a second, empty copy. null when that is not the
+   * cause.
+   */
+  readonly advice: string | null;
+}
+
 /**
  * Every declared table or column the database lacks, and every declared table
- * that is a view or another non-table relation, as human-readable problems.
+ * that is a view or another non-table relation, as human-readable problems,
+ * with the advice for tables left in public. Setup and `appkit db verify`
+ * share it so both name that cause.
+ */
+export async function diagnoseSchema(
+  dataPath: Pick<DataPath, "raw">,
+  schema: Schema,
+): Promise<SchemaDiagnosis> {
+  const { problems, absent } = await checkSchema(dataPath, schema);
+  return {
+    problems,
+    advice:
+      (await inPublicInstead(dataPath, schema.$schemaName, absent)) ?? null,
+  };
+}
+
+/**
  * pg_catalog is read rather than information_schema, which hides objects the
  * role cannot access and would report a privilege gap as a missing column.
  */
-export async function findSchemaProblems(
-  dataPath: Pick<DataPath, "raw">,
-  schema: Schema,
-): Promise<string[]> {
-  return (await checkSchema(dataPath, schema)).problems;
-}
-
 async function checkSchema(
   dataPath: Pick<DataPath, "raw">,
   schema: Schema,
@@ -101,13 +121,13 @@ export async function assertSchemaMatchesDatabase(
   dataPath: DataPath,
   schema: Schema,
 ): Promise<void> {
-  const { problems, absent } = await checkSchema(dataPath, schema);
+  const { problems, advice } = await diagnoseSchema(dataPath, schema);
   if (problems.length > 0) {
-    const advice =
-      (await inPublicInstead(dataPath, schema.$schemaName, absent)) ??
-      "Run `npx appkit db migrate` locally, or commit migrations under config/database/migrations and set APPKIT_DB_MIGRATE_ON_START=true in app.yaml so the deployed app applies them on start.";
     throw databaseSetupFailed(
-      `the declared schema does not match the database: ${problems.join("; ")}. ${advice}`,
+      `the declared schema does not match the database: ${problems.join("; ")}. ${
+        advice ??
+        "Run `npx appkit db migrate` locally, or commit migrations under config/database/migrations and set APPKIT_DB_MIGRATE_ON_START=true in app.yaml so the deployed app applies them on start."
+      }`,
     );
   }
 }
@@ -117,7 +137,7 @@ export async function assertSchemaMatchesDatabase(
  * `public`. Name that case; migrating would create a second, empty copy.
  */
 async function inPublicInstead(
-  dataPath: DataPath,
+  dataPath: Pick<DataPath, "raw">,
   schemaName: string,
   absent: readonly string[],
 ): Promise<string | undefined> {

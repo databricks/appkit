@@ -104,6 +104,8 @@ const REBUILD =
 
 /** The one next step for a failed local verify, most fundamental gap first. */
 function localVerifyHint(report: LocalVerifyReport): string {
+  // Tables left in public: migrating would create empty copies in the app schema.
+  if (report.schemaAdvice) return report.schemaAdvice;
   if (report.editedMigrations.length > 0) {
     return "Restore the edited migrations from version control, and put the change in a new migration.";
   }

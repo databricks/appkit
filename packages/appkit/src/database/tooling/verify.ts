@@ -4,7 +4,7 @@ import path from "node:path";
 import type { PoolClient } from "pg";
 
 import { loadDefaultDatabaseSchema } from "../../plugins/database/load-schema";
-import { findSchemaProblems } from "../../plugins/database/schema-check";
+import { diagnoseSchema } from "../../plugins/database/schema-check";
 import { readMigrationDrift } from "../migrations/apply";
 import {
   journalFile,
@@ -44,6 +44,8 @@ interface LocalVerifyReport {
   readonly branch: string;
   /** Declared tables or columns the branch lacks (the plugin's startup check). */
   readonly schemaProblems: readonly string[];
+  /** The startup check's advice when every absent table is in public; null otherwise. */
+  readonly schemaAdvice: string | null;
   /** Committed migrations the branch has not run yet, newer than every one it ran. */
   readonly pendingMigrations: readonly string[];
   /** Committed migrations older than one the branch ran, never run: merged out of order. */
@@ -122,7 +124,8 @@ async function verifyLocal(ctx: DbContext): Promise<LocalVerifyReport> {
     const client = await pool.connect();
     try {
       await client.query("begin transaction read only");
-      const schemaProblems = await findSchemaProblems(rawOn(client), schema);
+      const { problems: schemaProblems, advice: schemaAdvice } =
+        await diagnoseSchema(rawOn(client), schema);
       const drift = await readMigrationDrift(client, {
         migrationsFolder: migrationsFolder(ctx.root),
         schemaName: schema.$schemaName,
@@ -131,6 +134,7 @@ async function verifyLocal(ctx: DbContext): Promise<LocalVerifyReport> {
         kind: "local",
         branch,
         schemaProblems,
+        schemaAdvice,
         pendingMigrations: drift.pending,
         strandedMigrations: drift.stranded,
         editedMigrations: drift.edited,

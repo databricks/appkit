@@ -76,6 +76,7 @@ export interface LocalVerifyReport {
   readonly kind: "local";
   readonly branch: string;
   readonly schemaProblems: readonly string[];
+  readonly schemaAdvice: string | null;
   readonly pendingMigrations: readonly string[];
   readonly strandedMigrations: readonly string[];
   readonly editedMigrations: readonly string[];
