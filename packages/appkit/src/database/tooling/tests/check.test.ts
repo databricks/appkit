@@ -19,6 +19,7 @@ const roots: string[] = [];
 
 type Columns = Record<string, "id" | "text">;
 type Tables = Record<string, Columns>;
+type Snapshot = Record<string, unknown>;
 
 function writeSchema(root: string, tables: Tables): void {
   const file = path.join(root, "config/database/schema.ts");
@@ -278,6 +279,113 @@ describe("runCheck", () => {
         `${path.join("config/database/migrations/meta/0001_snapshot.json")}, the snapshot of 0001_migration, is not a drizzle-kit snapshot. Restore it from version control.`,
       ]);
       expect(report.ok).toBe(false);
+    },
+  );
+
+  const badWhen: [string, unknown, string][] = [
+    ["missing", undefined, "missing"],
+    ["a date string", "2026-10-01T00:00:00Z", '"2026-10-01T00:00:00Z"'],
+    ["a fraction", 1.5, "1.5"],
+  ];
+  test.each(badWhen)(
+    "a first entry whose when is %s fails, and the next entry is not ordered against it",
+    async (_label, when, shown) => {
+      const ctx = app(withTags);
+      await generate(migrations(ctx), notes);
+      await generate(migrations(ctx), withTags);
+      editJournal(migrations(ctx), (journal) => {
+        const [first] = journal.entries;
+        if (first) Object.assign(first, { when });
+      });
+
+      expect((await runCheck(ctx)).problems).toEqual([
+        expect.stringContaining(
+          `The when of 0000_migration in meta/_journal.json is ${shown}, not an integer timestamp, so the migrator never runs it.`,
+        ),
+      ]);
+    },
+  );
+
+  test("a first migration not generated from an empty database fails, since the ones before it are missing", async () => {
+    const ctx = app(withTags);
+    const folder = migrations(ctx);
+    await generate(folder, notes);
+    await generate(folder, withTags);
+    // A truncated history: 0000 dropped and 0001 renumbered into its place.
+    fs.rmSync(path.join(folder, "0000_migration.sql"));
+    fs.rmSync(path.join(folder, "meta/0000_snapshot.json"));
+    fs.renameSync(
+      path.join(folder, "0001_migration.sql"),
+      path.join(folder, "0000_migration.sql"),
+    );
+    fs.renameSync(
+      path.join(folder, "meta/0001_snapshot.json"),
+      path.join(folder, "meta/0000_snapshot.json"),
+    );
+    editJournal(folder, (journal) => {
+      const second = journal.entries[1];
+      if (!second) throw new Error("no second migration");
+      journal.entries = [{ ...second, idx: 0, tag: "0000_migration" }];
+    });
+
+    expect((await runCheck(ctx)).problems).toEqual([
+      "0000_migration is the first entry of meta/_journal.json but was not generated from an empty database, so the migrations before it are missing. Restore them from version control.",
+    ]);
+  });
+
+  test("a first migration merged in from a parallel branch is reported as generated from an empty database", async () => {
+    const ctx = app(withTags);
+    const main = migrations(ctx);
+    const parallel = path.join(ctx.root, "parallel/config/database/migrations");
+    fs.mkdirSync(parallel, { recursive: true });
+    await generate(main, notes);
+    await generate(parallel, withTags);
+    fs.copyFileSync(
+      path.join(parallel, "0000_migration.sql"),
+      path.join(main, "0001_migration.sql"),
+    );
+    fs.copyFileSync(
+      path.join(parallel, "meta/0000_snapshot.json"),
+      path.join(main, "meta/0001_snapshot.json"),
+    );
+    const merged = readJournal(parallel)?.entries[0];
+    if (!merged) throw new Error("no parallel migration");
+    editJournal(main, (journal) => {
+      const [first] = journal.entries;
+      if (!first) throw new Error("no first migration");
+      journal.entries.push({
+        ...merged,
+        idx: 1,
+        tag: "0001_migration",
+        when: first.when + 1,
+      });
+    });
+
+    expect((await runCheck(ctx)).problems).toEqual([
+      expect.stringContaining(
+        "0001_migration was generated from an empty database, not after 0000_migration: they were written on parallel branches, so 0001_migration lacks the other's changes.",
+      ),
+    ]);
+  });
+
+  const gutted: [string, (snapshot: Snapshot) => unknown][] = [
+    ["only its id and prevId", ({ id, prevId }) => ({ id, prevId })],
+    ["version 6", (snapshot) => ({ ...snapshot, version: "6" })],
+    ["tables as a list", (snapshot) => ({ ...snapshot, tables: [] })],
+  ];
+  test.each(gutted)(
+    "an earlier snapshot with %s fails as not drizzle-kit's",
+    async (_label, gut) => {
+      const ctx = app(withTags);
+      await generate(migrations(ctx), notes);
+      await generate(migrations(ctx), withTags);
+      const file = path.join(migrations(ctx), "meta/0000_snapshot.json");
+      const snapshot: Snapshot = JSON.parse(fs.readFileSync(file, "utf-8"));
+      fs.writeFileSync(file, JSON.stringify(gut(snapshot)));
+
+      expect((await runCheck(ctx)).problems).toEqual([
+        `${path.join("config/database/migrations/meta/0000_snapshot.json")}, the snapshot of 0000_migration, is not a drizzle-kit snapshot. Restore it from version control.`,
+      ]);
     },
   );
 
