@@ -367,6 +367,38 @@ targets:
     });
   });
 
+  test("a variable-overrides.json value wins, as it does for a deploy from this checkout", () => {
+    const root = tempApp({
+      "databricks.yml": databricksYml(
+        "projects/p/branches/production",
+        "projects/p/branches/production/databases/db",
+      ),
+      ".databricks/bundle/default/variable-overrides.json": JSON.stringify({
+        postgres_branch: "projects/q/branches/staging",
+        postgres_database: "projects/q/branches/staging/databases/staging-db",
+      }),
+    });
+
+    expect(readDeployTarget(root)).toEqual({
+      branch: "projects/q/branches/staging",
+      database: "projects/q/branches/staging/databases/staging-db",
+    });
+  });
+
+  test("a variable-overrides.json that leaves the branch unresolved gives no deploy target", () => {
+    const root = tempApp({
+      "databricks.yml": databricksYml(
+        "projects/p/branches/production",
+        "projects/p/branches/production/databases/db",
+      ),
+      ".databricks/bundle/default/variable-overrides.json": JSON.stringify({
+        postgres_branch: { lookup: { name: "dev" } },
+      }),
+    });
+
+    expect(readDeployTarget(root)).toBeNull();
+  });
+
   test("null without databricks.yml or without a postgres binding", () => {
     expect(readDeployTarget(tempApp())).toBeNull();
     expect(
