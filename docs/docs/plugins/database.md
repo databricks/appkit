@@ -143,8 +143,10 @@ checkout uses the file's value.
 
 If a branch or database reference has no value in those files, `migrate` cannot
 tell which branch the reference names. Examples are a target that leaves
-`postgres_branch` unset and `${workspace.current_user.short_name}`. While any such
-reference exists, `migrate` applies migrations to no branch. The message names
+`postgres_branch` unset and `${workspace.current_user.short_name}`. The same
+holds for a `${var.…}` reference in place of an app's `resources` list, one of
+its entries, or a `postgres` block, because the files do not say what it binds.
+While any such reference exists, `migrate` applies migrations to no branch. The message names
 the target and where the reference is. To continue, give the reference a value
 in `databricks.yml`, or in the `variable-overrides.json` the message names. A
 `variable-overrides.json` that is not a JSON object stops `migrate` too.

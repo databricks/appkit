@@ -73,21 +73,22 @@ type BundleValue =
   /** As written: a `${…}` only a deploy resolves, no value, or not a resource name. */
   | { readonly kind: "unresolved"; readonly written: string };
 
-/** One postgres resource of an app. */
-interface PostgresBinding {
-  /** Where it is in the merged bundle, e.g. "resources.apps.app.resources[0].postgres". */
+/** A value databricks.yml binds, and where it is written in the merged bundle. */
+interface BoundValue {
+  /** e.g. "resources.apps.app.resources[0].postgres.branch". */
   readonly at: string;
-  readonly branch: BundleValue;
-  /** null when the binding names no database. */
-  readonly database: BundleValue | null;
+  readonly value: BundleValue;
 }
 
 /** An app one target of databricks.yml deploys. */
 interface BundleApp {
   /** Its key under resources.apps. */
   readonly key: string;
-  /** Every postgres resource it has. */
-  readonly postgres: readonly PostgresBinding[];
+  /**
+   * The branch and database of each postgres resource it has, and any `${…}`
+   * standing where its resources, one of them, or a postgres block should be.
+   */
+  readonly postgres: readonly BoundValue[];
 }
 
 /** What one target binds with one set of variable values. */
@@ -295,29 +296,60 @@ function bundleValue(
   };
 }
 
+/** A `${…}` where only a deploy puts a structure: the files cannot say what it binds. */
+function unresolvedAt(at: string, written: unknown): BoundValue {
+  return {
+    at,
+    value: {
+      kind: "unresolved",
+      written: typeof written === "string" ? written : "",
+    },
+  };
+}
+
+/** What an app's `resources:` binds; none when it is absent. */
+function appPostgres(
+  at: string,
+  resources: unknown,
+  resolve: (value: unknown) => string | null,
+): BoundValue[] {
+  if (resources == null) return [];
+  if (!Array.isArray(resources)) return [unresolvedAt(at, resources)];
+  return resources.flatMap((resource, index): BoundValue[] => {
+    const here = `${at}[${index}]`;
+    const item = record(resource);
+    if (!item) return [unresolvedAt(here, resource)];
+    if (item.postgres == null) return [];
+    const binding = record(item.postgres);
+    if (!binding) return [unresolvedAt(`${here}.postgres`, item.postgres)];
+    const bound: BoundValue[] = [
+      {
+        at: `${here}.postgres.branch`,
+        value: bundleValue(binding.branch, resolve, "branch"),
+      },
+    ];
+    if (binding.database !== undefined) {
+      bound.push({
+        at: `${here}.postgres.database`,
+        value: bundleValue(binding.database, resolve, "database"),
+      });
+    }
+    return bound;
+  });
+}
+
 function bundleApps(
   apps: Record<string, unknown>,
   resolve: (value: unknown) => string | null,
 ): BundleApp[] {
-  return Object.entries(apps).map(([key, value]) => {
-    const app = record(value);
-    const resources = Array.isArray(app?.resources) ? app.resources : [];
-    const postgres = resources.flatMap((resource, index): PostgresBinding[] => {
-      const binding = record(record(resource)?.postgres);
-      if (!binding) return [];
-      return [
-        {
-          at: `resources.apps.${key}.resources[${index}].postgres`,
-          branch: bundleValue(binding.branch, resolve, "branch"),
-          database:
-            binding.database === undefined
-              ? null
-              : bundleValue(binding.database, resolve, "database"),
-        },
-      ];
-    });
-    return { key, postgres };
-  });
+  return Object.entries(apps).map(([key, value]) => ({
+    key,
+    postgres: appPostgres(
+      `resources.apps.${key}.resources`,
+      record(value)?.resources,
+      resolve,
+    ),
+  }));
 }
 
 /**
@@ -431,9 +463,10 @@ export function readDeployBoundary(root: string): DeployBoundary {
         const branch = parseResourceName(value.name)?.branch;
         if (branch) branches.add(branch);
       };
-      for (const binding of bindings.apps.flatMap((app) => app.postgres)) {
-        add(`${binding.at}.branch`, binding.branch);
-        if (binding.database) add(`${binding.at}.database`, binding.database);
+      for (const { at, value } of bindings.apps.flatMap(
+        (app) => app.postgres,
+      )) {
+        add(at, value);
       }
       if (bindings.postgresBranch) {
         add("variables.postgres_branch", bindings.postgresBranch);
