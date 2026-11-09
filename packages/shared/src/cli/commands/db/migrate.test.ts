@@ -151,6 +151,38 @@ describe("appkit db migrate", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  test("when applying fails after a migration was written, it still warns about what that migration breaks", async () => {
+    const drop = 'ALTER TABLE "app"."notes" DROP COLUMN "body";';
+    runMigrate.mockRejectedValue(
+      Object.assign(
+        new Error(
+          "Wrote config/database/migrations/0002_migration.sql, but did not apply it: 403 Forbidden",
+        ),
+        {
+          generated: {
+            tag: "0002_migration",
+            file: path.join(
+              process.cwd(),
+              "config/database/migrations/0002_migration.sql",
+            ),
+            statements: [drop],
+          },
+          breaking: [drop],
+        },
+      ),
+    );
+
+    await dbCommand.parseAsync(["migrate"], { from: "user" });
+
+    expect(output(error)).toContain(
+      "Wrote config/database/migrations/0002_migration.sql, but did not apply it: 403 Forbidden",
+    );
+    expect(output(log)).toContain(
+      `0002_migration breaks instances still running the previous release, which keep serving while the new one migrates on start: ${drop} Deploy code that works with both the old and the new schema first, then this change in a later deploy.`,
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
   test("prints the error and its root cause, and exits 1", async () => {
     const driverError = new Error('relation "notes" already exists');
     const wrapped = new Error("Failed query: CREATE TABLE ...", {

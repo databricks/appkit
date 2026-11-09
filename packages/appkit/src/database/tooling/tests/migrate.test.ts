@@ -342,6 +342,26 @@ describe("runMigrate", () => {
     expect(report.breaking).toEqual(report.generated?.statements);
   });
 
+  test("a failure after generating still carries what the kept migration breaks", async () => {
+    const ctx = app(`notes: table("notes", { id: id(), body: text() })`);
+    resolveEnvBranch.mockResolvedValue(null);
+    await runMigrate(ctx, { interactive: false });
+
+    writeSchema(ctx.root, `notes: table("notes", { id: id() })`);
+    resolveEnvBranch.mockRejectedValue(new Error("403 Forbidden"));
+    const error = await runMigrate(ctx, { interactive: false }).catch(
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toMatchObject({
+      generated: { tag: "0001_migration" },
+      breaking: ['ALTER TABLE "app"."notes" DROP COLUMN "body";'],
+    });
+    expect((error as Error).message).toMatch(
+      /^Wrote .*0001_migration\.sql, but did not apply it: 403 Forbidden$/,
+    );
+  });
+
   test("a second migrate in the same checkout fails while the first runs, and writes nothing", async () => {
     const ctx = app(`notes: table("notes", { id: id() })`);
     let finishApply: (value: unknown) => void = () => undefined;
