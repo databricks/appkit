@@ -22,9 +22,9 @@ Collapsible navigation sidebar with mobile support
 
 | Prop | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `side` | `enum` |  | `left` | Which side of the viewport the sidebar appears on |
-| `variant` | `enum` |  | `sidebar` | Visual style: `"sidebar"` (standard with border), `"floating"` (rounded with shadow), or `"inset"` (content area gets rounded margin) |
-| `collapsible` | `enum` |  | `offcanvas` | Collapse behavior: `"offcanvas"` (slides off-screen), `"icon"` (collapses to icon width), or `"none"` (always expanded) |
+| `side` | `"right" \| "left"` |  | `left` | Which side of the viewport the sidebar appears on |
+| `variant` | `"inset" \| "sidebar" \| "floating"` |  | `sidebar` | Visual style: `"sidebar"` (standard with border), `"floating"` (rounded with shadow), or `"inset"` (content area gets rounded margin) |
+| `collapsible` | `"none" \| "icon" \| "offcanvas"` |  | `offcanvas` | Collapse behavior: `"offcanvas"` (slides off-screen), `"icon"` (collapses to icon width), or `"none"` (always expanded) |
 
 
 
@@ -431,7 +431,7 @@ Button for submenu items
 | Prop | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
 | `asChild` | `boolean` |  | `false` | Render as child element instead of default tag |
-| `size` | `enum` |  | `md` | Text size of the submenu button |
+| `size` | `"sm" \| "md"` |  | `md` | Text size of the submenu button |
 | `isActive` | `boolean` |  | `false` | Whether this submenu item is currently active/selected |
 
 
@@ -528,7 +528,7 @@ Visual separator between sidebar sections
 
 | Prop | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `orientation` | `enum` |  | `vertical` | Either `vertical` or `horizontal`. Defaults to `horizontal`. |
+| `orientation` | `"horizontal" \| "vertical"` |  | `vertical` | Either `vertical` or `horizontal`. Defaults to `horizontal`. |
 | `decorative` | `boolean` |  | - | Whether or not the component is purely decorative. When true, accessibility-related attributes are updated so that that the rendered element is removed from the accessibility tree. |
 | `asChild` | `boolean` |  | - | - |
 

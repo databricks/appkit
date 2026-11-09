@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { parsePassRate } from "./eval";
+import { parsePassRate, withAppAuth } from "./eval";
 
 describe("parsePassRate", () => {
   test("returns undefined when the flag is unset", () => {
@@ -19,4 +19,31 @@ describe("parsePassRate", () => {
       expect(() => parsePassRate(raw)).toThrow(/min-pass-rate/);
     },
   );
+});
+
+describe("withAppAuth", () => {
+  const app = "https://my-app-123.staging.aws.databricksapps.com";
+
+  test("adds the bearer for a deployed app, keeping other headers", () => {
+    expect(withAppAuth(app, { "X-Test": "1" }, "tok")).toEqual({
+      "X-Test": "1",
+      Authorization: "Bearer tok",
+    });
+  });
+
+  test("an explicit Authorization header wins", () => {
+    const headers = { authorization: "Bearer mine" };
+    expect(withAppAuth(app, headers, "tok")).toBe(headers);
+  });
+
+  test.each([
+    ["http://localhost:8000", "tok"],
+    ["http://my-app.databricksapps.com", "tok"],
+    ["https://evil.example.com", "tok"],
+    ["https://databricksapps.com.evil.com", "tok"],
+    ["not a url", "tok"],
+    [app, undefined],
+  ])("leaves headers untouched for %s (token %s)", (url, token) => {
+    expect(withAppAuth(url, undefined, token)).toBeUndefined();
+  });
 });

@@ -24,7 +24,11 @@ import {
   toolsFromRegistry,
 } from "../../core/agent/tools/define-tool";
 import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
-import { AppKitError, ExecutionError } from "../../errors";
+import {
+  AppKitError,
+  ExecutionError,
+  IdentityExpiredError,
+} from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import { defineManifest } from "../../registry";
@@ -937,10 +941,14 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       // Do not echo upstream / SDK error text — it can include statement
       // fragments and correlation ids. Keep the structured code so the
       // client can branch (e.g. RESULT_TOO_LARGE_FOR_JSON_FALLBACK,
-      // ARROW_DELIVERY_UNSUPPORTED).
+      // ARROW_DELIVERY_UNSUPPORTED, IDENTITY_EXPIRED).
       const errorCode =
-        error instanceof ExecutionError ? error.errorCode : undefined;
-      res.status(500).json({
+        error instanceof IdentityExpiredError
+          ? error.code
+          : error instanceof ExecutionError
+            ? error.errorCode
+            : undefined;
+      res.status(error instanceof AppKitError ? error.statusCode : 500).json({
         // `clientMessage` is the sanitized, actionable text (e.g. "Re-run with
         // JSON_ARRAY" for ARROW_DELIVERY_UNSUPPORTED); it never carries raw
         // warehouse/SDK strings. Fall back to a generic message otherwise.

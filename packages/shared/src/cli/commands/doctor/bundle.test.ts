@@ -93,6 +93,29 @@ describe("readBundleInfo", () => {
       "sql-warehouse",
     );
   });
+
+  it("counts valueFrom and literal value entries as wired; a null value isn't", () => {
+    const dir = tmp({
+      "databricks.yml": BUNDLE,
+      "app.yaml": `${APP_YAML}  - name: DATABRICKS_GENIE_SPACE_ID
+    value: 01f0abc
+  - name: EMPTY_LITERAL
+    value: ""
+  - name: NULL_VALUE
+    value:
+`,
+    });
+    dirs.push(dir);
+    const info = readBundleInfo(dir);
+    expect([...info.wiredEnvVars].sort()).toEqual([
+      "DATABRICKS_GENIE_SPACE_ID",
+      "DATABRICKS_JOB_REPORT",
+      "DATABRICKS_WAREHOUSE_ID",
+      "EMPTY_LITERAL",
+    ]);
+    // A literal has no binding to join, so it stays out of envToBinding.
+    expect(info.envToBinding.has("DATABRICKS_GENIE_SPACE_ID")).toBe(false);
+  });
 });
 
 describe("originForEnvVars", () => {

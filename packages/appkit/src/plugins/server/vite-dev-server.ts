@@ -11,6 +11,7 @@ import { appKitTypesPlugin } from "../../type-generator/vite-plugin";
 import { mergeConfigDedup } from "../../utils";
 import { BaseServer } from "./base-server";
 import { reactSourceLocPlugin } from "./react-source-loc-vite-plugin";
+import { typecheckPlugin } from "./typecheck-vite-plugin";
 import type { PluginClientConfigs, PluginEndpoints } from "./utils";
 
 const logger = createLogger("server:vite");
@@ -86,6 +87,7 @@ export class ViteDevServer extends BaseServer {
       plugins: [
         react.default(),
         reactSourceLocPlugin({ projectRoot }),
+        typecheckPlugin({ projectRoot }),
         appKitTypesPlugin(),
         appKitServingTypesPlugin(),
       ],
