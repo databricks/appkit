@@ -101,7 +101,10 @@ export function printCleanReport(report: CleanReport): void {
   }
 }
 
-export function printIntrospectReport(report: IntrospectReport): void {
+export function printIntrospectReport(
+  report: IntrospectReport,
+  options: { rebuilt?: boolean } = {},
+): void {
   const count = report.tables.length;
   ok(
     `Wrote ${relative(report.schemaFile)} from schema ${report.schemaName} on ${shortName(report.branch)} (${count} table${count === 1 ? "" : "s"})${report.backupFile ? `; the previous file is ${relative(report.backupFile)}` : ""}`,
@@ -119,7 +122,9 @@ export function printIntrospectReport(report: IntrospectReport): void {
   }
   if (report.approximated.length > 0) {
     info(
-      "This branch keeps the approximated objects as they are; a database the migrations create gets what schema.ts declares.",
+      options.rebuilt
+        ? "The rebuild gave this branch what schema.ts declares, as a database the migrations create gets."
+        : "This branch keeps the approximated objects as they are; a database the migrations create gets what schema.ts declares.",
     );
   }
   if (report.migration) {
