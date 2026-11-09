@@ -14,10 +14,10 @@ describe("appkitServerConfig", () => {
     expect(c.unbundle).toBe(true);
   });
 
-  it("omits the agent glob + clean when there are no code agents", () => {
+  it("omits the agent glob but cleans stale output when there are no code agents", () => {
     const c = appkitServerConfig({}, { codeAgents: false });
     expect(c.entry).toEqual(["server/server.ts"]);
-    expect(c.clean).toBeUndefined();
+    expect(c.clean).toBe(true);
   });
 
   it("unions user entries — the agent glob survives an entry override", () => {
@@ -88,6 +88,27 @@ describe("appkitServerConfig", () => {
       expect(appkitServerConfig({}, { cwd: tmp }).entry).toEqual([
         "server/server.ts",
       ]);
+    });
+
+    it("includes the generated database registry as an entry without a server import", () => {
+      mk("server/database/routes.gen.ts");
+      const config = appkitServerConfig(
+        { entry: "server/worker.ts" },
+        { cwd: tmp },
+      );
+      expect(config.entry).toEqual([
+        "server/server.ts",
+        "server/database/routes.gen.ts",
+        "server/worker.ts",
+      ]);
+      expect(config.clean).toBe(true);
+    });
+
+    it("requires generation before building a routes directory", () => {
+      mk("server/database/routes/notes.ts");
+      expect(() => appkitServerConfig({}, { cwd: tmp })).toThrow(
+        "appkit generate-types",
+      );
     });
   });
 });

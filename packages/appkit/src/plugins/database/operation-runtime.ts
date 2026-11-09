@@ -16,8 +16,7 @@ import {
 import { DatabaseValidationError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import type { ITelemetry } from "../../telemetry";
-import type { JsonValue } from "./crud/codecs";
-import { boundedJson, isPlainObject } from "./crud/contract";
+import { boundedJson, isPlainObject, type JsonValue } from "./crud/contract";
 import { sendEmpty, sendJson } from "./crud/response";
 import { MAX_OPERATION_BODY_BYTES, MAX_QUERY_BYTES } from "./defaults";
 import type { DatabaseExports } from "./entity-types";
@@ -45,6 +44,11 @@ const DATABASE_ACTOR_HEADER = "x-appkit-database-actor";
 
 /** Mount point below the plugin router: `router.use(OPERATIONS_PATH, handler)`. */
 export const OPERATIONS_PATH = "/operations";
+
+/** Where one operation answers below the plugin router: its name as one encoded segment. */
+export function operationPath(name: string): string {
+  return `${OPERATIONS_PATH}/${encodeURIComponent(name)}`;
+}
 
 /** Methods whose `null` result is a missing record unless an output accepts it. */
 const NULLABLE_METHODS: ReadonlySet<OperationMethod> = new Set([

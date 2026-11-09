@@ -496,6 +496,18 @@ BasePlugin.getSkipBodyParsingPaths
 
 ***
 
+### getSkipBodyParsingPrefixes()
+
+```ts
+getSkipBodyParsingPrefixes(): ReadonlySet<string>;
+```
+
+#### Returns
+
+`ReadonlySet`\<`string`\>
+
+***
+
 ### injectRoutes()
 
 ```ts
@@ -608,3 +620,25 @@ setup(): Promise<void>;
 ```ts
 BasePlugin.setup
 ```
+
+***
+
+### skipBodyParsingUnder()
+
+```ts
+protected skipBodyParsingUnder(path: string): void;
+```
+
+Leave every request at or below `path` of this plugin's router unparsed,
+for a handler mounted with `router.use(path, handler)` that reads its own
+body, such as one that must authenticate the caller first.
+
+#### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `path` | `string` |
+
+#### Returns
+
+`void`

@@ -154,6 +154,9 @@ export abstract class Plugin<
   /** Paths that opt out of JSON body parsing (e.g. file upload routes) */
   private skipBodyParsingPaths: Set<string> = new Set();
 
+  /** Mount paths whose whole namespace opts out of JSON body parsing. */
+  private skipBodyParsingPrefixes: Set<string> = new Set();
+
   /**
    * Plugin initialization phase.
    * - 'core': Initialized first (e.g., config plugins)
@@ -239,6 +242,10 @@ export abstract class Plugin<
 
   getSkipBodyParsingPaths(): ReadonlySet<string> {
     return this.skipBodyParsingPaths;
+  }
+
+  getSkipBodyParsingPrefixes(): ReadonlySet<string> {
+    return this.skipBodyParsingPrefixes;
   }
 
   abortActiveOperations(): void {
@@ -537,6 +544,15 @@ export abstract class Plugin<
     if (config.skipBodyParsing) {
       this.skipBodyParsingPaths.add(fullPath);
     }
+  }
+
+  /**
+   * Leave every request at or below `path` of this plugin's router unparsed,
+   * for a handler mounted with `router.use(path, handler)` that reads its own
+   * body, such as one that must authenticate the caller first.
+   */
+  protected skipBodyParsingUnder(path: string): void {
+    this.skipBodyParsingPrefixes.add(`/api/${camelToKebab(this.name)}${path}`);
   }
 
   // build execution options by merging defaults, plugin config, and user overrides

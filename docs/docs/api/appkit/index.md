@@ -152,9 +152,6 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | [BaseSystemPromptOption](TypeAlias.BaseSystemPromptOption.md) | - |
 | [CallerPrincipal](TypeAlias.CallerPrincipal.md) | The caller identity whose permissions authorize execution, not its resources. |
 | [ConfigSchema](TypeAlias.ConfigSchema.md) | Configuration schema definition for plugin config. Re-exported from the standard JSON Schema Draft 7 types. |
-| [DatabaseApiConfig](TypeAlias.DatabaseApiConfig.md) | Full generated CRUD for every declared table by default. Set false to disable all generated routes, or use an object to restrict tables and writes. Keyed routes require a public primary key; upsert stays programmatic. Route names must start with a letter, contain only letters, digits, `_`, or `-`, be at most 64 characters, and be unique ignoring case. Invalid names fail setup; exclude internal tables with `api.tables` or use `api: false`. |
-| [DatabaseApiWriteOperation](TypeAlias.DatabaseApiWriteOperation.md) | Generated HTTP write operations. |
-| [DatabaseApiWritesConfig](TypeAlias.DatabaseApiWritesConfig.md) | All writes by default; false keeps reads only, and an object narrows writes. |
 | [DatabaseExports](TypeAlias.DatabaseExports.md) | Typed database API published by the plugin. |
 | [DatabricksAppKitDatabaseOperations](TypeAlias.DatabricksAppKitDatabaseOperations.md) | The same global registry, available as a module type for package exports. |
 | [EvalProgress](TypeAlias.EvalProgress.md) | - |

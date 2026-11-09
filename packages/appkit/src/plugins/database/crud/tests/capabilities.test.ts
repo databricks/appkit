@@ -14,7 +14,6 @@ import {
 } from "../../../../database/schema-builder";
 import { walkSchema } from "../../../../type-generator/database/walk-schema";
 import { columnHttpCapabilities } from "../capabilities";
-import { compileCrudTables } from "../contract";
 
 const schema = defineSchema((builder) => {
   const users = builder.table("users", {
@@ -47,22 +46,11 @@ const schema = defineSchema((builder) => {
   return { users, invites, sessions, audits, blobs, flags, documents };
 });
 
-/** Property names in one rendered object facet, in declaration order. */
-function facetKeys(facet: string): string[] {
-  return [...facet.matchAll(/^ +"([^"]+)"\??:/gm)].map((match) => match[1]);
-}
-
-/** Members of one rendered literal union; `never` renders as none. */
-function unionMembers(union: string): string[] {
-  return union === "never" ? [] : union.split(" | ").map((m) => JSON.parse(m));
-}
-
 describe("columnHttpCapabilities", () => {
   it("keeps a private column out of every HTTP capability", () => {
     expect(columnHttpCapabilities(schema.$tables.users.$columns.token)).toEqual(
       {
         selectable: false,
-        queryable: false,
         creatable: false,
         updatable: false,
         publicKey: false,
@@ -85,9 +73,6 @@ describe("columnHttpCapabilities", () => {
         publicKey: false,
       });
       expect(
-        compileCrudTables(schema.$tables).get(name)?.primaryKey,
-      ).toBeUndefined();
-      expect(
         walkSchema(schema).find((entry) => entry.name === name)?.api.key,
       ).toBe("never");
     },
@@ -96,7 +81,6 @@ describe("columnHttpCapabilities", () => {
   it("separates generated identities, caller keys, and stamps", () => {
     const { users, invites, sessions } = schema.$tables;
     expect(columnHttpCapabilities(users.$columns.id)).toMatchObject({
-      queryable: true,
       creatable: false,
       publicKey: true,
     });
@@ -119,32 +103,13 @@ describe("columnHttpCapabilities", () => {
     });
     expect(columnHttpCapabilities(users.$columns.profile)).toMatchObject({
       selectable: true,
-      queryable: false,
       updatable: true,
     });
   });
 });
 
-describe("HTTP capability parity", () => {
-  const compiled = compileCrudTables(schema.$tables);
+describe("generated api facets", () => {
   const entries = new Map(walkSchema(schema).map((e) => [e.name, e]));
-
-  it.each(Object.keys(schema.$tables))(
-    "generates the %s api facet from the sets its routes compile",
-    (name) => {
-      const table = compiled.get(name);
-      const api = entries.get(name)?.api;
-      if (!table || !api) throw new Error(`missing ${name}`);
-
-      expect(facetKeys(api.insert)).toEqual([...table.creatable]);
-      expect(facetKeys(api.update)).toEqual([...table.updatable]);
-      expect(facetKeys(api.filters)).toEqual([...table.queryable]);
-      expect(unionMembers(api.orderable)).toEqual([...table.queryable]);
-      expect(unionMembers(api.key)).toEqual(
-        table.primaryKey ? [table.primaryKey.meta.columnName] : [],
-      );
-    },
-  );
 
   it("never renders a private column into an api facet", () => {
     const users = entries.get("users");
@@ -155,6 +120,5 @@ describe("HTTP capability parity", () => {
       Object.values(entries.get("audits")?.api ?? {}).join("\n"),
     ).not.toContain('"id"');
     expect(entries.get("audits")?.api.key).toBe("never");
-    expect(entries.get("blobs")?.api.orderable).toBe("never");
   });
 });

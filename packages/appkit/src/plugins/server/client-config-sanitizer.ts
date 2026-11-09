@@ -7,6 +7,8 @@ const logger = createLogger("server:config");
 
 const REDACTED_CLIENT_CONFIG_VALUE = "[redacted by appkit]";
 const MIN_SUBSTRING_LENGTH = 3;
+/** HTTP method names are protocol vocabulary, never a secret. */
+const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 const DISALLOWED_CLIENT_CONFIG_KEYS = new Set([
   "__proto__",
   "constructor",
@@ -305,15 +307,19 @@ function getUniqueObjectKey(
  * replaced with "[redacted by appkit]" and a warning is logged.
  *
  * Only env vars prefixed with `PUBLIC_APPKIT_` are allowed through;
- * all other process.env values are treated as sensitive.
+ * all other process.env values are treated as sensitive. `published`
+ * strings, such as the plugin's endpoint names and paths that the boot
+ * payload already carries verbatim, and HTTP method names are public too.
  */
 export function sanitizeClientConfig(
   pluginName: string,
   config: unknown,
+  published: Iterable<string> = [],
 ): Record<string, unknown> {
   const validated = validateClientConfig(pluginName, config);
   const { nonPublic, publicValues } = getEnvValueSets();
   if (nonPublic.size === 0) return validated;
+  for (const value of [...published, ...HTTP_METHODS]) publicValues.add(value);
 
   const leakedVars = new Set<string>();
   const sanitized = redactLeakedValues(

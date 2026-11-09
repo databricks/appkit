@@ -1,4 +1,26 @@
 import { databaseSetupFailed } from "../../database/errors";
+import type { DatabaseRoutes } from "./operations";
+
+function isCallable(value: unknown): boolean {
+  return typeof value === "function";
+}
+
+/** The shape of the generated `databaseRoutes` registry. */
+export function isDatabaseRoutes(value: unknown): value is DatabaseRoutes {
+  if (typeof value !== "object" || value === null) return false;
+  const modules: unknown = Reflect.get(value, "modules");
+  return (
+    isCallable(Reflect.get(value, "schema")) &&
+    Array.isArray(modules) &&
+    modules.every(
+      (entry: unknown) =>
+        typeof entry === "object" &&
+        entry !== null &&
+        typeof Reflect.get(entry, "file") === "string" &&
+        isCallable(Reflect.get(entry, "load")),
+    )
+  );
+}
 
 /** Reject invalid arguments instead of turning them into the default API. */
 export function assertDatabaseConfig(config: unknown): void {
@@ -12,10 +34,10 @@ export function assertDatabaseConfig(config: unknown): void {
       "Expected a plain database configuration object.",
     );
   }
-  // Do not silently turn a previous opt-out into the default full API.
-  if ("crudRoutes" in config) {
+  const routes: unknown = Reflect.get(config, "routes");
+  if (routes !== undefined && routes !== false && !isDatabaseRoutes(routes)) {
     throw databaseSetupFailed(
-      '"crudRoutes" was renamed to "api". Use api: false to disable generated routes or api: { writes: false } for reads only.',
+      "Expected routes to be the generated databaseRoutes registry, or false.",
     );
   }
   if ("pool" in config && config.pool !== undefined) {
