@@ -390,6 +390,103 @@ describe("runInit — dev branch", () => {
   });
 });
 
+describe("runInit — a concurrent run on the same branch", () => {
+  /** The API that another run raced: it did `before` first, then this run's call returns 409. */
+  function racedApi(
+    lakebase: FakeLakebase,
+    method: "createEndpoint" | "createRole",
+  ) {
+    const api = lakebase.api();
+    const original = api[method].bind(api) as (
+      ...args: unknown[]
+    ) => Promise<unknown>;
+    (api as unknown as Record<string, unknown>)[method] = async (
+      ...args: unknown[]
+    ) => {
+      await original(...args);
+      throw conflict(method);
+    };
+    return api;
+  }
+
+  function withApi(
+    lakebase: FakeLakebase,
+    api: ReturnType<FakeLakebase["api"]>,
+  ) {
+    const app = appOn(lakebase);
+    return fakeContext({ root: app.root, env: app.env, userName: USER, api });
+  }
+
+  test("a 409 on the endpoint reads the one the other run created", async () => {
+    const lakebase = project();
+    lakebase.autoEndpoint = false;
+    const ctx = withApi(lakebase, racedApi(lakebase, "createEndpoint"));
+
+    const { report } = await init(ctx, { schema: "none" });
+
+    expect(report).toMatchObject({
+      endpoint: `${DEV}/endpoints/primary`,
+      endpointCreated: false,
+      host: `primary.${devBranchId(USER)}.example.com`,
+    });
+    expect(
+      lakebase.calls.filter((call) => call.startsWith("createEndpoint")),
+    ).toHaveLength(1);
+  });
+
+  test("a 409 on an endpoint still coming up waits for its host", async () => {
+    const lakebase = project();
+    lakebase.autoEndpoint = false;
+    const api = racedApi(lakebase, "createEndpoint");
+    const list = api.listEndpoints.bind(api);
+    let lists = 0;
+    api.listEndpoints = async (branch) => {
+      lists++;
+      const endpoints = await list(branch);
+      // The other run's endpoint has no host until the third look.
+      return lists < 3
+        ? endpoints.map((endpoint) => ({
+            ...endpoint,
+            status: { endpoint_type: endpoint.status?.endpoint_type },
+          }))
+        : endpoints;
+    };
+    const ctx = withApi(lakebase, api);
+    vi.useFakeTimers({ shouldAdvanceTime: true, advanceTimeDelta: 2_000 });
+    try {
+      const { report, steps } = await init(ctx, { schema: "none" });
+
+      expect(report).toMatchObject({
+        endpointCreated: false,
+        host: `primary.${devBranchId(USER)}.example.com`,
+      });
+      expect(steps).toContain(
+        `Waiting for the read-write endpoint of ${devBranchId(USER)} to get a host`,
+      );
+      expect(lists).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a 409 on your role reads the one the other run created", async () => {
+    schemaOwner = USER;
+    const lakebase = new FakeLakebase();
+    lakebase.addBranch(PRODUCTION, { default: true });
+    const ctx = withApi(lakebase, racedApi(lakebase, "createRole"));
+
+    const { report } = await init(ctx, { schema: "none" });
+
+    expect(report.role).toEqual({
+      name: `${DEV}/roles/rol-generated`,
+      action: "kept",
+    });
+    expect(
+      lakebase.calls.filter((call) => call.startsWith("createRole")),
+    ).toHaveLength(1);
+  });
+});
+
 describe("runInit — branch limit", () => {
   test("stops before creating anything and lists your other branches with the delete command", async () => {
     const lakebase = project();
