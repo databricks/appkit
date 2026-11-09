@@ -78,12 +78,17 @@ $appkit$`,
 }
 
 /**
- * Objects outside what clean drops that depend on it, so CASCADE removes them
- * too: a view in another schema, a foreign key into an app table, a column of
- * an app type. For public, "outside" also means owned by another role.
+ * Objects outside what clean drops that CASCADE removes with it: a view in
+ * another schema, a view over that view, a foreign key into an app table, a
+ * column of an app type. For public, "outside" also means owned by another
+ * role. The closure follows pg_depend the way DROP does: through normal, auto
+ * and internal dependencies, where a view's rewrite rule or a view's column
+ * stands for the view. Like DROP's own notice, it lists what a normal
+ * dependency reached; what went along automatically (an index on a dropped
+ * column) is not listed.
  */
 const DEPENDENTS_SQL = `
-with target as (
+with recursive target as (
   select oid from pg_catalog.pg_namespace where nspname = $1
 ), me as (
   select oid from pg_catalog.pg_roles where rolname = current_user
@@ -96,51 +101,64 @@ with target as (
   union all
   select 'pg_catalog.pg_proc'::regclass, p.oid from pg_catalog.pg_proc p, target, me
    where p.pronamespace = target.oid and (not $2 or p.proowner = me.oid)
+), gone(classid, objid, objsubid, listed) as (
+  select classid, objid, 0, false from dropped
+  union
+  select
+    case when d.classid = 'pg_catalog.pg_rewrite'::regclass
+         then 'pg_catalog.pg_class'::regclass else d.classid end,
+    coalesce(rule.ev_class, d.objid),
+    case when rule.oid is not null or view.oid is not null then 0 else d.objsubid end,
+    d.deptype = 'n'
+  from gone g
+  join pg_catalog.pg_depend d
+    on d.refclassid = g.classid and d.refobjid = g.objid
+   and (g.objsubid = 0 or d.refobjsubid = g.objsubid)
+  left join pg_catalog.pg_rewrite rule
+    on d.classid = 'pg_catalog.pg_rewrite'::regclass and rule.oid = d.objid
+  left join pg_catalog.pg_class view
+    on d.classid = 'pg_catalog.pg_class'::regclass and d.objsubid <> 0
+   and view.oid = d.objid and view.relkind in ('v', 'm')
+  where d.deptype in ('n', 'a', 'i')
 )
 select distinct o.label
-  from pg_catalog.pg_depend d
-  join dropped on d.refclassid = dropped.classid and d.refobjid = dropped.objid
+  from gone g
   cross join lateral (
     select c.relnamespace as namespace, c.relowner as owner,
-           pg_catalog.pg_describe_object(d.classid, d.objid, d.objsubid) as label
+           pg_catalog.pg_describe_object(g.classid, g.objid, g.objsubid) as label
       from pg_catalog.pg_class c
-     where d.classid = 'pg_catalog.pg_class'::regclass and c.oid = d.objid
-    union all
-    select c.relnamespace, c.relowner,
-           pg_catalog.pg_describe_object('pg_catalog.pg_class'::regclass, c.oid, 0)
-      from pg_catalog.pg_rewrite r join pg_catalog.pg_class c on c.oid = r.ev_class
-     where d.classid = 'pg_catalog.pg_rewrite'::regclass and r.oid = d.objid
+     where g.classid = 'pg_catalog.pg_class'::regclass and c.oid = g.objid
     union all
     select con.connamespace, coalesce(c.relowner, t.typowner),
-           pg_catalog.pg_describe_object(d.classid, d.objid, 0)
+           pg_catalog.pg_describe_object(g.classid, g.objid, 0)
       from pg_catalog.pg_constraint con
       left join pg_catalog.pg_class c on c.oid = con.conrelid
       left join pg_catalog.pg_type t on t.oid = con.contypid
-     where d.classid = 'pg_catalog.pg_constraint'::regclass and con.oid = d.objid
+     where g.classid = 'pg_catalog.pg_constraint'::regclass and con.oid = g.objid
     union all
-    select p.pronamespace, p.proowner, pg_catalog.pg_describe_object(d.classid, d.objid, 0)
+    select p.pronamespace, p.proowner, pg_catalog.pg_describe_object(g.classid, g.objid, 0)
       from pg_catalog.pg_proc p
-     where d.classid = 'pg_catalog.pg_proc'::regclass and p.oid = d.objid
+     where g.classid = 'pg_catalog.pg_proc'::regclass and p.oid = g.objid
     union all
-    select t.typnamespace, t.typowner, pg_catalog.pg_describe_object(d.classid, d.objid, 0)
+    select t.typnamespace, t.typowner, pg_catalog.pg_describe_object(g.classid, g.objid, 0)
       from pg_catalog.pg_type t
-     where d.classid = 'pg_catalog.pg_type'::regclass and t.oid = d.objid
+     where g.classid = 'pg_catalog.pg_type'::regclass and t.oid = g.objid
     union all
-    select c.relnamespace, c.relowner, pg_catalog.pg_describe_object(d.classid, d.objid, 0)
+    select c.relnamespace, c.relowner, pg_catalog.pg_describe_object(g.classid, g.objid, 0)
       from pg_catalog.pg_trigger tg join pg_catalog.pg_class c on c.oid = tg.tgrelid
-     where d.classid = 'pg_catalog.pg_trigger'::regclass and tg.oid = d.objid
+     where g.classid = 'pg_catalog.pg_trigger'::regclass and tg.oid = g.objid
     union all
-    select c.relnamespace, c.relowner, pg_catalog.pg_describe_object(d.classid, d.objid, 0)
+    select c.relnamespace, c.relowner, pg_catalog.pg_describe_object(g.classid, g.objid, 0)
       from pg_catalog.pg_attrdef a join pg_catalog.pg_class c on c.oid = a.adrelid
-     where d.classid = 'pg_catalog.pg_attrdef'::regclass and a.oid = d.objid
+     where g.classid = 'pg_catalog.pg_attrdef'::regclass and a.oid = g.objid
     union all
-    select c.relnamespace, c.relowner, pg_catalog.pg_describe_object(d.classid, d.objid, 0)
+    select c.relnamespace, c.relowner, pg_catalog.pg_describe_object(g.classid, g.objid, 0)
       from pg_catalog.pg_policy pol join pg_catalog.pg_class c on c.oid = pol.polrelid
-     where d.classid = 'pg_catalog.pg_policy'::regclass and pol.oid = d.objid
+     where g.classid = 'pg_catalog.pg_policy'::regclass and pol.oid = g.objid
   ) o
   cross join target
   cross join me
- where d.deptype = 'n'
+ where g.listed
    and (o.namespace <> target.oid or ($2 and o.owner <> me.oid))
  order by 1`;
 
