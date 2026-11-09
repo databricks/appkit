@@ -16,6 +16,7 @@ import {
   applyPendingMigrations,
   MigrationApplyError,
   MigrationHistoryError,
+  MigrationJournalError,
   migrationLockKey,
 } from "../apply";
 import { hashOf, removeMigrationFolders, writeMigrations } from "./fixtures";
@@ -375,6 +376,27 @@ describe.skipIf(!url)("applyPendingMigrations against Postgres", () => {
       await admin.query(`drop role "${app}"`);
       await admin.query(`drop role "${owner}"`);
     }
+  });
+
+  test("a view at the journal's name is refused, and nothing is created", async () => {
+    await admin.query(`create schema "${schema}"`);
+    await admin.query(
+      `create view ${q("__drizzle_migrations")} as select 'x'::text as hash, 1::bigint as created_at`,
+    );
+    const role = (
+      await admin.query<{ role: string }>("select current_user::text as role")
+    ).rows[0]?.role;
+
+    const error = await applyPendingMigrations(
+      newPool(),
+      options(notes()),
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(MigrationJournalError);
+    expect((error as Error).message).toContain(
+      `"${schema}"."__drizzle_migrations" is a view owned by "${role}". The migrator reads and records applied migrations only in a table owned by "${role}", the owner of schema "${schema}".`,
+    );
+    expect(await columns("notes")).toEqual([]);
   });
 
   test("a baseline whose tables already exist is adopted, and later migrations apply", async () => {

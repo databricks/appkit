@@ -216,6 +216,15 @@ describe("migrateOnStart", () => {
       "Migration 0001_parallel is older than 0002_b",
     ],
     [
+      "a view at the journal's name",
+      new apply.MigrationJournalError("app", {
+        relkind: "v",
+        owner: "mallory",
+        schemaOwner: "app-sp",
+      }),
+      '"app"."__drizzle_migrations" is a view owned by "mallory"',
+    ],
+    [
       "a baseline that only partly matches",
       new apply.MigrationBaselineMismatchError("app", [
         "table app.tags does not exist",
