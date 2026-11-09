@@ -254,12 +254,25 @@ async function loadDrizzleKit(): Promise<typeof import("drizzle-kit/api")> {
   }
 }
 
-const BREAKS_PREVIOUS_RELEASE = [
-  /^DROP (TABLE|VIEW|MATERIALIZED VIEW|TYPE|SEQUENCE|SCHEMA)\b/i,
-  /\bDROP COLUMN\b/i,
-  /\bRENAME\b/i,
-  /\bSET DATA TYPE\b/i,
-  /\bSET NOT NULL\b/i,
+const matches = (pattern: RegExp) => (statement: string) =>
+  pattern.test(statement);
+
+/** A new column nothing fills: old instances insert without it, and existing rows have no value for it. */
+function addsRequiredColumn(statement: string): boolean {
+  return (
+    /\bADD COLUMN\b/i.test(statement) &&
+    /\bNOT NULL\b/i.test(statement) &&
+    !/\b(DEFAULT|GENERATED)\b/i.test(statement)
+  );
+}
+
+const BREAKS_PREVIOUS_RELEASE: ReadonlyArray<(statement: string) => boolean> = [
+  matches(/^DROP (TABLE|VIEW|MATERIALIZED VIEW|TYPE|SEQUENCE|SCHEMA)\b/i),
+  matches(/\bDROP COLUMN\b/i),
+  matches(/\bRENAME\b/i),
+  matches(/\bSET DATA TYPE\b/i),
+  matches(/\bSET NOT NULL\b/i),
+  addsRequiredColumn,
 ];
 
 /**
@@ -269,9 +282,7 @@ const BREAKS_PREVIOUS_RELEASE = [
  */
 export function breakingStatements(statements: readonly string[]): string[] {
   return statements.filter((statement) =>
-    BREAKS_PREVIOUS_RELEASE.some((pattern) =>
-      pattern.test(statement.trimStart()),
-    ),
+    BREAKS_PREVIOUS_RELEASE.some((breaks) => breaks(statement.trimStart())),
   );
 }
 
