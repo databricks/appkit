@@ -3,25 +3,25 @@
     {
       "name": "@databricks/appkit",
       "tarball": {
-        "packed": 1307341,
-        "unpacked": 4483286
+        "packed": 1307985,
+        "unpacked": 4485075
       },
       "dist": {
         "total": {
-          "raw": 4467896,
-          "gzip": 1532807
+          "raw": 4469680,
+          "gzip": 1533502
         },
         "js": {
-          "raw": 1330311,
-          "gzip": 472775
+          "raw": 1330979,
+          "gzip": 473055
         },
         "types": {
           "raw": 475865,
-          "gzip": 172553
+          "gzip": 172554
         },
         "maps": {
-          "raw": 2650925,
-          "gzip": 883661
+          "raw": 2652041,
+          "gzip": 884075
         },
         "css": {
           "raw": 0,
@@ -36,17 +36,17 @@
       "entries": [
         {
           "id": ".",
-          "gzip": 112386,
+          "gzip": 112484,
           "composition": {
-            "initialGzip": 109812,
+            "initialGzip": 109910,
             "lazyGzip": 2574,
-            "totalGzip": 112386,
-            "own": 355118,
+            "totalGzip": 112484,
+            "own": 355340,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "index.js",
-                "gzip": 105142,
+                "gzip": 105240,
                 "kind": "initial"
               },
               {
@@ -64,17 +64,17 @@
         },
         {
           "id": "./beta",
-          "gzip": 106321,
+          "gzip": 106319,
           "composition": {
-            "initialGzip": 105836,
-            "lazyGzip": 485,
-            "totalGzip": 106321,
-            "own": 318256,
+            "initialGzip": 105835,
+            "lazyGzip": 484,
+            "totalGzip": 106319,
+            "own": 318267,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "beta.js",
-                "gzip": 85172,
+                "gzip": 85173,
                 "kind": "initial"
               },
               {
@@ -89,17 +89,17 @@
               },
               {
                 "label": "service-context.js",
-                "gzip": 4416,
+                "gzip": 4414,
                 "kind": "initial"
               },
               {
                 "label": "databricks.js",
-                "gzip": 3397,
+                "gzip": 3399,
                 "kind": "initial"
               },
               {
                 "label": "client.js",
-                "gzip": 648,
+                "gzip": 646,
                 "kind": "initial"
               },
               {
@@ -114,7 +114,7 @@
               },
               {
                 "label": "databricks.js",
-                "gzip": 178,
+                "gzip": 177,
                 "kind": "lazy"
               },
               {
@@ -127,12 +127,12 @@
         },
         {
           "id": "./testing",
-          "gzip": 80854,
+          "gzip": 80853,
           "composition": {
-            "initialGzip": 47238,
+            "initialGzip": 47237,
             "lazyGzip": 33616,
-            "totalGzip": 80854,
-            "own": 233886,
+            "totalGzip": 80853,
+            "own": 233897,
             "nodeModules": null,
             "chunks": [
               {
@@ -142,7 +142,7 @@
               },
               {
                 "label": "index.js",
-                "gzip": 10287,
+                "gzip": 10286,
                 "kind": "initial"
               },
               {
@@ -209,7 +209,7 @@
     {
       "name": "@databricks/appkit-ui",
       "tarball": {
-        "packed": 406469,
+        "packed": 406473,
         "unpacked": 1601172
       },
       "dist": {
@@ -290,15 +290,15 @@
           "id": "./react",
           "gzip": 50934,
           "composition": {
-            "initialGzip": 443047,
+            "initialGzip": 444477,
             "lazyGzip": 49772,
-            "totalGzip": 492819,
-            "own": 181685,
-            "nodeModules": 1403041,
+            "totalGzip": 494249,
+            "own": 181696,
+            "nodeModules": 1406372,
             "chunks": [
               {
                 "label": "index.js",
-                "gzip": 440897,
+                "gzip": 442327,
                 "kind": "initial"
               },
               {
