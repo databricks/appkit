@@ -28,7 +28,7 @@ export interface CheckReport {
 }
 
 const REWRITE =
-  "Merge the base branch, reset the migrations to its own (for example `git restore --source origin/main --staged --worktree config/database/migrations`), then run `appkit db clean` and `appkit db migrate`: migrate writes your change again after the base branch's migrations, and applies them all to your rebuilt branch.";
+  "Save any SQL you wrote by hand in your migration. Merge the base branch, reset the migrations to its own (for example `git restore --source origin/main --staged --worktree config/database/migrations`), then run `appkit db clean` and `appkit db migrate`, which writes your schema change again after the base branch's migrations and applies them all to your rebuilt branch. Add the saved SQL back to the regenerated migration and review its SQL before you commit.";
 
 /** Entries numbered or ordered in a way the migrator or drizzle-kit misreads. */
 function orderProblems(entries: readonly JournalEntry[]): string[] {

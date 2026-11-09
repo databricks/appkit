@@ -373,10 +373,12 @@ exits 1 when:
 
 Two pull requests that each add a migration conflict in
 `config/database/migrations` once one of them is merged, and keeping both sides
-fails the check. Resolve the conflict with the base branch's migrations instead:
-merge the base branch, reset `config/database/migrations` to the base branch's,
-then run `npx appkit db clean` and `npx appkit db migrate`. `migrate` writes your
-change again after the base branch's migrations.
+fails the check. Resolve the conflict with the base branch's migrations instead.
+Save any SQL you wrote by hand in your migration, such as a backfill. Merge the
+base branch, reset `config/database/migrations` to the base branch's, then run
+`npx appkit db clean` and `npx appkit db migrate`. `migrate` writes your schema
+change again after the base branch's migrations. Add the saved SQL back to the
+regenerated migration and review its SQL before you commit.
 
 After a deploy, check the deployed app with workspace credentials:
 
