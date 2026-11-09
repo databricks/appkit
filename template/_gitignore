@@ -11,6 +11,8 @@ playwright-report/
 
 # `appkit db` holds it while a command changes the migration history
 config/database/.appkit-db.lock
+# `appkit db init` writes .env through this file; a killed run can leave it, secrets included
+..env.*.tmp
 
 # Auto-generated types (endpoint-specific, varies per developer)
 shared/appkit-types/serving.d.ts
