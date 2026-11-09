@@ -108,6 +108,8 @@ function branch(state: {
   columns: Record<string, string[]>;
   /** The journal table's rows; "absent" without the table. */
   recorded: Array<{ hash: string; created_at: string }> | "absent";
+  /** Declared tables that exist in schema public instead. */
+  inPublic?: string[];
   failOn?: RegExp;
 }) {
   const statements: string[] = [];
@@ -115,6 +117,11 @@ function branch(state: {
     query: vi.fn(async (text: string, values?: unknown[]) => {
       statements.push(text);
       if (state.failOn?.test(text)) throw new Error("connection reset");
+      if (/n\.nspname = 'public'/.test(text)) {
+        return {
+          rows: (state.inPublic ?? []).map((table_name) => ({ table_name })),
+        };
+      }
       if (/pg_catalog\.pg_attribute/.test(text)) {
         expect(values?.[0]).toBe("app");
         return {
@@ -170,6 +177,7 @@ describe("runVerify", () => {
   ];
   const clean = {
     schemaProblems: [],
+    schemaAdvice: null,
     pendingMigrations: [],
     strandedMigrations: [],
     editedMigrations: [],
@@ -213,7 +221,26 @@ describe("runVerify", () => {
 
     expect(await runVerify(ctx)).toMatchObject({
       schemaProblems: ["table app.notes does not exist"],
+      schemaAdvice: null,
       pendingMigrations: ["0000_baseline"],
+      ok: false,
+    });
+  });
+
+  test("declared tables that exist in public are named as the cause, as the app's startup check does", async () => {
+    const ctx = app(two);
+    branch({
+      columns: {},
+      recorded: recordedAs(ctx, two),
+      inPublic: ["notes"],
+    });
+
+    expect(await runVerify(ctx)).toMatchObject({
+      ...clean,
+      schemaProblems: ["table app.notes does not exist"],
+      schemaAdvice:
+        `Schema public has that table, but defineSchema() puts tables in schema "app" unless told otherwise. ` +
+        'To keep them in public, pass { schemaName: "public" } as the second argument of defineSchema() in config/database/schema.ts.',
       ok: false,
     });
   });

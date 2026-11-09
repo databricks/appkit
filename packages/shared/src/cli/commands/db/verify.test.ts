@@ -33,6 +33,7 @@ const local = {
   kind: "local" as const,
   branch: "projects/p/branches/dev-alice-3f9a2c",
   schemaProblems: [],
+  schemaAdvice: null,
   pendingMigrations: [],
   strandedMigrations: [],
   editedMigrations: [],
@@ -124,6 +125,28 @@ describe("appkit db verify", () => {
     expect(output(error)).toContain(
       "If you changed schema.ts, run `appkit db migrate`; if the branch was changed by hand, `appkit db clean` and then `appkit db migrate` rebuild it from the migrations.",
     );
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("tables left in public: the hint is that cause, before any other, never to migrate", async () => {
+    const advice =
+      'Schema public has that table, but defineSchema() puts tables in schema "app" unless told otherwise. To keep them in public, pass { schemaName: "public" } as the second argument of defineSchema() in config/database/schema.ts.';
+    runVerify.mockResolvedValue({
+      ...local,
+      schemaProblems: ["table app.notes does not exist"],
+      schemaAdvice: advice,
+      editedMigrations: ["0000_migration"],
+      ok: false,
+    });
+
+    await dbCommand.parseAsync(["verify"], { from: "user" });
+
+    expect(output(log)).toContain("Schema: table app.notes does not exist");
+    const printed = output(error);
+    expect(printed).toContain(
+      `dev-alice-3f9a2c does not match config/database/schema.ts and the committed migrations. ${advice}`,
+    );
+    expect(printed).not.toContain("appkit db migrate");
     expect(process.exitCode).toBe(1);
   });
 

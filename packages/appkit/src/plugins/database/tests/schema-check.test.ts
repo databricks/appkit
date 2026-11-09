@@ -2,10 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 
 import type { DataPath } from "../../../database/runtime";
 import { defineSchema, fk, id, text } from "../../../database/schema-builder";
-import {
-  assertSchemaMatchesDatabase,
-  findSchemaProblems,
-} from "../schema-check";
+import { assertSchemaMatchesDatabase, diagnoseSchema } from "../schema-check";
 
 // Explicitly public: the assertions name the tables public.boards and public.notes.
 const schema = defineSchema(
@@ -195,21 +192,40 @@ describe("assertSchemaMatchesDatabase", () => {
   });
 });
 
-describe("findSchemaProblems", () => {
+describe("diagnoseSchema", () => {
   test("returns every problem without throwing; the assert reports the same ones", async () => {
     const { path } = catalog(
       { boards: ["id", "title"], notes: ["id", "body"] },
       { boards: "v" },
     );
 
-    const problems = await findSchemaProblems(path, schema);
+    const { problems, advice } = await diagnoseSchema(path, schema);
 
     expect(problems).toEqual([
       "table public.boards is a view, not a table",
       "table public.notes is missing columns board_id, author_email",
     ]);
+    expect(advice).toBeNull();
     await expect(assertSchemaMatchesDatabase(path, schema)).rejects.toThrow(
       `the declared schema does not match the database: ${problems.join("; ")}.`,
+    );
+  });
+
+  test("names tables left in public as the cause, the same advice the assert gives", async () => {
+    const appSchema = defineSchema(({ table }) => ({
+      notes: table("notes", { id: id() }),
+    }));
+    const { path } = catalog({}, {}, ["notes"]);
+
+    const { problems, advice } = await diagnoseSchema(path, appSchema);
+
+    expect(problems).toEqual(["table app.notes does not exist"]);
+    expect(advice).toBe(
+      `Schema public has that table, but defineSchema() puts tables in schema "app" unless told otherwise. ` +
+        'To keep them in public, pass { schemaName: "public" } as the second argument of defineSchema() in config/database/schema.ts.',
+    );
+    await expect(assertSchemaMatchesDatabase(path, appSchema)).rejects.toThrow(
+      advice as string,
     );
   });
 
@@ -218,15 +234,18 @@ describe("findSchemaProblems", () => {
       boards: ["id", "title"],
       notes: ["id", "board_id", "author_email", "body"],
     });
-    expect(await findSchemaProblems(path, schema)).toEqual([]);
+    expect(await diagnoseSchema(path, schema)).toEqual({
+      problems: [],
+      advice: null,
+    });
 
     const empty = catalog({});
     expect(
-      await findSchemaProblems(
+      await diagnoseSchema(
         empty.path,
         defineSchema(() => ({})),
       ),
-    ).toEqual([]);
+    ).toEqual({ problems: [], advice: null });
     expect(empty.raw).not.toHaveBeenCalled();
   });
 });
