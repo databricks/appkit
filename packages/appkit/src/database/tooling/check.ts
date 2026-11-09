@@ -117,8 +117,9 @@ function chainProblems(
 
 /**
  * `appkit db check`: the committed migrations are in order, every file they
- * list is committed, and schema.ts has no change without a migration. It reads
- * only files, so CI can run it without Databricks or Lakebase access.
+ * list is committed, and schema.ts has no change without a migration. It
+ * imports schema.ts and needs no Databricks or Lakebase access, so CI runs it
+ * on every pull request.
  */
 export async function runCheck(ctx: DbContext): Promise<CheckReport> {
   requireSchemaFile(ctx.root, "check");

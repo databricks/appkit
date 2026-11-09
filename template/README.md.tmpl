@@ -83,8 +83,9 @@ runs `config/database/seed.sql` on it; both refuse any branch `db init` did not
 create for you, such as the deployed one.
 
 In CI, `npx appkit db check` fails a pull request whose `schema.ts` change has no
-migration, or whose migrations are out of order or missing files. It reads only the
-checkout, so it needs no Databricks credentials.
+migration, or whose migrations are out of order or missing files. It needs no
+Databricks credentials, and it imports `schema.ts`, so give the job that runs it
+no secrets.
 {{- end}}
 
 ### CLI Authentication

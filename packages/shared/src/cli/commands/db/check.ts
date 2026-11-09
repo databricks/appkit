@@ -21,11 +21,15 @@ export const dbCheckCommand = new Command("check")
   .addHelpText(
     "after",
     `
-Reads only the checkout, so it needs no Databricks or Lakebase access, only
-the app's installed dependencies (drizzle-kit included). It fails when:
+Needs no Databricks or Lakebase access, only the app's installed dependencies
+(drizzle-kit included). It imports schema.ts, so give a CI job that runs it no
+secrets. It compares the snapshots and schema.ts and does not read the .sql
+files. It fails when:
   - the journal lists a migration generated before the one listed ahead of it;
   - two migrations were generated from the same snapshot on parallel branches;
-  - an entry's idx is not its position in the journal;
+  - the first migration was not generated from an empty database;
+  - an entry's idx is not its position in the journal, or its when is not an
+    integer timestamp;
   - a migration's .sql or snapshot is not committed, a snapshot is not a
     drizzle-kit snapshot, or a .sql is not in the journal;
   - schema.ts changed and no committed migration has the change.

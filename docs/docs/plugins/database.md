@@ -360,14 +360,21 @@ dependencies:
 npx appkit db check
 ```
 
-It reads only the checkout, so it needs no Databricks or Lakebase credentials. It
+It needs no Databricks or Lakebase credentials. It is not a sandbox, though. To
+load `schema.ts` it imports that file and everything the file imports, so it
+runs the pull request's code. Give the CI job that runs it no secrets. It
+compares the snapshots with each other and with `schema.ts`, and does not read
+the `.sql` files, so SQL edited by hand is not checked against its snapshot. It
 exits 1 when:
 
 - `schema.ts` changed and no committed migration has the change;
 - a migration is listed after one generated later, which a branch that ran the
   later one never runs;
 - two migrations were generated from the same snapshot on parallel git branches;
-- an entry's `idx` is not its position in the journal;
+- the first migration was not generated from an empty database, so the ones
+  before it are missing;
+- an entry's `idx` is not its position in the journal, or its `when` is not an
+  integer timestamp;
 - a migration's `.sql` or snapshot is not committed, a snapshot is not a
   drizzle-kit snapshot, or a `.sql` is not in the journal.
 
