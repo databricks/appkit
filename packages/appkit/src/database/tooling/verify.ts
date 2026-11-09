@@ -73,7 +73,11 @@ type DeployedMigrations =
   /** The snapshot could not be read, so whether it has them is unknown. */
   | { readonly evidence: "unavailable"; readonly reason: string };
 
-/** `appkit db verify --deployed`: whether a target's deployed app runs on its branch with the committed migrations. */
+/**
+ * `appkit db verify --deployed`: whether a target's deployed app is bound to
+ * its branch, running, and deployed from a source with the committed
+ * migrations. It reads no database, so not whether they ran there.
+ */
 interface DeployVerifyReport {
   readonly kind: "deploy";
   readonly target: string;
@@ -479,7 +483,11 @@ function detail(message: string | undefined): string {
   return text ? `: ${text}` : "";
 }
 
-/** Whether the app is up: a running app has applied its migrations and checked its schema on start. */
+/**
+ * Whether the app is up. A running app passed its start, which checks its
+ * schema and, with APPKIT_DB_MIGRATE_ON_START=true, applies pending
+ * migrations; verify itself reads no database.
+ */
 function runningProblems(app: DeployedApp, name: string): string[] {
   const pending = app.pending_deployment?.status;
   if (pending?.state === "IN_PROGRESS") {
@@ -568,7 +576,8 @@ function selectTarget(
  * be bound to the branch and database databricks.yml names with
  * CAN_CONNECT_AND_CREATE, have a role on the branch for its service
  * principal, be running, and run a snapshot with the journal entry and SQL of
- * every committed migration.
+ * every committed migration. That is the deployed source, not the database:
+ * whether the migrations ran there is not checked.
  */
 async function verifyDeploy(
   ctx: DbContext,
@@ -729,9 +738,11 @@ async function verifyDeploy(
 /**
  * `appkit db verify`: check the `.env` branch against schema.ts (the plugin's
  * startup check) and the committed migrations, read-only. With `deployed`,
- * check through the Databricks API that a target's deployed app runs on its
- * branch with the committed migrations; that reads no database, so it needs
- * no role on the deploy branch. Nothing is written or created either way.
+ * check through the Databricks API that a target's deployed app is bound to
+ * its branch, running, and deployed from a source with the committed
+ * migrations; that reads no database, so it needs no role on the deploy
+ * branch and does not tell whether the migrations ran there. Nothing is
+ * written or created either way.
  */
 export async function runVerify(
   ctx: DbContext,

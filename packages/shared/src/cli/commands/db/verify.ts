@@ -51,11 +51,15 @@ resource names the branch and database in databricks.yml with
 CAN_CONNECT_AND_CREATE, that its service principal has a role on the branch,
 that the app is running, and that the source its active deployment runs has
 every committed migration, with the same journal entry and SQL, and no
-migration this checkout does not commit. When the checkout has
+migration this checkout does not commit. It reads no database, so it does
+not check that those migrations ran there. An app that sets
+APPKIT_DB_MIGRATE_ON_START=true applies them on start, and a migration that
+fails stops it; \`databricks apps logs\` shows why. When the checkout has
 .databricks/bundle/<target>/variable-overrides.json, the branch and database
 come from it, as a deploy from this checkout uses them. When verify cannot
 read that source, it fails. It refuses when the target's workspace.host is
-not the workspace this shell is authenticated against.
+not the workspace this shell is authenticated against, or when this
+checkout's files do not resolve it.
 
 Exits 1 on any finding. Nothing is written or created.
 

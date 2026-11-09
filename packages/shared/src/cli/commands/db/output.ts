@@ -167,7 +167,7 @@ function printDeployVerifyReport(report: DeployVerifyReport): void {
     );
     if (report.migrations?.evidence === "verified") {
       ok(
-        "Its active deployment has every committed migration, with the same SQL",
+        "Its deployed source has every committed migration, with the same journal entry and SQL",
       );
     }
     return;

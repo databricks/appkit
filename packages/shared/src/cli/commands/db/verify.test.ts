@@ -229,7 +229,7 @@ describe("appkit db verify", () => {
         "app my-app (target prod on https://acme.cloud.databricks.com) is running, bound to production with CAN_CONNECT_AND_CREATE, and its service principal has a role there",
       );
       expect(printed).toContain(
-        "Its active deployment has every committed migration, with the same SQL",
+        "Its deployed source has every committed migration, with the same journal entry and SQL",
       );
       expect(error).not.toHaveBeenCalled();
       expect(process.exitCode).toBeUndefined();
