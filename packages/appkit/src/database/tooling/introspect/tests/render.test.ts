@@ -422,6 +422,62 @@ describe("renderSchemaSource", () => {
     expect(source).toContain("    code: varchar(2),");
   });
 
+  test("a literal default cast to a quoted type name keeps its value", () => {
+    const { source, skipped } = firstRender([
+      keyed("t", [
+        col("status", 'app."order-status"', {
+          notNull: true,
+          defaultExpr: `'open'::app."order-status"`,
+          enum: {
+            name: "order-status",
+            schema: "app",
+            values: ["open", "closed"],
+          },
+        }),
+        col("etat", 'app."état"', {
+          defaultExpr: `'ouvert'::app."état"`,
+          enum: { name: "état", schema: "app", values: ["ouvert", "fermé"] },
+        }),
+      ]),
+    ]);
+
+    expect(source).toContain(
+      '    status: enumType("order-status", ["open", "closed"]).notNull().default("open"),',
+    );
+    expect(source).toContain(
+      '    etat: enumType("état", ["ouvert", "fermé"]).default("ouvert"),',
+    );
+    expect(skipped).toEqual([]);
+  });
+
+  test("an enum with an empty label is skipped, since the builder does not accept it", () => {
+    const out = firstRender([
+      keyed("t", [
+        col("mood", "app.mood", {
+          notNull: true,
+          enum: { name: "mood", schema: "app", values: ["", "ok"] },
+        }),
+      ]),
+    ]);
+
+    expect(out.skipped).toEqual([
+      {
+        table: "t",
+        column: "mood",
+        reason:
+          'enum type "mood" has an empty label, which the builder does not accept',
+      },
+    ]);
+    expect(out.unexpressed).toContainEqual({
+      kind: "type",
+      name: "mood",
+      reason: "only what schema.ts leaves out uses it",
+    });
+    expect(out.warnings).toEqual([
+      expect.stringMatching(/^app\.t\.mood is NOT NULL with no default/),
+    ]);
+  });
+
   test("a catalog name with a line break stays inside its comment", () => {
     const evil = "x\nrequire('node:child_process').execSync('touch /tmp/p')//";
     const { source, skipped, warnings } = firstRender(

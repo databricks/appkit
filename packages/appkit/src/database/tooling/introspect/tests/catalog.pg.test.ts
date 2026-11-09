@@ -41,6 +41,11 @@ describe.skipIf(!url)("readCatalog against Postgres", () => {
       create table ${s}.parts (id integer primary key) partition by range (id);
       create table ${s}.parts_1 partition of ${s}.parts for values from (0) to (100);
       create table ${s}.refs (id integer primary key, part_id integer references ${s}.parts (id));
+      create type ${s}."order-status" as enum ('open', 'closed');
+      create table ${s}.orders (
+        id integer primary key,
+        status ${s}."order-status" not null default 'open'
+      );
 
       create view ${s}.active_authors as select * from ${s}.authors;
       create materialized view ${s}.mv as select 1 as x;
@@ -70,6 +75,7 @@ describe.skipIf(!url)("readCatalog against Postgres", () => {
       "base",
       "child",
       "events",
+      "orders",
       "parts",
       "posts",
       "refs",
@@ -118,6 +124,16 @@ describe.skipIf(!url)("readCatalog against Postgres", () => {
       name: "ticket_status",
       schema,
       values: ["open", "closed"],
+    });
+    // A type name with punctuation comes back quoted in the default's cast.
+    expect(byName.orders?.columns.find((c) => c.name === "status")).toEqual({
+      name: "status",
+      type: `${schema}."order-status"`,
+      notNull: true,
+      identity: "",
+      generated: false,
+      defaultExpr: `'open'::${schema}."order-status"`,
+      enum: { name: "order-status", schema, values: ["open", "closed"] },
     });
     expect(byName.events?.primaryKey).toEqual(["a", "b"]);
     expect(byName.parts?.partitioned).toBe(true);
