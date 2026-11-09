@@ -2,8 +2,12 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-/** An entry's first line: indentation and `export ` (kept on rewrite), the key, the value. */
-const ENTRY = /^(\s*(?:export\s+)?)([\w.-]+)\s*=\s*(.*)$/;
+/**
+ * An entry's first line: indentation and `export ` (kept on rewrite), the key,
+ * the value. dotenv also reads `KEY: value` (a colon, then whitespace); a
+ * rewrite writes it back as `KEY=`.
+ */
+const ENTRY = /^(\s*(?:export\s+)?)([\w.-]+)(?:\s*=\s*|:\s+)(.*)$/;
 const QUOTES = new Set(['"', "'", "`"]);
 const PLAIN_VALUE = /^[A-Za-z0-9_./:@+-]*$/;
 
