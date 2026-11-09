@@ -398,10 +398,13 @@ async function prepareMigrationSession(
     );
     reset.push("client_connection_check_interval");
   } catch (error) {
-    // Postgres before 14, or a server that cannot poll sockets.
-    logger.debug(
-      "client_connection_check_interval not set: %s",
+    // Postgres before 14, or a server that cannot poll sockets. With
+    // statement_timeout off, nothing else ends a dead instance's statement.
+    logger.warn(
+      "client_connection_check_interval not set (%s). If this instance dies while a migration statement runs, the server notices only once the statement ends, and the statement keeps its locks until then. " +
+        "To end it sooner, find its pid in pg_stat_activity (application_name '%s') and run select pg_terminate_backend(pid).",
       error instanceof Error ? error.message : String(error),
+      APPLICATION_NAME,
     );
   }
 }
