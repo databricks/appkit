@@ -1,6 +1,10 @@
-import { randomBytes } from "node:crypto";
 import fs from "node:fs";
-import path from "node:path";
+
+import {
+  refuseSymlink as refuseLink,
+  SymlinkRefusedError,
+  writeFileAtomic,
+} from "./files";
 
 /**
  * An entry's first line: indentation and `export ` (kept on rewrite), the key,
@@ -72,24 +76,13 @@ function entries(lines: readonly string[]): Entry[] {
 }
 
 export function refuseSymlink(file: string): void {
-  if (!fs.lstatSync(file, { throwIfNoEntry: false })?.isSymbolicLink()) return;
-  throw new Error(
-    `Refusing to rewrite ${file}: it is a symbolic link to ${fs.readlinkSync(file)}, and writing through it would change that file. Replace it with a regular file, then rerun.`,
-  );
-}
-
-/** A crash leaves the old file or the new one, never a truncated one. */
-function writeAtomically(file: string, contents: string): void {
-  const temp = path.join(
-    path.dirname(file),
-    `.${path.basename(file)}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`,
-  );
   try {
-    fs.writeFileSync(temp, contents, { mode: 0o600, flag: "wx" });
-    fs.renameSync(temp, file);
+    refuseLink(file);
   } catch (error) {
-    fs.rmSync(temp, { force: true });
-    throw error;
+    if (!(error instanceof SymlinkRefusedError)) throw error;
+    throw new Error(
+      `Refusing to rewrite ${file}: it is a symbolic link to ${fs.readlinkSync(file)}, and writing through it would change that file. Replace it with a regular file, then rerun.`,
+    );
   }
 }
 
@@ -128,5 +121,5 @@ export function updateEnvFile(
       out.push(`${key}=${formatValue(key, value)}`);
     }
   }
-  writeAtomically(file, `${out.join(eol)}${eol}`);
+  writeFileAtomic(file, `${out.join(eol)}${eol}`, { mode: 0o600 });
 }
