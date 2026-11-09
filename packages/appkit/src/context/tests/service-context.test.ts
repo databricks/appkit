@@ -80,6 +80,8 @@ describe("ServiceContext", () => {
     vi.clearAllMocks();
     ServiceContext.reset();
     setupDatabricksEnv();
+    // Databricks-hosted shells export this; it would short-circuit SCIM lookup
+    delete process.env.DATABRICKS_WORKSPACE_ID;
     setupDefaultMocks();
   });
 

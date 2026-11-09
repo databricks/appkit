@@ -1183,6 +1183,22 @@ export class FilesPlugin extends Plugin implements ToolProvider {
       return;
     }
 
+    // A body parser that already drained the request would make us write an
+    // empty file and report success; fail loudly instead.
+    if (req.readableEnded) {
+      logger.error(
+        req,
+        "Upload body already consumed: volume=%s path=%s",
+        volumeKey,
+        path,
+      );
+      res.status(500).json({
+        error: "Upload body was already consumed before the upload handler.",
+        plugin: this.name,
+      });
+      return;
+    }
+
     logger.debug(req, "Upload started: volume=%s path=%s", volumeKey, path);
 
     const { mode, userCtx } = this._resolveAuthForRequest(req, volumeKey);

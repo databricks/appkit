@@ -77,7 +77,7 @@ export class ServerPlugin extends Plugin {
   private resolvedListenPort?: number;
   declare protected config: ServerConfig;
   private serverExtensions: ((app: express.Application) => void)[] = [];
-  private rawBodyPaths: Set<string> = new Set();
+  private rawBodyPaths: RegExp[] = [];
   /**
    * Resolves when `server.close()` completes. Created in
    * {@link abortActiveOperations} (which initiates the close) and awaited in
@@ -145,9 +145,10 @@ export class ServerPlugin extends Plugin {
           // Skip JSON parsing for routes that declared skipBodyParsing
           // (e.g. file uploads where the raw body must flow through).
           // rawBodyPaths is populated by extendRoutes() below; the type
-          // callback runs per-request so the set is already filled.
+          // callback runs per-request so the list is already filled.
           const urlPath = req.url?.split("?")[0];
-          if (urlPath && this.rawBodyPaths.has(urlPath)) return false;
+          if (urlPath && this.rawBodyPaths.some((re) => re.test(urlPath)))
+            return false;
           const ct = req.headers["content-type"] ?? "";
           return ct.includes("json");
         },
@@ -289,8 +290,17 @@ export class ServerPlugin extends Plugin {
           plugin.getSkipBodyParsingPaths &&
           typeof plugin.getSkipBodyParsingPaths === "function"
         ) {
+          // Paths are route patterns (e.g. `/api/files/:volumeKey/upload`).
+          // Match them like Express 4 does by default: one segment per
+          // `:param`, optional trailing slash, case-insensitive.
+          // shortcut: only `:param` segments are supported, not Express
+          // wildcards/regex paths; switch to path-to-regexp if a
+          // skipBodyParsing route needs them.
           for (const p of plugin.getSkipBodyParsingPaths()) {
-            this.rawBodyPaths.add(p);
+            const source = p
+              .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+              .replace(/:\w+/g, "[^/]+");
+            this.rawBodyPaths.push(new RegExp(`^${source}/?$`, "i"));
           }
         }
       }
