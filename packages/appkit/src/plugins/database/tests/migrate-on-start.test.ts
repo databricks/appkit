@@ -209,7 +209,10 @@ describe("migrateOnStart", () => {
     ],
     [
       "a stranded migration",
-      new apply.MigrationHistoryError("app", ["0001_parallel"], "0002_b"),
+      new apply.MigrationHistoryError("app", {
+        stranded: ["0001_parallel"],
+        last: "0002_b",
+      }),
       "Migration 0001_parallel is older than 0002_b",
     ],
     [

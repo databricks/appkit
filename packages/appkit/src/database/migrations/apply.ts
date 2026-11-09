@@ -8,6 +8,7 @@ import type { Pool, PoolClient } from "pg";
 
 import { createLogger } from "../../logging/logger";
 import {
+  type AmbiguousTimestamp,
   type MigrationFile,
   type RecordedMigration,
   reconcileMigrations,
@@ -153,24 +154,65 @@ export class MigrationBaselineMismatchError extends Error {
   }
 }
 
+/** Why the committed history cannot be applied over the recorded one. */
+type HistoryRefusal =
+  /** Older than the last recorded migration and never applied, so they would never run. */
+  | { readonly stranded: readonly string[]; readonly last: string }
+  /** Files and rows at one timestamp that cannot be told apart. */
+  | { readonly ambiguous: AmbiguousTimestamp };
+
 /**
- * Committed migrations are older than the last one the database recorded and
- * were never applied, so they would never run. Nothing was applied.
+ * The committed migrations and the recorded ones disagree in a way the
+ * migrator refuses to resolve by itself. Nothing was applied.
  */
 export class MigrationHistoryError extends Error {
+  /** Committed migrations older than the last recorded one that never ran. */
   readonly stranded: readonly string[];
+  /** Committed migrations whose timestamp the database recorded with hashes none of them has. */
+  readonly ambiguous: readonly string[];
 
-  constructor(schemaName: string, stranded: readonly string[], last: string) {
-    const many = stranded.length > 1;
+  constructor(schemaName: string, refusal: HistoryRefusal) {
     super(
-      `Migration${many ? "s" : ""} ${stranded.join(", ")} ${many ? "are" : "is"} older than ${last}, which schema "${schemaName}" already recorded, ` +
-        `and ${many ? "were" : "was"} never applied, so ${many ? "they" : "it"} would never run. This happens when migrations from parallel branches merge. ` +
-        `Delete ${many ? "their" : "its"} .sql file, snapshot and journal entry, generate the migration again from schema.ts, and deploy again. ` +
-        "No migration was applied.",
+      "stranded" in refusal
+        ? strandedMessage(schemaName, refusal.stranded, refusal.last)
+        : ambiguousMessage(schemaName, refusal.ambiguous),
     );
     this.name = "MigrationHistoryError";
-    this.stranded = Object.freeze([...stranded]);
+    this.stranded = Object.freeze(
+      "stranded" in refusal ? [...refusal.stranded] : [],
+    );
+    this.ambiguous = Object.freeze(
+      "ambiguous" in refusal ? tags(refusal.ambiguous.files) : [],
+    );
   }
+}
+
+function strandedMessage(
+  schemaName: string,
+  stranded: readonly string[],
+  last: string,
+): string {
+  const many = stranded.length > 1;
+  return (
+    `Migration${many ? "s" : ""} ${stranded.join(", ")} ${many ? "are" : "is"} older than ${last}, which schema "${schemaName}" already recorded, ` +
+    `and ${many ? "were" : "was"} never applied, so ${many ? "they" : "it"} would never run. This happens when migrations from parallel branches merge. ` +
+    `Delete ${many ? "their" : "its"} .sql file, snapshot and journal entry, generate the migration again from schema.ts, and deploy again. ` +
+    "No migration was applied."
+  );
+}
+
+function ambiguousMessage(
+  schemaName: string,
+  { when, files, recorded }: AmbiguousTimestamp,
+): string {
+  return (
+    `Schema "${schemaName}" recorded ${recorded} migration${recorded === 1 ? "" : "s"} at ${new Date(when).toISOString()}, ` +
+    `and ${files.length} ${files.length === 1 ? "is" : "are"} committed with that timestamp (${tags(files).join(", ")}), none with a recorded hash. ` +
+    "The migrator cannot tell which of them ran and changed since, and which never ran. " +
+    `Compare the hash column of ${journalTable(schemaName)} with the sha256 of each file's versions in version control. ` +
+    "Restore the applied versions; for the others, delete the .sql file, snapshot and journal entry and generate the migration again from schema.ts. " +
+    "No migration was applied."
+  );
 }
 
 /** The migration lock stayed taken past the wait limit. */
@@ -588,8 +630,9 @@ function duration(ms: number): string {
  * transaction, so a failure keeps the ones before it.
  *
  * Fails closed, changing nothing, when a committed migration is older than the
- * last recorded one but was never applied. An applied migration whose file
- * changed, and recorded migrations that are not committed, are logged.
+ * last recorded one but was never applied, or when the files and rows at one
+ * timestamp cannot be paired. An applied migration whose file changed, and
+ * recorded migrations that are not committed, are logged.
  *
  * Baseline adoption: when nothing is recorded yet and `0000_baseline` comes
  * first, the baseline's tables are looked up in pg_catalog. None present → it
@@ -633,7 +676,11 @@ export async function applyPendingMigrations(
       await readRecordedMigrations(client, schemaName),
     );
     let waitedMs = 0;
-    if (history.pending.length > 0 && history.stranded.length === 0) {
+    if (
+      history.pending.length > 0 &&
+      history.stranded.length === 0 &&
+      history.ambiguous.length === 0
+    ) {
       pending = tags(history.pending);
       step = "Waiting for the migration lock";
       await prepareMigrationSession(client, reset);
@@ -649,11 +696,16 @@ export async function applyPendingMigrations(
       );
     }
 
+    const ambiguous = history.ambiguous[0];
+    if (ambiguous) throw new MigrationHistoryError(schemaName, { ambiguous });
     if (history.stranded.length > 0) {
       const last =
         files.find((file) => file.when === history.lastRecorded)?.tag ??
         `the migration recorded at ${new Date(history.lastRecorded ?? 0).toISOString()}`;
-      throw new MigrationHistoryError(schemaName, tags(history.stranded), last);
+      throw new MigrationHistoryError(schemaName, {
+        stranded: tags(history.stranded),
+        last,
+      });
     }
     if (history.edited.length > 0) {
       logger.warn(
