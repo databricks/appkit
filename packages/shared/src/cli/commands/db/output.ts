@@ -110,7 +110,12 @@ function localVerifyHint(report: LocalVerifyReport): string {
   if (report.unknownMigrations > 0) {
     return `${REBUILD}. If the branch ran migrations you have not pulled yet, pull them instead.`;
   }
-  if (report.strandedMigrations.length > 0) return `${REBUILD}.`;
+  // The same guidance the deployed app's MigrationHistoryError gives: the
+  // history itself is wrong, so rebuilding the local branch would not fix it.
+  if (report.strandedMigrations.length > 0) {
+    const its = report.strandedMigrations.length === 1 ? "its" : "their";
+    return `Delete ${its} .sql file, snapshot and journal entry, then run \`appkit db migrate\` to generate the migration again from schema.ts, after the recorded ones.`;
+  }
   // Pending migrations explain the gap; without them, schema.ts changed or the branch was edited.
   return report.pendingMigrations.length > 0
     ? "Run `appkit db migrate` to apply the pending migrations."
@@ -131,7 +136,7 @@ function printLocalVerifyReport(report: LocalVerifyReport): void {
   }
   for (const tag of report.strandedMigrations) {
     warn(
-      `Never runs: ${tag}: it is older than a migration the branch already ran (merged out of order); the deployed app skips it too once it ran a newer one`,
+      `Never runs: ${tag}: it is older than a migration the branch already ran (merged out of order), and the deployed app refuses to start on that history`,
     );
   }
   for (const tag of report.editedMigrations) {
