@@ -56,7 +56,10 @@ function runInCallerScope<T>(
   );
 }
 
-/** Convert downstream 401s before recording or surfacing caller failures. */
+/**
+ * Convert rejected caller credentials (a downstream 401, or a 403 invalid
+ * token) before recording or surfacing caller failures.
+ */
 export function normalizeIdentityError(error: unknown): unknown {
   const caller = getCallerContext();
   if (

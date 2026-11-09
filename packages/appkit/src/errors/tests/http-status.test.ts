@@ -1,4 +1,4 @@
-import { ModularApiError } from "shared/workspace-client";
+import { ApiError, ModularApiError } from "shared/workspace-client";
 import { describe, expect, test } from "vitest";
 
 import { httpStatusOf } from "../http-status";
@@ -27,6 +27,51 @@ describe("modular SDK errors", () => {
       isUnauthorized(new Error("wrapped", { cause: modularError(401) })),
     ).toBe(true);
     expect(isUnauthorized(modularError(403))).toBe(false);
+  });
+
+  test("isUnauthorized recognizes Databricks' 403 for an invalid token", () => {
+    const fromBody = (status: number, body: string) => {
+      const error = ModularApiError.fromHttpError(
+        status,
+        undefined,
+        new TextEncoder().encode(body),
+      );
+      if (!error) throw new Error(`no ApiError for ${status}`);
+      return error;
+    };
+    // Expired, revoked, or malformed PAT (numeric error_code, so code is UNKNOWN).
+    const pat = fromBody(
+      403,
+      '{"error_code":403,"message":"Invalid access token. [ReqId: 438fc878]"}',
+    );
+    // Expired OAuth token: plain-text body, so sdk-core leaves message empty.
+    const oauth = fromBody(403, "Invalid Token");
+    expect(oauth.message).toBe("");
+    expect(isUnauthorized(pat)).toBe(true);
+    expect(isUnauthorized(new Error("wrapped", { cause: pat }))).toBe(true);
+    expect(isUnauthorized(oauth)).toBe(true);
+    // The raw-request seam's wrapper for the same OAuth response.
+    expect(
+      isUnauthorized(
+        new ApiError(
+          "Response from server (Forbidden) Invalid Token",
+          "Forbidden",
+          403,
+          "Invalid Token",
+        ),
+      ),
+    ).toBe(true);
+
+    // Authorization failures and a tampered JWT (400) keep their behavior.
+    expect(
+      isUnauthorized(
+        fromBody(
+          403,
+          '{"error_code":"PERMISSION_DENIED","message":"User does not have USE CATALOG on Catalog \'main\'."}',
+        ),
+      ),
+    ).toBe(false);
+    expect(isUnauthorized(fromBody(400, "Invalid Token"))).toBe(false);
   });
 
   test("httpStatusOf reads statusCode or httpStatusCode", () => {
