@@ -438,13 +438,39 @@ describe("runIntrospect", () => {
     expect((await loadDefaultDatabaseSchema(root)).$schemaName).toBe("public");
   });
 
-  test("the schema schema.ts declares does not change which schema is read, and declares nothing in it", async () => {
+  test("without --schema-name, the schema schema.ts declares is read", async () => {
+    catalog = authorsOnly();
+    const root = tempApp({
+      [SCHEMA]: previousSchema.replace("}));", '}), { schemaName: "sales" });'),
+    });
+
+    const report = await introspect(root);
+
+    expect(catalog.calls.every((call) => call.values[0] === "sales")).toBe(
+      true,
+    );
+    expect(report.schemaName).toBe("sales");
+    expect((await loadDefaultDatabaseSchema(root)).$schemaName).toBe("sales");
+    expect(markMigrationsApplied).toHaveBeenCalledWith(
+      pool,
+      { migrationsFolder: path.join(root, MIGRATIONS), schemaName: "sales" },
+      ["0000_baseline"],
+    );
+  });
+
+  test("--schema-name overrides the schema schema.ts declares, which then declares nothing in it", async () => {
     const root = tempApp({
       [SCHEMA]: previousSchema.replace("}));", '}), { schemaName: "sales" });'),
     });
     const before = tree(root);
 
-    const error = await refusal(root);
+    const error = await rejection(
+      runIntrospect(ctxFor(root), {
+        interactive: false,
+        importSource: BUILDER,
+        schemaName: "app",
+      }),
+    );
 
     expect(catalog.calls.every((call) => call.values[0] === "app")).toBe(true);
     expect(error).toBeInstanceOf(IntrospectRefusedError);
