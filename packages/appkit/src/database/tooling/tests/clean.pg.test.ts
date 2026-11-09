@@ -45,10 +45,15 @@ describe.skipIf(!url)("clean against Postgres", () => {
         create type "${app}".kind as enum ('a', 'b');
         create table "${app}".notes (id integer primary key, kind "${app}".kind);
         create table "${app}".__drizzle_migrations (id serial primary key);
+        create view "${app}".ordered as select id from "${app}".notes order by id;
         create schema "${other}";
         create view "${other}".recent as select id from "${app}".notes;
+        create view "${other}".recent_ids as select id from "${other}".recent;
+        create view "${other}".ordered_too as select id from "${app}".ordered;
         create table "${other}".refs (id integer primary key, note_id integer constraint refs_note_fk references "${app}".notes (id));
         create table "${other}".tagged (id integer primary key, kind "${app}".kind);
+        create view "${other}".tagged_kinds as select kind from "${other}".tagged;
+        create view "${other}".tagged_ids as select id from "${other}".tagged;
       `);
     });
     afterAll(async () => {
@@ -57,13 +62,16 @@ describe.skipIf(!url)("clean against Postgres", () => {
       await pool.end();
     });
 
-    test("reports what CASCADE drops outside the schema, then drops the schema and only those", async () => {
+    test("reports everything CASCADE drops outside the schema, through views over views and dropped columns, then drops the schema and only those", async () => {
       const dependents = await clean(pool, app);
 
       expect(dependents).toEqual([
         `column kind of table ${other}.tagged`,
         `constraint refs_note_fk on table ${other}.refs`,
+        `view ${other}.ordered_too`,
         `view ${other}.recent`,
+        `view ${other}.recent_ids`,
+        `view ${other}.tagged_kinds`,
       ]);
       expect(
         await names(
@@ -76,7 +84,7 @@ describe.skipIf(!url)("clean against Postgres", () => {
           pool,
           `select relname as name from pg_class where relnamespace = '"${other}"'::regnamespace and relkind in ('r', 'v') order by 1`,
         ),
-      ).toEqual(["refs", "tagged"]);
+      ).toEqual(["refs", "tagged", "tagged_ids"]);
     });
   });
 
