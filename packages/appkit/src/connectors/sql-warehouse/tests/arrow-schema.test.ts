@@ -23,7 +23,11 @@ import {
 } from "apache-arrow";
 import { describe, expect, test } from "vitest";
 
-import { buildEmptyArrowIPCBase64, parseDatabricksType } from "../arrow-schema";
+import {
+  buildArrowIPCFromRows,
+  buildEmptyArrowIPCBase64,
+  parseDatabricksType,
+} from "../arrow-schema";
 
 // ============================================================================
 // Helpers
@@ -511,5 +515,230 @@ describe("buildEmptyArrowIPCBase64", () => {
     const table = tableFromIPC(buf);
     expect(table.numRows).toBe(0);
     expect(table.numCols).toBe(0);
+  });
+});
+
+// ============================================================================
+// buildArrowIPCFromRows (rebuilds ARROW_STREAM from INLINE JSON_ARRAY rows)
+// ============================================================================
+
+describe("buildArrowIPCFromRows", () => {
+  type Case = {
+    column: Parameters<typeof buildArrowIPCFromRows>[0][number];
+    cells: Array<string | null>;
+    expected: unknown[];
+  };
+
+  const decimalUnscaled = (v: unknown) =>
+    v === null ? null : String(v as { toString(): string });
+  const cases: Record<string, Case & { read?: (v: unknown) => unknown }> = {
+    INT: {
+      column: { name: "c", typeName: "INT", typeText: "INT" },
+      cells: ["1", null, "-3"],
+      expected: [1, null, -3],
+    },
+    TINYINT: {
+      column: { name: "c", typeName: "BYTE", typeText: "TINYINT" },
+      cells: ["7", null, "-128"],
+      expected: [7, null, -128],
+    },
+    SMALLINT: {
+      column: { name: "c", typeName: "SHORT", typeText: "SMALLINT" },
+      cells: ["32767", null],
+      expected: [32767, null],
+    },
+    BIGINT: {
+      column: { name: "c", typeName: "LONG", typeText: "BIGINT" },
+      cells: ["9007199254740993", null, "-9223372036854775808"],
+      expected: [9007199254740993n, null, -9223372036854775808n],
+    },
+    FLOAT: {
+      column: { name: "c", typeName: "FLOAT", typeText: "FLOAT" },
+      cells: ["1.5", null, "-0.25"],
+      expected: [1.5, null, -0.25],
+    },
+    DOUBLE: {
+      column: { name: "c", typeName: "DOUBLE", typeText: "DOUBLE" },
+      cells: ["1.1", "NaN", null],
+      expected: [1.1, Number.NaN, null],
+    },
+    DECIMAL: {
+      column: {
+        name: "c",
+        typeName: "DECIMAL",
+        typeText: "DECIMAL(10,2)",
+        typePrecision: 10,
+        typeScale: 2,
+      },
+      cells: ["1.50", "-0.05", null, "12345678.99", "7"],
+      expected: ["150", "-5", null, "1234567899", "700"],
+      read: decimalUnscaled,
+    },
+    "DECIMAL without (p,s) in typeText": {
+      column: {
+        name: "c",
+        typeName: "DECIMAL",
+        typeText: "DECIMAL",
+        typePrecision: 12,
+        typeScale: 3,
+      },
+      cells: ["1.5", null],
+      expected: ["1500", null],
+      read: decimalUnscaled,
+    },
+    DATE: {
+      column: { name: "c", typeName: "DATE", typeText: "DATE" },
+      cells: ["2026-01-02", null],
+      expected: [Date.UTC(2026, 0, 2), null],
+    },
+    TIMESTAMP: {
+      column: { name: "c", typeName: "TIMESTAMP", typeText: "TIMESTAMP" },
+      cells: ["2026-01-02T10:00:00.123Z", null],
+      expected: [Date.UTC(2026, 0, 2, 10, 0, 0, 123), null],
+    },
+    TIMESTAMP_NTZ: {
+      column: {
+        name: "c",
+        typeName: "TIMESTAMP_NTZ",
+        typeText: "TIMESTAMP_NTZ",
+      },
+      cells: ["2026-01-02T10:00:00.123", null],
+      expected: [Date.UTC(2026, 0, 2, 10, 0, 0, 123), null],
+    },
+    STRING: {
+      column: { name: "c", typeName: "STRING", typeText: "STRING" },
+      cells: ["a", "", null],
+      expected: ["a", "", null],
+    },
+    BOOLEAN: {
+      column: { name: "c", typeName: "BOOLEAN", typeText: "BOOLEAN" },
+      cells: ["true", "false", null],
+      expected: [true, false, null],
+    },
+    BINARY: {
+      column: { name: "c", typeName: "BINARY", typeText: "BINARY" },
+      cells: ["AQI=", null],
+      expected: [[1, 2], null],
+      read: (v) => (v === null ? null : [...(v as Uint8Array)]),
+    },
+    VOID: {
+      column: { name: "c", typeName: "NULL", typeText: "VOID" },
+      cells: [null, null],
+      expected: [null, null],
+    },
+  };
+
+  test.each(Object.entries(cases))(
+    "%s keeps the native Arrow type and values, nulls included",
+    (_name, { column, cells, expected, read }) => {
+      const ipc = buildArrowIPCFromRows(
+        [column],
+        cells.map((cell) => [cell]),
+      );
+      const table = tableFromIPC(ipc);
+
+      const native = parseDatabricksType(column.typeText ?? "STRING");
+      const field = table.schema.fields[0];
+      expect(field.name).toBe("col_0");
+      expect(field.typeId).toBe(native.typeId);
+      if (column.typeName === "DECIMAL") {
+        const type = field.type as Decimal;
+        expect([type.precision, type.scale]).toEqual([
+          column.typePrecision,
+          column.typeScale,
+        ]);
+      } else {
+        expect(String(field.type)).toBe(String(native));
+      }
+      const values = [...(table.getChild("col_0") as Iterable<unknown>)];
+      expect(values.map((v) => (read ? read(v) : v))).toEqual(expected);
+    },
+  );
+
+  test("positional rows keep duplicate column names and JSON-looking strings verbatim", () => {
+    const payload = '{"id":9007199254740993, "label":"kept verbatim"}';
+    const ipc = buildArrowIPCFromRows(
+      [
+        { name: "x", typeName: "INT", typeText: "INT" },
+        { name: "x", typeName: "INT", typeText: "INT" },
+        { name: "payload", typeName: "STRING", typeText: "STRING" },
+      ],
+      [["1", "2", payload]],
+    );
+    const table = tableFromIPC(ipc);
+    expect(table.schema.fields.map((f) => f.name)).toEqual([
+      "col_0",
+      "col_1",
+      "col_2",
+    ]);
+    expect(table.getChild("col_0")?.get(0)).toBe(1);
+    expect(table.getChild("col_1")?.get(0)).toBe(2);
+    expect(table.getChild("col_2")?.get(0)).toBe(payload);
+  });
+
+  test("nested, interval and geospatial columns stay strings", () => {
+    const columns = [
+      { name: "a", typeText: "ARRAY<INT>" },
+      { name: "m", typeText: "MAP<STRING,INT>" },
+      { name: "s", typeText: "STRUCT<f:INT>" },
+      { name: "i", typeText: "INTERVAL DAY" },
+      { name: "g", typeName: "GEOGRAPHY", typeText: "GEOGRAPHY(4326)" },
+    ];
+    const row = [
+      "[1,2]",
+      '{"k":1}',
+      '{"f":1}',
+      "1 00:00:00.000000000",
+      "POINT(1 2)",
+    ];
+    const table = tableFromIPC(buildArrowIPCFromRows(columns, [row]));
+    expect(table.schema.fields.map((f) => f.typeId)).toEqual(
+      columns.map(() => Type.Utf8),
+    );
+    expect(table.toArray()[0].toJSON()).toEqual({
+      col_0: row[0],
+      col_1: row[1],
+      col_2: row[2],
+      col_3: row[3],
+      col_4: row[4],
+    });
+  });
+
+  test("zero rows still yield the typed schema", () => {
+    const table = tableFromIPC(
+      buildArrowIPCFromRows(
+        [{ name: "n", typeName: "LONG", typeText: "BIGINT" }],
+        [],
+      ),
+    );
+    expect(table.numRows).toBe(0);
+    expect(table.schema.fields[0].typeId).toBe(Type.Int);
+  });
+
+  test("a cell that does not parse as its column type throws", () => {
+    expect(() =>
+      buildArrowIPCFromRows(
+        [{ typeText: "INT" }, { typeText: "DATE" }],
+        [["1", "not-a-date"]],
+      ),
+    ).toThrow(/Invalid date/);
+    expect(() =>
+      buildArrowIPCFromRows(
+        [{ typeText: "DECIMAL(5,2)", typePrecision: 5, typeScale: 2 }],
+        [["abc"]],
+      ),
+    ).toThrow(/Invalid decimal/);
+    expect(() =>
+      buildArrowIPCFromRows([{ typeText: "INT" }], [["abc"]]),
+    ).toThrow(/Invalid integer/);
+    expect(() =>
+      buildArrowIPCFromRows([{ typeText: "BIGINT" }], [["1.5"]]),
+    ).toThrow();
+    expect(() =>
+      buildArrowIPCFromRows([{ typeText: "DOUBLE" }], [["x"]]),
+    ).toThrow(/Invalid number/);
+    expect(() =>
+      buildArrowIPCFromRows([{ typeText: "BOOLEAN" }], [["maybe"]]),
+    ).toThrow(/Invalid boolean/);
   });
 });

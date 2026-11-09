@@ -1,6 +1,12 @@
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { ExecutionError } from "../../errors";
 import { ArrowStreamProcessor } from "../arrow-stream-processor";
+
+const EXTERNAL_LINK_DOWNLOAD_FAILED = "EXTERNAL_LINK_DOWNLOAD_FAILED";
 
 /** A ReadableStream that emits the given pieces in order, then closes. */
 function streamOf(...pieces: Uint8Array[]): ReadableStream<Uint8Array> {
@@ -263,4 +269,272 @@ describe("ArrowStreamProcessor.streamChunks", () => {
     // Refresh failure is swallowed; the retry still runs against the original.
     expect(bytes).toEqual([7]);
   }, 10000);
+});
+
+const response = (status: number, statusText = "") =>
+  ({ ok: false, status, statusText }) as Response;
+const okResponse = (...pieces: number[]) =>
+  ({
+    ok: true,
+    status: 200,
+    body: streamOf(new Uint8Array(pieces)),
+  }) as unknown as Response;
+
+async function failureOf(gen: AsyncGenerator<Uint8Array, void, unknown>) {
+  try {
+    await drain(gen);
+  } catch (error) {
+    return error as ExecutionError;
+  }
+  throw new Error("expected the download to fail");
+}
+
+describe("ArrowStreamProcessor — refused downloads", () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  test("sends the link's httpHeaders on every GET, and the new link's headers after a re-mint", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response(403, "Forbidden"))
+      .mockResolvedValueOnce(okResponse(1));
+    globalThis.fetch = fetchMock;
+    const refresh = vi.fn(async (chunkIndex: number) => ({
+      chunkIndex,
+      externalLink: "https://example.com/fresh",
+      httpHeaders: { "x-key": "fresh" },
+    }));
+
+    const p = new ArrowStreamProcessor({ timeout: 5000, retries: 3 });
+    await drain(
+      p.streamChunks(
+        [
+          {
+            chunkIndex: 0,
+            externalLink: "https://example.com/stale",
+            httpHeaders: { "x-key": "stale" },
+          },
+        ],
+        undefined,
+        refresh,
+      ),
+    );
+
+    expect(fetchMock.mock.calls.map(([, init]) => init?.headers)).toEqual([
+      { "x-key": "stale" },
+      { "x-key": "fresh" },
+    ]);
+  });
+
+  test.each([400, 404, 410])(
+    "a %i is not retried, and the error carries the code and status",
+    async (status) => {
+      const fetchMock = vi.fn().mockResolvedValue(response(status, "No"));
+      globalThis.fetch = fetchMock;
+      const refresh = vi.fn();
+
+      const p = new ArrowStreamProcessor({ timeout: 5000, retries: 3 });
+      const error = await failureOf(
+        p.streamChunks(mockChunks(1), undefined, refresh),
+      );
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(refresh).not.toHaveBeenCalled();
+      expect(error.errorCode).toBe(EXTERNAL_LINK_DOWNLOAD_FAILED);
+      expect(error.context?.httpStatus).toBe(status);
+    },
+  );
+
+  test("a 403 re-mints the link once, retries at once, then stops", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response(403, "Forbidden"));
+    globalThis.fetch = fetchMock;
+    const refresh = vi.fn(async (chunkIndex: number) => ({
+      chunkIndex,
+      externalLink: "https://example.com/fresh",
+    }));
+
+    // retries: 1 proves the re-mint retry is not charged to the attempt budget.
+    const p = new ArrowStreamProcessor({ timeout: 5000, retries: 1 });
+    const started = Date.now();
+    const error = await failureOf(
+      p.streamChunks(mockChunks(1), undefined, refresh),
+    );
+
+    expect(Date.now() - started).toBeLessThan(500);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(error.errorCode).toBe(EXTERNAL_LINK_DOWNLOAD_FAILED);
+    expect(error.context?.httpStatus).toBe(403);
+  });
+
+  test.each([429, 408])(
+    "a %i is retried after the backoff and can succeed",
+    async (status) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(response(status))
+        .mockResolvedValueOnce(okResponse(5));
+      globalThis.fetch = fetchMock;
+
+      const p = new ArrowStreamProcessor({ timeout: 5000, retries: 3 });
+      const bytes = await drain(p.streamChunks(mockChunks(1)));
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(bytes).toEqual([5]);
+    },
+    10000,
+  );
+
+  test("a 5xx keeps retrying and ends without a client-error status", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response(503, "Unavailable"));
+    globalThis.fetch = fetchMock;
+
+    const p = new ArrowStreamProcessor({ timeout: 5000, retries: 2 });
+    const error = await failureOf(p.streamChunks(mockChunks(1)));
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(error.errorCode).toBe(EXTERNAL_LINK_DOWNLOAD_FAILED);
+    expect(error.context?.httpStatus).toBe(503);
+  }, 10000);
+});
+
+describe("ArrowStreamProcessor — storage that stalls", () => {
+  let server: Server;
+  let gets = 0;
+  let handler: Parameters<typeof createServer>[1];
+
+  const link = () =>
+    `http://127.0.0.1:${(server.address() as AddressInfo).port}/chunk`;
+  const chunks = () => [{ chunkIndex: 0, externalLink: link() }];
+
+  beforeEach(async () => {
+    gets = 0;
+    server = createServer((req, res) => {
+      gets++;
+      handler?.(req, res);
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  });
+
+  afterEach(async () => {
+    server.closeAllConnections();
+    await new Promise((r) => server.close(r));
+  });
+
+  test("no response headers within responseTimeoutMs is a denial and is not retried", async () => {
+    handler = () => {};
+
+    const p = new ArrowStreamProcessor({
+      timeout: 5000,
+      retries: 3,
+      responseTimeoutMs: 100,
+    });
+    const started = Date.now();
+    const error = await failureOf(p.streamChunks(chunks()));
+
+    expect(gets).toBe(1);
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(error.errorCode).toBe(EXTERNAL_LINK_DOWNLOAD_FAILED);
+    expect(error.context?.httpStatus).toBeUndefined();
+  });
+
+  test("the default wait for response headers is 10 seconds", () => {
+    expect(ArrowStreamProcessor.DEFAULT_RESPONSE_TIMEOUT).toBe(10_000);
+  });
+
+  test("a healthy chunk that streams for longer than responseTimeoutMs finishes", async () => {
+    handler = (_req, res) => {
+      res.writeHead(200);
+      let sent = 0;
+      const timer = setInterval(() => {
+        res.write(Buffer.from([sent++]));
+        if (sent === 8) {
+          clearInterval(timer);
+          res.end();
+        }
+      }, 60);
+    };
+
+    const p = new ArrowStreamProcessor({
+      timeout: 1000,
+      retries: 1,
+      responseTimeoutMs: 100,
+    });
+    const bytes = await drain(p.streamChunks(chunks()));
+
+    expect(bytes).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  test("a body that stalls after the headers fails with the download code", async () => {
+    handler = (_req, res) => {
+      res.writeHead(200, { "content-length": 1000 });
+      res.flushHeaders();
+    };
+
+    const p = new ArrowStreamProcessor({
+      timeout: 150,
+      retries: 3,
+      responseTimeoutMs: 100,
+    });
+    const error = await failureOf(p.streamChunks(chunks()));
+
+    expect(gets).toBe(1);
+    expect(error.errorCode).toBe(EXTERNAL_LINK_DOWNLOAD_FAILED);
+  });
+
+  test("a connection reset after the headers fails with the download code", async () => {
+    handler = (req, res) => {
+      res.writeHead(200, { "content-length": 1000 });
+      res.flushHeaders();
+      setTimeout(() => req.socket.destroy(), 30);
+    };
+
+    const p = new ArrowStreamProcessor({ timeout: 5000, retries: 3 });
+    const error = await failureOf(p.streamChunks(chunks()));
+
+    expect(error.errorCode).toBe(EXTERNAL_LINK_DOWNLOAD_FAILED);
+  });
+
+  test("patient mode waits for headers as long as the attempt timeout", async () => {
+    handler = (_req, res) => {
+      setTimeout(() => res.end(Buffer.from([9])), 300);
+    };
+    const p = new ArrowStreamProcessor({
+      timeout: 2000,
+      retries: 1,
+      responseTimeoutMs: 100,
+    });
+
+    const strict = await failureOf(p.streamChunks(chunks()));
+    expect(strict.errorCode).toBe(EXTERNAL_LINK_DOWNLOAD_FAILED);
+
+    const bytes = await drain(
+      p.streamChunks(chunks(), undefined, undefined, true),
+    );
+    expect(bytes).toEqual([9]);
+  });
+
+  test("an abort from the caller still reads as a cancellation", async () => {
+    handler = () => {};
+    const controller = new AbortController();
+    const p = new ArrowStreamProcessor({
+      timeout: 5000,
+      retries: 3,
+      responseTimeoutMs: 5000,
+    });
+    const failed = failureOf(p.streamChunks(chunks(), controller.signal));
+    setTimeout(() => controller.abort(), 50);
+
+    const error = await failed;
+    expect(error.errorCode).toBeUndefined();
+    expect(error.message).toMatch(/canceled/);
+  });
 });

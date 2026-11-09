@@ -1,16 +1,34 @@
-import { Table, tableToIPC, Utf8, vectorFromArray } from "apache-arrow";
-import { describe, expect, test, vi } from "vitest";
+import {
+  Table,
+  tableFromIPC,
+  tableToIPC,
+  Utf8,
+  vectorFromArray,
+} from "apache-arrow";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { ExecutionError } from "../../../errors";
+import { ArrowStreamProcessor } from "../../../stream/arrow-stream-processor";
 import {
   type ArrowChunkStreamer,
+  type ArrowDeliveryOut,
+  type ArrowCapability,
   arrowDeliveryUnsupported,
   classifyDispositionRejection,
   decodeArrowAttachmentToRows,
   deliverArrowBytes,
+  deliverArrowBytesWithFallback,
   deliverJsonResult,
   type QueryExecutor,
 } from "../result-delivery";
+import {
+  cellsOf,
+  type Dataset,
+  type FakeStorage,
+  schemaOf,
+  startStorage,
+  typedDataset,
+} from "./cloud-fetch-fixtures";
 
 /** Build a base64 Arrow IPC stream (2 cols, given names + rows). */
 function arrowBase64(names: [string, string]): string {
@@ -170,6 +188,7 @@ describe("deliverArrowBytes — normal warehouse (fallback to EXTERNAL_LINKS)", 
       links,
       undefined,
       undefined,
+      false,
     );
     expect(out.columnNames).toEqual(["a", "b"]);
     expect(chunks).toEqual([extBytes]);
@@ -422,5 +441,308 @@ describe("decodeArrowAttachmentToRows — captured Reyden fixtures", () => {
       REYDEN_NESTED_FIXTURE.columns as unknown as string[],
     );
     expect(rows).toEqual([REYDEN_NESTED_FIXTURE.expected]);
+  });
+});
+
+describe("deliverArrowBytesWithFallback", () => {
+  const LARGE = 26 * 1024 * 1024;
+  const storages: FakeStorage[] = [];
+
+  afterEach(async () => {
+    await Promise.all(storages.splice(0).map((st) => st.close()));
+  });
+
+  async function setup(
+    options: {
+      storage?: Parameters<typeof startStorage>[0];
+      totalByteCount?: number;
+      inline?: () => unknown;
+      rows?: number;
+    } = {},
+  ) {
+    const data: Dataset = typedDataset(options.rows);
+    const storage = await startStorage(options.storage);
+    storage.setBody(data.ipc);
+    storages.push(storage);
+    const executions: string[] = [];
+    const executor: QueryExecutor = {
+      query: async (_q, _p, fp) => {
+        executions.push(`${fp.disposition}+${fp.format}`);
+        if (fp.disposition === "INLINE" && fp.format === "ARROW_STREAM") {
+          throw ExecutionError.statementFailed(
+            "The format field must be JSON_ARRAY when the disposition field is INLINE.",
+            "INVALID_PARAMETER_VALUE",
+          );
+        }
+        if (fp.disposition === "EXTERNAL_LINKS") {
+          return {
+            statement_id: "stmt-links",
+            columnNames: data.columns.map((c) => c.name),
+            totalByteCount: options.totalByteCount,
+            external_links: [{ chunkIndex: 0, externalLink: storage.url() }],
+          };
+        }
+        if (options.inline) return options.inline() as never;
+        return {
+          statement_id: "stmt-json",
+          columns: data.columns,
+          columnNames: data.columns.map((c) => c.name),
+          dataArray: data.dataArray,
+        };
+      },
+    };
+    const processor = new ArrowStreamProcessor({
+      timeout: 1000,
+      retries: 2,
+      responseTimeoutMs: 100,
+    });
+    const streamer: ArrowChunkStreamer = {
+      streamExternalLinks: (links, signal, refresh, patient) =>
+        processor.streamChunks(links, signal, refresh, patient),
+    };
+    return { data, storage, executions, executor, streamer };
+  }
+
+  async function run(
+    ctx: Awaited<ReturnType<typeof setup>>,
+    capabilityHint?: ArrowCapability,
+  ) {
+    const out: ArrowDeliveryOut = {};
+    const reported: ArrowCapability[] = [];
+    const chunks: Uint8Array[] = [];
+    let error: ExecutionError | undefined;
+    try {
+      for await (const bytes of deliverArrowBytesWithFallback(
+        ctx.executor,
+        ctx.streamer,
+        "SELECT 1",
+        undefined,
+        out,
+        undefined,
+        {
+          capabilityHint,
+          onCapabilityResolved: (c) => reported.push(c),
+        },
+      )) {
+        chunks.push(bytes);
+      }
+    } catch (e) {
+      error = e as ExecutionError;
+    }
+    const bytes = Buffer.concat(chunks.map((c) => Buffer.from(c)));
+    return { bytes, out, reported, error };
+  }
+
+  const expectNativeArrow = (ctx: { data: Dataset }, bytes: Uint8Array) => {
+    const native = tableFromIPC(ctx.data.ipc);
+    const served = tableFromIPC(new Uint8Array(bytes));
+    expect(schemaOf(served)).toEqual(schemaOf(native));
+    expect(cellsOf(served)).toEqual(cellsOf(native));
+  };
+
+  test("a healthy workspace streams the download and never runs the inline fallback", async () => {
+    const ctx = await setup();
+    const { bytes, reported, error } = await run(ctx);
+
+    expect(error).toBeUndefined();
+    expect(Buffer.from(ctx.data.ipc).equals(bytes)).toBe(true);
+    expect(ctx.executions).toEqual([
+      "INLINE+ARROW_STREAM",
+      "EXTERNAL_LINKS+ARROW_STREAM",
+    ]);
+    expect(ctx.storage.gets()).toBe(1);
+    expect(reported).toEqual(["external"]);
+  });
+
+  test.each([403, 400])(
+    "a %i from storage serves rebuilt Arrow equal to the native result and reports links-denied",
+    async (status) => {
+      const ctx = await setup({ storage: { kind: "status", status } });
+      const { bytes, out, reported, error } = await run(ctx);
+
+      expect(error).toBeUndefined();
+      expectNativeArrow(ctx, bytes);
+      expect(out.columnNames).toEqual(ctx.data.columns.map((c) => c.name));
+      expect(out.statementId).toBe("stmt-json");
+      expect(ctx.executions).toEqual([
+        "INLINE+ARROW_STREAM",
+        "EXTERNAL_LINKS+ARROW_STREAM",
+        "INLINE+JSON_ARRAY",
+      ]);
+      expect(reported.at(-1)).toBe("links-denied");
+    },
+  );
+
+  test.each([
+    ["no answer", { kind: "hang" }],
+    ["headers then no body", { kind: "hang-after-headers" }],
+    ["headers then a reset", { kind: "reset-after-headers" }],
+  ] as const)(
+    "storage with %s falls back once and is not remembered as denied",
+    async (_name, storage) => {
+      const ctx = await setup({ storage });
+      const { bytes, reported, error } = await run(ctx);
+
+      expect(error).toBeUndefined();
+      expectNativeArrow(ctx, bytes);
+      expect(ctx.storage.gets()).toBe(1);
+      expect(ctx.executions.at(-1)).toBe("INLINE+JSON_ARRAY");
+      expect(reported).not.toContain("links-denied");
+    },
+  );
+
+  test("with the links-denied hint the query goes inline and storage is not touched", async () => {
+    const ctx = await setup({ storage: { kind: "status", status: 403 } });
+    const { bytes, error } = await run(ctx, "links-denied");
+
+    expect(error).toBeUndefined();
+    expectNativeArrow(ctx, bytes);
+    expect(ctx.executions).toEqual(["INLINE+JSON_ARRAY"]);
+    expect(ctx.storage.gets()).toBe(0);
+  });
+
+  test("a refusal that is followed by an unrelated inline failure surfaces that failure unchanged", async () => {
+    const ctx = await setup({
+      storage: { kind: "status", status: 403 },
+      inline: () => {
+        throw ExecutionError.statementFailed(
+          "User does not have SELECT on catalog.schema.table",
+          "PERMISSION_DENIED",
+          "You do not have permission to run this query.",
+        );
+      },
+    });
+    const { error } = await run(ctx);
+
+    expect(error?.errorCode).toBe("PERMISSION_DENIED");
+    expect(error?.clientMessage).toBe(
+      "You do not have permission to run this query.",
+    );
+  });
+
+  test("a refused download of a result too large for inline fails saying why, without running inline", async () => {
+    const ctx = await setup({
+      storage: { kind: "status", status: 403 },
+      totalByteCount: LARGE,
+    });
+    const { error, reported } = await run(ctx);
+
+    expect(error?.errorCode).toBe("EXTERNAL_LINKS_DENIED");
+    expect(error?.clientMessage).toMatch(/workspace storage/);
+    expect(error?.clientMessage).toMatch(/too large to send inline/);
+    expect(error?.clientMessage).not.toMatch(/azure/i);
+    expect(ctx.executions).toEqual([
+      "INLINE+ARROW_STREAM",
+      "EXTERNAL_LINKS+ARROW_STREAM",
+    ]);
+    expect(reported.at(-1)).toBe("links-denied");
+  });
+
+  test("a slow first byte on a large result gets one patient pass instead of a denial", async () => {
+    const ctx = await setup({
+      storage: { kind: "ok", delayMs: 300 },
+      totalByteCount: LARGE,
+    });
+    const { bytes, reported, error } = await run(ctx);
+
+    expect(error).toBeUndefined();
+    expect(Buffer.from(ctx.data.ipc).equals(bytes)).toBe(true);
+    expect(ctx.storage.gets()).toBe(2);
+    expect(ctx.executions).not.toContain("INLINE+JSON_ARRAY");
+    expect(reported).not.toContain("links-denied");
+  });
+
+  test("a large result whose storage never answers fails saying why after the patient pass", async () => {
+    const ctx = await setup({
+      storage: { kind: "hang" },
+      totalByteCount: LARGE,
+    });
+    const { error, reported } = await run(ctx);
+
+    expect(error?.errorCode).toBe("EXTERNAL_LINKS_DENIED");
+    expect(ctx.storage.gets()).toBe(2);
+    expect(ctx.executions).not.toContain("INLINE+JSON_ARRAY");
+    expect(reported).not.toContain("links-denied");
+  });
+
+  test("an inline result that spans several chunks is not served truncated", async () => {
+    const ctx = await setup({
+      storage: { kind: "status", status: 403 },
+      inline: () => ({
+        statement_id: "stmt-json",
+        columns: typedDataset().columns,
+        dataArray: typedDataset().dataArray.slice(0, 3),
+        nextChunkIndex: 1,
+      }),
+    });
+    const { error } = await run(ctx);
+
+    expect(error?.errorCode).toBe("EXTERNAL_LINKS_DENIED");
+  });
+
+  test("with the links-denied hint, a result too big for inline still downloads once storage recovers", async () => {
+    const ctx = await setup({
+      inline: () => ({
+        statement_id: "stmt-json",
+        columns: typedDataset().columns,
+        dataArray: [],
+        nextChunkIndex: 1,
+      }),
+    });
+    const { bytes, reported, error } = await run(ctx, "links-denied");
+
+    expect(error).toBeUndefined();
+    expect(Buffer.from(ctx.data.ipc).equals(bytes)).toBe(true);
+    expect(ctx.executions).toEqual([
+      "INLINE+JSON_ARRAY",
+      "EXTERNAL_LINKS+ARROW_STREAM",
+    ]);
+    expect(ctx.storage.gets()).toBe(1);
+    expect(reported.at(-1)).toBe("external");
+  });
+
+  test("with the links-denied hint, a too-big result while storage still refuses fails saying why", async () => {
+    const ctx = await setup({
+      storage: { kind: "status", status: 403 },
+      inline: () => ({
+        statement_id: "stmt-json",
+        columns: typedDataset().columns,
+        dataArray: [],
+        nextChunkIndex: 1,
+      }),
+    });
+    const { error } = await run(ctx, "links-denied");
+
+    expect(error?.errorCode).toBe("EXTERNAL_LINKS_DENIED");
+  });
+
+  test("with the links-denied hint, an unrelated inline failure is what the user sees when storage still refuses", async () => {
+    const ctx = await setup({
+      storage: { kind: "status", status: 403 },
+      inline: () => {
+        throw ExecutionError.statementFailed(
+          "warehouse is restarting",
+          "TEMPORARILY_UNAVAILABLE",
+        );
+      },
+    });
+    const { error } = await run(ctx, "links-denied");
+
+    expect(error?.errorCode).toBe("TEMPORARILY_UNAVAILABLE");
+  });
+
+  test("a result the rebuild cannot parse fails with a code and a message, not a generic error", async () => {
+    const ctx = await setup({
+      storage: { kind: "status", status: 403 },
+      inline: () => ({
+        statement_id: "stmt-json",
+        columns: [{ name: "n", typeName: "INT", typeText: "INT" }],
+        dataArray: [["not-a-number"]],
+      }),
+    });
+    const { error } = await run(ctx);
+
+    expect(error?.errorCode).toBe("ARROW_REBUILD_FAILED");
+    expect(error?.clientMessage).toMatch(/JSON_ARRAY/);
   });
 });
