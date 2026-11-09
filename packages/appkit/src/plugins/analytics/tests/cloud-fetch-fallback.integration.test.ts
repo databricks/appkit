@@ -216,7 +216,7 @@ describe("Arrow charts when workspace storage refuses the Cloud Fetch download",
     expect(storage.gets()).toBe(getsAfterFirst + 1);
   });
 
-  test("storage that never answers falls back, and the next chart tries storage again", async () => {
+  test("storage that never answers falls back, and the next chart skips storage", async () => {
     await setStorage({ kind: "hang" });
     await boot({ timeout: 300 });
     installWarehouse();
@@ -226,8 +226,8 @@ describe("Arrow charts when workspace storage refuses the Cloud Fetch download",
 
     warehouse.executions.length = 0;
     await expectNativeArrow(await chart("stalled-again"));
-    expect(warehouse.executions).toContain("EXTERNAL_LINKS+ARROW_STREAM");
-    expect(storage.gets()).toBe(2);
+    expect(warehouse.executions).toEqual(["INLINE+JSON_ARRAY"]);
+    expect(storage.gets()).toBe(1);
   });
 
   test("a body that stalls after the headers falls back instead of hanging", async () => {

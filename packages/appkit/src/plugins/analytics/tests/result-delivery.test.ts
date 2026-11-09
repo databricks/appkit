@@ -573,8 +573,18 @@ describe("deliverArrowBytesWithFallback", () => {
     },
   );
 
+  test("storage that never answers falls back and is remembered as denied", async () => {
+    const ctx = await setup({ storage: { kind: "hang" } });
+    const { bytes, reported, error } = await run(ctx);
+
+    expect(error).toBeUndefined();
+    expectNativeArrow(ctx, bytes);
+    expect(ctx.storage.gets()).toBe(1);
+    expect(ctx.executions.at(-1)).toBe("INLINE+JSON_ARRAY");
+    expect(reported.at(-1)).toBe("links-denied");
+  });
+
   test.each([
-    ["no answer", { kind: "hang" }],
     ["headers then no body", { kind: "hang-after-headers" }],
     ["headers then a reset", { kind: "reset-after-headers" }],
   ] as const)(
@@ -662,7 +672,7 @@ describe("deliverArrowBytesWithFallback", () => {
     expect(error?.errorCode).toBe("EXTERNAL_LINKS_DENIED");
     expect(ctx.storage.gets()).toBe(2);
     expect(ctx.executions).not.toContain("INLINE+JSON_ARRAY");
-    expect(reported).not.toContain("links-denied");
+    expect(reported.at(-1)).toBe("links-denied");
   });
 
   test("an inline result that spans several chunks is not served truncated", async () => {

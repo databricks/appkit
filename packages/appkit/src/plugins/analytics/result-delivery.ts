@@ -79,7 +79,7 @@ export interface ArrowChunkStreamer {
 
 /**
  * The arrow delivery mode a warehouse actually supports. `"links-denied"` means
- * storage definitively refused the Cloud Fetch download, so results are served
+ * storage refused or never answered the Cloud Fetch download, so results are served
  * from an inline `JSON_ARRAY` run until the caller lets the hint lapse.
  */
 export type ArrowCapability = "inline" | "external" | "links-denied";
@@ -369,6 +369,12 @@ function isDownloadFailure(err: unknown): err is ExecutionError {
   );
 }
 
+/** Storage answered 400 or 403 even after the link re-mint. */
+function isRefusal(err: ExecutionError): boolean {
+  const status = err.context?.httpStatus;
+  return status === 400 || status === 403;
+}
+
 /** Download refused (or unanswered) and the result cannot be sent inline. */
 function linksDenied(cause: ExecutionError): ExecutionError {
   return new ExecutionError(
@@ -387,13 +393,14 @@ function linksDenied(cause: ExecutionError): ExecutionError {
  * before its first byte (storage refuses, resets, or never answers).
  *
  * The first chunk is pulled here, before the route sends headers, so a failed
- * download can still be replaced by `inlineJsonAsArrow`. Only a 400 or 403 that
- * survived the link re-mint counts as a definite refusal and reports
- * `"links-denied"`; a timeout, network error, or body failure falls back once
- * and is forgotten. A result too large for inline is never stranded: after an
- * inconclusive failure Cloud Fetch gets one more, patient pass, and after a
- * definite refusal the error says why. Any other inline failure is rethrown
- * unchanged.
+ * download can still be replaced by `inlineJsonAsArrow`. A 400 or 403 that
+ * survived the link re-mint reports `"links-denied"` at once. No response at all
+ * reports it once the inline result has been served, or once the patient pass
+ * also fails, because blocked hosts hang instead of refusing. A network error
+ * or body failure falls back once and is forgotten. A result too large for
+ * inline is never stranded: after an inconclusive failure Cloud Fetch gets one
+ * more, patient pass, and after a definite refusal the error says why. Any
+ * other inline failure is rethrown unchanged.
  *
  * With the `"links-denied"` hint the inline run goes first, and Cloud Fetch is
  * tried only if that cannot deliver.
@@ -451,8 +458,8 @@ export async function* deliverArrowBytesWithFallback(
     return;
   }
 
-  const status = downloadError.context?.httpStatus;
-  const refused = status === 400 || status === 403;
+  const refused = isRefusal(downloadError);
+  const unanswered = downloadError.context?.timedOut === true;
   if (refused) opts?.onCapabilityResolved?.("links-denied");
   const size = out.cloudFetch?.totalByteCount;
   tooLarge ||= size !== undefined && size > MAX_INLINE_ATTACHMENT_BYTES;
@@ -465,6 +472,7 @@ export async function* deliverArrowBytesWithFallback(
       signal,
     );
     if ("bytes" in inline) {
+      if (unanswered) opts?.onCapabilityResolved?.("links-denied");
       yield inline.bytes;
       return;
     }
@@ -480,6 +488,9 @@ export async function* deliverArrowBytesWithFallback(
     retried = await patient.next();
   } catch (err: unknown) {
     if (signal?.aborted || !isDownloadFailure(err)) throw err;
+    if (isRefusal(err) || err.context?.timedOut === true) {
+      opts?.onCapabilityResolved?.("links-denied");
+    }
     throw linksDenied(err);
   }
   if (hinted) opts?.onCapabilityResolved?.("external");

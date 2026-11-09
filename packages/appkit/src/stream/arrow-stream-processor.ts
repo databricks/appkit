@@ -44,10 +44,11 @@ function downloadFailed(
   message: string,
   httpStatus?: number,
   cause?: unknown,
+  timedOut = false,
 ): ExecutionError {
   return new ExecutionError(message, {
     errorCode: EXTERNAL_LINK_DOWNLOAD_FAILED,
-    context: { httpStatus },
+    context: { httpStatus, timedOut },
     cause: cause instanceof Error ? cause : undefined,
   });
 }
@@ -192,6 +193,7 @@ export class ArrowStreamProcessor {
         `Failed to download chunk ${chunk.chunkIndex}: ${reason}`,
         failure?.status,
         failure?.error,
+        failure?.timedOut,
       );
     }
 
