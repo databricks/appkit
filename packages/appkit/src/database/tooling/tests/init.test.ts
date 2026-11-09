@@ -828,6 +828,23 @@ describe("runInit — .env", () => {
     expect(fs.statSync(path.join(root, ".env")).mode & 0o777).toBe(0o600);
   });
 
+  test("a database databricks.yml binds that the branch does not have is refused, naming both, before .env is written", async () => {
+    const lakebase = project();
+    const root = tempApp({
+      "databricks.yml": databricksYml(
+        PRODUCTION,
+        `${PRODUCTION}/databases/analytics`,
+      ),
+    });
+    const ctx = fakeContext({ root, userName: USER, api: lakebase.api() });
+
+    await expect(init(ctx, { schema: "none" })).rejects.toThrow(
+      `Database analytics, which databricks.yml binds, is not on ${devBranchId(USER)}. Create it there (databricks postgres create-database ${DEV} --database-id analytics), or bind a database the project's branches have, then rerun \`appkit db init\`.`,
+    );
+    expect(lakebase.calls).toContain(`getDatabase ${DEV}/databases/analytics`);
+    expect(fs.existsSync(path.join(root, ".env"))).toBe(false);
+  });
+
   test("the profile init authenticated with wins over the host", async () => {
     const lakebase = project();
     const root = tempApp();
