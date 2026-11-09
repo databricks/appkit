@@ -59,6 +59,7 @@ function listFiles(folder: string): string[] {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   for (const folder of folders.splice(0)) {
     fs.rmSync(folder, { recursive: true, force: true });
   }
@@ -425,6 +426,46 @@ describe("discardMigrationFiles", () => {
 
     expect(listFiles(folder)).toEqual(filesBefore);
     expect(fs.readFileSync(journalFile, "utf-8")).toBe(journalBefore);
+  });
+
+  /** Discard a migration, killed as it deletes the migration's SQL file. */
+  async function discardKilledAtSql(
+    folder: string,
+    schema: Parameters<typeof generateMigrationFiles>[1]["schema"],
+  ): Promise<void> {
+    await withHistoryLock(rootOf(folder), "migrate", async (lock) => {
+      const migration = await generateMigrationFiles(lock, {
+        schema,
+        interactive: false,
+      });
+      const rm = fs.rmSync;
+      vi.spyOn(fs, "rmSync").mockImplementation((target, options) => {
+        if (target === migration?.file) throw new Error("killed");
+        return rm(target, options);
+      });
+      expect(() => discardMigrationFiles(lock, migration as never)).toThrow(
+        "killed",
+      );
+    });
+  }
+
+  test("killed while deleting a later migration's files, it has already put the journal back", async () => {
+    const folder = tempFolder();
+    await generate({ folder, schema: blog(), interactive: false });
+
+    await discardKilledAtSql(folder, blog({ summary: text() }));
+
+    expect(readJournal(folder)?.entries.map((entry) => entry.tag)).toEqual([
+      "0000_migration",
+    ]);
+  });
+
+  test("killed while deleting a first migration's files, it has already removed the journal", async () => {
+    const folder = tempFolder();
+
+    await discardKilledAtSql(folder, blog());
+
+    expect(readJournal(folder)).toBeNull();
   });
 
   test("a writer whose lock was released removes nothing", async () => {
