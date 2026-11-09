@@ -378,6 +378,45 @@ describe.skipIf(!url)("applyPendingMigrations against Postgres", () => {
     }
   });
 
+  test("the app's own journal in a schema another role owns (public) is read and recorded into on every start", async () => {
+    // Like `public` under CAN_CONNECT_AND_CREATE: the schema belongs to the
+    // database owner, the app may create in it, and the journal it creates
+    // there is the app's.
+    const suffix = schema.slice(-8);
+    const owner = `appkit_owner_${suffix}`;
+    const app = `appkit_app_${suffix}`;
+    const database = (
+      await admin.query<{ database: string }>(
+        "select current_database() as database",
+      )
+    ).rows[0]?.database;
+    await admin.query(`create role "${owner}" nologin`);
+    await admin.query(`create role "${app}" login password '${ROLE_PASSWORD}'`);
+    await admin.query(`grant create on database "${database}" to "${app}"`);
+    await admin.query(`create schema "${schema}" authorization "${owner}"`);
+    await admin.query(`grant usage, create on schema "${schema}" to "${app}"`);
+    try {
+      const folder = notes();
+      const pool = newPool({ user: app });
+
+      const first = await applyPendingMigrations(pool, options(folder));
+      const second = await applyPendingMigrations(pool, options(folder));
+
+      expect(first.applied).toEqual(["0000_notes", "0001_body"]);
+      expect(second.applied).toEqual([]);
+      expect(await recorded()).toEqual([
+        { hash: hashOf(folder, "0000_notes"), createdAt: 1000 },
+        { hash: hashOf(folder, "0001_body"), createdAt: 2000 },
+      ]);
+    } finally {
+      await Promise.all(pools.splice(0).map((pool) => pool.end()));
+      await admin.query(`drop schema if exists "${schema}" cascade`);
+      await admin.query(`drop owned by "${app}"`);
+      await admin.query(`drop role "${app}"`);
+      await admin.query(`drop role "${owner}"`);
+    }
+  });
+
   test("a view at the journal's name is refused, and nothing is created", async () => {
     await admin.query(`create schema "${schema}"`);
     await admin.query(
@@ -394,7 +433,7 @@ describe.skipIf(!url)("applyPendingMigrations against Postgres", () => {
 
     expect(error).toBeInstanceOf(MigrationJournalError);
     expect((error as Error).message).toContain(
-      `"${schema}"."__drizzle_migrations" is a view owned by "${role}". The migrator reads and records applied migrations only in a table owned by "${role}", the owner of schema "${schema}".`,
+      `"${schema}"."__drizzle_migrations" is a view owned by "${role}". The migrator reads and records applied migrations only in an ordinary table`,
     );
     expect(await columns("notes")).toEqual([]);
   });

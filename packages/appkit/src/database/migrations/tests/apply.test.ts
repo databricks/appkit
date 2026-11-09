@@ -39,8 +39,13 @@ interface FakeState {
   failCleanupOn?: RegExp;
   /** pg_catalog (table, column) pairs the baseline check sees. */
   catalog?: Array<[string, string]>;
-  /** What pg_catalog holds at the journal's name; a table of the schema owner's when unset. */
-  journal?: { relkind: string; owner: string; schema_owner?: string };
+  /** What pg_catalog holds at the journal's name; the connecting role's own table when unset. */
+  journal?: {
+    relkind: string;
+    owner: string;
+    schema_owner?: string;
+    row_security?: boolean;
+  };
   /** Another session holds the migration lock. */
   lockHeld?: boolean;
   lockHolder?: { pid: number; application_name: string; state: string };
@@ -98,9 +103,25 @@ class RecordingClient {
     }
     if (text.includes("c.relowner")) {
       if (this.state.recorded === null) return { rows: [] };
-      const journal = this.state.journal ?? { relkind: "r", owner: "app-sp" };
+      // The fake connects as "app-sp" and, like the server, trusts the
+      // relation's owner when it is that role or the schema's owner.
+      const journal = {
+        relkind: "r",
+        owner: "app-sp",
+        schema_owner: "app-sp",
+        row_security: false,
+        ...this.state.journal,
+      };
       return {
-        rows: [{ schema_owner: "app-sp", ...journal }],
+        rows: [
+          {
+            ...journal,
+            current_user: "app-sp",
+            trusted:
+              journal.owner === "app-sp" ||
+              journal.owner === journal.schema_owner,
+          },
+        ],
       };
     }
     if (text.includes("pg_get_userbyid")) {
@@ -583,29 +604,46 @@ describe("applyPendingMigrations", () => {
     );
   });
 
-  test("a view at the journal's name is refused before anything runs", async () => {
+  test("the app's own journal in a schema another role owns (public) is read and recorded into", async () => {
     const folder = twoMigrations();
-    const { pool, client } = fakePool({
-      recorded: [],
-      journal: { relkind: "v", owner: "mallory" },
+    const { pool, state } = fakePool({
+      recorded: [{ hash: hashOf(folder, "0000_migration"), created_at: 1000 }],
+      journal: {
+        relkind: "r",
+        owner: "app-sp",
+        schema_owner: "pg_database_owner",
+      },
     });
 
-    const error = await applyPendingMigrations(pool, options(folder)).catch(
-      (caught: unknown) => caught,
-    );
+    const result = await applyPendingMigrations(pool, options(folder));
 
-    expect(error).toBeInstanceOf(MigrationJournalError);
-    expect((error as Error).message).toBe(
-      `"app"."__drizzle_migrations" is a view owned by "mallory". The migrator reads and records applied migrations only in a table owned by "app-sp", the owner of schema "app". ` +
-        "Another role's view or table could run its code as the app. Drop or rename it, then deploy again. No migration was applied.",
-    );
-    expect(steps(client.statements)).toEqual(["journal table?"]);
+    expect(result.applied).toEqual(["0001_migration"]);
+    expect(state.recorded).toEqual([
+      { hash: hashOf(folder, "0000_migration"), created_at: 1000 },
+      { hash: hashOf(folder, "0001_migration"), created_at: 2000 },
+    ]);
   });
 
-  test("a journal table owned by a role other than the schema's owner is refused", async () => {
+  test("another role's journal table without row security is read", async () => {
     const folder = twoMigrations();
     const { pool, client } = fakePool({
-      recorded: [],
+      recorded: [
+        { hash: hashOf(folder, "0000_migration"), created_at: 1000 },
+        { hash: hashOf(folder, "0001_migration"), created_at: 2000 },
+      ],
+      journal: { relkind: "r", owner: "mallory", schema_owner: "app-sp" },
+    });
+
+    const result = await applyPendingMigrations(pool, options(folder));
+
+    expect(result.applied).toEqual([]);
+    expect(steps(client.statements)).toEqual(["journal table?", "recorded?"]);
+  });
+
+  test("another role's journal table is not recorded into, and the error names both roles and the fix", async () => {
+    const folder = twoMigrations();
+    const { pool, client, state } = fakePool({
+      recorded: [{ hash: hashOf(folder, "0000_migration"), created_at: 1000 }],
       journal: { relkind: "r", owner: "mallory", schema_owner: "app-sp" },
     });
 
@@ -615,11 +653,64 @@ describe("applyPendingMigrations", () => {
 
     expect(error).toBeInstanceOf(MigrationJournalError);
     expect((error as Error).message).toContain(
-      `"app"."__drizzle_migrations" is a table owned by "mallory". The migrator reads and records applied migrations only in a table owned by "app-sp"`,
+      `"app"."__drizzle_migrations" is a table owned by "mallory". The migrator connects as "app-sp", which neither owns it nor inherits "mallory"`,
     );
-    expect(client.statements).not.toContain(
-      `CREATE TABLE "app"."notes" ("id" integer);`,
+    expect((error as Error).message).toContain(
+      `Have "mallory" run the migration, or transfer the table to "app-sp" (ALTER TABLE … OWNER TO), then deploy again. No migration was applied.`,
     );
+    expect(steps(client.statements)).toEqual([
+      "journal table?",
+      "recorded?",
+      ...SESSION_SETUP,
+      "journal table?",
+      "recorded?",
+      "begin",
+      "journal table?",
+      "rollback",
+      ...SESSION_CLEANUP,
+    ]);
+    expect(state.recorded).toHaveLength(1);
+  });
+
+  test("another role's journal table with row security is not read", async () => {
+    const folder = twoMigrations();
+    const { pool, client } = fakePool({
+      recorded: [],
+      journal: {
+        relkind: "r",
+        owner: "mallory",
+        schema_owner: "app-sp",
+        row_security: true,
+      },
+    });
+
+    const error = await applyPendingMigrations(pool, options(folder)).catch(
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBeInstanceOf(MigrationJournalError);
+    expect((error as Error).message).toContain(
+      `"app"."__drizzle_migrations" is a table owned by "mallory" with row-level security enabled. The migrator connects as "app-sp", which neither owns it nor inherits "mallory"`,
+    );
+    expect(steps(client.statements)).toEqual(["journal table?"]);
+  });
+
+  test("a view at the journal's name is refused before anything runs", async () => {
+    const folder = twoMigrations();
+    const { pool, client } = fakePool({
+      recorded: [],
+      journal: { relkind: "v", owner: "app-sp" },
+    });
+
+    const error = await applyPendingMigrations(pool, options(folder)).catch(
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBeInstanceOf(MigrationJournalError);
+    expect((error as Error).message).toContain(
+      `"app"."__drizzle_migrations" is a view owned by "app-sp". The migrator reads and records applied migrations only in an ordinary table`,
+    );
+    expect(steps(client.statements)).toEqual(["journal table?"]);
   });
 
   test("a connection failure carries the system error code", async () => {
