@@ -48,7 +48,8 @@ import {
 import { QueryProcessor } from "./query";
 import {
   type ArrowCapability,
-  deliverArrowBytes,
+  type ArrowDeliveryOut,
+  deliverArrowBytesWithFallback,
   deliverJsonResult,
   type QueryExecutor,
 } from "./result-delivery";
@@ -132,6 +133,9 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    * talks to (effectively one).
    */
   private _arrowCapability = new Map<string, ArrowCapability>();
+
+  /** When each warehouse's `"links-denied"` entry lapses back to `"external"`. */
+  private _linksDeniedUntil = new Map<string, number>();
 
   constructor(config: IAnalyticsConfig) {
     super(config);
@@ -861,10 +865,11 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
 
       const warehouseId = await getWarehouseId();
 
-      // Populated by `deliverArrowBytes` from the result manifest before the
-      // first chunk is yielded, so the header below carries the real names.
-      const columnsRef: { columnNames?: string[]; statementId?: string } = {};
-      const bytes = deliverArrowBytes(
+      // Populated by `deliverArrowBytesWithFallback` from the result manifest
+      // before the first chunk is yielded, so the header below carries the
+      // real names.
+      const columnsRef: ArrowDeliveryOut = {};
+      const bytes = deliverArrowBytesWithFallback(
         // Wrap the executor so the INLINE attempt runs through the interceptor
         // chain (cache + retry), matching the JSON path. Only inline attachments
         // are cached; EXTERNAL_LINKS carry expiring pre-signed URLs and are
@@ -884,9 +889,16 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         {
           // Skip the doomed INLINE probe on a warehouse already known to need
           // EXTERNAL_LINKS; remember the resolved mode for next time.
-          capabilityHint: this._arrowCapability.get(warehouseId),
-          onCapabilityResolved: (capability) =>
-            this._arrowCapability.set(warehouseId, capability),
+          capabilityHint: this._arrowCapabilityHint(warehouseId),
+          onCapabilityResolved: (capability) => {
+            this._arrowCapability.set(warehouseId, capability);
+            if (capability === "links-denied") {
+              this._linksDeniedUntil.set(
+                warehouseId,
+                Date.now() + LINKS_DENIED_TTL_MS,
+              );
+            }
+          },
         },
       );
       const first = await bytes.next();
@@ -965,6 +977,24 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
   }
 
   /**
+   * The remembered arrow capability for a warehouse. A lapsed `"links-denied"`
+   * reverts to `"external"`, so the next query tries Cloud Fetch again.
+   */
+  private _arrowCapabilityHint(
+    warehouseId: string,
+  ): ArrowCapability | undefined {
+    const capability = this._arrowCapability.get(warehouseId);
+    if (
+      capability === "links-denied" &&
+      Date.now() >= (this._linksDeniedUntil.get(warehouseId) ?? 0)
+    ) {
+      this._arrowCapability.set(warehouseId, "external");
+      return "external";
+    }
+    return capability;
+  }
+
+  /**
    * Await SQL warehouse readiness for the direct-binary Arrow path. There is no
    * SSE progress channel here — readiness is simply awaited, bounded by the
    * caller's abort signal / fail-fast timeout. Invoked via the request executor
@@ -994,6 +1024,8 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    *
    * - INLINE results carry a bounded (<=25 MiB) base64 `attachment` with the
    *   same lifecycle as cached JSON rows — safe to cache.
+   * - The `INLINE + JSON_ARRAY` run behind the Cloud Fetch fallback (the
+   *   `rawRows` request) is bounded the same way, and cached under its own key.
    * - EXTERNAL_LINKS results carry short-lived pre-signed URLs that expire in
    *   minutes; caching them would serve dead links, so those pass through
    *   uncached (only the tiny link metadata would be cached anyway).
@@ -1016,12 +1048,16 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     const ttl = queryDefaults.cache?.ttl;
     return {
       query: (q, params, formatParameters, signal) => {
-        // Only the inline-arrow attempt is cacheable — EXTERNAL_LINKS carry
+        // Only inline attempts are cacheable — EXTERNAL_LINKS carry
         // short-lived pre-signed URLs, so those pass straight through.
-        if (
-          formatParameters.disposition !== "INLINE" ||
-          formatParameters.format !== "ARROW_STREAM"
-        ) {
+        const inlineArrow =
+          formatParameters.disposition === "INLINE" &&
+          formatParameters.format === "ARROW_STREAM";
+        const inlineRows =
+          formatParameters.disposition === "INLINE" &&
+          formatParameters.format === "JSON_ARRAY" &&
+          formatParameters.rawRows;
+        if (!inlineArrow && !inlineRows) {
           return executor.query(q, params, formatParameters, signal);
         }
         // On a standard warehouse this throws a capability rejection — the
@@ -1031,7 +1067,9 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         // dedupes concurrent renders (e.g. React StrictMode double-mount).
         return cache.getOrExecute(
           [
-            "analytics:query:arrow",
+            inlineArrow
+              ? "analytics:query:arrow"
+              : "analytics:query:arrow-rows",
             query_key,
             JSON.stringify(parameters),
             hashedQuery,
@@ -1207,6 +1245,9 @@ export function writeChunk(
  * `arrowFirstByteTimeoutMs`.
  */
 const DEFAULT_ARROW_FIRST_BYTE_TIMEOUT_MS = 120_000;
+
+/** How long a definite Cloud Fetch refusal is remembered before storage is tried again. */
+const LINKS_DENIED_TTL_MS = 10 * 60_000;
 
 /**
  * Byte ceiling for the `X-Appkit-Arrow-Columns` header value. Beyond this (a

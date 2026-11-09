@@ -102,7 +102,7 @@ function normalizeStatementCounts<T extends StatementResponse>(response: T): T {
  * results fall through to `disposition: "EXTERNAL_LINKS"`, which streams
  * chunk-by-chunk and is not bound by this limit.
  */
-const MAX_INLINE_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+export const MAX_INLINE_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 /**
  * Safety cap on how many additional EXTERNAL_LINKS chunks
@@ -246,7 +246,13 @@ export class SQLWarehouseConnector {
 
   async executeStatement(
     workspaceClient: WorkspaceClient,
-    input: ExecuteStatementRequest,
+    input: ExecuteStatementRequest & {
+      /**
+       * Keep the warehouse's positional `dataArray` and carry the manifest
+       * `columns` on the result, instead of building keyed row objects.
+       */
+      rawRows?: boolean;
+    },
     signal?: AbortSignal,
   ) {
     const startTime = Date.now();
@@ -353,6 +359,7 @@ export class SQLWarehouseConnector {
                 statementId,
                 this.config.timeout,
                 signal,
+                input.rawRows,
               );
               break;
             case "SUCCEEDED":
@@ -360,6 +367,7 @@ export class SQLWarehouseConnector {
                 response,
                 workspaceClient,
                 signal,
+                input.rawRows,
               );
               break;
             case "FAILED":
@@ -830,6 +838,7 @@ export class SQLWarehouseConnector {
     statementId: string,
     timeout = executeStatementDefaults.timeout,
     signal?: AbortSignal,
+    rawRows?: boolean,
   ) {
     return this.telemetry.startActiveSpan(
       "sql.poll",
@@ -908,6 +917,7 @@ export class SQLWarehouseConnector {
                   response,
                   workspaceClient,
                   signal,
+                  rawRows,
                 );
               case "FAILED":
                 throw ExecutionError.statementFailed(
@@ -949,6 +959,7 @@ export class SQLWarehouseConnector {
     response: StatementResponse,
     workspaceClient: WorkspaceClient,
     signal?: AbortSignal,
+    rawRows?: boolean,
   ) {
     if (response.manifest?.format === "ARROW_STREAM") {
       const result = response.result as
@@ -998,11 +1009,22 @@ export class SQLWarehouseConnector {
       // current Databricks warehouses.
     }
 
-    if (!response.result?.dataArray || !response.manifest?.schema?.columns) {
-      return response;
+    const columns = response.manifest?.schema?.columns;
+    if (rawRows && columns) {
+      return {
+        ...response,
+        result: {
+          ...response.result,
+          columns,
+          columnNames: arrowColumnNames(response),
+          statement_id: response.statementId,
+        },
+      };
     }
 
-    const columns = response.manifest.schema.columns;
+    if (!response.result?.dataArray || !columns) {
+      return response;
+    }
 
     const transformedData = response.result.dataArray.map((row) => {
       const obj: Record<string, unknown> = {};
@@ -1108,6 +1130,7 @@ export class SQLWarehouseConnector {
       statement_id: string;
       status: StatementStatus;
       columnNames?: string[];
+      totalByteCount?: number;
       external_links?: ExternalLink[];
       refreshChunkLink?: RefreshChunkLink;
     };
@@ -1121,6 +1144,7 @@ export class SQLWarehouseConnector {
           error: response.status?.error,
         } as StatementStatus,
         columnNames: arrowColumnNames(response),
+        totalByteCount: response.manifest?.totalByteCount as number | undefined,
         // Resolve the pre-signed links for EVERY chunk in the caller's own
         // execution context. Streaming these directly (see
         // {@link streamExternalLinks}) avoids a second `getStatement` under
@@ -1227,8 +1251,9 @@ export class SQLWarehouseConnector {
     chunks: ExternalLink[],
     signal?: AbortSignal,
     refresh?: RefreshChunkLink,
+    patient?: boolean,
   ): AsyncGenerator<Uint8Array, void, unknown> {
-    return this.arrowProcessor.streamChunks(chunks, signal, refresh);
+    return this.arrowProcessor.streamChunks(chunks, signal, refresh, patient);
   }
 
   /**
