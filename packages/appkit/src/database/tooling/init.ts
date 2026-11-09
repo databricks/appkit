@@ -115,6 +115,12 @@ const DEFAULT_ENDPOINT_ID = "primary";
 const SUSPEND_TIMEOUT = "300s";
 /** Every Lakebase branch has it; used when nothing names another database. */
 const DEFAULT_DATABASE = "databricks_postgres";
+/**
+ * The one PGSSLMODE under which the Lakebase pool checks the server's
+ * certificate: it maps prefer to rejectUnauthorized: false, disable to no TLS,
+ * and rejects every other value.
+ */
+const TLS_MODE = "require";
 
 /** LAKEBASE_PROJECT, else the project of LAKEBASE_ENDPOINT, else of the bundle's postgres_branch. */
 function resolveProject(
@@ -528,9 +534,14 @@ async function initHolding(
     PGUSER: identity.userName,
     ...(found.session === null ? {} : { APPKIT_DB_SESSION: found.session }),
     ...(before.PGPORT && /^\d+$/.test(before.PGPORT) ? {} : { PGPORT: "5432" }),
-    ...(before.PGSSLMODE ? {} : { PGSSLMODE: "require" }),
+    ...(before.PGSSLMODE === TLS_MODE ? {} : { PGSSLMODE: TLS_MODE }),
     ...(await authValues(ctx, before)),
   };
+  if (before.PGSSLMODE && before.PGSSLMODE !== TLS_MODE) {
+    onStep(
+      `Setting PGSSLMODE=${TLS_MODE} in .env: it was ${before.PGSSLMODE}, and only ${TLS_MODE} makes every connection use TLS and check the server's certificate`,
+    );
+  }
   onStep(`Pointing .env at ${resourceId(branch.name)}, database ${database}`);
   updateEnvFile(envFile, values);
   const branchCtx: DbContext = { ...ctx, env: { ...ctx.env, ...values } };
