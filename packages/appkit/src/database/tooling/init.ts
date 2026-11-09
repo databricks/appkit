@@ -395,22 +395,34 @@ async function ensureDeveloperRole(
   return { role: role?.name ? role : existing, action: "updated" };
 }
 
+/**
+ * The Postgres database .env names: the one it already names, else the one
+ * databricks.yml binds, read on the branch (a fork inherits its parent's
+ * databases), else the project's default database. A bound database the branch
+ * lacks is refused: pointing .env at the default one would run the app on a
+ * database its deploy does not use.
+ */
 async function resolveDatabase(
   ctx: DbContext,
   branch: string,
   local: LocalTarget,
   deploy: DeployTarget | null,
 ): Promise<string> {
-  // A real .env endpoint came with its database; forks inherit the parent's databases.
   if (local.database) return local.database;
-  if (deploy?.database) {
-    const database = await ctx
-      .api()
-      .getDatabase(`${branch}/databases/${resourceId(deploy.database)}`);
-    if (database?.status?.postgres_database)
-      return database.status.postgres_database;
+  if (!deploy?.database) return DEFAULT_DATABASE;
+  const id = resourceId(deploy.database);
+  const database = await ctx.api().getDatabase(`${branch}/databases/${id}`);
+  if (!database) {
+    throw new Error(
+      `Database ${id}, which databricks.yml binds, is not on ${resourceId(branch)}. Create it there (databricks postgres create-database ${branch} --database-id ${id}), or bind a database the project's branches have, then rerun \`appkit db init\`.`,
+    );
   }
-  return DEFAULT_DATABASE;
+  if (!database.status?.postgres_database) {
+    throw new Error(
+      `Lakebase returned database ${id} on ${resourceId(branch)} without its Postgres database name. Rerun \`appkit db init\` in a minute.`,
+    );
+  }
+  return database.status.postgres_database;
 }
 
 /** The profile or host init authenticated with, for a .env that names neither. */
