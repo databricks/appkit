@@ -562,13 +562,13 @@ async function initHolding(
       : { api: parseTtl(options.ttl), label: options.ttl.trim() };
 
   // Before any change, check the .env init may write and read the schema the
-  // hand-off and the start are for. --schema none does neither, so it reads no
-  // schema.ts.
+  // hand-off and the start are for: the one schema.ts declares, which
+  // introspect reads too. --schema none does neither, so it reads no schema.ts.
   const envFile = path.join(ctx.root, ENV_FILE);
   refuseSymlink(envFile);
   const hasSchema = hasSchemaFile(ctx.root);
   const schemaName =
-    hasSchema && options.schema !== "introspect" && options.schema !== "none"
+    hasSchema && options.schema !== "none"
       ? (await loadDefaultDatabaseSchema(ctx.root, { showImportError: true }))
           .$schemaName
       : DEFAULT_SCHEMA_NAME;
@@ -696,6 +696,7 @@ async function initHolding(
       onStep(`Writing schema.ts from schema ${schemaName} ${on}`);
       const introspect = await introspectHolding(branchCtx, lock, {
         interactive,
+        schemaName,
       });
       start = {
         kind: "introspect",
