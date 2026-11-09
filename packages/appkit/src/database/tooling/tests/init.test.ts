@@ -50,8 +50,9 @@ const migrateReport = {
   typesFile: "/app/shared/appkit-types/database.d.ts",
 };
 
-/** What the hand-off reads on the branch: the app schema's owner, and what blocks deleting that role. */
+/** What the hand-off reads on the branch: the app schema's owner, what else that role owns here, and what blocks deleting it. */
 let schemaOwner: string | null;
+let ownedOutside: string[];
 let blockers: { database: string; count: number }[];
 const queries: string[] = [];
 const pool = {
@@ -59,6 +60,9 @@ const pool = {
     queries.push(text);
     if (text.includes("nspowner")) {
       return { rows: [{ owner: schemaOwner, current_user: USER }] };
+    }
+    if (text.includes("pg_identify_object")) {
+      return { rows: ownedOutside.map((label) => ({ label })) };
     }
     if (text.includes("pg_shdepend")) return { rows: blockers };
     throw new Error(`unexpected query ${text}`);
@@ -157,6 +161,7 @@ function conflict(name: string): LakebaseApiError {
 
 beforeEach(() => {
   schemaOwner = SP;
+  ownedOutside = [];
   blockers = [];
   queries.length = 0;
   pool.query.mockClear();
@@ -765,6 +770,22 @@ describe("runInit — hand-off failures", () => {
 
     await expect(init(appOn(project()))).rejects.toThrow(
       `Cannot hand schema app in database databricks_postgres on ${devBranchId(USER)} to you: it belongs to "legacy_owner", which is not a Lakebase-managed role. .env already points at the branch.`,
+    );
+  });
+
+  test("an owner that also owns objects outside the app schema is not deleted: the list and the manual command are given", async () => {
+    const lakebase = project();
+    ownedOutside = ["schema reports", "table public.shared"];
+
+    await expect(init(appOn(lakebase))).rejects.toThrow(
+      `Refusing to hand schema app in database databricks_postgres on ${devBranchId(USER)} to you: deleting role "${SP}" would also give you what else it owns on this branch: schema reports, table public.shared. .env already points at the branch. Reassign or drop them, or take them all with \`databricks postgres delete-role ${DEV}/roles/dbrx-apps-${SP} --reassign-owned-to ${DEV}/roles/alice\`, then rerun \`appkit db init\`.`,
+    );
+    expect(lakebase.calls.some((call) => call.startsWith("deleteRole"))).toBe(
+      false,
+    );
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.stringContaining("pg_identify_object"),
+      [SP, "app"],
     );
   });
 

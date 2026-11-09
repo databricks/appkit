@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
-import { readRoleBlockers } from "../hand-off";
+import { readOwnedOutsideSchema, readRoleBlockers } from "../hand-off";
 
 // The pg_shdepend query against a real server, as a superuser that may create
 // databases and roles, e.g. APPKIT_TEST_PG_URL=postgres://localhost:5432/postgres
@@ -71,5 +71,42 @@ describe.skipIf(!url)("readRoleBlockers against Postgres", () => {
     await expect(
       readRoleBlockers(mainPool, `appkit_missing_${suffix}`),
     ).resolves.toEqual([]);
+  });
+
+  test("what the role owns in this database outside the app schema: nothing while it only owns the schema and its tables", async () => {
+    await expect(
+      readOwnedOutsideSchema(mainPool, role, "app"),
+    ).resolves.toEqual([]);
+  });
+
+  test("lists the role's tables, types, routines and schemas elsewhere, not grants, system objects or other databases", async () => {
+    await mainPool.query(`
+      alter table public.shared owner to "${role}";
+      create type public.shared_kind as enum ('a');
+      alter type public.shared_kind owner to "${role}";
+      create function public.shared_fn(integer) returns integer language sql as 'select $1';
+      alter function public.shared_fn(integer) owner to "${role}";
+      create schema reports authorization "${role}";
+      create table reports.daily (id integer primary key);
+      alter table reports.daily owner to "${role}";
+    `);
+    try {
+      await expect(
+        readOwnedOutsideSchema(mainPool, role, "app"),
+      ).resolves.toEqual([
+        "function public.shared_fn(integer)",
+        "schema reports",
+        "table public.shared",
+        "table reports.daily",
+        "type public.shared_kind",
+      ]);
+    } finally {
+      await mainPool.query(`
+        drop schema reports cascade;
+        drop function public.shared_fn(integer);
+        drop type public.shared_kind;
+        alter table public.shared owner to current_user;
+      `);
+    }
   });
 });
