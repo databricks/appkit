@@ -127,7 +127,7 @@ describe("appkit db verify", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  test("a migration merged out of order is named, with how to rebuild the branch", async () => {
+  test("a migration merged out of order is named, with how to regenerate it after the recorded ones", async () => {
     runVerify.mockResolvedValue({
       ...local,
       strandedMigrations: ["0001_parallel"],
@@ -137,11 +137,12 @@ describe("appkit db verify", () => {
     await dbCommand.parseAsync(["verify"], { from: "user" });
 
     expect(output(log)).toContain(
-      "Never runs: 0001_parallel: it is older than a migration the branch already ran (merged out of order); the deployed app skips it too once it ran a newer one",
+      "Never runs: 0001_parallel: it is older than a migration the branch already ran (merged out of order), and the deployed app refuses to start on that history",
     );
     expect(output(error)).toContain(
-      "`appkit db clean` and then `appkit db migrate` rebuild the branch from this checkout's migrations, in order.",
+      "Delete its .sql file, snapshot and journal entry, then run `appkit db migrate` to generate the migration again from schema.ts, after the recorded ones.",
     );
+    expect(output(error)).not.toContain("`appkit db clean`");
     expect(process.exitCode).toBe(1);
   });
 
