@@ -666,6 +666,11 @@ async function verifyDeploy(
   );
   problems.push(...binding, ...runningProblems(deployed, name));
   const sp = deployed.service_principal_client_id;
+  if (!sp) {
+    problems.push(
+      `the API reports no service principal for app ${name}, so verify cannot tell whether it has a Postgres role on ${branchId}: \`databricks apps get ${name}\` shows the app; run verify again once it has one`,
+    );
+  }
   const [roles, migrations] = await Promise.all([
     // Only meaningful once the app is bound to this branch.
     sp && binding.length === 0 ? api.listRoles(branch) : null,
