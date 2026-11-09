@@ -210,6 +210,64 @@ resources:
     });
   });
 
+  test("a ${var…} in place of an app's resources, one of them, or its postgres block is unresolved, not unbound", () => {
+    const root = tempApp({
+      "databricks.yml": `variables:
+  app_resources:
+    type: complex
+  postgres_resource:
+    type: complex
+  postgres:
+    type: complex
+resources:
+  apps:
+    app:
+      resources: \${var.app_resources}
+    reports:
+      resources:
+        - \${var.postgres_resource}
+    archive:
+      resources:
+        - name: postgres
+          postgres: \${var.postgres}
+`,
+    });
+
+    const boundary = readDeployBoundary(root);
+
+    expect(boundary).toEqual({
+      branches: new Set(),
+      unresolved: [
+        {
+          target: "default",
+          at: "resources.apps.app.resources",
+          written: "${var.app_resources}",
+        },
+        {
+          target: "default",
+          at: "resources.apps.reports.resources[0]",
+          written: "${var.postgres_resource}",
+        },
+        {
+          target: "default",
+          at: "resources.apps.archive.resources[0].postgres",
+          written: "${var.postgres}",
+        },
+      ],
+    });
+    expect(
+      classifyBranch({
+        branch: {
+          name: `projects/p/branches/${devBranchId("alice@example.com")}`,
+          status: {},
+        },
+        userName: "alice@example.com",
+        sessionId: null,
+        boundary,
+      }).kind,
+    ).toBe("deploy-target");
+  });
+
   test("a variable-overrides.json value binds its target too, so the dev branch it names is a deploy target", () => {
     const dev = `projects/p/branches/${devBranchId("alice@example.com")}`;
     const root = tempApp({

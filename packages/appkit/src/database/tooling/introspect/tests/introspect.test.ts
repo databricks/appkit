@@ -89,7 +89,16 @@ const pool = {
   query: vi.fn(async (text: string, values: unknown[]) => {
     // readMigrationDrift: whether the journal table exists, then its rows.
     if (text.includes("c.relname = $2")) {
-      return { rows: recorded.length > 0 ? [{ "?column?": 1 }] : [] };
+      // The app's own journal: an ordinary table its role owns.
+      const journal = {
+        relkind: "r",
+        owner: "app-sp",
+        schema_owner: "app-sp",
+        current_user: "app-sp",
+        row_security: false,
+        trusted: true,
+      };
+      return { rows: recorded.length > 0 ? [journal] : [] };
     }
     if (text.includes("select hash, created_at")) {
       return {

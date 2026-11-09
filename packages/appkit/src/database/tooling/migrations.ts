@@ -259,12 +259,25 @@ async function loadDrizzleKit(): Promise<typeof import("drizzle-kit/api")> {
   }
 }
 
-const BREAKS_PREVIOUS_RELEASE = [
-  /^DROP (TABLE|VIEW|MATERIALIZED VIEW|TYPE|SEQUENCE|SCHEMA)\b/i,
-  /\bDROP COLUMN\b/i,
-  /\bRENAME\b/i,
-  /\bSET DATA TYPE\b/i,
-  /\bSET NOT NULL\b/i,
+const matches = (pattern: RegExp) => (statement: string) =>
+  pattern.test(statement);
+
+/** A new column nothing fills: old instances insert without it, and existing rows have no value for it. */
+function addsRequiredColumn(statement: string): boolean {
+  return (
+    /\bADD COLUMN\b/i.test(statement) &&
+    /\bNOT NULL\b/i.test(statement) &&
+    !/\b(DEFAULT|GENERATED)\b/i.test(statement)
+  );
+}
+
+const BREAKS_PREVIOUS_RELEASE: ReadonlyArray<(statement: string) => boolean> = [
+  matches(/^DROP (TABLE|VIEW|MATERIALIZED VIEW|TYPE|SEQUENCE|SCHEMA)\b/i),
+  matches(/\bDROP COLUMN\b/i),
+  matches(/\bRENAME\b/i),
+  matches(/\bSET DATA TYPE\b/i),
+  matches(/\bSET NOT NULL\b/i),
+  addsRequiredColumn,
 ];
 
 /**
@@ -274,9 +287,7 @@ const BREAKS_PREVIOUS_RELEASE = [
  */
 export function breakingStatements(statements: readonly string[]): string[] {
   return statements.filter((statement) =>
-    BREAKS_PREVIOUS_RELEASE.some((pattern) =>
-      pattern.test(statement.trimStart()),
-    ),
+    BREAKS_PREVIOUS_RELEASE.some((breaks) => breaks(statement.trimStart())),
   );
 }
 
@@ -370,15 +381,18 @@ export function discardMigrationFiles(
 ): void {
   lock.assertHeld();
   const { folder } = lock;
+  // The journal goes back first, as it is what names the migration: a crash
+  // after this point leaves files no journal names, never the reverse.
+  if (migration.journalBefore === null) {
+    fs.rmSync(journalFile(folder), { force: true });
+  } else {
+    writeFileAtomic(journalFile(folder), migration.journalBefore);
+  }
   fs.rmSync(migration.file, { force: true });
   fs.rmSync(snapshotFile(folder, Number.parseInt(migration.tag, 10)), {
     force: true,
   });
-  if (migration.journalBefore !== null) {
-    writeFileAtomic(journalFile(folder), migration.journalBefore);
-    return;
-  }
-  fs.rmSync(journalFile(folder), { force: true });
+  if (migration.journalBefore !== null) return;
   for (const dir of [metaFolder(folder), folder]) {
     if (fs.existsSync(dir) && fs.readdirSync(dir).length === 0)
       fs.rmdirSync(dir);

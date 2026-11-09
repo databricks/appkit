@@ -40,6 +40,15 @@ export interface IntrospectReport {
 }
 
 /**
+ * What the error runMigrate throws after writing a migration carries. The
+ * file stays for the next run, which generates nothing new to warn about.
+ */
+export interface UnappliedMigration {
+  readonly generated: GeneratedMigration;
+  readonly breaking: readonly string[];
+}
+
+/**
  * The exports of `@databricks/appkit/beta/database-tooling` the CLI calls. `shared`
  * must not depend on appkit, so the CLI imports the tooling dynamically and
  * types it with this interface, and appkit's typecheck checks its real exports
