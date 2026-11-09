@@ -48,8 +48,8 @@ function catalog(
           })),
   );
   const raw = vi.fn(async (strings: TemplateStringsArray) =>
-    strings.join("?").includes("n.nspname = 'public'")
-      ? inPublic.map((table_name) => ({ table_name }))
+    strings.join("?").includes("'public'")
+      ? inPublic.map((table_name) => ({ schema_name: "public", table_name }))
       : rows,
   );
   return { raw, path: { raw } as unknown as DataPath };

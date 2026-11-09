@@ -97,7 +97,12 @@ tables the first one owns.
 
 Earlier releases put tables in `public` by default. An app that created its
 tables there fails setup after the upgrade, and the error says the tables are in
-`public`. Keep them there with:
+`public`. With `APPKIT_DB_MIGRATE_ON_START=true`, startup refuses before any
+migration runs when `defineSchema()` was given no `schemaName`, none of the
+declared tables exist in `app`, and some exist in `public`; `npx appkit db migrate`
+refuses to apply on a dev branch in the same case. Otherwise the first
+migration would create empty copies in `app`, the check would pass, and the app
+would serve the empty tables. Keep the tables in `public` with:
 
 ```ts
 export const schema = defineSchema(
@@ -107,6 +112,11 @@ export const schema = defineSchema(
   { schemaName: "public" },
 );
 ```
+
+To use `app` instead, move the tables first
+(`ALTER TABLE public.notes SET SCHEMA app`). When the tables in `public` belong
+to another app, pass `{ schemaName: "app" }` explicitly and neither startup nor
+`migrate` refuses.
 
 Migrations applied on start into `public` also need
 `GRANT CREATE ON SCHEMA public` to the app's service principal, because it does
@@ -165,8 +175,10 @@ checkout uses the file's value.
 
 If a branch or database reference has no value in those files, `migrate` cannot
 tell which branch the reference names. Examples are a target that leaves
-`postgres_branch` unset and `${workspace.current_user.short_name}`. While any such
-reference exists, `migrate` applies migrations to no branch. The message names
+`postgres_branch` unset and `${workspace.current_user.short_name}`. The same
+holds for a `${var.…}` reference in place of an app's `resources` list, one of
+its entries, or a `postgres` block, because the files do not say what it binds.
+While any such reference exists, `migrate` applies migrations to no branch. The message names
 the target and where the reference is. To continue, give the reference a value
 in `databricks.yml`, or in the `variable-overrides.json` the message names. A
 `variable-overrides.json` that is not a JSON object stops `migrate` too.

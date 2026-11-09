@@ -32,6 +32,7 @@ vi.mock("../../../../type-generator/database", async (importOriginal) => ({
 
 import { loadDefaultDatabaseSchema } from "../../../../plugins/database/load-schema";
 import { readJournal } from "../../../migrations/paths";
+import { hashOf } from "../../../migrations/tests/fixtures";
 import { withHistoryLock } from "../../history-lock";
 import { generateMigrationFiles } from "../../migrations";
 import { cleanupTempApps, fakeContext, tempApp } from "../../tests/fakes";
@@ -75,19 +76,36 @@ const onProduction = {
 };
 
 let catalog: ReturnType<typeof catalogResponder>;
-/** `when` of each migration the branch recorded; empty: no journal table. */
-let recorded: number[];
-const lastWhen = (root: string) =>
-  readJournal(path.join(root, MIGRATIONS))?.entries.at(-1)?.when ?? 0;
+/** The journal rows of the branch, as drizzle-orm records them; empty: no journal table. */
+let recorded: Array<{ when: number; hash: string }>;
+/** The row the branch records for the last committed migration. */
+const lastCommitted = (root: string) => {
+  const folder = path.join(root, MIGRATIONS);
+  const entry = readJournal(folder)?.entries.at(-1);
+  if (!entry) throw new Error(`no migration committed under ${folder}`);
+  return { when: entry.when, hash: hashOf(folder, entry.tag) };
+};
 const pool = {
   query: vi.fn(async (text: string, values: unknown[]) => {
     // readMigrationDrift: whether the journal table exists, then its rows.
     if (text.includes("c.relname = $2")) {
-      return { rows: recorded.length > 0 ? [{ "?column?": 1 }] : [] };
+      // The app's own journal: an ordinary table its role owns.
+      const journal = {
+        relkind: "r",
+        owner: "app-sp",
+        schema_owner: "app-sp",
+        current_user: "app-sp",
+        row_security: false,
+        trusted: true,
+      };
+      return { rows: recorded.length > 0 ? [journal] : [] };
     }
     if (text.includes("select hash, created_at")) {
       return {
-        rows: recorded.map((when) => ({ hash: "h", created_at: String(when) })),
+        rows: recorded.map(({ when, hash }) => ({
+          hash,
+          created_at: String(when),
+        })),
       };
     }
     return { rows: await catalog.respond(text, values) };
@@ -120,7 +138,10 @@ beforeEach(() => {
       ) => {
         const entries = readJournal(options.migrationsFolder)?.entries ?? [];
         for (const tag of tags) {
-          recorded.push(entries.find((entry) => entry.tag === tag)?.when ?? 0);
+          recorded.push({
+            when: entries.find((entry) => entry.tag === tag)?.when ?? 0,
+            hash: hashOf(options.migrationsFolder, tag),
+          });
         }
       },
     );
@@ -168,7 +189,7 @@ async function commitMigration(root: string, applied = true): Promise<void> {
       interactive: false,
     }),
   );
-  if (applied) recorded.push(lastWhen(root));
+  if (applied) recorded.push(lastCommitted(root));
 }
 
 /** Every file under config/, with its contents. */
@@ -410,6 +431,39 @@ describe("runIntrospect", () => {
     },
   );
 
+  test.each([
+    ["schema.ts", SCHEMA, previousSchema],
+    ["schema.ts.bak", `${SCHEMA}.bak`, "// an older backup\n"],
+  ])(
+    "a symlinked %s is refused before anything is read or written, since introspect does not write through links",
+    async (_label, file, contents) => {
+      catalog = authorsOnly();
+      const root = tempApp({
+        [SCHEMA]: previousSchema,
+        "elsewhere/target.ts": contents,
+      });
+      const link = path.join(root, file);
+      fs.rmSync(link, { force: true });
+      fs.symlinkSync(path.join(root, "elsewhere/target.ts"), link);
+      const before = tree(root);
+
+      const error = await refusal(root);
+
+      expect(error).toBeInstanceOf(IntrospectRefusedError);
+      expect(error.message).toBe(
+        `Refusing to introspect: config/database/${_label} is a symbolic link, and introspect replaces files instead of writing through links. Replace it with a regular file, then rerun.`,
+      );
+      expect(resolveEnvBranch).not.toHaveBeenCalled();
+      expect(catalog.calls).toEqual([]);
+      expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+      expect(
+        fs.readFileSync(path.join(root, "elsewhere/target.ts"), "utf-8"),
+      ).toBe(contents);
+      expect(tree(root)).toEqual(before);
+      expect(markMigrationsApplied).not.toHaveBeenCalled();
+    },
+  );
+
   test("--schema-name public is written explicitly, so the app never looks for the tables in the default app schema", async () => {
     const root = tempApp();
 
@@ -426,13 +480,39 @@ describe("runIntrospect", () => {
     expect((await loadDefaultDatabaseSchema(root)).$schemaName).toBe("public");
   });
 
-  test("the schema schema.ts declares does not change which schema is read, and declares nothing in it", async () => {
+  test("without --schema-name, the schema schema.ts declares is read", async () => {
+    catalog = authorsOnly();
+    const root = tempApp({
+      [SCHEMA]: previousSchema.replace("}));", '}), { schemaName: "sales" });'),
+    });
+
+    const report = await introspect(root);
+
+    expect(catalog.calls.every((call) => call.values[0] === "sales")).toBe(
+      true,
+    );
+    expect(report.schemaName).toBe("sales");
+    expect((await loadDefaultDatabaseSchema(root)).$schemaName).toBe("sales");
+    expect(markMigrationsApplied).toHaveBeenCalledWith(
+      pool,
+      { migrationsFolder: path.join(root, MIGRATIONS), schemaName: "sales" },
+      ["0000_baseline"],
+    );
+  });
+
+  test("--schema-name overrides the schema schema.ts declares, which then declares nothing in it", async () => {
     const root = tempApp({
       [SCHEMA]: previousSchema.replace("}));", '}), { schemaName: "sales" });'),
     });
     const before = tree(root);
 
-    const error = await refusal(root);
+    const error = await rejection(
+      runIntrospect(ctxFor(root), {
+        interactive: false,
+        importSource: BUILDER,
+        schemaName: "app",
+      }),
+    );
 
     expect(catalog.calls.every((call) => call.values[0] === "app")).toBe(true);
     expect(error).toBeInstanceOf(IntrospectRefusedError);
@@ -581,7 +661,7 @@ export const schema = defineSchema(({ table }) => ({
     async (_label, history) => {
       const root = tempApp({ [SCHEMA]: previousSchema });
       if (history) await commitMigration(root);
-      recorded.push(Date.now() + 60_000);
+      recorded.push({ when: Date.now() + 60_000, hash: "teammate" });
       const before = tree(root);
 
       const error = await refusal(root);
@@ -610,6 +690,26 @@ export const schema = defineSchema(({ table }) => ({
     expect(error.message).toBe(
       'Refusing to introspect dev-alice-3f9a2c: it skipped 0000_migration in schema "app". Run `appkit db migrate`, which says how to fix it.',
     );
+  });
+
+  test("a recorded migration whose committed file changed since is refused before reading the catalog", async () => {
+    const root = tempApp({ [SCHEMA]: previousSchema });
+    await commitMigration(root);
+    fs.appendFileSync(
+      path.join(root, MIGRATIONS, "0000_migration.sql"),
+      '\n--> statement-breakpoint\nALTER TABLE "app"."authors" ADD COLUMN "bio" text;',
+    );
+    const before = tree(root);
+
+    const error = await refusal(root);
+
+    expect(error).toBeInstanceOf(IntrospectRefusedError);
+    expect(error.message).toBe(
+      'Refusing to introspect dev-alice-3f9a2c: it applied 0000_migration before its file changed in schema "app". Restore the file to what the branch ran and put the change in a new migration, or recreate the branch.',
+    );
+    expect(catalog.calls).toEqual([]);
+    expect(tree(root)).toEqual(before);
+    expect(markMigrationsApplied).not.toHaveBeenCalled();
   });
 
   test("with history and no schema.ts, an empty schema refuses instead of dropping every table", async () => {

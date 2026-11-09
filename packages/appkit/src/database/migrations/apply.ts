@@ -7,6 +7,7 @@ import type { Pool, PoolClient } from "pg";
 
 import { createLogger } from "../../logging/logger";
 import {
+  type AmbiguousTimestamp,
   type MigrationFile,
   type RecordedMigration,
   reconcileMigrations,
@@ -154,23 +155,164 @@ export class MigrationBaselineMismatchError extends Error {
   }
 }
 
+/** Why the committed history cannot be applied over the recorded one. */
+type HistoryRefusal =
+  /** Older than the last recorded migration and never applied, so they would never run. */
+  | { readonly stranded: readonly string[]; readonly last: string }
+  /** Files and rows at one timestamp that cannot be told apart. */
+  | { readonly ambiguous: AmbiguousTimestamp };
+
 /**
- * Committed migrations are older than the last one the database recorded and
- * were never applied, so they would never run. Nothing was applied.
+ * The committed migrations and the recorded ones disagree in a way the
+ * migrator refuses to resolve by itself. Nothing was applied.
  */
 export class MigrationHistoryError extends Error {
+  /** Committed migrations older than the last recorded one that never ran. */
   readonly stranded: readonly string[];
+  /** Committed migrations whose timestamp the database recorded with hashes none of them has. */
+  readonly ambiguous: readonly string[];
 
-  constructor(schemaName: string, stranded: readonly string[], last: string) {
-    const many = stranded.length > 1;
+  constructor(schemaName: string, refusal: HistoryRefusal) {
     super(
-      `Migration${many ? "s" : ""} ${stranded.join(", ")} ${many ? "are" : "is"} older than ${last}, which schema "${schemaName}" already recorded, ` +
-        `and ${many ? "were" : "was"} never applied, so ${many ? "they" : "it"} would never run. This happens when migrations from parallel branches merge. ` +
-        `Delete ${many ? "their" : "its"} .sql file, snapshot and journal entry, generate the migration again from schema.ts, and deploy again. ` +
-        "No migration was applied.",
+      "stranded" in refusal
+        ? strandedMessage(schemaName, refusal.stranded, refusal.last)
+        : ambiguousMessage(schemaName, refusal.ambiguous),
     );
     this.name = "MigrationHistoryError";
-    this.stranded = Object.freeze([...stranded]);
+    this.stranded = Object.freeze(
+      "stranded" in refusal ? [...refusal.stranded] : [],
+    );
+    this.ambiguous = Object.freeze(
+      "ambiguous" in refusal ? tags(refusal.ambiguous.files) : [],
+    );
+  }
+}
+
+function strandedMessage(
+  schemaName: string,
+  stranded: readonly string[],
+  last: string,
+): string {
+  const many = stranded.length > 1;
+  return (
+    `Migration${many ? "s" : ""} ${stranded.join(", ")} ${many ? "are" : "is"} older than ${last}, which schema "${schemaName}" already recorded, ` +
+    `and ${many ? "were" : "was"} never applied, so ${many ? "they" : "it"} would never run. This happens when migrations from parallel branches merge. ` +
+    `Delete ${many ? "their" : "its"} .sql file, snapshot and journal entry, generate the migration again from schema.ts, and deploy again. ` +
+    "No migration was applied."
+  );
+}
+
+function ambiguousMessage(
+  schemaName: string,
+  { when, files, recorded }: AmbiguousTimestamp,
+): string {
+  return (
+    `Schema "${schemaName}" recorded ${recorded} migration${recorded === 1 ? "" : "s"} at ${new Date(when).toISOString()}, ` +
+    `and ${files.length} ${files.length === 1 ? "is" : "are"} committed with that timestamp (${tags(files).join(", ")}), none with a recorded hash. ` +
+    "The migrator cannot tell which of them ran and changed since, and which never ran. " +
+    `Compare the hash column of ${journalTable(schemaName)} with the sha256 of each file's versions in version control. ` +
+    "Restore the applied versions; for the others, delete the .sql file, snapshot and journal entry and generate the migration again from schema.ts. " +
+    "No migration was applied."
+  );
+}
+
+/** What pg_catalog holds at the journal's name, seen from the migrating session. */
+interface JournalRelation {
+  readonly relkind: string;
+  readonly owner: string;
+  readonly schemaOwner: string;
+  /** The role the migrator connects as. */
+  readonly currentUser: string;
+  /** Row-level security is enabled, so a policy runs on every read by a non-owner. */
+  readonly rowSecurity: boolean;
+  /** The current role owns it or inherits its owner, or its owner is the schema's. */
+  readonly trusted: boolean;
+}
+
+/** What the migrator is about to do with the journal. */
+type JournalUse = "read" | "record";
+
+/** Why the relation at the journal's name is refused for a use. */
+type JournalRefusal =
+  /** Not an ordinary table. */
+  | "kind"
+  /** Recording into a table of an untrusted owner's. */
+  | "owner"
+  /** Reading a table of an untrusted owner's under row-level security. */
+  | "row-security";
+
+/**
+ * A relation at the journal's name can run its owner's code with the app's
+ * privileges: a view when read, a row-security policy when a non-owner
+ * reads, and triggers, rules or column defaults when recorded into. So only
+ * an ordinary table is used, and one of an untrusted owner's only for a read
+ * without row-level security.
+ */
+function journalRefusal(
+  relation: JournalRelation,
+  use: JournalUse,
+): JournalRefusal | undefined {
+  if (relation.relkind !== "r") return "kind";
+  if (relation.trusted) return undefined;
+  if (use === "record") return "owner";
+  return relation.rowSecurity ? "row-security" : undefined;
+}
+
+/** pg_class.relkind, for the error message. */
+const RELATION_KINDS: Readonly<Record<string, string>> = {
+  r: "a table",
+  p: "a partitioned table",
+  v: "a view",
+  m: "a materialized view",
+  f: "a foreign table",
+  S: "a sequence",
+};
+
+/** The relation at the journal's name cannot be used as the journal (see journalRefusal). Nothing was applied. */
+export class MigrationJournalError extends Error {
+  constructor(
+    schemaName: string,
+    relation: JournalRelation,
+    refusal: JournalRefusal,
+  ) {
+    super(
+      `${journalRefusalMessage(schemaName, relation, refusal)} No migration was applied.`,
+    );
+    this.name = "MigrationJournalError";
+  }
+}
+
+function journalRefusalMessage(
+  schemaName: string,
+  relation: JournalRelation,
+  refusal: JournalRefusal,
+): string {
+  const table = journalTable(schemaName);
+  const untrusted = `The migrator connects as "${relation.currentUser}", which neither owns it nor inherits "${relation.owner}"`;
+  const transfer = `transfer the table to "${relation.currentUser}" (ALTER TABLE … OWNER TO), then deploy again.`;
+  switch (refusal) {
+    case "kind": {
+      const kind =
+        RELATION_KINDS[relation.relkind] ??
+        `a relation of kind "${relation.relkind}"`;
+      return (
+        `${table} is ${kind} owned by "${relation.owner}". ` +
+        "The migrator reads and records applied migrations only in an ordinary table. Drop or rename it, then deploy again."
+      );
+    }
+    case "owner":
+      return (
+        `${table} is a table owned by "${relation.owner}". ${untrusted}, ` +
+        `and records applied migrations only in a table owned by its role or by "${relation.schemaOwner}", the owner of schema "${schemaName}", ` +
+        "because a trigger, rule or column default on another role's table would run that role's code as the app. " +
+        `Have "${relation.owner}" run the migration, or ${transfer}`
+      );
+    case "row-security":
+      return (
+        `${table} is a table owned by "${relation.owner}" with row-level security enabled. ${untrusted}, ` +
+        "so a policy would run that role's code as the app on every read. " +
+        `Have "${relation.owner}" disable row-level security on it, or ${transfer}`
+      );
   }
 }
 
@@ -255,19 +397,57 @@ function readMigrations(folder: string, journal: Journal): MigrationFile[] {
   });
 }
 
+/**
+ * Whether the journal table exists. Every read of the journal and every
+ * record into it starts here, so a relation at its name that is unfit for
+ * that use is refused (see journalRefusal).
+ */
+async function journalTableExists(
+  client: QueryClient,
+  schemaName: string,
+  use: JournalUse,
+): Promise<boolean> {
+  // pg_catalog needs no privileges, so a missing grant is not mistaken for a missing table.
+  const { rows } = await client.query<{
+    relkind: string;
+    owner: string;
+    schema_owner: string;
+    current_user: string;
+    row_security: boolean;
+    trusted: boolean;
+  }>(
+    `select c.relkind::text as relkind,
+            pg_catalog.pg_get_userbyid(c.relowner) as owner,
+            pg_catalog.pg_get_userbyid(n.nspowner) as schema_owner,
+            current_user::text as current_user,
+            c.relrowsecurity as row_security,
+            (pg_catalog.pg_has_role(current_user, c.relowner, 'USAGE') or c.relowner = n.nspowner) as trusted
+       from pg_catalog.pg_class c
+       join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = $1 and c.relname = $2`,
+    [schemaName, MIGRATIONS_TABLE],
+  );
+  const found = rows[0];
+  if (!found) return false;
+  const relation: JournalRelation = {
+    relkind: found.relkind,
+    owner: found.owner,
+    schemaOwner: found.schema_owner,
+    currentUser: found.current_user,
+    rowSecurity: found.row_security,
+    trusted: found.trusted,
+  };
+  const refusal = journalRefusal(relation, use);
+  if (refusal) throw new MigrationJournalError(schemaName, relation, refusal);
+  return true;
+}
+
 /** The journal table's rows; none when the table does not exist yet. */
 async function readRecordedMigrations(
   client: QueryClient,
   schemaName: string,
 ): Promise<RecordedMigration[]> {
-  // pg_catalog needs no privileges, so a missing grant is not mistaken for a missing table.
-  const table = await client.query(
-    `select 1 from pg_catalog.pg_class c
-       join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-      where n.nspname = $1 and c.relname = $2`,
-    [schemaName, MIGRATIONS_TABLE],
-  );
-  if (table.rows.length === 0) return [];
+  if (!(await journalTableExists(client, schemaName, "read"))) return [];
   const { rows } = await client.query<{
     hash: string;
     created_at: string | number | null;
@@ -293,10 +473,13 @@ async function prepareMigrationSession(
     );
     reset.push("client_connection_check_interval");
   } catch (error) {
-    // Postgres before 14, or a server that cannot poll sockets.
-    logger.debug(
-      "client_connection_check_interval not set: %s",
+    // Postgres before 14, or a server that cannot poll sockets. With
+    // statement_timeout off, nothing else ends a dead instance's statement.
+    logger.warn(
+      "client_connection_check_interval not set (%s). If this instance dies while a migration statement runs, the server notices only once the statement ends, and the statement keeps its locks until then. " +
+        "To end it sooner, find its pid in pg_stat_activity (application_name '%s') and run select pg_terminate_backend(pid).",
       error instanceof Error ? error.message : String(error),
+      APPLICATION_NAME,
     );
   }
 }
@@ -387,11 +570,14 @@ async function ensureJournalTable(
   client: QueryClient,
   schemaName: string,
 ): Promise<void> {
+  if (await journalTableExists(client, schemaName, "record")) return;
   await client.query(
     `CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(schemaName)}`,
   );
+  // Not IF NOT EXISTS: a relation that appeared at this name since the check
+  // fails the transaction instead of receiving the record.
   await client.query(
-    `CREATE TABLE IF NOT EXISTS ${journalTable(schemaName)} (
+    `CREATE TABLE ${journalTable(schemaName)} (
       id SERIAL PRIMARY KEY,
       hash text NOT NULL,
       created_at bigint
@@ -582,6 +768,8 @@ interface MigrationDrift {
   readonly pending: readonly string[];
   /** Committed, not recorded, older than the last recorded one. */
   readonly stranded: readonly string[];
+  /** Recorded, but the committed file changed since: the branch ran another version. */
+  readonly edited: readonly string[];
   /** Recorded rows no committed migration matches: the branch is ahead of the checkout. */
   readonly unknown: number;
 }
@@ -592,6 +780,7 @@ function driftOf(
   return {
     pending: tags(history.pending),
     stranded: tags(history.stranded),
+    edited: tags(history.edited),
     unknown: history.unknown.length,
   };
 }
@@ -614,6 +803,11 @@ export async function readMigrationDrift(
   );
 }
 
+/** The branch ran these migrations as they were before an edit, so the committed history is not what it holds. */
+export function editedReason(edited: readonly string[]): string {
+  return `it applied ${edited.join(", ")} before ${edited.length === 1 ? "its file" : "their files"} changed`;
+}
+
 /** Why the branch's history is not the committed one plus toRecord; undefined when it is. */
 function driftReason(
   drift: MigrationDrift,
@@ -626,6 +820,7 @@ function driftReason(
       ? `it records ${drift.unknown} migration${drift.unknown === 1 ? "" : "s"} this checkout does not have`
       : "",
     drift.stranded.length > 0 ? `it skipped ${drift.stranded.join(", ")}` : "",
+    drift.edited.length > 0 ? editedReason(drift.edited) : "",
     notApplied.length > 0 ? `it has not applied ${notApplied.join(", ")}` : "",
     recorded.length > 0 ? `it already records ${recorded.join(", ")}` : "",
   ].filter(Boolean);
@@ -704,8 +899,9 @@ export async function markMigrationsApplied(
  * transaction, so a failure keeps the ones before it.
  *
  * Fails closed, changing nothing, when a committed migration is older than the
- * last recorded one but was never applied. An applied migration whose file
- * changed, and recorded migrations that are not committed, are logged.
+ * last recorded one but was never applied, or when the files and rows at one
+ * timestamp cannot be paired. An applied migration whose file changed, and
+ * recorded migrations that are not committed, are logged.
  *
  * Baseline adoption: when nothing is recorded yet and `0000_baseline` comes
  * first, the baseline's tables are looked up in pg_catalog. None present → it
@@ -749,7 +945,11 @@ export async function applyPendingMigrations(
       await readRecordedMigrations(client, schemaName),
     );
     let waitedMs = 0;
-    if (history.pending.length > 0 && history.stranded.length === 0) {
+    if (
+      history.pending.length > 0 &&
+      history.stranded.length === 0 &&
+      history.ambiguous.length === 0
+    ) {
       pending = tags(history.pending);
       step = "Waiting for the migration lock";
       await prepareMigrationSession(client, reset);
@@ -765,11 +965,16 @@ export async function applyPendingMigrations(
       );
     }
 
+    const ambiguous = history.ambiguous[0];
+    if (ambiguous) throw new MigrationHistoryError(schemaName, { ambiguous });
     if (history.stranded.length > 0) {
       const last =
         files.find((file) => file.when === history.lastRecorded)?.tag ??
         `the migration recorded at ${new Date(history.lastRecorded ?? 0).toISOString()}`;
-      throw new MigrationHistoryError(schemaName, tags(history.stranded), last);
+      throw new MigrationHistoryError(schemaName, {
+        stranded: tags(history.stranded),
+        last,
+      });
     }
     if (history.edited.length > 0) {
       logger.warn(
@@ -830,7 +1035,8 @@ export async function applyPendingMigrations(
     if (
       error instanceof MigrationBaselineMismatchError ||
       error instanceof MigrationFilesError ||
-      error instanceof MigrationHistoryError
+      error instanceof MigrationHistoryError ||
+      error instanceof MigrationJournalError
     ) {
       throw error;
     }

@@ -14,6 +14,11 @@ import {
   MigrationApplyError,
 } from "../migrations/apply";
 import { readJournal } from "../migrations/paths";
+import {
+  catalogSqlOf,
+  detectTablesLeftInPublic,
+} from "../migrations/tables-left-in-public";
+import type { Schema } from "../schema-builder";
 import { type DbContext, NO_ENV_BRANCH, withBranchPool } from "./context";
 import { notYourBranch, resolveEnvBranch, takesWrites } from "./guard";
 import { type HistoryLock, withHistoryLock } from "./history-lock";
@@ -73,6 +78,32 @@ export interface MigrateOptions {
 
 type ApplyOutcome = Pick<MigrateReport, "applied" | "adopted" | "notApplied">;
 
+/**
+ * The run wrote a migration and then failed before applying it. The file
+ * stays for the next run, which generates nothing new, so this is the only
+ * run that can report what the migration breaks.
+ */
+class UnappliedMigrationError extends Error {
+  readonly generated: GeneratedMigration;
+  /** Statements of the kept migration that break instances still running the previous release. */
+  readonly breaking: readonly string[];
+
+  constructor(
+    root: string,
+    generated: GeneratedMigration,
+    breaking: readonly string[],
+    cause: unknown,
+  ) {
+    super(
+      `Wrote ${path.relative(root, generated.file)}, but did not apply it: ${cause instanceof Error ? cause.message : String(cause)}`,
+      { cause },
+    );
+    this.name = "UnappliedMigrationError";
+    this.generated = generated;
+    this.breaking = breaking;
+  }
+}
+
 /** Why migrations must not be applied to the `.env` branch; undefined when they may. */
 async function applyBlocker(ctx: DbContext): Promise<string | undefined> {
   const env = await resolveEnvBranch(ctx);
@@ -85,16 +116,22 @@ async function applyBlocker(ctx: DbContext): Promise<string | undefined> {
 async function applyToEnvBranch(
   ctx: DbContext,
   folder: string,
-  schemaName: string,
+  schema: Schema,
 ): Promise<ApplyOutcome> {
   const blocker = readJournal(folder)
     ? await applyBlocker(ctx)
     : "no migrations to apply — schema.ts declares no tables yet";
   if (blocker) return { applied: [], notApplied: blocker };
   return withBranchPool(ctx, async (pool) => {
+    // The deployed app refuses this case on start; refuse it here first.
+    const leftInPublic = await detectTablesLeftInPublic(
+      catalogSqlOf(pool),
+      schema,
+    );
+    if (leftInPublic) throw new Error(`Did not apply: ${leftInPublic}`);
     const { applied, adopted } = await applyPendingMigrations(pool, {
       migrationsFolder: folder,
-      schemaName,
+      schemaName: schema.$schemaName,
     });
     return { applied, ...(adopted.length > 0 ? { adopted } : {}) };
   });
@@ -131,6 +168,7 @@ export async function migrateHolding(
           schema,
           interactive: options.interactive,
         });
+  const breaking = breakingStatements(generated?.statements ?? []);
 
   // The types follow schema.ts alone, so they are current even if applying fails.
   const typesFile = path.join(ctx.root, DATABASE_TYPES_PATH);
@@ -138,7 +176,7 @@ export async function migrateHolding(
 
   let outcome: ApplyOutcome;
   try {
-    outcome = await applyToEnvBranch(ctx, lock.folder, schema.$schemaName);
+    outcome = await applyToEnvBranch(ctx, lock.folder, schema);
   } catch (error) {
     if (!generated) throw error;
     const file = path.relative(ctx.root, generated.file);
@@ -155,12 +193,8 @@ export async function migrateHolding(
         { cause: error },
       );
     }
-    throw new Error(
-      `Wrote ${file}, but did not apply it: ${error instanceof Error ? error.message : String(error)}`,
-      { cause: error },
-    );
+    throw new UnappliedMigrationError(ctx.root, generated, breaking, error);
   }
-  const breaking = breakingStatements(generated?.statements ?? []);
   return {
     generated,
     ...(breaking.length > 0 ? { breaking } : {}),

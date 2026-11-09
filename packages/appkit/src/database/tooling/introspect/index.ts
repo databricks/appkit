@@ -7,6 +7,7 @@ import {
 } from "../../../plugins/database/load-schema";
 import { writeDatabaseTypes } from "../../../type-generator/database";
 import {
+  editedReason,
   markMigrationsApplied,
   readMigrationDrift,
 } from "../../migrations/apply";
@@ -14,6 +15,7 @@ import { readJournal } from "../../migrations/paths";
 import { DEFAULT_SCHEMA_NAME } from "../../schema-builder/define-schema";
 import type { Schema } from "../../schema-builder/types";
 import { type DbContext, NO_ENV_BRANCH, withBranchPool } from "../context";
+import { refuseSymlink, SymlinkRefusedError, writeFileAtomic } from "../files";
 import { notYourBranch, resolveEnvBranch, takesWrites } from "../guard";
 import { type HistoryLock, withHistoryLock } from "../history-lock";
 import { DATABASE_TYPES_PATH } from "../migrate";
@@ -36,7 +38,7 @@ import {
 export interface IntrospectOptions {
   /** false: an ambiguous rename against existing history throws instead of prompting. */
   readonly interactive: boolean;
-  /** Schema to read; defaults to DEFAULT_SCHEMA_NAME. */
+  /** Schema to read. Default: the one schema.ts declares, else DEFAULT_SCHEMA_NAME. */
   readonly schemaName?: string;
   /** Module the written schema.ts imports the builder from. Default "@databricks/appkit/beta". */
   readonly importSource?: string;
@@ -79,7 +81,20 @@ function readIfExists(file: string): string | null {
 
 function writeOrRemove(file: string, contents: string | null): void {
   if (contents === null) fs.rmSync(file, { force: true });
-  else fs.writeFileSync(file, contents);
+  else writeFileAtomic(file, contents);
+}
+
+/** Introspect replaces `file`, so a link there would be swapped for a plain file or written through. */
+function refuseSymlinkedDestination(root: string, file: string): void {
+  try {
+    refuseSymlink(path.join(root, file));
+  } catch (error) {
+    if (!(error instanceof SymlinkRefusedError)) throw error;
+    throw new IntrospectRefusedError(
+      `Refusing to introspect: ${file} is a symbolic link, and introspect replaces files instead of writing through links. Replace it with a regular file, then rerun.`,
+      { cause: error },
+    );
+  }
 }
 
 const plural = (count: number, word: string) =>
@@ -153,9 +168,10 @@ async function readPreviousSchema(root: string): Promise<Schema | null> {
 }
 
 /**
- * `appkit db introspect`: read the `.env` branch's app schema from pg_catalog,
- * write schema.ts (the previous file goes to schema.ts.bak), write the
- * migration that brings history up to the database, and record it as applied.
+ * `appkit db introspect`: read the `.env` branch's app schema from pg_catalog
+ * (the one schema.ts declares, unless `--schema-name` names another), write
+ * schema.ts (the previous file goes to schema.ts.bak), write the migration
+ * that brings history up to the database, and record it as applied.
  * Columns the previous schema.ts declares keep their privacy; new ones are
  * written private, and a foreign key it does not declare is refused. Runs only
  * on your dev or session branch, and only when the branch records exactly the
@@ -179,8 +195,11 @@ export async function introspectHolding(
   options: IntrospectOptions,
 ): Promise<IntrospectReport> {
   const schemaFile = path.join(ctx.root, DEFAULT_SCHEMA_FILE);
+  refuseSymlinkedDestination(ctx.root, DEFAULT_SCHEMA_FILE);
+  refuseSymlinkedDestination(ctx.root, `${DEFAULT_SCHEMA_FILE}.bak`);
   const previousSchema = await readPreviousSchema(ctx.root);
-  const schemaName = options.schemaName || DEFAULT_SCHEMA_NAME;
+  const schemaName =
+    options.schemaName || previousSchema?.$schemaName || DEFAULT_SCHEMA_NAME;
   const { folder } = lock;
   const migrationOptions = { migrationsFolder: folder, schemaName };
   const hasHistory = (readJournal(folder)?.entries.length ?? 0) > 0;
@@ -198,7 +217,8 @@ export async function introspectHolding(
   return withBranchPool(ctx, async (pool) => {
     // The diff starts from the latest committed snapshot, so the branch must
     // record exactly the committed migrations: one it lacks would come out
-    // reversed, and one the checkout lacks would come out again.
+    // reversed, one the checkout lacks would come out again, and one whose
+    // file changed after it ran left the branch where the snapshot is not.
     const drift = await readMigrationDrift(pool, migrationOptions);
     const refuse = (reason: string, advice: string) =>
       new IntrospectRefusedError(
@@ -214,6 +234,12 @@ export async function introspectHolding(
       throw refuse(
         `it skipped ${drift.stranded.join(", ")}`,
         "Run `appkit db migrate`, which says how to fix it.",
+      );
+    }
+    if (drift.edited.length > 0) {
+      throw refuse(
+        editedReason(drift.edited),
+        `Restore ${drift.edited.length === 1 ? "the file" : "the files"} to what the branch ran and put the change in a new migration, or recreate the branch.`,
       );
     }
     // An interrupted run leaves its migration written but not recorded.
@@ -284,9 +310,9 @@ export async function introspectHolding(
     let migration: GeneratedMigration | null = null;
     let recorded: string[] = [];
     try {
-      if (backsUp) fs.writeFileSync(backupFile, previous);
+      if (backsUp) writeFileAtomic(backupFile, previous);
       fs.mkdirSync(path.dirname(schemaFile), { recursive: true });
-      fs.writeFileSync(schemaFile, rendered.source);
+      writeFileAtomic(schemaFile, rendered.source);
       let schema: Awaited<ReturnType<typeof loadDefaultDatabaseSchema>>;
       try {
         schema = await loadDefaultDatabaseSchema(ctx.root, {

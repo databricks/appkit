@@ -13,6 +13,16 @@ export interface IntrospectedEnum {
   readonly values: readonly string[];
 }
 
+/** Options of the sequence behind a serial or identity column, as text so bigint bounds survive JSON. */
+export interface IntrospectedSequence {
+  readonly start: string;
+  readonly increment: string;
+  readonly min: string;
+  readonly max: string;
+  readonly cache: string;
+  readonly cycle: boolean;
+}
+
 export interface IntrospectedColumn {
   readonly name: string;
   /** format_type(), e.g. "character varying(120)". */
@@ -25,6 +35,8 @@ export interface IntrospectedColumn {
   /** pg_get_expr() of the default (or generation expression). */
   readonly defaultExpr: string | null;
   readonly enum?: IntrospectedEnum;
+  /** The sequence a serial or identity column owns; absent otherwise. */
+  readonly sequence?: IntrospectedSequence;
 }
 
 export interface IntrospectedForeignKey {
@@ -43,6 +55,8 @@ export interface IntrospectedForeignKey {
 export interface IntrospectedUnique {
   readonly name: string;
   readonly columns: readonly string[];
+  /** DEFERRABLE, which the builder does not declare. */
+  readonly deferrable: boolean;
 }
 
 export interface IntrospectedTable {
@@ -80,6 +94,7 @@ export interface ColumnRow {
   type_schema: string;
   type_name: string;
   enum_values: string[] | null;
+  sequence: IntrospectedSequence | null;
 }
 
 export interface TableRow {
@@ -128,13 +143,27 @@ select c.relname::text as table_name, a.attname::text as name,
        case when t.typtype = 'e' then array(
          select e.enumlabel::text from pg_catalog.pg_enum e
           where e.enumtypid = t.oid order by e.enumsortorder)
-       end as enum_values
+       end as enum_values,
+       seq.options as sequence
   from pg_catalog.pg_attribute a
   join pg_catalog.pg_class c on c.oid = a.attrelid
   join pg_catalog.pg_namespace n on n.oid = c.relnamespace
   join pg_catalog.pg_type t on t.oid = a.atttypid
   join pg_catalog.pg_namespace tn on tn.oid = t.typnamespace
   left join pg_catalog.pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
+  -- The sequence a serial (deptype a) or identity (deptype i) column owns; bounds as text, since bigint exceeds JSON numbers.
+  left join lateral (
+    select jsonb_build_object(
+             'start', s.seqstart::text, 'increment', s.seqincrement::text,
+             'min', s.seqmin::text, 'max', s.seqmax::text,
+             'cache', s.seqcache::text, 'cycle', s.seqcycle) as options
+      from pg_catalog.pg_depend sd
+      join pg_catalog.pg_sequence s on s.seqrelid = sd.objid
+     where sd.classid = 'pg_catalog.pg_class'::regclass
+       and sd.refclassid = 'pg_catalog.pg_class'::regclass
+       and sd.refobjid = a.attrelid and sd.refobjsubid = a.attnum
+       and sd.deptype in ('a', 'i')
+     limit 1) seq on true
  where n.nspname = $1 and c.relkind in ('r', 'p') and not c.relispartition
    and c.relname <> $2 and a.attnum > 0 and not a.attisdropped
  order by c.relname, a.attnum`;
@@ -256,6 +285,7 @@ function toColumn(row: ColumnRow): IntrospectedColumn {
           },
         }
       : {}),
+    ...(row.sequence ? { sequence: row.sequence } : {}),
   };
 }
 
@@ -275,7 +305,11 @@ export function buildTables(
       primaryKey: own.find((row) => row.kind === "p")?.columns ?? [],
       unique: own
         .filter((row) => row.kind === "u")
-        .map((row) => ({ name: row.name, columns: row.columns })),
+        .map((row) => ({
+          name: row.name,
+          columns: row.columns,
+          deferrable: row.deferrable === true,
+        })),
       foreignKeys: own
         .filter((row) => row.kind === "f" && row.ref_table)
         .map((row) => ({
