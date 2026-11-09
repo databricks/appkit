@@ -226,6 +226,7 @@ describe("appkit db init", () => {
           branch: report.branch,
           schemaName: "app",
           dependents: ["view reports.summary"],
+          kept: [],
         },
         migrate,
       },
@@ -284,6 +285,7 @@ describe("appkit db clean", () => {
     branch: "projects/p/branches/dev-a",
     schemaName: "app",
     dependents: [],
+    kept: [],
   };
 
   test("refuses without --yes when there is no TTY, before any API call", async () => {
@@ -323,14 +325,21 @@ describe("appkit db clean", () => {
     expect(output(log)).toContain("Dropped schema app on dev-a");
   });
 
-  test("--yes cleans without asking; public says only your objects went", async () => {
-    tooling.runClean.mockResolvedValue({ ...cleaned, schemaName: "public" });
+  test("--yes cleans without asking; public says only your objects went, and what other roles' objects stayed", async () => {
+    tooling.runClean.mockResolvedValue({
+      ...cleaned,
+      schemaName: "public",
+      kept: ["table notes", "table orders"],
+    });
     await clean("--yes");
 
     expect(tooling.previewClean).not.toHaveBeenCalled();
     expect(prompts.confirm).not.toHaveBeenCalled();
     expect(output(log)).toContain(
       "Removed your objects in schema public on dev-a",
+    );
+    expect(output(log)).toContain(
+      "Kept in schema public, with their rows, because other roles own them: table notes, table orders",
     );
   });
 

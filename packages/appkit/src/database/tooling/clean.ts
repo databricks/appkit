@@ -173,11 +173,53 @@ export async function readCascadeDependents(
   return rows.map((row) => row.label);
 }
 
+/**
+ * The relations, types and routines in schema public that other roles own,
+ * which clean leaves with their rows; an extension's objects are not listed.
+ * Nothing for another schema, which the drop takes whole.
+ */
+const KEPT_SQL = `
+with ns as (
+  select oid from pg_catalog.pg_namespace where nspname = 'public'
+), me as (
+  select oid from pg_catalog.pg_roles where rolname = current_user
+), kept(classid, objid) as (
+  select 'pg_catalog.pg_class'::regclass, c.oid from pg_catalog.pg_class c, ns, me
+   where c.relnamespace = ns.oid and c.relowner <> me.oid
+     and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S')
+  union all
+  select 'pg_catalog.pg_type'::regclass, t.oid from pg_catalog.pg_type t, ns, me
+   where t.typnamespace = ns.oid and t.typowner <> me.oid
+     and (t.typtype in ('e', 'd')
+          or (t.typtype = 'c' and exists (
+                select 1 from pg_catalog.pg_class c where c.oid = t.typrelid and c.relkind = 'c')))
+  union all
+  select 'pg_catalog.pg_proc'::regclass, p.oid from pg_catalog.pg_proc p, ns, me
+   where p.pronamespace = ns.oid and p.proowner <> me.oid and p.prokind in ('f', 'p', 'a', 'w')
+)
+select pg_catalog.pg_describe_object(k.classid, k.objid, 0) as label
+  from kept k
+ where not exists (
+   select 1 from pg_catalog.pg_depend d
+    where d.deptype = 'e' and d.classid = k.classid and d.objid = k.objid)
+ order by 1`;
+
+export async function readKeptObjects(
+  client: Pick<PoolClient, "query">,
+  schemaName: string,
+): Promise<string[]> {
+  if (schemaName !== "public") return [];
+  const { rows } = await client.query<{ label: string }>(KEPT_SQL);
+  return rows.map((row) => row.label);
+}
+
 export interface CleanReport {
   readonly branch: string;
   readonly schemaName: string;
   /** Objects outside the app schema that depend on it, which the drop removes too. */
   readonly dependents: readonly string[];
+  /** In schema public, the objects other roles own, which stay with their rows. */
+  readonly kept: readonly string[];
 }
 
 async function cleanTarget(ctx: DbContext) {
@@ -192,10 +234,14 @@ async function cleanTarget(ctx: DbContext) {
 /** What `appkit db clean` would drop, read without changing anything. */
 export async function previewClean(ctx: DbContext): Promise<CleanReport> {
   const target = await cleanTarget(ctx);
-  const dependents = await withBranchPool(ctx, (pool) =>
-    readCascadeDependents(pool, target.schemaName),
-  );
-  return { ...target, dependents };
+  return withBranchPool(ctx, async (pool) => {
+    const dependents = await readCascadeDependents(pool, target.schemaName);
+    // Before the drop, another role's object that depends on yours is still there; it goes.
+    const kept = (await readKeptObjects(pool, target.schemaName)).filter(
+      (label) => !dependents.includes(label),
+    );
+    return { ...target, dependents, kept };
+  });
 }
 
 /**
@@ -217,14 +263,14 @@ export async function cleanHolding(
   // Dropping the schema drops the branch's migration journal too.
   lock.assertHeld();
   const target = await cleanTarget(ctx);
-  const dependents = await runInTransaction(ctx, async (client) => {
-    const found = await readCascadeDependents(client, target.schemaName);
+  return runInTransaction(ctx, async (client) => {
+    const dependents = await readCascadeDependents(client, target.schemaName);
     for (const statement of cleanStatements(target.schemaName)) {
       await client.query(statement);
     }
-    return found;
+    const kept = await readKeptObjects(client, target.schemaName);
+    return { ...target, dependents, kept };
   });
-  return { ...target, dependents };
 }
 
 /**

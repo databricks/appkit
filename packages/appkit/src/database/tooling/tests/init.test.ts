@@ -173,6 +173,7 @@ beforeEach(() => {
     branch: DEV,
     schemaName: "app",
     dependents: [],
+    kept: [],
   });
   introspectHolding.mockReset().mockResolvedValue({ branch: DEV, tables: [] });
 });
@@ -895,7 +896,7 @@ describe("runInit — schema start", () => {
     expect(runCommand).not.toHaveBeenCalled();
     expect(report.start).toEqual({
       kind: "clean",
-      clean: { branch: DEV, schemaName: "app", dependents: [] },
+      clean: { branch: DEV, schemaName: "app", dependents: [], kept: [] },
       migrate: migrateReport,
     });
   });
@@ -909,7 +910,7 @@ describe("runInit — schema start", () => {
       await expect(runMigrate(ctx, { interactive: false })).rejects.toThrow(
         /^Another `appkit db init` \(pid \d+ on .+\) is changing the migration history in config\/database\. /,
       );
-      return { branch: DEV, schemaName: "app", dependents: [] };
+      return { branch: DEV, schemaName: "app", dependents: [], kept: [] };
     });
 
     await init(ctx, { schema: "clean" });

@@ -94,6 +94,11 @@ export function printCleanReport(report: CleanReport): void {
       `Also removed, because they depended on it: ${report.dependents.join(", ")}`,
     );
   }
+  if (report.kept.length > 0) {
+    warn(
+      `Kept in schema public, with their rows, because other roles own them: ${report.kept.join(", ")}`,
+    );
+  }
 }
 
 export function printIntrospectReport(report: IntrospectReport): void {

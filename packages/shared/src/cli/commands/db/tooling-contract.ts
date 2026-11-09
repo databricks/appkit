@@ -55,6 +55,8 @@ export interface CleanReport {
   readonly branch: string;
   readonly schemaName: string;
   readonly dependents: readonly string[];
+  /** In schema public, the objects other roles own, which stay with their rows. */
+  readonly kept: readonly string[];
 }
 
 export type InitStart =
