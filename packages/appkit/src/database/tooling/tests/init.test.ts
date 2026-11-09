@@ -68,6 +68,11 @@ const pool = {
 function project(): FakeLakebase {
   const lakebase = new FakeLakebase();
   lakebase.addBranch(PRODUCTION, { default: true });
+  lakebase.addDatabase(
+    PRODUCTION,
+    "databricks-postgres",
+    "databricks_postgres",
+  );
   lakebase.addRole(PRODUCTION, "alice", USER, ["DATABRICKS_SUPERUSER"]);
   lakebase.addRole(PRODUCTION, `dbrx-apps-${SP}`, SP);
   lakebase.addRole(PRODUCTION, "dbrx-apps-user-bob", "bob@example.com");
@@ -542,7 +547,7 @@ describe("runInit — session branch", () => {
       root: tempApp({
         "databricks.yml": databricksYml(
           PRODUCTION,
-          `${PRODUCTION}/databases/db`,
+          `${PRODUCTION}/databases/databricks-postgres`,
         ),
       }),
       env: { LAKEBASE_PROJECT: P, APPKIT_DB_SESSION: "k2x9q0ab" },
@@ -798,10 +803,6 @@ describe("runInit — .env", () => {
         PRODUCTION,
         `${PRODUCTION}/databases/databricks-postgres`,
       ),
-    });
-    lakebase.databases.set(`${DEV}/databases/databricks-postgres`, {
-      name: `${DEV}/databases/databricks-postgres`,
-      status: { postgres_database: "databricks_postgres" },
     });
     const ctx = fakeContext({
       root,
