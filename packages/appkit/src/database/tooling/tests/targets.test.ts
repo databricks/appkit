@@ -63,12 +63,14 @@ describe("readLocalTarget", () => {
         PGDATABASE: "databricks_postgres",
         PGUSER: "alice@example.com",
         APPKIT_DB_SESSION: "k2x9q0ab",
+        APPKIT_DB_NEW_BRANCH: "projects/p/branches/dev-alice-3f9a2c",
       }),
     ).toEqual({
       project: "projects/p",
       endpoint: "projects/p/branches/b/endpoints/primary",
       database: "databricks_postgres",
       session: "k2x9q0ab",
+      newBranch: "projects/p/branches/dev-alice-3f9a2c",
     });
   });
 
@@ -80,12 +82,14 @@ describe("readLocalTarget", () => {
         PGHOST: "your_postgres_host",
         PGDATABASE: "your_postgres_databaseName",
         APPKIT_DB_SESSION: "NOT VALID",
+        APPKIT_DB_NEW_BRANCH: "dev-alice-3f9a2c",
       }),
     ).toEqual({
       project: null,
       endpoint: null,
       database: null,
       session: null,
+      newBranch: null,
     });
   });
 });

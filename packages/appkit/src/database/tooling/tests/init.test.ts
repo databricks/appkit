@@ -20,11 +20,15 @@ vi.mock("../migrate", async (importOriginal) => ({
   migrateHolding,
 }));
 vi.mock("../clean", () => ({ cleanHolding }));
-vi.mock("../introspect", () => ({ introspectHolding }));
+vi.mock("../introspect", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../introspect")>()),
+  introspectHolding,
+}));
 
 import type { DbContext } from "../context";
 import type { HistoryLock } from "../history-lock";
 import { type InitOptions, runInit } from "../init";
+import { IntrospectRefusedError } from "../introspect";
 import { LakebaseApiError } from "../lakebase-api";
 import { runMigrate } from "../migrate";
 import { DRIZZLE_KIT_VERSION } from "../migrations";
@@ -180,7 +184,7 @@ beforeEach(() => {
 afterEach(cleanupTempApps);
 
 describe("runInit — dev branch", () => {
-  test("forks the default branch with no expiry, hands the app schema to you, rewrites .env, migrates", async () => {
+  test("forks the default branch with no expiry, hands the app schema to you, rewrites .env, rebuilds the app schema from the migrations", async () => {
     const lakebase = project();
     const ctx = appOn(lakebase);
 
@@ -207,15 +211,20 @@ describe("runInit — dev branch", () => {
       role: { name: `${DEV}/roles/alice`, action: "kept" },
       handedOff: SP,
       installed: null,
-      start: { kind: "migrate", migrate: migrateReport },
+      start: {
+        kind: "clean",
+        clean: { branch: DEV, schemaName: "app", dependents: [], kept: [] },
+        migrate: migrateReport,
+      },
     });
     expect(steps).toEqual([
       `Creating ${devBranchId(USER)} from production`,
       `Pointing .env at ${devBranchId(USER)}, database databricks_postgres`,
       `Handing schema app in database databricks_postgres on ${devBranchId(USER)} to you: deleting this branch's copy of role ${SP}, which owns it, with its objects reassigned to you`,
-      `Migrating schema app on ${devBranchId(USER)}`,
+      `Dropping schema app on ${devBranchId(USER)}: a branch init forked starts without the rows it copied, and the committed migrations recreate its tables`,
     ]);
 
+    // The marker that the branch awaits its first start is gone with the start.
     const written = envFile(ctx.root);
     expect(written).toEqual({
       DATABRICKS_CONFIG_PROFILE: "DEFAULT",
@@ -230,10 +239,13 @@ describe("runInit — dev branch", () => {
     expect(fs.readFileSync(path.join(ctx.root, ".env"), "utf-8")).toMatch(
       /^# Lakebase\n/,
     );
-    // Migrate runs against the new branch; the caller's environment is left alone.
+    // Clean and migrate run against the new branch; the caller's environment is left alone.
+    expect(cleanHolding.mock.invocationCallOrder[0]).toBeLessThan(
+      migrateHolding.mock.invocationCallOrder[0] ?? 0,
+    );
     const [migrateCtx, , migrateOptions] = migrateHolding.mock.calls[0] ?? [];
     expect(migrateCtx.env.LAKEBASE_ENDPOINT).toBe(`${DEV}/endpoints/primary`);
-    expect(migrateOptions).toEqual({ interactive: false });
+    expect(migrateOptions).toEqual({ interactive: false, generate: false });
     expect(ctx.env.LAKEBASE_ENDPOINT).toBe(`${PRODUCTION}/endpoints/primary`);
   });
 
@@ -822,7 +834,7 @@ describe("runInit — hand-off failures", () => {
 });
 
 describe("runInit — schema start", () => {
-  test("without schema.ts the default is introspect, which installs drizzle-kit first", async () => {
+  test("without schema.ts the default on a new fork is introspect, which installs drizzle-kit first, then a rebuild from the migrations it wrote", async () => {
     const lakebase = project();
     const ctx = appOn(
       lakebase,
@@ -846,9 +858,24 @@ describe("runInit — schema start", () => {
     expect(report.start).toEqual({
       kind: "introspect",
       introspect: { branch: DEV, tables: [] },
+      rebuilt: {
+        clean: { branch: DEV, schemaName: "app", dependents: [], kept: [] },
+        migrate: migrateReport,
+      },
     });
     expect(introspectHolding.mock.calls[0]?.[2]).toEqual({
       interactive: false,
+      schemaName: "app",
+    });
+    expect(introspectHolding.mock.invocationCallOrder[0]).toBeLessThan(
+      cleanHolding.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(cleanHolding.mock.invocationCallOrder[0]).toBeLessThan(
+      migrateHolding.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(migrateHolding.mock.calls[0]?.[2]).toEqual({
+      interactive: false,
+      generate: false,
     });
     expect(
       steps.indexOf(
@@ -954,6 +981,144 @@ describe("runInit — schema start", () => {
       expect(fs.existsSync(path.join(ctx.root, "config/database"))).toBe(false);
     },
   );
+});
+
+describe("runInit — a branch init forked starts without its copied rows", () => {
+  const dropping = (schemaName = "app") =>
+    `Dropping schema ${schemaName} on ${devBranchId(USER)}: a branch init forked starts without the rows it copied, and the committed migrations recreate its tables`;
+
+  function existingDev(): FakeLakebase {
+    const lakebase = project();
+    lakebase.addBranch(DEV);
+    lakebase.addRole(DEV, "alice", USER, ["DATABRICKS_SUPERUSER"]);
+    return lakebase;
+  }
+
+  test("a reused branch keeps its rows: migrate with schema.ts, introspect alone without", async () => {
+    schemaOwner = USER;
+    const withSchema = await init(appOn(existingDev()));
+    expect(withSchema.report.start).toEqual({
+      kind: "migrate",
+      migrate: migrateReport,
+    });
+
+    const withoutSchema = await init(
+      appOn(existingDev(), {}, { schema: false }),
+    );
+    expect(withoutSchema.report.start).toEqual({
+      kind: "introspect",
+      introspect: { branch: DEV, tables: [] },
+      rebuilt: null,
+    });
+    expect(cleanHolding).not.toHaveBeenCalled();
+  });
+
+  test("--schema migrate or --schema introspect on a new fork keeps the copied rows", async () => {
+    const migrated = await init(appOn(project()), { schema: "migrate" });
+    expect(migrated.report.start).toEqual({
+      kind: "migrate",
+      migrate: migrateReport,
+    });
+
+    const introspected = await init(appOn(project(), {}, { schema: false }), {
+      schema: "introspect",
+    });
+    expect(introspected.report.start).toEqual({
+      kind: "introspect",
+      introspect: { branch: DEV, tables: [] },
+      rebuilt: null,
+    });
+    expect(cleanHolding).not.toHaveBeenCalled();
+  });
+
+  test("a run that stopped after the fork leaves a marker in .env, and the next init rebuilds as if it had forked", async () => {
+    schemaOwner = USER;
+    const ctx = appOn(existingDev(), { APPKIT_DB_NEW_BRANCH: DEV });
+
+    const { report, steps } = await init(ctx);
+
+    expect(report).toMatchObject({ created: false, start: { kind: "clean" } });
+    expect(steps).toContain(dropping());
+    expect(envFile(ctx.root).APPKIT_DB_NEW_BRANCH).toBeUndefined();
+  });
+
+  test("a marker for another branch changes nothing, and stays", async () => {
+    schemaOwner = USER;
+    const other = session("k2x9q0ab");
+    const ctx = appOn(existingDev(), { APPKIT_DB_NEW_BRANCH: other });
+
+    const { report } = await init(ctx);
+
+    expect(report.start.kind).toBe("migrate");
+    expect(envFile(ctx.root).APPKIT_DB_NEW_BRANCH).toBe(other);
+  });
+
+  test("the marker is written before the fork and removed when the fork is refused, so a stop during the fork is covered", async () => {
+    const stopped = project();
+    stopped.createBranchError = new Error("network down");
+    const stoppedCtx = appOn(stopped);
+    await expect(init(stoppedCtx)).rejects.toThrow("network down");
+    expect(envFile(stoppedCtx.root).APPKIT_DB_NEW_BRANCH).toBe(DEV);
+
+    const refused = project();
+    refused.createBranchError = forbidden();
+    const refusedCtx = appOn(refused);
+    await expect(init(refusedCtx)).rejects.toThrow("needs CAN MANAGE");
+    expect(envFile(refusedCtx.root).APPKIT_DB_NEW_BRANCH).toBeUndefined();
+  });
+
+  test("--schema none on a new fork completes its setup: the marker goes, and the next init migrates", async () => {
+    const lakebase = project();
+    const ctx = appOn(lakebase);
+
+    const first = await init(ctx, { schema: "none" });
+    expect(first.report.start).toEqual({ kind: "none" });
+    expect(envFile(ctx.root).APPKIT_DB_NEW_BRANCH).toBeUndefined();
+
+    schemaOwner = USER;
+    const rerun = fakeContext({
+      root: ctx.root,
+      env: { ...ctx.env, ...envFile(ctx.root) },
+      userName: USER,
+      api: lakebase.api(),
+    });
+    const second = await init(rerun);
+    expect(second.report.start.kind).toBe("migrate");
+  });
+
+  test("the hand-off and the introspect read the schema schema.ts declares", async () => {
+    const ctx = appOn(
+      project(),
+      {},
+      { files: { "config/database/schema.ts": schemaSource("sales") } },
+    );
+
+    const { steps } = await init(ctx, { schema: "introspect" });
+
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.stringContaining("nspowner"),
+      ["sales"],
+    );
+    expect(introspectHolding.mock.calls[0]?.[2]).toEqual({
+      interactive: false,
+      schemaName: "sales",
+    });
+    expect(steps).toContain(
+      `Writing schema.ts from schema sales on ${devBranchId(USER)}`,
+    );
+  });
+
+  test("an introspect refusal that says to pass --schema-name names the introspect command, which has the flag", async () => {
+    introspectHolding.mockRejectedValue(
+      new IntrospectRefusedError(
+        `Schema "app" on ${devBranchId(USER)} has no tables, so introspect would replace config/database/schema.ts with an empty one. Pass --schema-name <name> to read another schema.`,
+      ),
+    );
+
+    await expect(init(appOn(project(), {}, { schema: false }))).rejects.toThrow(
+      `Schema "app" on ${devBranchId(USER)} has no tables, so introspect would replace config/database/schema.ts with an empty one. Run \`appkit db introspect --schema-name <name>\` to read another schema.`,
+    );
+  });
 });
 
 describe("runInit — .env", () => {
