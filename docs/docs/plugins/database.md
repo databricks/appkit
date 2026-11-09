@@ -295,10 +295,18 @@ only some of them exist, the app does not start, and nothing is changed.
 
 Migrations only go forward. There are no down migrations, and the app never undoes
 one. Redeploying an older commit leaves the newer tables and their recorded
-migrations in place: the app logs that the branch recorded migrations the older
-code does not have, applies nothing, and starts. The older code must work with the
-newer schema, which [two-step changes](#changing-tables-in-use) guarantee. To undo
-a schema change, commit a new migration that reverses it, and deploy it.
+migrations in place. The app logs that the branch recorded migrations the older
+code does not have, and applies nothing. It starts when every table and column the
+older `schema.ts` declares still exists.
+
+You can roll back only to a commit whose code works with the current schema. A
+migration that only adds, as the first step of a
+[two-step change](#changing-tables-in-use) does, keeps the previous release
+working. A migration that drops or renames a table or column ends rollbacks to
+every commit whose `schema.ts` declares it, because that code no longer starts.
+The second step of a two-step change is such a migration, so deploy it only when
+you no longer need to roll back past the first step. To undo a schema change,
+commit a new migration that reverses it, and deploy it.
 
 ### One owner per branch
 
