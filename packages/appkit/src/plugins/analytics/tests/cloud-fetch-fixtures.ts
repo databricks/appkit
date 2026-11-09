@@ -83,14 +83,14 @@ export function typedDataset(rows = 20): Dataset {
   const flag = col(7, (i) => i % 2 === 0);
 
   const table = new ArrowTable({
-    col_0: vectorFromArray(id, new Int32()),
-    col_1: vectorFromArray(big, new Int64()),
-    col_2: vectorFromArray(amount, new Float64()),
-    col_3: decimalVector(price, 2),
-    col_4: vectorFromArray(day, new DateDay()),
-    col_5: vectorFromArray(ts, new TimestampMicrosecond("UTC")),
-    col_6: vectorFromArray(label, new Utf8()),
-    col_7: vectorFromArray(flag, new Bool()),
+    id: vectorFromArray(id, new Int32()),
+    big: vectorFromArray(big, new Int64()),
+    amount: vectorFromArray(amount, new Float64()),
+    price: decimalVector(price, 2),
+    day: vectorFromArray(day, new DateDay()),
+    ts: vectorFromArray(ts, new TimestampMicrosecond("UTC")),
+    label: vectorFromArray(label, new Utf8()),
+    flag: vectorFromArray(flag, new Bool()),
   });
 
   const text = (v: unknown, render: (x: never) => string) =>
@@ -134,8 +134,8 @@ export function typedDataset(rows = 20): Dataset {
 
 /** Every cell as a string, so schemas and values compare across Arrow builds. */
 export function cellsOf(table: Table): Array<Array<string | null>> {
-  const columns = table.schema.fields.map((f) =>
-    [...(table.getChild(f.name) as Iterable<unknown>)].map((v) =>
+  const columns = table.schema.fields.map((_f, index) =>
+    [...(table.getChildAt(index) as Iterable<unknown>)].map((v) =>
       v === null || v === undefined ? null : String(v),
     ),
   );

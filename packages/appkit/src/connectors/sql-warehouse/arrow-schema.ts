@@ -16,6 +16,7 @@ import {
   List,
   Map_,
   Null,
+  RecordBatch,
   Schema,
   Struct,
   Table,
@@ -23,11 +24,13 @@ import {
   tableToIPC,
   Type,
   Utf8,
-  type Vector,
   makeData,
   makeVector,
   vectorFromArray,
 } from "apache-arrow";
+
+import type { ColumnInfo } from "../../workspace-client";
+import { hasJsonArrayCodec, parseJsonArrayCell } from "./json-array-cells";
 
 /**
  * Parse a Databricks SQL type text (the value returned by the Statement
@@ -56,13 +59,7 @@ export function parseDatabricksType(typeText: string): DataType {
  * deliver a real Arrow Table to the client, preserving the hook's typed
  * contract.
  */
-export function buildEmptyArrowIPCBase64(
-  columns: Array<{
-    name?: string;
-    typeText?: string;
-    typeName?: string;
-  }>,
-): string {
+export function buildEmptyArrowIPCBase64(columns: ColumnInfo[]): string {
   const fields = columns.map((col, index) => {
     const typeText = col.typeText ?? col.typeName ?? "STRING";
     let dataType: DataType;
@@ -80,77 +77,58 @@ export function buildEmptyArrowIPCBase64(
   return Buffer.from(ipc).toString("base64");
 }
 
-/** Column metadata from `manifest.schema.columns`. */
-export interface ArrowRowColumn {
-  name?: string;
-  typeText?: string;
-  typeName?: string;
-  typePrecision?: number;
-  typeScale?: number;
-}
-
 /**
  * Rebuild the Arrow IPC stream a warehouse serves for `ARROW_STREAM` from the
- * positional string rows of an `INLINE` + `JSON_ARRAY` result. Fields are named
- * `col_N` like the native stream, and each type is what
- * {@link parseDatabricksType} gives that column, with DECIMAL precision and
- * scale taken from `typePrecision` and `typeScale`.
+ * positional string rows of an `INLINE` + `JSON_ARRAY` result. Fields carry the
+ * manifest column names, duplicates included, like the native Cloud Fetch
+ * stream, and each type is what {@link parseDatabricksType} gives that column,
+ * with DECIMAL precision and scale taken from `typePrecision` and `typeScale`.
  *
  * Nested, interval, and geospatial columns arrive as strings on the JSON wire
- * and stay strings. A cell that does not parse as its column type throws.
+ * and stay strings, and so does any type without a {@link parseJsonArrayCell}
+ * codec. A cell that does not parse as its column type throws.
  */
 export function buildArrowIPCFromRows(
-  columns: ArrowRowColumn[],
+  columns: ColumnInfo[],
   rows: Array<Array<string | null | undefined>>,
 ): Uint8Array {
-  const vectors: Record<string, Vector> = {};
-  columns.forEach((col, index) => {
-    const cells = rows.map((row) => row[index] ?? null);
-    vectors[`col_${index}`] = vectorFromCells(col, cells);
-  });
-  return tableToIPC(new Table(vectors), "stream");
+  const vectors = columns.map((col, index) =>
+    vectorFromCells(
+      col,
+      rows.map((row) => row[index] ?? null),
+    ),
+  );
+  const fields = vectors.map(
+    (vector, index) =>
+      new Field(columns[index].name || `col_${index}`, vector.type, true),
+  );
+  const batch = new RecordBatch(
+    new Schema(fields),
+    makeData({
+      type: new Struct(fields),
+      length: rows.length,
+      nullCount: 0,
+      children: vectors.map((vector) => vector.data[0]),
+    }),
+  );
+  return tableToIPC(new Table(batch), "stream");
 }
 
-function vectorFromCells(col: ArrowRowColumn, cells: Array<string | null>) {
+function vectorFromCells(col: ColumnInfo, cells: Array<string | null>) {
   const type = rebuildType(col);
-  const map = <T>(parse: (cell: string) => T) =>
-    cells.map((cell) => (cell === null ? null : parse(cell)));
-  switch (type.typeId) {
-    case Type.Int: {
-      const { bitWidth } = type as unknown as { bitWidth: number };
-      return vectorFromArray(
-        bitWidth === 64 ? map(parseBigInt) : map(parseInteger),
-        type as never,
-      );
-    }
-    case Type.Float:
-      return vectorFromArray(map(parseFloatCell), type as never);
-    case Type.Bool:
-      return vectorFromArray(map(parseBoolean), type as never);
-    case Type.Date:
-      return vectorFromArray(map(parseUtcMillis), type as never);
-    case Type.Timestamp:
-      return vectorFromArray(map(parseUtcMillis), type as never);
-    case Type.Binary:
-      return vectorFromArray(
-        map((cell) => new Uint8Array(Buffer.from(cell, "base64"))),
-        type as never,
-      );
-    case Type.Decimal: {
-      const { scale, precision } = type as unknown as {
-        scale: number;
-        precision: number;
-      };
-      return decimalVector(cells, scale, precision);
-    }
-    case Type.Null:
-      return vectorFromArray(
-        cells.map(() => null),
-        type as never,
-      );
-    default:
-      return vectorFromArray(cells, new Utf8());
+  if (type.typeId === Type.Null) {
+    return vectorFromArray(
+      cells.map(() => null),
+      type as never,
+    );
   }
+  const values = cells.map((cell) =>
+    cell === null ? null : parseJsonArrayCell(cell, type),
+  );
+  if (type.typeId === Type.Decimal) {
+    return decimalVector(values as Array<bigint | null>, type as Decimal);
+  }
+  return vectorFromArray(values, type as never);
 }
 
 const STRING_ONLY_TYPES = new Set<Type>([
@@ -161,7 +139,7 @@ const STRING_ONLY_TYPES = new Set<Type>([
   Type.Duration,
 ]);
 
-function rebuildType(col: ArrowRowColumn): DataType {
+function rebuildType(col: ColumnInfo): DataType {
   const typeText = col.typeText ?? col.typeName ?? "STRING";
   let type: DataType;
   try {
@@ -177,68 +155,22 @@ function rebuildType(col: ArrowRowColumn): DataType {
   if (type.typeId === Type.Decimal && col.typePrecision != null) {
     return new Decimal(col.typeScale ?? 0, col.typePrecision, 128);
   }
+  if (type.typeId !== Type.Null && !hasJsonArrayCodec(type)) return new Utf8();
   return type;
 }
 
-function parseInteger(cell: string): number {
-  const n = Number(cell);
-  if (cell.trim() === "" || !Number.isInteger(n)) {
-    throw new Error(`Invalid integer "${cell}"`);
-  }
-  return n;
-}
-
-function parseBigInt(cell: string): bigint {
-  if (cell.trim() === "") throw new Error(`Invalid integer "${cell}"`);
-  return BigInt(cell);
-}
-
-function parseFloatCell(cell: string): number {
-  const n = Number(cell);
-  if (cell.trim() === "" || (Number.isNaN(n) && cell !== "NaN")) {
-    throw new Error(`Invalid number "${cell}"`);
-  }
-  return n;
-}
-
-function parseBoolean(cell: string): boolean {
-  if (cell !== "true" && cell !== "false") {
-    throw new Error(`Invalid boolean "${cell}"`);
-  }
-  return cell === "true";
-}
-
-/** Epoch ms for an ISO date or timestamp; a value with no zone is UTC. */
-function parseUtcMillis(cell: string): number {
-  const ms = Date.parse(
-    /(?:Z|[+-]\d\d(?::?\d\d)?)$/i.test(cell) || !cell.includes("T")
-      ? cell
-      : `${cell}Z`,
-  );
-  if (Number.isNaN(ms)) throw new Error(`Invalid date or timestamp "${cell}"`);
-  return ms;
-}
-
-function decimalVector(
-  cells: Array<string | null>,
-  scale: number,
-  precision: number,
-) {
-  const words = new Uint32Array(cells.length * 4);
-  const validity = new Uint8Array(Math.ceil(cells.length / 8));
+/** `vectorFromArray` cannot build Decimal128, so write the 128-bit words directly. */
+function decimalVector(unscaled: Array<bigint | null>, type: Decimal) {
+  const words = new Uint32Array(unscaled.length * 4);
+  const validity = new Uint8Array(Math.ceil(unscaled.length / 8));
   let nullCount = 0;
-  cells.forEach((cell, i) => {
-    if (cell === null) {
+  unscaled.forEach((value, i) => {
+    if (value === null) {
       nullCount++;
       return;
     }
     validity[i >> 3] |= 1 << (i & 7);
-    const negative = cell.startsWith("-");
-    const [whole, fraction = ""] = cell.replace(/^[-+]/, "").split(".");
-    const digits = `${whole}${fraction.padEnd(scale, "0").slice(0, scale)}`;
-    if (!/^\d+$/.test(digits)) throw new Error(`Invalid decimal "${cell}"`);
-    const unscaled = BigInt(digits);
-    const twosComplement = negative ? (1n << 128n) - unscaled : unscaled;
+    const twosComplement = value < 0n ? (1n << 128n) + value : value;
     for (let w = 0; w < 4; w++) {
       words[i * 4 + w] = Number(
         (twosComplement >> BigInt(32 * w)) & 0xffffffffn,
@@ -247,8 +179,8 @@ function decimalVector(
   });
   return makeVector(
     makeData({
-      type: new Decimal(scale, precision, 128),
-      length: cells.length,
+      type: new Decimal(type.scale, type.precision, 128),
+      length: unscaled.length,
       nullCount,
       nullBitmap: validity,
       data: words,

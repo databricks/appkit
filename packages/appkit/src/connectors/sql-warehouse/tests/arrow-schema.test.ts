@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import {
   Binary,
   Bool,
@@ -23,6 +25,7 @@ import {
 } from "apache-arrow";
 import { describe, expect, test } from "vitest";
 
+import type { ColumnInfo } from "../../../workspace-client";
 import {
   buildArrowIPCFromRows,
   buildEmptyArrowIPCBase64,
@@ -639,7 +642,7 @@ describe("buildArrowIPCFromRows", () => {
 
       const native = parseDatabricksType(column.typeText ?? "STRING");
       const field = table.schema.fields[0];
-      expect(field.name).toBe("col_0");
+      expect(field.name).toBe(column.name);
       expect(field.typeId).toBe(native.typeId);
       if (column.typeName === "DECIMAL") {
         const type = field.type as Decimal;
@@ -650,12 +653,12 @@ describe("buildArrowIPCFromRows", () => {
       } else {
         expect(String(field.type)).toBe(String(native));
       }
-      const values = [...(table.getChild("col_0") as Iterable<unknown>)];
+      const values = [...(table.getChildAt(0) as Iterable<unknown>)];
       expect(values.map((v) => (read ? read(v) : v))).toEqual(expected);
     },
   );
 
-  test("positional rows keep duplicate column names and JSON-looking strings verbatim", () => {
+  test("duplicate column names and JSON-looking strings come through verbatim", () => {
     const payload = '{"id":9007199254740993, "label":"kept verbatim"}';
     const ipc = buildArrowIPCFromRows(
       [
@@ -667,13 +670,13 @@ describe("buildArrowIPCFromRows", () => {
     );
     const table = tableFromIPC(ipc);
     expect(table.schema.fields.map((f) => f.name)).toEqual([
-      "col_0",
-      "col_1",
-      "col_2",
+      "x",
+      "x",
+      "payload",
     ]);
-    expect(table.getChild("col_0")?.get(0)).toBe(1);
-    expect(table.getChild("col_1")?.get(0)).toBe(2);
-    expect(table.getChild("col_2")?.get(0)).toBe(payload);
+    expect(table.getChildAt(0)?.get(0)).toBe(1);
+    expect(table.getChildAt(1)?.get(0)).toBe(2);
+    expect(table.getChildAt(2)?.get(0)).toBe(payload);
   });
 
   test("nested, interval and geospatial columns stay strings", () => {
@@ -696,11 +699,11 @@ describe("buildArrowIPCFromRows", () => {
       columns.map(() => Type.Utf8),
     );
     expect(table.toArray()[0].toJSON()).toEqual({
-      col_0: row[0],
-      col_1: row[1],
-      col_2: row[2],
-      col_3: row[3],
-      col_4: row[4],
+      a: row[0],
+      m: row[1],
+      s: row[2],
+      i: row[3],
+      g: row[4],
     });
   });
 
@@ -740,5 +743,69 @@ describe("buildArrowIPCFromRows", () => {
     expect(() =>
       buildArrowIPCFromRows([{ typeText: "BOOLEAN" }], [["maybe"]]),
     ).toThrow(/Invalid boolean/);
+  });
+});
+
+describe("buildArrowIPCFromRows against a captured warehouse response", () => {
+  const fixture = JSON.parse(
+    readFileSync(
+      new URL("./fixtures/typed-values.json", import.meta.url),
+      "utf8",
+    ),
+  ) as {
+    columns: ColumnInfo[];
+    dataArray: Array<Array<string | null>>;
+    arrowIpcBase64: string;
+  };
+  const native = tableFromIPC(Buffer.from(fixture.arrowIpcBase64, "base64"));
+  const rebuilt = tableFromIPC(
+    buildArrowIPCFromRows(fixture.columns, fixture.dataArray),
+  );
+  const comparable = (value: unknown) =>
+    value !== null && typeof value === "object" ? String(value) : value;
+  const values = (table: typeof native, index: number) =>
+    [...(table.getChildAt(index) ?? [])].map(comparable);
+  const SESSION_ZONE = "America/Los_Angeles";
+
+  test("has the same rows and column names, duplicates included", () => {
+    expect(rebuilt.numRows).toBe(native.numRows);
+    expect(rebuilt.schema.fields.map((f) => f.name)).toEqual(
+      native.schema.fields.map((f) => f.name),
+    );
+  });
+
+  test.each(
+    fixture.columns
+      .map((column, index) => [column.name ?? "", index] as const)
+      .filter(([name]) => !["ts", "ts_micro", "arr"].includes(name)),
+  )("column %s (%i) has the native Arrow type and values", (_name, index) => {
+    expect(String(rebuilt.schema.fields[index].type)).toBe(
+      String(native.schema.fields[index].type),
+    );
+    expect(values(rebuilt, index)).toEqual(values(native, index));
+  });
+
+  test("TIMESTAMP keeps every instant but is labeled UTC instead of the session zone", () => {
+    const index = fixture.columns.findIndex((c) => c.name === "ts");
+    expect(native.schema.fields[index].type.timezone).toBe(SESSION_ZONE);
+    expect(rebuilt.schema.fields[index].type.timezone).toBe("UTC");
+    expect(values(rebuilt, index)).toEqual(values(native, index));
+  });
+
+  test("TIMESTAMP keeps milliseconds, because the JSON text has no microseconds", () => {
+    const index = fixture.columns.findIndex((c) => c.name === "ts_micro");
+    expect(fixture.dataArray[0][index]).toMatch(/\.\d{3}-\d{2}:\d{2}$/);
+    expect(values(rebuilt, index)).toEqual(
+      values(native, index).map((ms) => Math.trunc(ms as number)),
+    );
+  });
+
+  test("ARRAY arrives as JSON text and stays a string column", () => {
+    const index = fixture.columns.findIndex((c) => c.name === "arr");
+    expect(native.schema.fields[index].type.typeId).toBe(Type.List);
+    expect(rebuilt.schema.fields[index].type.typeId).toBe(Type.Utf8);
+    expect(values(rebuilt, index)).toEqual(
+      fixture.dataArray.map((row) => row[index]),
+    );
   });
 });

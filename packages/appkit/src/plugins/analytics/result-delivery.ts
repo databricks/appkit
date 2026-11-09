@@ -1,18 +1,16 @@
 import { type DataType, type Field, Type, tableFromIPC } from "apache-arrow";
 import type { SQLTypeMarker } from "shared";
 
-import {
-  type ArrowRowColumn,
-  buildArrowIPCFromRows,
-} from "../../connectors/sql-warehouse/arrow-schema";
+import { buildArrowIPCFromRows } from "../../connectors/sql-warehouse/arrow-schema";
 import { MAX_INLINE_ATTACHMENT_BYTES } from "../../connectors/sql-warehouse/client";
+import { formatJsonArrayCell } from "../../connectors/sql-warehouse/json-array-cells";
 import { ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import {
   EXTERNAL_LINK_DOWNLOAD_FAILED,
   type RefreshChunkLink,
 } from "../../stream/arrow-stream-processor";
-import type { ExternalLink } from "../../workspace-client";
+import type { ColumnInfo, ExternalLink } from "../../workspace-client";
 
 /**
  * Centralized disposition/format fallback for analytics result delivery.
@@ -53,7 +51,7 @@ export interface QueryExecutor {
         attachment?: string;
         data?: Record<string, unknown>[];
         dataArray?: Array<Array<string | null>>;
-        columns?: ArrowRowColumn[];
+        columns?: ColumnInfo[];
         external_links?: ExternalLink[];
         columnNames?: string[];
         totalByteCount?: number;
@@ -575,70 +573,11 @@ export async function deliverJsonResult(
 const JSON_ARRAY_FALLBACK_MAX_ROWS = 100_000;
 const JSON_ARRAY_FALLBACK_MAX_BYTES = 64 * 1024 * 1024;
 
-/** Render an apache-arrow Decimal cell to a fixed-point string. */
-function formatDecimalCell(
-  value: { toString(): string },
-  scale: number,
-): string {
-  const unscaled = value.toString();
-  if (scale <= 0) return unscaled;
-  const negative = unscaled.startsWith("-");
-  let digits = negative ? unscaled.slice(1) : unscaled;
-  if (digits.length <= scale) digits = digits.padStart(scale + 1, "0");
-  const point = digits.length - scale;
-  const out = `${digits.slice(0, point)}.${digits.slice(point)}`;
-  return negative ? `-${out}` : out;
-}
-
-/**
- * Render an apache-arrow Timestamp cell to ISO-8601 ms precision — `Z` for
- * zoned columns, no `Z` for TIMESTAMP_NTZ — matching native JSON_ARRAY.
- */
-function formatTimestampCell(epochMs: number, hasTimezone: boolean): string {
-  const iso = new Date(epochMs).toISOString();
-  return hasTimezone ? iso : iso.slice(0, -1);
-}
-
-/** Render an apache-arrow Date cell to `yyyy-MM-dd` (UTC). */
-function formatDateCell(epochMs: number): string {
-  return new Date(epochMs).toISOString().slice(0, 10);
-}
-
-/**
- * Render a single scalar Arrow value to the string form the warehouse emits
- * under native JSON_ARRAY. Used for both top-level cells and (recursively, via
- * {@link renderNestedValue}) scalar leaves inside List/Struct/Map columns,
- * keyed on the Arrow field type so a nested `DECIMAL` keeps its scale and a
- * nested `TIMESTAMP` becomes ISO-8601 instead of raw epoch-ms.
- */
-function formatScalarCell(value: unknown, type: DataType): string {
-  switch (type.typeId) {
-    case Type.Decimal:
-      return formatDecimalCell(
-        value as { toString(): string },
-        (type as DataType & { scale: number }).scale,
-      );
-    case Type.Timestamp:
-      return formatTimestampCell(
-        Number(value),
-        (type as DataType & { timezone?: string | null }).timezone != null,
-      );
-    case Type.Date:
-      return formatDateCell(Number(value));
-    default:
-      if (value instanceof Uint8Array) {
-        return Buffer.from(value).toString("base64");
-      }
-      if (value instanceof Date) return value.toISOString();
-      return String(value);
-  }
-}
-
 /**
  * Recursively render a nested Arrow value (List / Struct / Map, or a scalar
  * leaf) to the plain JS shape the warehouse nests inside a JSON_ARRAY cell:
  * structs and maps become objects, lists become arrays, and every scalar leaf
- * is stringified per {@link formatScalarCell}. The caller `JSON.stringify`s the
+ * is stringified per {@link formatJsonArrayCell}. The caller `JSON.stringify`s the
  * result so nested columns match the warehouse's native `data_array` exactly.
  */
 function renderNestedValue(value: unknown, type: DataType): unknown {
@@ -678,7 +617,7 @@ function renderNestedValue(value: unknown, type: DataType): unknown {
       return obj;
     }
     default:
-      return formatScalarCell(value, type);
+      return formatJsonArrayCell(value, type);
   }
 }
 
@@ -745,7 +684,7 @@ export function decodeArrowAttachmentToRows(
         case Type.Decimal:
         case Type.Timestamp:
         case Type.Date:
-          row[name] = formatScalarCell(v, type);
+          row[name] = formatJsonArrayCell(v, type);
           continue;
         // Nested columns (STRUCT / ARRAY / MAP) arrive on the native
         // JSON_ARRAY wire as a JSON string with every scalar leaf stringified
@@ -769,7 +708,7 @@ export function decodeArrowAttachmentToRows(
       } else if (v instanceof Uint8Array) {
         row[name] = Buffer.from(v).toString("base64");
       } else {
-        row[name] = formatScalarCell(v, type);
+        row[name] = formatJsonArrayCell(v, type);
       }
     }
     rows.push(row);
