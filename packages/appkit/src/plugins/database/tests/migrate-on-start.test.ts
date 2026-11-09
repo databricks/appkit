@@ -217,11 +217,18 @@ describe("migrateOnStart", () => {
     ],
     [
       "a view at the journal's name",
-      new apply.MigrationJournalError("app", {
-        relkind: "v",
-        owner: "mallory",
-        schemaOwner: "app-sp",
-      }),
+      new apply.MigrationJournalError(
+        "app",
+        {
+          relkind: "v",
+          owner: "mallory",
+          schemaOwner: "app-sp",
+          currentUser: "app-sp",
+          rowSecurity: false,
+          trusted: false,
+        },
+        "kind",
+      ),
       '"app"."__drizzle_migrations" is a view owned by "mallory"',
     ],
     [

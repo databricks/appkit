@@ -215,11 +215,46 @@ function ambiguousMessage(
   );
 }
 
-/** What pg_catalog holds at the journal's name. */
+/** What pg_catalog holds at the journal's name, seen from the migrating session. */
 interface JournalRelation {
   readonly relkind: string;
   readonly owner: string;
   readonly schemaOwner: string;
+  /** The role the migrator connects as. */
+  readonly currentUser: string;
+  /** Row-level security is enabled, so a policy runs on every read by a non-owner. */
+  readonly rowSecurity: boolean;
+  /** The current role owns it or inherits its owner, or its owner is the schema's. */
+  readonly trusted: boolean;
+}
+
+/** What the migrator is about to do with the journal. */
+type JournalUse = "read" | "record";
+
+/** Why the relation at the journal's name is refused for a use. */
+type JournalRefusal =
+  /** Not an ordinary table. */
+  | "kind"
+  /** Recording into a table of an untrusted owner's. */
+  | "owner"
+  /** Reading a table of an untrusted owner's under row-level security. */
+  | "row-security";
+
+/**
+ * A relation at the journal's name can run its owner's code with the app's
+ * privileges: a view when read, a row-security policy when a non-owner
+ * reads, and triggers, rules or column defaults when recorded into. So only
+ * an ordinary table is used, and one of an untrusted owner's only for a read
+ * without row-level security.
+ */
+function journalRefusal(
+  relation: JournalRelation,
+  use: JournalUse,
+): JournalRefusal | undefined {
+  if (relation.relkind !== "r") return "kind";
+  if (relation.trusted) return undefined;
+  if (use === "record") return "owner";
+  return relation.rowSecurity ? "row-security" : undefined;
 }
 
 /** pg_class.relkind, for the error message. */
@@ -232,23 +267,51 @@ const RELATION_KINDS: Readonly<Record<string, string>> = {
   S: "a sequence",
 };
 
-/**
- * The journal's name is taken by something other than an ordinary table of
- * the schema owner's. The migrator selects from and inserts into the journal
- * as the app, so another role's view, or a table with its triggers, could
- * run that role's code with the app's privileges. Nothing was applied.
- */
+/** The relation at the journal's name cannot be used as the journal (see journalRefusal). Nothing was applied. */
 export class MigrationJournalError extends Error {
-  constructor(schemaName: string, relation: JournalRelation) {
-    const kind =
-      RELATION_KINDS[relation.relkind] ??
-      `a relation of kind "${relation.relkind}"`;
+  constructor(
+    schemaName: string,
+    relation: JournalRelation,
+    refusal: JournalRefusal,
+  ) {
     super(
-      `${journalTable(schemaName)} is ${kind} owned by "${relation.owner}". ` +
-        `The migrator reads and records applied migrations only in a table owned by "${relation.schemaOwner}", the owner of schema "${schemaName}". ` +
-        "Another role's view or table could run its code as the app. Drop or rename it, then deploy again. No migration was applied.",
+      `${journalRefusalMessage(schemaName, relation, refusal)} No migration was applied.`,
     );
     this.name = "MigrationJournalError";
+  }
+}
+
+function journalRefusalMessage(
+  schemaName: string,
+  relation: JournalRelation,
+  refusal: JournalRefusal,
+): string {
+  const table = journalTable(schemaName);
+  const untrusted = `The migrator connects as "${relation.currentUser}", which neither owns it nor inherits "${relation.owner}"`;
+  const transfer = `transfer the table to "${relation.currentUser}" (ALTER TABLE … OWNER TO), then deploy again.`;
+  switch (refusal) {
+    case "kind": {
+      const kind =
+        RELATION_KINDS[relation.relkind] ??
+        `a relation of kind "${relation.relkind}"`;
+      return (
+        `${table} is ${kind} owned by "${relation.owner}". ` +
+        "The migrator reads and records applied migrations only in an ordinary table. Drop or rename it, then deploy again."
+      );
+    }
+    case "owner":
+      return (
+        `${table} is a table owned by "${relation.owner}". ${untrusted}, ` +
+        `and records applied migrations only in a table owned by its role or by "${relation.schemaOwner}", the owner of schema "${schemaName}", ` +
+        "because a trigger, rule or column default on another role's table would run that role's code as the app. " +
+        `Have "${relation.owner}" run the migration, or ${transfer}`
+      );
+    case "row-security":
+      return (
+        `${table} is a table owned by "${relation.owner}" with row-level security enabled. ${untrusted}, ` +
+        "so a policy would run that role's code as the app on every read. " +
+        `Have "${relation.owner}" disable row-level security on it, or ${transfer}`
+      );
   }
 }
 
@@ -335,21 +398,29 @@ function readMigrations(folder: string, journal: Journal): MigrationFile[] {
 
 /**
  * Whether the journal table exists. Every read of the journal and every
- * record into it starts here, so anything else at its name is refused.
+ * record into it starts here, so a relation at its name that is unfit for
+ * that use is refused (see journalRefusal).
  */
 async function journalTableExists(
   client: QueryClient,
   schemaName: string,
+  use: JournalUse,
 ): Promise<boolean> {
   // pg_catalog needs no privileges, so a missing grant is not mistaken for a missing table.
   const { rows } = await client.query<{
     relkind: string;
     owner: string;
     schema_owner: string;
+    current_user: string;
+    row_security: boolean;
+    trusted: boolean;
   }>(
     `select c.relkind::text as relkind,
             pg_catalog.pg_get_userbyid(c.relowner) as owner,
-            pg_catalog.pg_get_userbyid(n.nspowner) as schema_owner
+            pg_catalog.pg_get_userbyid(n.nspowner) as schema_owner,
+            current_user::text as current_user,
+            c.relrowsecurity as row_security,
+            (pg_catalog.pg_has_role(current_user, c.relowner, 'USAGE') or c.relowner = n.nspowner) as trusted
        from pg_catalog.pg_class c
        join pg_catalog.pg_namespace n on n.oid = c.relnamespace
       where n.nspname = $1 and c.relname = $2`,
@@ -357,13 +428,16 @@ async function journalTableExists(
   );
   const found = rows[0];
   if (!found) return false;
-  if (found.relkind !== "r" || found.owner !== found.schema_owner) {
-    throw new MigrationJournalError(schemaName, {
-      relkind: found.relkind,
-      owner: found.owner,
-      schemaOwner: found.schema_owner,
-    });
-  }
+  const relation: JournalRelation = {
+    relkind: found.relkind,
+    owner: found.owner,
+    schemaOwner: found.schema_owner,
+    currentUser: found.current_user,
+    rowSecurity: found.row_security,
+    trusted: found.trusted,
+  };
+  const refusal = journalRefusal(relation, use);
+  if (refusal) throw new MigrationJournalError(schemaName, relation, refusal);
   return true;
 }
 
@@ -372,7 +446,7 @@ async function readRecordedMigrations(
   client: QueryClient,
   schemaName: string,
 ): Promise<RecordedMigration[]> {
-  if (!(await journalTableExists(client, schemaName))) return [];
+  if (!(await journalTableExists(client, schemaName, "read"))) return [];
   const { rows } = await client.query<{
     hash: string;
     created_at: string | number | null;
@@ -494,7 +568,7 @@ async function ensureJournalTable(
   client: QueryClient,
   schemaName: string,
 ): Promise<void> {
-  if (await journalTableExists(client, schemaName)) return;
+  if (await journalTableExists(client, schemaName, "record")) return;
   await client.query(
     `CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(schemaName)}`,
   );
