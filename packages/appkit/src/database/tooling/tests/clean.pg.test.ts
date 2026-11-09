@@ -4,13 +4,20 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import { inTransaction } from "../../migrations/apply";
-import { cleanStatements, readCascadeDependents } from "../clean";
+import {
+  cleanStatements,
+  readCascadeDependents,
+  readKeptObjects,
+} from "../clean";
 
 // The clean SQL against a real server, as a superuser that may create
 // databases and roles, e.g. APPKIT_TEST_PG_URL=postgres://localhost:5432/postgres
 const url = process.env.APPKIT_TEST_PG_URL;
 
-async function clean(pool: Pool, schemaName: string): Promise<string[]> {
+async function clean(
+  pool: Pool,
+  schemaName: string,
+): Promise<{ dependents: string[]; kept: string[] }> {
   const client = await pool.connect();
   try {
     return await inTransaction(client, async () => {
@@ -18,7 +25,7 @@ async function clean(pool: Pool, schemaName: string): Promise<string[]> {
       for (const statement of cleanStatements(schemaName)) {
         await client.query(statement);
       }
-      return dependents;
+      return { dependents, kept: await readKeptObjects(client, schemaName) };
     });
   } finally {
     client.release();
@@ -63,8 +70,9 @@ describe.skipIf(!url)("clean against Postgres", () => {
     });
 
     test("reports everything CASCADE drops outside the schema, through views over views and dropped columns, then drops the schema and only those", async () => {
-      const dependents = await clean(pool, app);
+      const { dependents, kept } = await clean(pool, app);
 
+      expect(kept).toEqual([]);
       expect(dependents).toEqual([
         `column kind of table ${other}.tagged`,
         `constraint refs_note_fk on table ${other}.refs`,
@@ -116,6 +124,7 @@ describe.skipIf(!url)("clean against Postgres", () => {
         grant create on schema public to "${role}";
         set role "${role}";
         create view public.their_view as select id from public.notes;
+        create table public.theirs (id integer primary key);
         reset role;
       `);
     });
@@ -134,15 +143,17 @@ describe.skipIf(!url)("clean against Postgres", () => {
       expect(extensionTypes).toContain("citext");
       expect(extensionTypes).toContain("tablefunc_crosstab_2");
 
-      const dependents = await clean(pool, "public");
+      const { dependents, kept } = await clean(pool, "public");
 
       expect(dependents).toEqual(["view their_view"]);
+      // The other role's table stays with its rows; the extensions' objects are not listed as kept.
+      expect(kept).toEqual(["table theirs"]);
       expect(
         await names(
           pool,
           `select relname as name from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'v', 'S')`,
         ),
-      ).toEqual([]);
+      ).toEqual(["theirs"]);
       expect(
         await names(
           pool,

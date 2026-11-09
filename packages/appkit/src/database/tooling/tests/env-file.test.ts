@@ -157,6 +157,22 @@ describe("updateEnvFile", () => {
     expect(fs.readdirSync(root)).toEqual([".env"]);
   });
 
+  test("a null value removes the key, every duplicate included, and adds nothing", () => {
+    const root = tempApp({
+      ".env": [
+        "KEEP=1",
+        "APPKIT_DB_NEW_BRANCH=projects/p/branches/dev-a",
+        "PGHOST=h",
+        "APPKIT_DB_NEW_BRANCH=stale",
+      ].join("\n"),
+    });
+    const file = path.join(root, ".env");
+
+    updateEnvFile(file, { APPKIT_DB_NEW_BRANCH: null, MISSING: null });
+
+    expect(fs.readFileSync(file, "utf-8")).toBe("KEEP=1\nPGHOST=h\n");
+  });
+
   test("quotes values that need it", () => {
     const root = tempApp();
     const file = path.join(root, ".env");
