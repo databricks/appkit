@@ -9,8 +9,8 @@ import {
   timestamp,
   uuid,
 } from "../../../../database/schema-builder";
-import { MAX_SERIALIZED_DEPTH } from "../../defaults";
-import { compileCrudTables } from "../contract";
+import { MAX_SERIALIZED_DEPTH, MAX_SERIALIZED_NODES } from "../../defaults";
+import { boundedJson, compileCrudTables } from "../contract";
 
 const schema = defineSchema((builder) => {
   const users = builder.table("users", {
@@ -128,45 +128,44 @@ describe("projectPublicRow", () => {
   });
 });
 
-describe("sanitizeSerializedRow", () => {
-  it("re-applies the private-column policy to serializer output", () => {
-    const sanitized = users.sanitizeSerializedRow({
-      id: 1,
-      token: "leaked",
-      computed: { label: "Ada", tags: ["a", "b"] },
-      skipped: undefined,
-      notes: [{ id: 2, draft: "leaked", body: "hello" }],
-    });
-    expect(sanitized).toEqual({
-      id: 1,
-      computed: { label: "Ada", tags: ["a", "b"] },
-      notes: [{ id: 2, body: "hello" }],
-    });
+describe("boundedJson", () => {
+  it("keeps finite JSON and drops undefined object entries", () => {
+    expect(
+      boundedJson({
+        id: 1,
+        label: "Ada",
+        tags: ["a", "b"],
+        skipped: undefined,
+      }),
+    ).toEqual({ id: 1, label: "Ada", tags: ["a", "b"] });
   });
 
-  it("treats a broken serializer as an internal fault", () => {
+  it("rejects values that are not bounded JSON", () => {
     const cyclic: Record<string, unknown> = { id: 1 };
     cyclic.self = cyclic;
     let deep: Record<string, unknown> = {};
     for (let level = 0; level <= MAX_SERIALIZED_DEPTH; level += 1) {
       deep = { deep };
     }
+    const wide = Array.from({ length: MAX_SERIALIZED_NODES }, () => 1);
     for (const broken of [
       cyclic,
       deep,
-      "not-an-object",
+      wide,
       { id: Number.POSITIVE_INFINITY },
       { at: new Date() },
     ]) {
-      expect(() => users.sanitizeSerializedRow(broken)).toThrow(
-        expect.objectContaining({ category: "INTERNAL" }),
+      expect(() => boundedJson(broken)).toThrow(
+        expect.objectContaining({
+          category: "INVALID_REQUEST",
+          phase: "write",
+        }),
       );
     }
   });
 
   it("carries a __proto__ key as data rather than dropping it", () => {
-    const sanitized = users.sanitizeSerializedRow({
-      id: 1,
+    const sanitized = boundedJson({
       computed: JSON.parse('{"__proto__":{"owned":true},"keep":1}'),
     }) as { computed: unknown };
 

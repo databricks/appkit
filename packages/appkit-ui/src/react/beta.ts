@@ -53,12 +53,9 @@ export {
   type UseDatabaseListResult,
   useDatabaseList,
 } from "./hooks/use-database-list";
-export {
-  type DatabaseRowShape,
-  type DatabaseShape,
-  serialized,
-  type UseDatabaseReadOptions,
-  type UseDatabaseReadResult,
+export type {
+  UseDatabaseReadOptions,
+  UseDatabaseReadResult,
 } from "./hooks/use-database-read";
 export {
   type UseDatabaseRecordOptions,
