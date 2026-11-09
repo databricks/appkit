@@ -197,7 +197,7 @@ describe("runCheck", () => {
 
     expect(report.problems).toEqual([
       expect.stringContaining(
-        "0002_migration was generated after 0000_migration, not after 0001_migration: they were written on parallel branches, so 0002_migration lacks the other's changes. Merge the base branch, reset the migrations to its own",
+        "0002_migration was generated after 0000_migration, not after 0001_migration: they were written on parallel branches, so 0002_migration lacks the other's changes. Save any SQL you wrote by hand in your migration. Merge the base branch, reset the migrations to its own",
       ),
       "config/database/schema.ts changed since 0002_migration, so the deployed app would not get the change. Run `appkit db migrate` and commit the migration it writes.",
     ]);
