@@ -617,6 +617,10 @@ export function renderSchemaSource(
       return "foreign keys over several columns are not supported";
     }
     if (!source) return "its column is skipped";
+    if (source.fk) {
+      // One fk() per column; declared keys come first, so a refresh keeps the declared one.
+      return `its column already keeps the foreign key to ${source.fk.table}(${source.fk.column})`;
+    }
     if (foreignKey.schema !== schemaName) {
       return `it references schema "${foreignKey.schema}"`;
     }
