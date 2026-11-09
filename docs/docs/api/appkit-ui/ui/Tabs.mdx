@@ -25,9 +25,9 @@ Tabbed interface for organizing content into separate panels
 | `value` | `string` |  | - | The value for the selected tab, if controlled |
 | `defaultValue` | `string` |  | - | The value of the tab to select by default, if uncontrolled |
 | `onValueChange` | `((value: string) => void)` |  | - | A function called when a new tab is selected |
-| `orientation` | `enum` |  | - | The orientation the tabs are layed out. Mainly so arrow navigation is done accordingly (left & right vs. up & down) @defaultValue horizontal |
-| `dir` | `enum` |  | - | The direction of navigation between toolbar items. |
-| `activationMode` | `enum` |  | - | Whether a tab is activated automatically or manually. @defaultValue automatic |
+| `orientation` | `"horizontal" \| "vertical"` |  | - | The orientation the tabs are layed out. Mainly so arrow navigation is done accordingly (left & right vs. up & down) @defaultValue horizontal |
+| `dir` | `"ltr" \| "rtl"` |  | - | The direction of navigation between toolbar items. |
+| `activationMode` | `"manual" \| "automatic"` |  | - | Whether a tab is activated automatically or manually. @defaultValue automatic |
 | `asChild` | `boolean` |  | - | - |
 
 
