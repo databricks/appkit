@@ -4,17 +4,27 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-const { applyPendingMigrations, resolveEnvBranch, withBranchPool } = vi.hoisted(
-  () => ({
-    applyPendingMigrations: vi.fn(),
-    resolveEnvBranch: vi.fn(),
-    withBranchPool: vi.fn(),
-  }),
-);
+const {
+  applyPendingMigrations,
+  detectTablesLeftInPublic,
+  resolveEnvBranch,
+  withBranchPool,
+} = vi.hoisted(() => ({
+  applyPendingMigrations: vi.fn(),
+  detectTablesLeftInPublic: vi.fn(),
+  resolveEnvBranch: vi.fn(),
+  withBranchPool: vi.fn(),
+}));
 
 vi.mock("../../migrations/apply", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../migrations/apply")>()),
   applyPendingMigrations,
+}));
+vi.mock("../../migrations/tables-left-in-public", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("../../migrations/tables-left-in-public")
+  >()),
+  detectTablesLeftInPublic,
 }));
 vi.mock("../guard", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../guard")>()),
@@ -70,6 +80,8 @@ const pool = {};
 
 beforeEach(() => {
   applyPendingMigrations.mockReset();
+  detectTablesLeftInPublic.mockReset();
+  detectTablesLeftInPublic.mockResolvedValue(undefined);
   withBranchPool
     .mockReset()
     .mockImplementation((_ctx, fn: (p: unknown) => unknown) => fn(pool));
@@ -110,6 +122,26 @@ describe("runMigrate", () => {
       path.join(ctx.root, "shared/appkit-types/database.d.ts"),
     );
     expect(fs.existsSync(report.typesFile)).toBe(true);
+  });
+
+  test("does not apply when the implicit app schema would shadow tables left in public", async () => {
+    const ctx = app(`notes: table("notes", { id: id(), body: text() })`);
+    detectTablesLeftInPublic.mockResolvedValue(
+      'none of the declared tables exist in schema "app", but public has notes.',
+    );
+
+    const error = await runMigrate(ctx, { interactive: false }).catch(
+      (caught: unknown) => caught,
+    );
+
+    expect((error as Error).message).toContain(
+      'none of the declared tables exist in schema "app", but public has notes.',
+    );
+    expect(detectTablesLeftInPublic).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ $schemaName: "app" }),
+    );
+    expect(applyPendingMigrations).not.toHaveBeenCalled();
   });
 
   test("generates, regenerates types, and applies to the .env branch with the app schema", async () => {
