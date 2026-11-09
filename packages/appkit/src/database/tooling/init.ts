@@ -114,6 +114,8 @@ const ENV_FILE = ".env";
 const DEFAULT_ENDPOINT_ID = "primary";
 /** An idle compute counts against the project's 20 active ones. */
 const SUSPEND_TIMEOUT = "300s";
+/** How long init waits for a read-write endpoint another run is still creating. */
+const ENDPOINT_HOST_WAIT = { intervalMs: 2_000, timeoutMs: 90_000 };
 /** Every Lakebase branch has it; used when nothing names another database. */
 const DEFAULT_DATABASE = "databricks_postgres";
 /**
@@ -327,6 +329,14 @@ async function findOrCreateBranch(
   }
 }
 
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * The branch's read-write endpoint, created when it has none. Another run of
+ * init on the same branch can create it first: its 409 is followed by a reread,
+ * and an endpoint that is still coming up is waited for until it has a host.
+ */
 async function ensureReadWriteEndpoint(
   ctx: DbContext,
   branch: string,
@@ -342,16 +352,35 @@ async function ensureReadWriteEndpoint(
     onStep(
       `Creating a read-write endpoint on ${resourceId(branch)} that suspends after 5 idle minutes`,
     );
-    endpoint = await api.createEndpoint(branch, DEFAULT_ENDPOINT_ID, {
-      suspendTimeout: SUSPEND_TIMEOUT,
-    });
-    created = true;
+    try {
+      endpoint = await api.createEndpoint(branch, DEFAULT_ENDPOINT_ID, {
+        suspendTimeout: SUSPEND_TIMEOUT,
+      });
+      created = true;
+    } catch (error) {
+      if (!isAlreadyExists(error)) throw error;
+      endpoint = readWrite(await api.listEndpoints(branch));
+      if (!endpoint) {
+        throw new Error(
+          `Endpoint ${DEFAULT_ENDPOINT_ID} on ${branch} exists but is not a read-write endpoint, so init cannot use it. Create a read-write endpoint on the branch, then rerun \`appkit db init\`.`,
+          { cause: error },
+        );
+      }
+    }
   }
-  let host = endpoint?.status?.hosts?.host;
-  if (!host) {
+  const deadline = Date.now() + ENDPOINT_HOST_WAIT.timeoutMs;
+  let waiting = false;
+  while (!endpoint?.status?.hosts?.host && Date.now() < deadline) {
+    if (!waiting) {
+      waiting = true;
+      onStep(
+        `Waiting for the read-write endpoint of ${resourceId(branch)} to get a host`,
+      );
+    }
+    await sleep(ENDPOINT_HOST_WAIT.intervalMs);
     endpoint = readWrite(await api.listEndpoints(branch)) ?? endpoint;
-    host = endpoint?.status?.hosts?.host;
   }
+  const host = endpoint?.status?.hosts?.host;
   if (!endpoint?.name || !host) {
     throw new Error(
       `The read-write endpoint of ${branch} has no host yet. Rerun \`appkit db init\` in a minute.`,
@@ -360,6 +389,11 @@ async function ensureReadWriteEndpoint(
   return { endpoint, created, host };
 }
 
+/**
+ * Your role on the branch with DATABRICKS_SUPERUSER, created or updated when
+ * needed. Another run of init on the same branch can create it first: its 409
+ * is followed by a reread, and the reread role gets the same membership check.
+ */
 async function ensureDeveloperRole(
   ctx: DbContext,
   branch: string,
@@ -368,28 +402,34 @@ async function ensureDeveloperRole(
   onStep: (message: string) => void,
 ): Promise<{ role: LakebaseRole; action: RoleAction }> {
   const api = ctx.api();
-  const existing = roles.find(
-    (r) => r.status?.postgres_role === identity.userName,
-  );
+  const mine = (list: readonly LakebaseRole[]) =>
+    list.find((r) => r.status?.postgres_role === identity.userName);
+
+  let existing = mine(roles);
   if (!existing) {
     onStep(
       `Creating your role ${identity.userName} with ${SUPERUSER_MEMBERSHIP}`,
     );
-    const role = await api.createRole(branch, {
-      identity_type: identity.identityType,
-      postgres_role: identity.userName,
-      auth_method: "LAKEBASE_OAUTH_V1",
-      membership_roles: [SUPERUSER_MEMBERSHIP],
-    });
-    if (role?.name) return { role, action: "created" };
-    // The operation response normally carries the role; fall back to a lookup.
-    const found = (await api.listRoles(branch)).find(
-      (r) => r.status?.postgres_role === identity.userName,
-    );
-    if (!found) {
-      throw new Error(`Creating your role on ${branch} did not return it.`);
+    let created: LakebaseRole | undefined;
+    try {
+      created = await api.createRole(branch, {
+        identity_type: identity.identityType,
+        postgres_role: identity.userName,
+        auth_method: "LAKEBASE_OAUTH_V1",
+        membership_roles: [SUPERUSER_MEMBERSHIP],
+      });
+    } catch (error) {
+      if (!isAlreadyExists(error)) throw error;
     }
-    return { role: found, action: "created" };
+    if (created?.name) return { role: created, action: "created" };
+    // Either the operation response did not carry the role, or another run created it.
+    existing = mine(await api.listRoles(branch));
+    if (!existing) {
+      throw new Error(
+        `Creating your role on ${branch} did not return it, and listing the branch's roles did not find it. Rerun \`appkit db init\`.`,
+      );
+    }
+    if (created) return { role: existing, action: "created" };
   }
   if (existing.status?.membership_roles?.includes(SUPERUSER_MEMBERSHIP)) {
     return { role: existing, action: "kept" };
