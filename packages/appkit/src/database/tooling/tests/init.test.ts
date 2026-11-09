@@ -519,6 +519,47 @@ describe("runInit — session branch", () => {
     });
   });
 
+  test("a rerun without --session resumes a rotation that stopped before .env pointed at the new branch", async () => {
+    // The rotation wrote the new id, then stopped before or after the fork.
+    const beforeFork = project();
+    beforeFork.addBranch(session("oldaaaaa"), {
+      expire_time: "2000-01-01T00:00:00Z",
+    });
+    const pending = {
+      APPKIT_DB_SESSION: "newbbbbb",
+      LAKEBASE_ENDPOINT: `${session("oldaaaaa")}/endpoints/primary`,
+    };
+
+    const forked = await init(appOn(beforeFork, pending), { schema: "none" });
+
+    expect(forked.report).toMatchObject({
+      mode: "session",
+      branch: session("newbbbbb"),
+      created: true,
+    });
+    expect(beforeFork.branches.has(DEV)).toBe(false);
+
+    const afterFork = project();
+    afterFork.addBranch(session("oldaaaaa"), {
+      expire_time: "2000-01-01T00:00:00Z",
+    });
+    afterFork.addBranch(session("newbbbbb"), {
+      expire_time: "2099-01-01T00:00:00Z",
+    });
+    afterFork.addRole(session("newbbbbb"), "alice", USER, [
+      "DATABRICKS_SUPERUSER",
+    ]);
+
+    const resumed = await init(appOn(afterFork, pending), { schema: "none" });
+
+    expect(resumed.report).toMatchObject({
+      mode: "session",
+      branch: session("newbbbbb"),
+      created: false,
+    });
+    expect(afterFork.branches.has(DEV)).toBe(false);
+  });
+
   test("an expired session branch, or a 409 for one that is gone, gets a fresh session id", async () => {
     const lakebase = project();
     lakebase.addBranch(session("k2x9q0ab"), {
