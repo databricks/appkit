@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 
 import { Pool, type PoolClient } from "pg";
 import {
@@ -437,11 +439,12 @@ describe.skipIf(!url)("applyPendingMigrations against Postgres", () => {
       );
     };
 
-    test("the drift lists unrecorded committed migrations and recorded ones the checkout lacks", async () => {
+    test("the drift lists unrecorded committed migrations, recorded ones the checkout lacks, and recorded ones whose file changed", async () => {
       const folder = withTags();
       expect(await readMigrationDrift(newPool(), options(folder))).toEqual({
         pending: ["0000_notes", "0001_introspect"],
         stranded: [],
+        edited: [],
         unknown: 0,
       });
 
@@ -450,6 +453,16 @@ describe.skipIf(!url)("applyPendingMigrations against Postgres", () => {
       expect(await readMigrationDrift(newPool(), options(folder))).toEqual({
         pending: ["0001_introspect"],
         stranded: [],
+        edited: [],
+        unknown: 1,
+      });
+
+      fs.appendFileSync(path.join(folder, "0000_notes.sql"), "\n-- edited");
+
+      expect(await readMigrationDrift(newPool(), options(folder))).toEqual({
+        pending: ["0001_introspect"],
+        stranded: [],
+        edited: ["0000_notes"],
         unknown: 1,
       });
     });
@@ -484,6 +497,18 @@ describe.skipIf(!url)("applyPendingMigrations against Postgres", () => {
         },
         ["0001_introspect"],
         "it has not applied 0000_notes",
+      ],
+      [
+        "applied a migration whose committed file changed since",
+        async (folder: string) => {
+          await applyPendingMigrations(newPool(), options(folder));
+          await admin.query(
+            `delete from ${q("__drizzle_migrations")} where created_at = 3000`,
+          );
+          fs.appendFileSync(path.join(folder, "0000_notes.sql"), "\n-- edited");
+        },
+        ["0001_introspect"],
+        "it applied 0000_notes before its file changed",
       ],
     ])(
       "refuses when the branch %s, and records nothing",
