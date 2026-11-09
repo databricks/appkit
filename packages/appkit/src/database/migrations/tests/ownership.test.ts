@@ -18,6 +18,7 @@ describe("ownership: one owner per branch", () => {
       schemaName: "app",
       owner: "old-app-sp",
       currentUser: "new-app-sp",
+      canCreate: false,
     });
     expect(hint).toContain(
       `Schema "app" is owned by "old-app-sp", but the app connects as "new-app-sp".`,
@@ -34,6 +35,7 @@ describe("ownership: one owner per branch", () => {
         schemaName: "app",
         owner: null,
         currentUser: "app-sp",
+        canCreate: null,
       }),
     ).toBe(
       `Role "app-sp" cannot create schema "app". On the deploy branch that role is the app's service principal: bind the database to the app with CAN_CONNECT_AND_CREATE.`,

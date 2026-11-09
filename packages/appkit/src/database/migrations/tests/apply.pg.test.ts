@@ -18,6 +18,7 @@ import {
   MigrationHistoryError,
   migrationLockKey,
 } from "../apply";
+import { schemaOwnership } from "../ownership";
 import { hashOf, removeMigrationFolders, writeMigrations } from "./fixtures";
 
 // A real server, for what a fake cannot show: transactions, enum rules, locks
@@ -368,6 +369,38 @@ describe.skipIf(!url)("applyPendingMigrations against Postgres", () => {
       expect((error as Error).message).toContain(
         `Schema "${schema}" is owned by "${owner}", but the app connects as "${app}".`,
       );
+    } finally {
+      await Promise.all(pools.splice(0).map((pool) => pool.end()));
+      await admin.query(`drop schema if exists "${schema}" cascade`);
+      await admin.query(`drop owned by "${app}"`);
+      await admin.query(`drop role "${app}"`);
+      await admin.query(`drop role "${owner}"`);
+    }
+  });
+
+  test("schemaOwnership reads the owner and whether the connecting role may CREATE", async () => {
+    const suffix = schema.slice(-8);
+    const owner = `appkit_owner_${suffix}`;
+    const app = `appkit_app_${suffix}`;
+    await admin.query(`create role "${owner}" nologin`);
+    await admin.query(`create role "${app}" login password '${ROLE_PASSWORD}'`);
+    await admin.query(`create schema "${schema}" authorization "${owner}"`);
+    await admin.query(`grant usage on schema "${schema}" to "${app}"`);
+    const asApp = newPool({ user: app });
+    try {
+      const withoutCreate = await schemaOwnership(asApp, schema);
+      await admin.query(`grant create on schema "${schema}" to "${app}"`);
+      const withCreate = await schemaOwnership(asApp, schema);
+      const missing = await schemaOwnership(asApp, `${schema}_missing`);
+
+      expect(withoutCreate).toEqual({
+        schemaName: schema,
+        owner,
+        currentUser: app,
+        canCreate: false,
+      });
+      expect(withCreate).toMatchObject({ owner, canCreate: true });
+      expect(missing).toMatchObject({ owner: null, canCreate: null });
     } finally {
       await Promise.all(pools.splice(0).map((pool) => pool.end()));
       await admin.query(`drop schema if exists "${schema}" cascade`);
