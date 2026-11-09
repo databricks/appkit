@@ -8,12 +8,17 @@ import {
   MigrationApplyError,
   MigrationBaselineMismatchError,
   MigrationHistoryError,
+  MigrationJournalError,
 } from "../../database/migrations/apply";
 import {
   journalFile,
   MigrationFilesError,
   migrationsFolder,
 } from "../../database/migrations/paths";
+import {
+  catalogSqlOf,
+  detectTablesLeftInPublic,
+} from "../../database/migrations/tables-left-in-public";
 import type { Schema } from "../../database/schema-builder";
 import { createLogger } from "../../logging/logger";
 
@@ -49,7 +54,7 @@ function endpointBranch(endpoint: string | undefined): string | undefined {
  * no-op. Every migration failure becomes a setup failure that names it.
  */
 export async function migrateOnStart(
-  pool: Pick<Pool, "connect">,
+  pool: Pick<Pool, "connect" | "query">,
   schema: Schema,
   root: string = process.cwd(),
   env: NodeJS.ProcessEnv = process.env,
@@ -74,6 +79,13 @@ export async function migrateOnStart(
       `PGHOST ${env.PGHOST} is a pooled endpoint, and migrations need a direct connection. Use the host without "-pooler".`,
     );
   }
+  const leftInPublic = await detectTablesLeftInPublic(
+    catalogSqlOf(pool),
+    schema,
+  );
+  if (leftInPublic) {
+    throw databaseSetupFailed(`not applying migrations: ${leftInPublic}`);
+  }
 
   const started = Date.now();
   let result: Awaited<ReturnType<typeof applyPendingMigrations>>;
@@ -87,6 +99,7 @@ export async function migrateOnStart(
       error instanceof MigrationApplyError ||
       error instanceof MigrationBaselineMismatchError ||
       error instanceof MigrationHistoryError ||
+      error instanceof MigrationJournalError ||
       error instanceof MigrationFilesError
     ) {
       throw databaseSetupFailed(error.message);

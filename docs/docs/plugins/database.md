@@ -97,7 +97,11 @@ tables the first one owns.
 
 Earlier releases put tables in `public` by default. An app that created its
 tables there fails setup after the upgrade, and the error says the tables are in
-`public`. Keep them there with:
+`public`. With `APPKIT_DB_MIGRATE_ON_START=true`, startup refuses before any
+migration runs when `defineSchema()` was given no `schemaName`, none of the
+declared tables exist in `app`, and some exist in `public`. Otherwise the first
+migration would create empty copies in `app`, the check would pass, and the app
+would serve the empty tables. Keep the tables in `public` with:
 
 ```ts
 export const schema = defineSchema(
@@ -107,6 +111,11 @@ export const schema = defineSchema(
   { schemaName: "public" },
 );
 ```
+
+To use `app` instead, move the tables first
+(`ALTER TABLE public.notes SET SCHEMA app`). When the tables in `public` belong
+to another app, pass `{ schemaName: "app" }` explicitly and startup does not
+refuse.
 
 Migrations applied on start into `public` also need
 `GRANT CREATE ON SCHEMA public` to the app's service principal, because it does

@@ -10,24 +10,29 @@ import type { PoolClient } from "pg";
 /** insufficient_privilege: "must be owner of …", "permission denied for …". */
 export const INSUFFICIENT_PRIVILEGE = "42501";
 
-/** Who owns the app schema, next to who is connected; owner is null when the schema does not exist. */
+/** Who owns the app schema, next to who is connected; owner and canCreate are null when the schema does not exist. */
 interface SchemaOwnership {
   readonly schemaName: string;
   readonly owner: string | null;
   readonly currentUser: string;
+  /** Whether the connecting role holds CREATE on the schema. */
+  readonly canCreate: boolean | null;
 }
 
-/** Read the app schema's owner. pg_catalog needs no privileges. */
+/** Read the app schema's owner and the connecting role's CREATE on it. pg_catalog needs no privileges. */
 export async function schemaOwnership(
   client: Pick<PoolClient, "query">,
   schemaName: string,
 ): Promise<SchemaOwnership> {
   const { rows } = await client.query<{
     owner: string | null;
+    can_create: boolean | null;
     current_user: string;
   }>(
     `select (select pg_catalog.pg_get_userbyid(n.nspowner)
                from pg_catalog.pg_namespace n where n.nspname = $1) as owner,
+            (select pg_catalog.has_schema_privilege(current_user, n.oid, 'CREATE')
+               from pg_catalog.pg_namespace n where n.nspname = $1) as can_create,
             current_user::text as current_user`,
     [schemaName],
   );
@@ -35,6 +40,7 @@ export async function schemaOwnership(
     schemaName,
     owner: rows[0]?.owner ?? null,
     currentUser: rows[0]?.current_user ?? "",
+    canCreate: rows[0]?.can_create ?? null,
   };
 }
 
@@ -54,9 +60,16 @@ export function ownershipHint(
     ownership?.schemaName === "public" &&
     ownership.owner !== ownership.currentUser
   ) {
+    // Nobody owns public as an app, so the fault is either CREATE or an object another role owns.
+    if (ownership.canCreate === false) {
+      return (
+        `Schema public belongs to "${ownership.owner}", and the app's role "${ownership.currentUser}" has no CREATE on it. ` +
+        `Grant it once with GRANT CREATE ON SCHEMA public TO "${ownership.currentUser}", or drop schemaName from defineSchema() to use the default schema app, which the app creates and owns.`
+      );
+    }
     return (
-      `Schema public belongs to "${ownership.owner}", and the app's role "${ownership.currentUser}" has no CREATE on it. ` +
-      `Grant it once with GRANT CREATE ON SCHEMA public TO "${ownership.currentUser}", or drop schemaName from defineSchema() to use the default schema app, which the app creates and owns.`
+      `Role "${ownership.currentUser}" can create in schema public, so an object this migration changes belongs to another role. ` +
+      `Have that role transfer it with ALTER TABLE public.<table> OWNER TO "${ownership.currentUser}", or drop schemaName from defineSchema() to use the default schema app, which the app creates and owns.`
     );
   }
   if (ownership && ownership.owner !== ownership.currentUser) {
