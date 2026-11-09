@@ -762,6 +762,91 @@ describe("runVerify --deployed", () => {
     });
   });
 
+  test.each([
+    [
+      "lists a tag twice",
+      [
+        { tag: "0000_migration", when: 1000 },
+        { tag: "0001_migration", when: 2000 },
+        { tag: "0000_migration", when: 1000 },
+      ],
+      `${JOURNAL} lists 0000_migration twice`,
+    ],
+    [
+      "has an entry that is not a migration",
+      JSON.stringify({
+        version: "7",
+        dialect: "postgresql",
+        entries: [
+          { idx: 0, version: "7", when: 1000, tag: "0000_migration" },
+          { idx: 1, version: "7", when: 2000, tag: "0001_migration" },
+          {},
+        ],
+      }),
+      `entry 2 of ${JOURNAL} is not a migration journal entry`,
+    ],
+  ] as const)(
+    "a deployed journal that %s is unavailable, never a match",
+    async (_label, deployedJournal, reason) => {
+      const migrations = [
+        { tag: "0000_migration", when: 1000 },
+        { tag: "0001_migration", when: 2000 },
+      ];
+      const { ctx } = deployedApp({
+        migrations,
+        deployedJournal: deployedJournal as Migration[] | string,
+      });
+
+      expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+        migrations: { evidence: "unavailable", reason },
+        problems: [
+          `verify cannot tell whether app my-app's active deployment has the committed migrations: ${reason}`,
+        ],
+        ok: false,
+      });
+    },
+  );
+
+  test("the committed entries in another order in the deployed journal differ, even with the same idx and SQL", async () => {
+    const migrations = [
+      { tag: "0000_migration", when: 1000 },
+      { tag: "0001_migration", when: 2000 },
+    ];
+    const { ctx } = deployedApp({
+      migrations,
+      deployedJournal: JSON.stringify({
+        version: "7",
+        dialect: "postgresql",
+        entries: [
+          {
+            idx: 1,
+            version: "7",
+            when: 2000,
+            tag: "0001_migration",
+            breakpoints: true,
+          },
+          {
+            idx: 0,
+            version: "7",
+            when: 1000,
+            tag: "0000_migration",
+            breakpoints: true,
+          },
+        ],
+      }),
+    });
+
+    expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+      migrations: {
+        evidence: "differs",
+        missing: [],
+        changed: ["0000_migration", "0001_migration"],
+        unknown: [],
+      },
+      ok: false,
+    });
+  });
+
   test("a snapshot without a journal lacks every committed migration: deploy them", async () => {
     const { ctx } = deployedApp({
       migrations: [
