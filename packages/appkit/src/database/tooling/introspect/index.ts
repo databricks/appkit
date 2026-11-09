@@ -15,6 +15,7 @@ import { readJournal } from "../../migrations/paths";
 import { DEFAULT_SCHEMA_NAME } from "../../schema-builder/define-schema";
 import type { Schema } from "../../schema-builder/types";
 import { type DbContext, NO_ENV_BRANCH, withBranchPool } from "../context";
+import { refuseSymlink, SymlinkRefusedError, writeFileAtomic } from "../files";
 import { notYourBranch, resolveEnvBranch, takesWrites } from "../guard";
 import { type HistoryLock, withHistoryLock } from "../history-lock";
 import { DATABASE_TYPES_PATH } from "../migrate";
@@ -80,7 +81,20 @@ function readIfExists(file: string): string | null {
 
 function writeOrRemove(file: string, contents: string | null): void {
   if (contents === null) fs.rmSync(file, { force: true });
-  else fs.writeFileSync(file, contents);
+  else writeFileAtomic(file, contents);
+}
+
+/** Introspect replaces `file`, so a link there would be swapped for a plain file or written through. */
+function refuseSymlinkedDestination(root: string, file: string): void {
+  try {
+    refuseSymlink(path.join(root, file));
+  } catch (error) {
+    if (!(error instanceof SymlinkRefusedError)) throw error;
+    throw new IntrospectRefusedError(
+      `Refusing to introspect: ${file} is a symbolic link, and introspect replaces files instead of writing through links. Replace it with a regular file, then rerun.`,
+      { cause: error },
+    );
+  }
 }
 
 const plural = (count: number, word: string) =>
@@ -180,6 +194,8 @@ async function introspectHolding(
   options: IntrospectOptions,
 ): Promise<IntrospectReport> {
   const schemaFile = path.join(ctx.root, DEFAULT_SCHEMA_FILE);
+  refuseSymlinkedDestination(ctx.root, DEFAULT_SCHEMA_FILE);
+  refuseSymlinkedDestination(ctx.root, `${DEFAULT_SCHEMA_FILE}.bak`);
   const previousSchema = await readPreviousSchema(ctx.root);
   const schemaName =
     options.schemaName || previousSchema?.$schemaName || DEFAULT_SCHEMA_NAME;
@@ -293,9 +309,9 @@ async function introspectHolding(
     let migration: GeneratedMigration | null = null;
     let recorded: string[] = [];
     try {
-      if (backsUp) fs.writeFileSync(backupFile, previous);
+      if (backsUp) writeFileAtomic(backupFile, previous);
       fs.mkdirSync(path.dirname(schemaFile), { recursive: true });
-      fs.writeFileSync(schemaFile, rendered.source);
+      writeFileAtomic(schemaFile, rendered.source);
       let schema: Awaited<ReturnType<typeof loadDefaultDatabaseSchema>>;
       try {
         schema = await loadDefaultDatabaseSchema(ctx.root, {

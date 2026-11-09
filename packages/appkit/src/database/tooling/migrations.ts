@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -16,6 +15,7 @@ import {
 } from "../migrations/paths";
 import type { Schema } from "../schema-builder";
 import { drizzleKitImports } from "./drizzle-exports";
+import { writeFileAtomic } from "./files";
 import type { HistoryLock } from "./history-lock";
 
 /**
@@ -278,20 +278,6 @@ export function breakingStatements(statements: readonly string[]): string[] {
       pattern.test(statement.trimStart()),
     ),
   );
-}
-
-/** Replace a file through a rename, so a crash never leaves it half written. */
-function writeFileAtomic(file: string, content: string): void {
-  const temporary = path.join(
-    path.dirname(file),
-    `.${path.basename(file)}.${randomUUID()}.tmp`,
-  );
-  try {
-    fs.writeFileSync(temporary, content);
-    fs.renameSync(temporary, file);
-  } finally {
-    fs.rmSync(temporary, { force: true });
-  }
 }
 
 /**
