@@ -10,16 +10,13 @@ function isPackageManager(value: string): value is PackageManager {
 }
 
 /**
- * Prefers the project's packageManager field, then its lockfiles, then
- * npm_config_user_agent. The launcher (e.g. npx) may use a different manager.
+ * The manager a directory's own files name: its package.json's packageManager
+ * field, else its lockfile. null when neither names one.
  */
-export function detectPackageManager(
-  cwd: string,
-  fallback: PackageManager = "pnpm",
-): PackageManager {
+export function declaredPackageManager(dir: string): PackageManager | null {
   try {
     const pkg = JSON.parse(
-      fs.readFileSync(path.join(cwd, "package.json"), "utf-8"),
+      fs.readFileSync(path.join(dir, "package.json"), "utf-8"),
     ) as { packageManager?: unknown } | null;
     if (typeof pkg?.packageManager === "string") {
       const name = pkg.packageManager.split("@")[0];
@@ -29,20 +26,33 @@ export function detectPackageManager(
     // A missing or unreadable manifest still permits lockfile detection.
   }
 
-  if (fs.existsSync(path.join(cwd, "pnpm-lock.yaml"))) return "pnpm";
-  if (fs.existsSync(path.join(cwd, "yarn.lock"))) return "yarn";
+  if (fs.existsSync(path.join(dir, "pnpm-lock.yaml"))) return "pnpm";
+  if (fs.existsSync(path.join(dir, "yarn.lock"))) return "yarn";
   if (
-    fs.existsSync(path.join(cwd, "bun.lock")) ||
-    fs.existsSync(path.join(cwd, "bun.lockb"))
+    fs.existsSync(path.join(dir, "bun.lock")) ||
+    fs.existsSync(path.join(dir, "bun.lockb"))
   ) {
     return "bun";
   }
   if (
-    fs.existsSync(path.join(cwd, "package-lock.json")) ||
-    fs.existsSync(path.join(cwd, "npm-shrinkwrap.json"))
+    fs.existsSync(path.join(dir, "package-lock.json")) ||
+    fs.existsSync(path.join(dir, "npm-shrinkwrap.json"))
   ) {
     return "npm";
   }
+  return null;
+}
+
+/**
+ * Prefers the project's packageManager field, then its lockfiles, then
+ * npm_config_user_agent. The launcher (e.g. npx) may use a different manager.
+ */
+export function detectPackageManager(
+  cwd: string,
+  fallback: PackageManager = "pnpm",
+): PackageManager {
+  const declared = declaredPackageManager(cwd);
+  if (declared) return declared;
 
   const userAgent = process.env.npm_config_user_agent;
   if (userAgent) {
