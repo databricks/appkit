@@ -181,6 +181,9 @@ function baseType(
     if (column.enum.values.length === 0) {
       return `enum type "${column.enum.name}" has no values`;
     }
+    if (column.enum.values.includes("")) {
+      return `enum type "${column.enum.name}" has an empty label, which the builder does not accept`;
+    }
     return {
       call: `enumType(${q(column.enum.name)}, [${column.enum.values.map(q).join(", ")}])`,
       importName: "",
@@ -239,6 +242,12 @@ function baseType(
 const isSequenceDefault = (expr: string | null) =>
   !!expr && /^nextval\(/.test(expr);
 
+/**
+ * A quoted literal, with the cast pg_get_expr adds: `'x'::text`, `'x'::character
+ * varying`, `'x'::app."order-status"`. A quoted name holds any character but `"`.
+ */
+const LITERAL_WITH_CAST = /^'((?:[^']|'')*)'(?:::(?:[\w .]|"(?:[^"]|"")*")+)?$/;
+
 /** A builder default call, or why the database default cannot be expressed. */
 function defaultCall(
   expr: string,
@@ -269,7 +278,7 @@ function defaultCall(
     case "text":
     case "varchar":
     case "enum": {
-      const match = /^'((?:[^']|'')*)'(?:::[\w." ]+)?$/.exec(expr);
+      const match = LITERAL_WITH_CAST.exec(expr);
       if (!match) return unsupported;
       const value = (match[1] ?? "").replace(/''/g, "'");
       if (
