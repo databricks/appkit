@@ -118,9 +118,6 @@ class RecordingClient {
         })),
       };
     }
-    if (text.includes("pg_catalog.pg_class")) {
-      return { rows: this.state.recorded ? [{ one: 1 }] : [] };
-    }
     if (text.startsWith("select hash, created_at")) {
       return { rows: this.state.recorded ?? [] };
     }
@@ -186,7 +183,6 @@ function steps(statements: readonly string[]): string[] {
     if (statement.includes("pg_get_userbyid")) return "schema owner?";
     if (statement.includes("pg_catalog.pg_attribute"))
       return "baseline tables?";
-    if (statement.includes("pg_catalog.pg_class")) return "journal table?";
     if (statement.startsWith("select hash, created_at")) return "recorded?";
     if (statement.startsWith(`CREATE SCHEMA IF NOT EXISTS`))
       return "create schema";
@@ -844,7 +840,7 @@ describe("applyPendingMigrations — baseline adoption", () => {
       recorded: null,
       catalog: BASELINE_CATALOG,
       // The schema belongs to another role, so the journal table cannot be created in it.
-      failOn: /^CREATE TABLE IF NOT EXISTS "app"\."__drizzle_migrations"/,
+      failOn: /^CREATE TABLE "app"\."__drizzle_migrations"/,
       failCode: "42501",
       ownership: { owner: "someone-else", current_user: "app-sp" },
     });

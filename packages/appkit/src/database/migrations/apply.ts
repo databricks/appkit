@@ -215,6 +215,43 @@ function ambiguousMessage(
   );
 }
 
+/** What pg_catalog holds at the journal's name. */
+interface JournalRelation {
+  readonly relkind: string;
+  readonly owner: string;
+  readonly schemaOwner: string;
+}
+
+/** pg_class.relkind, for the error message. */
+const RELATION_KINDS: Readonly<Record<string, string>> = {
+  r: "a table",
+  p: "a partitioned table",
+  v: "a view",
+  m: "a materialized view",
+  f: "a foreign table",
+  S: "a sequence",
+};
+
+/**
+ * The journal's name is taken by something other than an ordinary table of
+ * the schema owner's. The migrator selects from and inserts into the journal
+ * as the app, so another role's view, or a table with its triggers, could
+ * run that role's code with the app's privileges. Nothing was applied.
+ */
+export class MigrationJournalError extends Error {
+  constructor(schemaName: string, relation: JournalRelation) {
+    const kind =
+      RELATION_KINDS[relation.relkind] ??
+      `a relation of kind "${relation.relkind}"`;
+    super(
+      `${journalTable(schemaName)} is ${kind} owned by "${relation.owner}". ` +
+        `The migrator reads and records applied migrations only in a table owned by "${relation.schemaOwner}", the owner of schema "${schemaName}". ` +
+        "Another role's view or table could run its code as the app. Drop or rename it, then deploy again. No migration was applied.",
+    );
+    this.name = "MigrationJournalError";
+  }
+}
+
 /** The migration lock stayed taken past the wait limit. */
 class MigrationLockWaitError extends Error {
   constructor(readonly holder: string | undefined) {
@@ -296,19 +333,46 @@ function readMigrations(folder: string, journal: Journal): MigrationFile[] {
   });
 }
 
+/**
+ * Whether the journal table exists. Every read of the journal and every
+ * record into it starts here, so anything else at its name is refused.
+ */
+async function journalTableExists(
+  client: QueryClient,
+  schemaName: string,
+): Promise<boolean> {
+  // pg_catalog needs no privileges, so a missing grant is not mistaken for a missing table.
+  const { rows } = await client.query<{
+    relkind: string;
+    owner: string;
+    schema_owner: string;
+  }>(
+    `select c.relkind::text as relkind,
+            pg_catalog.pg_get_userbyid(c.relowner) as owner,
+            pg_catalog.pg_get_userbyid(n.nspowner) as schema_owner
+       from pg_catalog.pg_class c
+       join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = $1 and c.relname = $2`,
+    [schemaName, MIGRATIONS_TABLE],
+  );
+  const found = rows[0];
+  if (!found) return false;
+  if (found.relkind !== "r" || found.owner !== found.schema_owner) {
+    throw new MigrationJournalError(schemaName, {
+      relkind: found.relkind,
+      owner: found.owner,
+      schemaOwner: found.schema_owner,
+    });
+  }
+  return true;
+}
+
 /** The journal table's rows; none when the table does not exist yet. */
 async function readRecordedMigrations(
   client: QueryClient,
   schemaName: string,
 ): Promise<RecordedMigration[]> {
-  // pg_catalog needs no privileges, so a missing grant is not mistaken for a missing table.
-  const table = await client.query(
-    `select 1 from pg_catalog.pg_class c
-       join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-      where n.nspname = $1 and c.relname = $2`,
-    [schemaName, MIGRATIONS_TABLE],
-  );
-  if (table.rows.length === 0) return [];
+  if (!(await journalTableExists(client, schemaName))) return [];
   const { rows } = await client.query<{
     hash: string;
     created_at: string | number | null;
@@ -427,11 +491,14 @@ async function ensureJournalTable(
   client: QueryClient,
   schemaName: string,
 ): Promise<void> {
+  if (await journalTableExists(client, schemaName)) return;
   await client.query(
     `CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(schemaName)}`,
   );
+  // Not IF NOT EXISTS: a relation that appeared at this name since the check
+  // fails the transaction instead of receiving the record.
   await client.query(
-    `CREATE TABLE IF NOT EXISTS ${journalTable(schemaName)} (
+    `CREATE TABLE ${journalTable(schemaName)} (
       id SERIAL PRIMARY KEY,
       hash text NOT NULL,
       created_at bigint
@@ -766,7 +833,8 @@ export async function applyPendingMigrations(
     if (
       error instanceof MigrationBaselineMismatchError ||
       error instanceof MigrationFilesError ||
-      error instanceof MigrationHistoryError
+      error instanceof MigrationHistoryError ||
+      error instanceof MigrationJournalError
     ) {
       throw error;
     }
