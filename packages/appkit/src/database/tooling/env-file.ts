@@ -1,9 +1,17 @@
-import { randomBytes } from "node:crypto";
 import fs from "node:fs";
-import path from "node:path";
 
-/** An entry's first line: indentation and `export ` (kept on rewrite), the key, the value. */
-const ENTRY = /^(\s*(?:export\s+)?)([\w.-]+)\s*=\s*(.*)$/;
+import {
+  refuseSymlink as refuseLink,
+  SymlinkRefusedError,
+  writeFileAtomic,
+} from "./files";
+
+/**
+ * An entry's first line: indentation and `export ` (kept on rewrite), the key,
+ * the value. dotenv also reads `KEY: value` (a colon, then whitespace); a
+ * rewrite writes it back as `KEY=`.
+ */
+const ENTRY = /^(\s*(?:export\s+)?)([\w.-]+)(?:\s*=\s*|:\s+)(.*)$/;
 const QUOTES = new Set(['"', "'", "`"]);
 const PLAIN_VALUE = /^[A-Za-z0-9_./:@+-]*$/;
 
@@ -68,35 +76,25 @@ function entries(lines: readonly string[]): Entry[] {
 }
 
 export function refuseSymlink(file: string): void {
-  if (!fs.lstatSync(file, { throwIfNoEntry: false })?.isSymbolicLink()) return;
-  throw new Error(
-    `Refusing to rewrite ${file}: it is a symbolic link to ${fs.readlinkSync(file)}, and writing through it would change that file. Replace it with a regular file, then rerun.`,
-  );
-}
-
-/** A crash leaves the old file or the new one, never a truncated one. */
-function writeAtomically(file: string, contents: string): void {
-  const temp = path.join(
-    path.dirname(file),
-    `.${path.basename(file)}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`,
-  );
   try {
-    fs.writeFileSync(temp, contents, { mode: 0o600, flag: "wx" });
-    fs.renameSync(temp, file);
+    refuseLink(file);
   } catch (error) {
-    fs.rmSync(temp, { force: true });
-    throw error;
+    if (!(error instanceof SymlinkRefusedError)) throw error;
+    throw new Error(
+      `Refusing to rewrite ${file}: it is a symbolic link to ${fs.readlinkSync(file)}, and writing through it would change that file. Replace it with a regular file, then rerun.`,
+    );
   }
 }
 
 /**
- * Replace `KEY=…` entries and append missing keys. Comments, blank lines,
- * other keys, their order, `export ` prefixes and CRLF line endings are kept.
- * Written 0600 through a temporary file; a symbolic link is refused.
+ * Replace `KEY=…` entries, append missing keys, and remove the keys whose
+ * value is null. Comments, blank lines, other keys, their order, `export `
+ * prefixes and CRLF line endings are kept. Written 0600 through a temporary
+ * file; a symbolic link is refused.
  */
 export function updateEnvFile(
   file: string,
-  values: Readonly<Record<string, string>>,
+  values: Readonly<Record<string, string | null>>,
 ): void {
   refuseSymlink(file);
   const text = fs.existsSync(file) ? fs.readFileSync(file, "utf-8") : "";
@@ -112,13 +110,16 @@ export function updateEnvFile(
       out.push(...entry.lines);
       continue;
     }
+    const value = values[key];
     // Later duplicates of a managed key are dropped, so the value is unambiguous.
-    if (written.has(key)) continue;
+    if (value === null || written.has(key)) continue;
     written.add(key);
-    out.push(`${entry.prefix}${key}=${formatValue(key, values[key] ?? "")}`);
+    out.push(`${entry.prefix}${key}=${formatValue(key, value ?? "")}`);
   }
   for (const [key, value] of Object.entries(values)) {
-    if (!written.has(key)) out.push(`${key}=${formatValue(key, value)}`);
+    if (value !== null && !written.has(key)) {
+      out.push(`${key}=${formatValue(key, value)}`);
+    }
   }
-  writeAtomically(file, `${out.join(eol)}${eol}`);
+  writeFileAtomic(file, `${out.join(eol)}${eol}`, { mode: 0o600 });
 }

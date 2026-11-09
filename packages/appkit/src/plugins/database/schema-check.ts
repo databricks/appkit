@@ -1,4 +1,8 @@
 import { databaseSetupFailed } from "../../database/errors";
+import {
+  keepInPublicAdvice,
+  locateTables,
+} from "../../database/migrations/tables-left-in-public";
 import type { DataPath } from "../../database/runtime";
 import type { Schema } from "../../database/schema-builder";
 
@@ -134,7 +138,8 @@ export async function assertSchemaMatchesDatabase(
 
 /**
  * Apps from before the default schema moved to `app` keep their tables in
- * `public`. Name that case; migrating would create a second, empty copy.
+ * `public`. Name that case when every absent table is there; the migration
+ * guard in database/migrations/tables-left-in-public.ts refuses it up front.
  */
 async function inPublicInstead(
   dataPath: Pick<DataPath, "raw">,
@@ -142,16 +147,7 @@ async function inPublicInstead(
   absent: readonly string[],
 ): Promise<string | undefined> {
   if (schemaName === "public" || absent.length === 0) return undefined;
-  const rows = await dataPath.raw<{ table_name: string }>`
-    select c.relname::text as table_name
-    from pg_catalog.pg_class c
-    join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-    where n.nspname = 'public'
-      and c.relname::text = any(${absent}::text[])
-      and c.relkind in ('r', 'p')`;
-  if (rows.length < absent.length) return undefined;
-  return (
-    `Schema public has ${absent.length === 1 ? "that table" : "those tables"}, but defineSchema() puts tables in schema "${schemaName}" unless told otherwise. ` +
-    'To keep them in public, pass { schemaName: "public" } as the second argument of defineSchema() in config/database/schema.ts.'
-  );
+  const { inPublic } = await locateTables(dataPath.raw, schemaName, absent);
+  if (inPublic.length < absent.length) return undefined;
+  return `Schema public has ${absent.length === 1 ? "that table" : "those tables"}, but ${keepInPublicAdvice(schemaName)}`;
 }

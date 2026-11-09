@@ -93,6 +93,7 @@ describe("runClean", () => {
       branch: devBranch.name,
       schemaName: "app",
       dependents: ["view reporting.recent"],
+      kept: [],
     });
     expect(writableEnvBranch).toHaveBeenCalledWith(ctx, "clean");
     expect(statements).toEqual([
@@ -165,6 +166,7 @@ describe("previewClean", () => {
       branch: devBranch.name,
       schemaName: "app",
       dependents: ["constraint refs_fk on table reporting.refs"],
+      kept: [],
     });
     expect(statements).toEqual(["<dependents>"]);
   });

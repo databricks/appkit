@@ -20,11 +20,15 @@ vi.mock("../migrate", async (importOriginal) => ({
   migrateHolding,
 }));
 vi.mock("../clean", () => ({ cleanHolding }));
-vi.mock("../introspect", () => ({ introspectHolding }));
+vi.mock("../introspect", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../introspect")>()),
+  introspectHolding,
+}));
 
 import type { DbContext } from "../context";
 import type { HistoryLock } from "../history-lock";
 import { type InitOptions, runInit } from "../init";
+import { IntrospectRefusedError } from "../introspect";
 import { LakebaseApiError } from "../lakebase-api";
 import { runMigrate } from "../migrate";
 import { DRIZZLE_KIT_VERSION } from "../migrations";
@@ -50,8 +54,9 @@ const migrateReport = {
   typesFile: "/app/shared/appkit-types/database.d.ts",
 };
 
-/** What the hand-off reads on the branch: the app schema's owner, and what blocks deleting that role. */
+/** What the hand-off reads on the branch: the app schema's owner, what else that role owns here, and what blocks deleting it. */
 let schemaOwner: string | null;
+let ownedOutside: string[];
 let blockers: { database: string; count: number }[];
 const queries: string[] = [];
 const pool = {
@@ -59,6 +64,9 @@ const pool = {
     queries.push(text);
     if (text.includes("nspowner")) {
       return { rows: [{ owner: schemaOwner, current_user: USER }] };
+    }
+    if (text.includes("pg_identify_object")) {
+      return { rows: ownedOutside.map((label) => ({ label })) };
     }
     if (text.includes("pg_shdepend")) return { rows: blockers };
     throw new Error(`unexpected query ${text}`);
@@ -68,6 +76,11 @@ const pool = {
 function project(): FakeLakebase {
   const lakebase = new FakeLakebase();
   lakebase.addBranch(PRODUCTION, { default: true });
+  lakebase.addDatabase(
+    PRODUCTION,
+    "databricks-postgres",
+    "databricks_postgres",
+  );
   lakebase.addRole(PRODUCTION, "alice", USER, ["DATABRICKS_SUPERUSER"]);
   lakebase.addRole(PRODUCTION, `dbrx-apps-${SP}`, SP);
   lakebase.addRole(PRODUCTION, "dbrx-apps-user-bob", "bob@example.com");
@@ -152,6 +165,7 @@ function conflict(name: string): LakebaseApiError {
 
 beforeEach(() => {
   schemaOwner = SP;
+  ownedOutside = [];
   blockers = [];
   queries.length = 0;
   pool.query.mockClear();
@@ -163,13 +177,14 @@ beforeEach(() => {
     branch: DEV,
     schemaName: "app",
     dependents: [],
+    kept: [],
   });
   introspectHolding.mockReset().mockResolvedValue({ branch: DEV, tables: [] });
 });
 afterEach(cleanupTempApps);
 
 describe("runInit — dev branch", () => {
-  test("forks the default branch with no expiry, hands the app schema to you, rewrites .env, migrates", async () => {
+  test("forks the default branch with no expiry, hands the app schema to you, rewrites .env, rebuilds the app schema from the migrations", async () => {
     const lakebase = project();
     const ctx = appOn(lakebase);
 
@@ -196,15 +211,20 @@ describe("runInit — dev branch", () => {
       role: { name: `${DEV}/roles/alice`, action: "kept" },
       handedOff: SP,
       installed: null,
-      start: { kind: "migrate", migrate: migrateReport },
+      start: {
+        kind: "clean",
+        clean: { branch: DEV, schemaName: "app", dependents: [], kept: [] },
+        migrate: migrateReport,
+      },
     });
     expect(steps).toEqual([
       `Creating ${devBranchId(USER)} from production`,
       `Pointing .env at ${devBranchId(USER)}, database databricks_postgres`,
       `Handing schema app in database databricks_postgres on ${devBranchId(USER)} to you: deleting this branch's copy of role ${SP}, which owns it, with its objects reassigned to you`,
-      `Migrating schema app on ${devBranchId(USER)}`,
+      `Dropping schema app on ${devBranchId(USER)}: a branch init forked starts without the rows it copied, and the committed migrations recreate its tables`,
     ]);
 
+    // The marker that the branch awaits its first start is gone with the start.
     const written = envFile(ctx.root);
     expect(written).toEqual({
       DATABRICKS_CONFIG_PROFILE: "DEFAULT",
@@ -219,10 +239,13 @@ describe("runInit — dev branch", () => {
     expect(fs.readFileSync(path.join(ctx.root, ".env"), "utf-8")).toMatch(
       /^# Lakebase\n/,
     );
-    // Migrate runs against the new branch; the caller's environment is left alone.
+    // Clean and migrate run against the new branch; the caller's environment is left alone.
+    expect(cleanHolding.mock.invocationCallOrder[0]).toBeLessThan(
+      migrateHolding.mock.invocationCallOrder[0] ?? 0,
+    );
     const [migrateCtx, , migrateOptions] = migrateHolding.mock.calls[0] ?? [];
     expect(migrateCtx.env.LAKEBASE_ENDPOINT).toBe(`${DEV}/endpoints/primary`);
-    expect(migrateOptions).toEqual({ interactive: false });
+    expect(migrateOptions).toEqual({ interactive: false, generate: false });
     expect(ctx.env.LAKEBASE_ENDPOINT).toBe(`${PRODUCTION}/endpoints/primary`);
   });
 
@@ -385,6 +408,106 @@ describe("runInit — dev branch", () => {
   });
 });
 
+describe("runInit — a concurrent run on the same branch", () => {
+  /** The API that another run raced: it did `before` first, then this run's call returns 409. */
+  function racedApi(
+    lakebase: FakeLakebase,
+    method: "createEndpoint" | "createRole",
+  ) {
+    const api = lakebase.api();
+    const original = api[method].bind(api) as (
+      ...args: unknown[]
+    ) => Promise<unknown>;
+    (api as unknown as Record<string, unknown>)[method] = async (
+      ...args: unknown[]
+    ) => {
+      await original(...args);
+      throw conflict(method);
+    };
+    return api;
+  }
+
+  function withApi(
+    lakebase: FakeLakebase,
+    api: ReturnType<FakeLakebase["api"]>,
+  ) {
+    const app = appOn(lakebase);
+    return fakeContext({ root: app.root, env: app.env, userName: USER, api });
+  }
+
+  test("a 409 on the endpoint reads the one the other run created", async () => {
+    const lakebase = project();
+    lakebase.autoEndpoint = false;
+    const ctx = withApi(lakebase, racedApi(lakebase, "createEndpoint"));
+
+    const { report } = await init(ctx, { schema: "none" });
+
+    expect(report).toMatchObject({
+      endpoint: `${DEV}/endpoints/primary`,
+      endpointCreated: false,
+      host: `primary.${devBranchId(USER)}.example.com`,
+    });
+    expect(
+      lakebase.calls.filter((call) => call.startsWith("createEndpoint")),
+    ).toHaveLength(1);
+  });
+
+  test("a 409 on an endpoint still coming up waits for its host", async () => {
+    const lakebase = project();
+    lakebase.autoEndpoint = false;
+    const api = racedApi(lakebase, "createEndpoint");
+    const list = api.listEndpoints.bind(api);
+    let lists = 0;
+    api.listEndpoints = async (branch) => {
+      lists++;
+      const endpoints = await list(branch);
+      // The other run's endpoint has no host until the third look.
+      return lists < 3
+        ? endpoints.map((endpoint) => ({
+            ...endpoint,
+            status: { endpoint_type: endpoint.status?.endpoint_type },
+          }))
+        : endpoints;
+    };
+    const ctx = withApi(lakebase, api);
+    vi.useFakeTimers();
+    try {
+      const run = init(ctx, { schema: "none" });
+      // init reaches its wait in microtasks; the async advance lets them run, then fires the wait's timer.
+      await vi.advanceTimersByTimeAsync(2_000);
+      const { report, steps } = await run;
+
+      expect(report).toMatchObject({
+        endpointCreated: false,
+        host: `primary.${devBranchId(USER)}.example.com`,
+      });
+      expect(steps).toContain(
+        `Waiting for the read-write endpoint of ${devBranchId(USER)} to get a host`,
+      );
+      expect(lists).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a 409 on your role reads the one the other run created", async () => {
+    schemaOwner = USER;
+    const lakebase = new FakeLakebase();
+    lakebase.addBranch(PRODUCTION, { default: true });
+    const ctx = withApi(lakebase, racedApi(lakebase, "createRole"));
+
+    const { report } = await init(ctx, { schema: "none" });
+
+    expect(report.role).toEqual({
+      name: `${DEV}/roles/rol-generated`,
+      action: "kept",
+    });
+    expect(
+      lakebase.calls.filter((call) => call.startsWith("createRole")),
+    ).toHaveLength(1);
+  });
+});
+
 describe("runInit — branch limit", () => {
   test("stops before creating anything and lists your other branches with the delete command", async () => {
     const lakebase = project();
@@ -514,6 +637,47 @@ describe("runInit — session branch", () => {
     });
   });
 
+  test("a rerun without --session resumes a rotation that stopped before .env pointed at the new branch", async () => {
+    // The rotation wrote the new id, then stopped before or after the fork.
+    const beforeFork = project();
+    beforeFork.addBranch(session("oldaaaaa"), {
+      expire_time: "2000-01-01T00:00:00Z",
+    });
+    const pending = {
+      APPKIT_DB_SESSION: "newbbbbb",
+      LAKEBASE_ENDPOINT: `${session("oldaaaaa")}/endpoints/primary`,
+    };
+
+    const forked = await init(appOn(beforeFork, pending), { schema: "none" });
+
+    expect(forked.report).toMatchObject({
+      mode: "session",
+      branch: session("newbbbbb"),
+      created: true,
+    });
+    expect(beforeFork.branches.has(DEV)).toBe(false);
+
+    const afterFork = project();
+    afterFork.addBranch(session("oldaaaaa"), {
+      expire_time: "2000-01-01T00:00:00Z",
+    });
+    afterFork.addBranch(session("newbbbbb"), {
+      expire_time: "2099-01-01T00:00:00Z",
+    });
+    afterFork.addRole(session("newbbbbb"), "alice", USER, [
+      "DATABRICKS_SUPERUSER",
+    ]);
+
+    const resumed = await init(appOn(afterFork, pending), { schema: "none" });
+
+    expect(resumed.report).toMatchObject({
+      mode: "session",
+      branch: session("newbbbbb"),
+      created: false,
+    });
+    expect(afterFork.branches.has(DEV)).toBe(false);
+  });
+
   test("an expired session branch, or a 409 for one that is gone, gets a fresh session id", async () => {
     const lakebase = project();
     lakebase.addBranch(session("k2x9q0ab"), {
@@ -542,7 +706,7 @@ describe("runInit — session branch", () => {
       root: tempApp({
         "databricks.yml": databricksYml(
           PRODUCTION,
-          `${PRODUCTION}/databases/db`,
+          `${PRODUCTION}/databases/databricks-postgres`,
         ),
       }),
       env: { LAKEBASE_PROJECT: P, APPKIT_DB_SESSION: "k2x9q0ab" },
@@ -624,6 +788,22 @@ describe("runInit — hand-off failures", () => {
     );
   });
 
+  test("an owner that also owns objects outside the app schema is not deleted: the list and the manual command are given", async () => {
+    const lakebase = project();
+    ownedOutside = ["schema reports", "table public.shared"];
+
+    await expect(init(appOn(lakebase))).rejects.toThrow(
+      `Refusing to hand schema app in database databricks_postgres on ${devBranchId(USER)} to you: deleting role "${SP}" would also give you what else it owns on this branch: schema reports, table public.shared. .env already points at the branch. Reassign or drop them, or take them all with \`databricks postgres delete-role ${DEV}/roles/dbrx-apps-${SP} --reassign-owned-to ${DEV}/roles/alice\`, then rerun \`appkit db init\`.`,
+    );
+    expect(lakebase.calls.some((call) => call.startsWith("deleteRole"))).toBe(
+      false,
+    );
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.stringContaining("pg_identify_object"),
+      [SP, "app"],
+    );
+  });
+
   test("a failed role delete lists what blocks it", async () => {
     const lakebase = project();
     lakebase.deleteRoleError = new LakebaseApiError(
@@ -656,7 +836,7 @@ describe("runInit — hand-off failures", () => {
 });
 
 describe("runInit — schema start", () => {
-  test("without schema.ts the default is introspect, which installs drizzle-kit first", async () => {
+  test("without schema.ts the default on a new fork is introspect, which installs drizzle-kit first, then a rebuild from the migrations it wrote", async () => {
     const lakebase = project();
     const ctx = appOn(
       lakebase,
@@ -680,9 +860,24 @@ describe("runInit — schema start", () => {
     expect(report.start).toEqual({
       kind: "introspect",
       introspect: { branch: DEV, tables: [] },
+      rebuilt: {
+        clean: { branch: DEV, schemaName: "app", dependents: [], kept: [] },
+        migrate: migrateReport,
+      },
     });
     expect(introspectHolding.mock.calls[0]?.[2]).toEqual({
       interactive: false,
+      schemaName: "app",
+    });
+    expect(introspectHolding.mock.invocationCallOrder[0]).toBeLessThan(
+      cleanHolding.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(cleanHolding.mock.invocationCallOrder[0]).toBeLessThan(
+      migrateHolding.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(migrateHolding.mock.calls[0]?.[2]).toEqual({
+      interactive: false,
+      generate: false,
     });
     expect(
       steps.indexOf(
@@ -704,6 +899,7 @@ describe("runInit — schema start", () => {
 
     await expect(
       runInit(ctx, {
+        schema: "migrate",
         runCommand: () => {
           throw new Error("ENOTFOUND registry");
         },
@@ -730,7 +926,7 @@ describe("runInit — schema start", () => {
     expect(runCommand).not.toHaveBeenCalled();
     expect(report.start).toEqual({
       kind: "clean",
-      clean: { branch: DEV, schemaName: "app", dependents: [] },
+      clean: { branch: DEV, schemaName: "app", dependents: [], kept: [] },
       migrate: migrateReport,
     });
   });
@@ -744,7 +940,7 @@ describe("runInit — schema start", () => {
       await expect(runMigrate(ctx, { interactive: false })).rejects.toThrow(
         /^Another `appkit db init` \(pid \d+ on .+\) is changing the migration history in config\/database\. /,
       );
-      return { branch: DEV, schemaName: "app", dependents: [] };
+      return { branch: DEV, schemaName: "app", dependents: [], kept: [] };
     });
 
     await init(ctx, { schema: "clean" });
@@ -790,6 +986,144 @@ describe("runInit — schema start", () => {
   );
 });
 
+describe("runInit — a branch init forked starts without its copied rows", () => {
+  const dropping = (schemaName = "app") =>
+    `Dropping schema ${schemaName} on ${devBranchId(USER)}: a branch init forked starts without the rows it copied, and the committed migrations recreate its tables`;
+
+  function existingDev(): FakeLakebase {
+    const lakebase = project();
+    lakebase.addBranch(DEV);
+    lakebase.addRole(DEV, "alice", USER, ["DATABRICKS_SUPERUSER"]);
+    return lakebase;
+  }
+
+  test("a reused branch keeps its rows: migrate with schema.ts, introspect alone without", async () => {
+    schemaOwner = USER;
+    const withSchema = await init(appOn(existingDev()));
+    expect(withSchema.report.start).toEqual({
+      kind: "migrate",
+      migrate: migrateReport,
+    });
+
+    const withoutSchema = await init(
+      appOn(existingDev(), {}, { schema: false }),
+    );
+    expect(withoutSchema.report.start).toEqual({
+      kind: "introspect",
+      introspect: { branch: DEV, tables: [] },
+      rebuilt: null,
+    });
+    expect(cleanHolding).not.toHaveBeenCalled();
+  });
+
+  test("--schema migrate or --schema introspect on a new fork keeps the copied rows", async () => {
+    const migrated = await init(appOn(project()), { schema: "migrate" });
+    expect(migrated.report.start).toEqual({
+      kind: "migrate",
+      migrate: migrateReport,
+    });
+
+    const introspected = await init(appOn(project(), {}, { schema: false }), {
+      schema: "introspect",
+    });
+    expect(introspected.report.start).toEqual({
+      kind: "introspect",
+      introspect: { branch: DEV, tables: [] },
+      rebuilt: null,
+    });
+    expect(cleanHolding).not.toHaveBeenCalled();
+  });
+
+  test("a run that stopped after the fork leaves a marker in .env, and the next init rebuilds as if it had forked", async () => {
+    schemaOwner = USER;
+    const ctx = appOn(existingDev(), { APPKIT_DB_NEW_BRANCH: DEV });
+
+    const { report, steps } = await init(ctx);
+
+    expect(report).toMatchObject({ created: false, start: { kind: "clean" } });
+    expect(steps).toContain(dropping());
+    expect(envFile(ctx.root).APPKIT_DB_NEW_BRANCH).toBeUndefined();
+  });
+
+  test("a marker for another branch changes nothing, and stays", async () => {
+    schemaOwner = USER;
+    const other = session("k2x9q0ab");
+    const ctx = appOn(existingDev(), { APPKIT_DB_NEW_BRANCH: other });
+
+    const { report } = await init(ctx);
+
+    expect(report.start.kind).toBe("migrate");
+    expect(envFile(ctx.root).APPKIT_DB_NEW_BRANCH).toBe(other);
+  });
+
+  test("the marker is written before the fork and removed when the fork is refused, so a stop during the fork is covered", async () => {
+    const stopped = project();
+    stopped.createBranchError = new Error("network down");
+    const stoppedCtx = appOn(stopped);
+    await expect(init(stoppedCtx)).rejects.toThrow("network down");
+    expect(envFile(stoppedCtx.root).APPKIT_DB_NEW_BRANCH).toBe(DEV);
+
+    const refused = project();
+    refused.createBranchError = forbidden();
+    const refusedCtx = appOn(refused);
+    await expect(init(refusedCtx)).rejects.toThrow("needs CAN MANAGE");
+    expect(envFile(refusedCtx.root).APPKIT_DB_NEW_BRANCH).toBeUndefined();
+  });
+
+  test("--schema none on a new fork completes its setup: the marker goes, and the next init migrates", async () => {
+    const lakebase = project();
+    const ctx = appOn(lakebase);
+
+    const first = await init(ctx, { schema: "none" });
+    expect(first.report.start).toEqual({ kind: "none" });
+    expect(envFile(ctx.root).APPKIT_DB_NEW_BRANCH).toBeUndefined();
+
+    schemaOwner = USER;
+    const rerun = fakeContext({
+      root: ctx.root,
+      env: { ...ctx.env, ...envFile(ctx.root) },
+      userName: USER,
+      api: lakebase.api(),
+    });
+    const second = await init(rerun);
+    expect(second.report.start.kind).toBe("migrate");
+  });
+
+  test("the hand-off and the introspect read the schema schema.ts declares", async () => {
+    const ctx = appOn(
+      project(),
+      {},
+      { files: { "config/database/schema.ts": schemaSource("sales") } },
+    );
+
+    const { steps } = await init(ctx, { schema: "introspect" });
+
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.stringContaining("nspowner"),
+      ["sales"],
+    );
+    expect(introspectHolding.mock.calls[0]?.[2]).toEqual({
+      interactive: false,
+      schemaName: "sales",
+    });
+    expect(steps).toContain(
+      `Writing schema.ts from schema sales on ${devBranchId(USER)}`,
+    );
+  });
+
+  test("an introspect refusal that says to pass --schema-name names the introspect command, which has the flag", async () => {
+    introspectHolding.mockRejectedValue(
+      new IntrospectRefusedError(
+        `Schema "app" on ${devBranchId(USER)} has no tables, so introspect would replace config/database/schema.ts with an empty one. Pass --schema-name <name> to read another schema.`,
+      ),
+    );
+
+    await expect(init(appOn(project(), {}, { schema: false }))).rejects.toThrow(
+      `Schema "app" on ${devBranchId(USER)} has no tables, so introspect would replace config/database/schema.ts with an empty one. Run \`appkit db introspect --schema-name <name>\` to read another schema.`,
+    );
+  });
+});
+
 describe("runInit — .env", () => {
   test("a missing .env gets the host init authenticated with, and never .env.example's placeholders", async () => {
     const lakebase = project();
@@ -800,10 +1134,6 @@ describe("runInit — .env", () => {
         PRODUCTION,
         `${PRODUCTION}/databases/databricks-postgres`,
       ),
-    });
-    lakebase.databases.set(`${DEV}/databases/databricks-postgres`, {
-      name: `${DEV}/databases/databricks-postgres`,
-      status: { postgres_database: "databricks_postgres" },
     });
     const ctx = fakeContext({
       root,
@@ -830,6 +1160,24 @@ describe("runInit — .env", () => {
     expect(fs.statSync(path.join(root, ".env")).mode & 0o777).toBe(0o600);
   });
 
+  test("a database databricks.yml binds that the branch does not have is refused, naming both, before .env is written", async () => {
+    const lakebase = project();
+    const root = tempApp({
+      "databricks.yml": databricksYml(
+        PRODUCTION,
+        `${PRODUCTION}/databases/analytics`,
+      ),
+    });
+    const ctx = fakeContext({ root, userName: USER, api: lakebase.api() });
+
+    await expect(init(ctx, { schema: "none" })).rejects.toThrow(
+      `Database analytics, which databricks.yml binds, is not on ${devBranchId(USER)}. Create it there (databricks postgres create-database ${DEV} --database-id analytics), or bind a database the project's branches have, then rerun \`appkit db init\`.`,
+    );
+    expect(lakebase.calls).toContain(`getDatabase ${DEV}/databases/analytics`);
+    // The fork happened, so .env marks the branch for its first start and nothing else.
+    expect(envFile(root)).toEqual({ APPKIT_DB_NEW_BRANCH: DEV });
+  });
+
   test("the profile init authenticated with wins over the host", async () => {
     const lakebase = project();
     const root = tempApp();
@@ -846,6 +1194,25 @@ describe("runInit — .env", () => {
     expect(envFile(root).DATABRICKS_CONFIG_PROFILE).toBe("staging");
     expect(envFile(root).DATABRICKS_HOST).toBeUndefined();
   });
+
+  test.each(["prefer", "disable", "verify-full"])(
+    "PGSSLMODE=%s becomes require, and init says so; require stays",
+    async (weak) => {
+      const ctx = appOn(project(), { PGSSLMODE: weak });
+
+      const { steps } = await init(ctx, { schema: "none" });
+
+      expect(envFile(ctx.root).PGSSLMODE).toBe("require");
+      expect(steps).toContain(
+        `Setting PGSSLMODE=require in .env: it was ${weak}, and only require makes every connection use TLS and check the server's certificate`,
+      );
+
+      const strict = appOn(project(), { PGSSLMODE: "require" });
+      const kept = await init(strict, { schema: "none" });
+      expect(envFile(strict.root).PGSSLMODE).toBe("require");
+      expect(kept.steps.some((step) => step.includes("PGSSLMODE"))).toBe(false);
+    },
+  );
 
   test("a symlinked .env is refused before any API call", async () => {
     const lakebase = project();

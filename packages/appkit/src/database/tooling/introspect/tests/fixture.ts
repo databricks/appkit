@@ -58,6 +58,7 @@ export const uniqueKey = (
 ): IntrospectedUnique => ({
   name: `${table}_${columns.join("_")}_key`,
   columns,
+  deferrable: false,
 });
 
 const status = {
@@ -171,6 +172,7 @@ export const columnRow = (
   type_schema: "pg_catalog",
   type_name: type,
   enum_values: null,
+  sequence: null,
   ...extra,
 });
 
@@ -275,8 +277,8 @@ export function catalogResponder(
     values: readonly unknown[],
   ) => {
     calls.push({ text, values });
-    // The unread and index queries mention what the others match on, so they go first.
-    const result = text.includes("pg_catalog.pg_depend")
+    // Each query is told apart by text only it has; the index query mentions pg_constraint, so it goes before that one.
+    const result = text.includes("select o.label")
       ? unread.map((label) => ({ label }))
       : text.includes("pg_catalog.pg_index")
         ? rows.indexes

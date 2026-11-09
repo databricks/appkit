@@ -2,6 +2,11 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
+import {
+  declaredPackageManager,
+  detectPackageManager,
+  type PackageManager,
+} from "../../../../shared/src/cli/package-manager";
 import { DRIZZLE_KIT_VERSION, hasDrizzleKit } from "./migrations";
 
 /** Runs a command in `cwd`; throws when it fails. */
@@ -11,36 +16,35 @@ export type RunCommand = (
   cwd: string,
 ) => void;
 
-/** Exact dev-dependency installs, by the lockfile that names the package manager. */
-const MANAGERS: ReadonlyArray<
-  readonly [lockfile: string, command: string, args: readonly string[]]
-> = [
-  ["pnpm-lock.yaml", "pnpm", ["add", "-D", "-E"]],
-  ["yarn.lock", "yarn", ["add", "-D", "-E"]],
-  ["bun.lock", "bun", ["add", "-d", "--exact"]],
-  ["bun.lockb", "bun", ["add", "-d", "--exact"]],
-  ["package-lock.json", "npm", ["install", "--save-dev", "--save-exact"]],
-];
+/** Each manager's exact dev-dependency install. */
+const INSTALL_ARGS: Record<PackageManager, readonly string[]> = {
+  pnpm: ["add", "-D", "-E"],
+  yarn: ["add", "-D", "-E"],
+  bun: ["add", "-d", "--exact"],
+  npm: ["install", "--save-dev", "--save-exact"],
+};
 
 interface Install {
   readonly command: string;
   readonly args: readonly string[];
 }
 
-/** The install with the package manager whose lockfile is nearest `root`; npm without one. */
+/**
+ * The install with the manager the app declares, by packageManager field or
+ * lockfile, in its own directory or the nearest ancestor's (a workspace member
+ * has neither; its root does). Without one, the manager that launched this
+ * command, else npm.
+ */
 export function drizzleKitInstall(root: string): Install {
-  const spec = `drizzle-kit@${DRIZZLE_KIT_VERSION}`;
+  let manager: PackageManager | null = null;
   for (let dir = path.resolve(root); ; dir = path.dirname(dir)) {
-    for (const [lockfile, command, args] of MANAGERS) {
-      if (fs.existsSync(path.join(dir, lockfile))) {
-        return { command, args: [...args, spec] };
-      }
-    }
-    if (dir === path.dirname(dir)) break;
+    manager = declaredPackageManager(dir);
+    if (manager || dir === path.dirname(dir)) break;
   }
+  const command = manager ?? detectPackageManager(root, "npm");
   return {
-    command: "npm",
-    args: ["install", "--save-dev", "--save-exact", spec],
+    command,
+    args: [...INSTALL_ARGS[command], `drizzle-kit@${DRIZZLE_KIT_VERSION}`],
   };
 }
 

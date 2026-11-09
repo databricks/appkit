@@ -117,9 +117,13 @@ function branch(state: {
     query: vi.fn(async (text: string, values?: unknown[]) => {
       statements.push(text);
       if (state.failOn?.test(text)) throw new Error("connection reset");
-      if (/n\.nspname = 'public'/.test(text)) {
+      // locateTables: the declared tables found in the target schema or in public.
+      if (/n\.nspname::text in \(/.test(text)) {
         return {
-          rows: (state.inPublic ?? []).map((table_name) => ({ table_name })),
+          rows: (state.inPublic ?? []).map((table_name) => ({
+            schema_name: "public",
+            table_name,
+          })),
         };
       }
       if (/pg_catalog\.pg_attribute/.test(text)) {
@@ -135,7 +139,16 @@ function branch(state: {
         };
       }
       if (/from pg_catalog\.pg_class c\s+join/.test(text)) {
-        return { rows: state.recorded === "absent" ? [] : [{ "?column?": 1 }] };
+        // The app's own journal: an ordinary table its role owns.
+        const journalTable = {
+          relkind: "r",
+          owner: "app-sp",
+          schema_owner: "app-sp",
+          current_user: "app-sp",
+          row_security: false,
+          trusted: true,
+        };
+        return { rows: state.recorded === "absent" ? [] : [journalTable] };
       }
       if (/select hash, created_at from/.test(text)) {
         return { rows: state.recorded === "absent" ? [] : state.recorded };

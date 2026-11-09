@@ -62,11 +62,19 @@ export function sessionBranchId(userName: string, sessionId: string): string {
   return `${SESSION_PREFIX}${userHash(userName)}-${sessionId}`;
 }
 
+/** Whether a branch id is one of this user's session branches, whatever its session id. */
+export function isUsersSessionBranchId(
+  userName: string,
+  branchId: string,
+): boolean {
+  return branchId.startsWith(`${SESSION_PREFIX}${userHash(userName)}-`);
+}
+
 /** Whether a branch id is one of this user's dev or session branches. */
 export function isUsersBranchId(userName: string, branchId: string): boolean {
   return (
     branchId === devBranchId(userName) ||
-    branchId.startsWith(`${SESSION_PREFIX}${userHash(userName)}-`)
+    isUsersSessionBranchId(userName, branchId)
   );
 }
 

@@ -62,6 +62,12 @@ export interface LocalTarget {
   readonly endpoint: string | null;
   readonly database: string | null;
   readonly session: string | null;
+  /**
+   * APPKIT_DB_NEW_BRANCH: a branch `appkit db init` forked whose schema it has
+   * not started yet, so it still holds every row the fork copied. init writes
+   * it before the fork and removes it when the start completes.
+   */
+  readonly newBranch: string | null;
 }
 
 export function readLocalTarget(env: NodeJS.ProcessEnv): LocalTarget {
@@ -76,6 +82,7 @@ export function readLocalTarget(env: NodeJS.ProcessEnv): LocalTarget {
     // Without a real endpoint PGDATABASE is a template placeholder too.
     database: endpoint ? env.PGDATABASE || null : null,
     session,
+    newBranch: parseResourceName(env.APPKIT_DB_NEW_BRANCH)?.branch ?? null,
   };
 }
 
@@ -106,11 +113,16 @@ type BundleValue =
 
 /** One postgres resource of an app. */
 interface PostgresBinding {
-  /** Where it is in the merged bundle, e.g. "resources.apps.app.resources[0].postgres". */
+  /**
+   * Where it is in the merged bundle, e.g. "resources.apps.app.resources[0].postgres",
+   * or where a `${…}` stands in for the app's resources, one of them, or a postgres block.
+   */
   readonly at: string;
   readonly branch: BundleValue;
   /** null when the binding names no database. */
   readonly database: BundleValue | null;
+  /** A `${…}` stands where the structure should be; `branch` holds it, unresolved. */
+  readonly whole?: true;
 }
 
 /** An app one target of databricks.yml deploys. */
@@ -121,7 +133,10 @@ interface BundleApp {
   readonly declaredName: string | null;
   /** Its name with bundle references resolved; null when one needs a deploy to resolve. */
   readonly name: string | null;
-  /** Every postgres resource it has. */
+  /**
+   * Every postgres resource it has, and any `${…}` standing where its
+   * resources, one of them, or a postgres block should be.
+   */
   readonly postgres: readonly PostgresBinding[];
 }
 
@@ -352,6 +367,47 @@ function hostValue(
   };
 }
 
+/** A `${…}` where only a deploy puts a structure: the files cannot say what it binds. */
+function unresolvedAt(at: string, written: unknown): PostgresBinding {
+  return {
+    at,
+    branch: {
+      kind: "unresolved",
+      written: typeof written === "string" ? written : "",
+    },
+    database: null,
+    whole: true,
+  };
+}
+
+/** What an app's `resources:` binds; none when it is absent. */
+function appPostgres(
+  at: string,
+  resources: unknown,
+  resolve: (value: unknown) => string | null,
+): PostgresBinding[] {
+  if (resources == null) return [];
+  if (!Array.isArray(resources)) return [unresolvedAt(at, resources)];
+  return resources.flatMap((resource, index): PostgresBinding[] => {
+    const here = `${at}[${index}]`;
+    const item = record(resource);
+    if (!item) return [unresolvedAt(here, resource)];
+    if (item.postgres == null) return [];
+    const binding = record(item.postgres);
+    if (!binding) return [unresolvedAt(`${here}.postgres`, item.postgres)];
+    return [
+      {
+        at: `${here}.postgres`,
+        branch: bundleValue(binding.branch, resolve, "branch"),
+        database:
+          binding.database === undefined
+            ? null
+            : bundleValue(binding.database, resolve, "database"),
+      },
+    ];
+  });
+}
+
 function bundleApps(
   apps: Record<string, unknown>,
   resolve: (value: unknown) => string | null,
@@ -359,26 +415,15 @@ function bundleApps(
   return Object.entries(apps).map(([key, value]) => {
     const app = record(value);
     const declared = app?.name;
-    const resources = Array.isArray(app?.resources) ? app.resources : [];
-    const postgres = resources.flatMap((resource, index): PostgresBinding[] => {
-      const binding = record(record(resource)?.postgres);
-      if (!binding) return [];
-      return [
-        {
-          at: `resources.apps.${key}.resources[${index}].postgres`,
-          branch: bundleValue(binding.branch, resolve, "branch"),
-          database:
-            binding.database === undefined
-              ? null
-              : bundleValue(binding.database, resolve, "database"),
-        },
-      ];
-    });
     return {
       key,
       declaredName: typeof declared === "string" && declared ? declared : null,
       name: resolve(declared),
-      postgres,
+      postgres: appPostgres(
+        `resources.apps.${key}.resources`,
+        app?.resources,
+        resolve,
+      ),
     };
   });
 }
@@ -392,25 +437,27 @@ export function defaultBundleTarget(bundle: Bundle): BundleTarget | null {
 }
 
 /**
- * The branch and database the default target deploys to: its first app
- * binding the files resolve, else its postgres_branch and postgres_database
- * variables. null without databricks.yml, a default target or a branch the
+ * The branch and database the default target deploys to from this checkout:
+ * its first app binding the files resolve, else its postgres_branch and
+ * postgres_database variables, with the checkout's variable-overrides.json
+ * applied as a deploy would. null without databricks.yml or a branch the
  * files resolve.
  */
 export function readDeployTarget(root: string): DeployTarget | null {
   const bundle = readBundle(root);
   const target = bundle ? defaultBundleTarget(bundle) : null;
   if (!target) return null;
+  const bindings: TargetBindings = target.overridden ?? target;
   const resolved = (value: BundleValue | null) =>
     value?.kind === "resolved" ? value.name : null;
-  const binding = target.apps
+  const binding = bindings.apps
     .flatMap((app) => app.postgres)
     .find((candidate) => candidate.branch.kind === "resolved");
-  const branch = resolved(binding?.branch ?? target.postgresBranch);
+  const branch = resolved(binding?.branch ?? bindings.postgresBranch);
   if (!branch) return null;
   return {
     branch,
-    database: resolved(binding ? binding.database : target.postgresDatabase),
+    database: resolved(binding ? binding.database : bindings.postgresDatabase),
   };
 }
 
@@ -538,7 +585,10 @@ export function readDeployBoundary(root: string): DeployBoundary {
         if (branch) branches.add(branch);
       };
       for (const binding of bindings.apps.flatMap((app) => app.postgres)) {
-        add(`${binding.at}.branch`, binding.branch);
+        add(
+          binding.whole ? binding.at : `${binding.at}.branch`,
+          binding.branch,
+        );
         if (binding.database) add(`${binding.at}.database`, binding.database);
       }
       if (bindings.postgresBranch) {

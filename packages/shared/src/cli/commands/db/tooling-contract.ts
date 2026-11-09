@@ -55,17 +55,26 @@ export interface CleanReport {
   readonly branch: string;
   readonly schemaName: string;
   readonly dependents: readonly string[];
+  /** In schema public, the objects other roles own, which stay with their rows. */
+  readonly kept: readonly string[];
+}
+
+/** The app schema dropped, then recreated from the committed migrations. */
+export interface Rebuild {
+  readonly clean: CleanReport;
+  readonly migrate: MigrateReport;
 }
 
 export type InitStart =
   | { readonly kind: "none" }
   | { readonly kind: "migrate"; readonly migrate: MigrateReport }
-  | { readonly kind: "introspect"; readonly introspect: IntrospectReport }
   | {
-      readonly kind: "clean";
-      readonly clean: CleanReport;
-      readonly migrate: MigrateReport;
-    };
+      readonly kind: "introspect";
+      readonly introspect: IntrospectReport;
+      /** On a branch init forked: the schema introspect read, rebuilt from the migrations it wrote. */
+      readonly rebuilt: Rebuild | null;
+    }
+  | ({ readonly kind: "clean" } & Rebuild);
 
 export interface VerifyOptions {
   readonly deployed?: boolean;
@@ -125,6 +134,15 @@ export interface InitReport {
   readonly envFile: string;
   readonly installed: string | null;
   readonly start: InitStart;
+}
+
+/**
+ * What the error runMigrate throws after writing a migration carries. The
+ * file stays for the next run, which generates nothing new to warn about.
+ */
+export interface UnappliedMigration {
+  readonly generated: GeneratedMigration;
+  readonly breaking: readonly string[];
 }
 
 /**

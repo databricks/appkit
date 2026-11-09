@@ -54,20 +54,24 @@ export function fail(error: unknown): void {
   process.exitCode = 1;
 }
 
+/** Statements of a written migration that break instances still running the previous release. */
+export function warnBreaking(tag: string, breaking: readonly string[]): void {
+  if (breaking.length === 0) return;
+  warn(
+    `${tag} breaks instances still running the previous release, which keep serving while the new one migrates on start: ${breaking.join(" ")} ` +
+      "Deploy code that works with both the old and the new schema first, then this change in a later deploy.",
+  );
+}
+
 export function printMigrateReport(report: MigrateReport): void {
   if (report.generated) {
     const count = report.generated.statements.length;
     ok(
       `Generated ${relative(report.generated.file)} (${count} statement${count === 1 ? "" : "s"})`,
     );
+    warnBreaking(report.generated.tag, report.breaking ?? []);
   } else {
     info("No schema changes since the last migration");
-  }
-  if (report.generated && report.breaking?.length) {
-    warn(
-      `${report.generated.tag} breaks instances still running the previous release, which keep serving while the new one migrates on start: ${report.breaking.join(" ")} ` +
-        "Deploy code that works with both the old and the new schema first, then this change in a later deploy.",
-    );
   }
 
   if (report.adopted?.length) {
@@ -95,6 +99,11 @@ export function printCleanReport(report: CleanReport): void {
   if (report.dependents.length > 0) {
     warn(
       `Also removed, because they depended on it: ${report.dependents.join(", ")}`,
+    );
+  }
+  if (report.kept.length > 0) {
+    warn(
+      `Kept in schema public, with their rows, because other roles own them: ${report.kept.join(", ")}`,
     );
   }
 }
@@ -183,7 +192,10 @@ export function printVerifyReport(report: VerifyReport): void {
   else printDeployVerifyReport(report);
 }
 
-export function printIntrospectReport(report: IntrospectReport): void {
+export function printIntrospectReport(
+  report: IntrospectReport,
+  options: { rebuilt?: boolean } = {},
+): void {
   const count = report.tables.length;
   ok(
     `Wrote ${relative(report.schemaFile)} from schema ${report.schemaName} on ${shortName(report.branch)} (${count} table${count === 1 ? "" : "s"})${report.backupFile ? `; the previous file is ${relative(report.backupFile)}` : ""}`,
@@ -201,7 +213,9 @@ export function printIntrospectReport(report: IntrospectReport): void {
   }
   if (report.approximated.length > 0) {
     info(
-      "This branch keeps the approximated objects as they are; a database the migrations create gets what schema.ts declares.",
+      options.rebuilt
+        ? "The rebuild gave this branch what schema.ts declares, as a database the migrations create gets."
+        : "This branch keeps the approximated objects as they are; a database the migrations create gets what schema.ts declares.",
     );
   }
   if (report.migration) {

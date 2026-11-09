@@ -199,6 +199,9 @@ describe("introspect round trip", () => {
           col("g", "integer", { generated: true, defaultExpr: "(x + y)" }),
           col("seq", "integer", { identity: "d" }),
           col("tags", "text[]"),
+          col("mood", "app.mood", {
+            enum: { name: "mood", schema: "app", values: ["", "ok"] },
+          }),
         ],
       }),
       tableOf({

@@ -12,7 +12,9 @@ describe("readCatalog", () => {
       name: "authors",
       partitioned: false,
       primaryKey: ["id"],
-      unique: [{ name: "authors_email_key", columns: ["email"] }],
+      unique: [
+        { name: "authors_email_key", columns: ["email"], deferrable: false },
+      ],
       foreignKeys: [],
       checks: [],
       indexes: [],
@@ -70,7 +72,7 @@ describe("readCatalog", () => {
   });
 
   test("partitioned tables, CHECK and EXCLUDE constraints, indexes, DEFERRABLE and MATCH FULL are kept for the report", () => {
-    const row = (kind: "c" | "x" | "f", name: string, extra = {}) => ({
+    const row = (kind: "c" | "x" | "f" | "u", name: string, extra = {}) => ({
       ...catalogRows.constraints[2],
       kind,
       name,
@@ -86,6 +88,7 @@ describe("readCatalog", () => {
           deferrable: true,
           match_type: "f",
         }),
+        row("u", "posts_slug_key", { columns: ["slug"], deferrable: true }),
       ] as never,
       [
         { table_name: "posts", name: "posts_status_idx" },
@@ -97,7 +100,29 @@ describe("readCatalog", () => {
       checks: ["posts_score_check", "posts_no_overlap"],
       indexes: ["posts_status_idx"],
       foreignKeys: [{ deferrable: true, matchFull: true }],
+      unique: [{ name: "posts_slug_key", columns: ["slug"], deferrable: true }],
     });
+  });
+
+  test("an identity or serial column carries the options of the sequence it owns", () => {
+    const sequence = {
+      start: "100",
+      increment: "10",
+      min: "1",
+      max: "2147483647",
+      cache: "1",
+      cycle: false,
+    };
+    const [table] = buildTables(
+      [{ name: "t", partitioned: false }],
+      [
+        { ...catalogRows.columns[0], table_name: "t", sequence },
+        { ...catalogRows.columns[1], table_name: "t", sequence: null },
+      ] as never,
+      [],
+    );
+    expect(table?.columns[0]?.sequence).toEqual(sequence);
+    expect(table?.columns[1]).not.toHaveProperty("sequence");
   });
 
   test("stored and virtual (PG18) generated columns are both generated", () => {
