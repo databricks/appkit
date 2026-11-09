@@ -897,6 +897,7 @@ describe("runInit — schema start", () => {
 
     await expect(
       runInit(ctx, {
+        schema: "migrate",
         runCommand: () => {
           throw new Error("ENOTFOUND registry");
         },
@@ -1171,7 +1172,8 @@ describe("runInit — .env", () => {
       `Database analytics, which databricks.yml binds, is not on ${devBranchId(USER)}. Create it there (databricks postgres create-database ${DEV} --database-id analytics), or bind a database the project's branches have, then rerun \`appkit db init\`.`,
     );
     expect(lakebase.calls).toContain(`getDatabase ${DEV}/databases/analytics`);
-    expect(fs.existsSync(path.join(root, ".env"))).toBe(false);
+    // The fork happened, so .env marks the branch for its first start and nothing else.
+    expect(envFile(root)).toEqual({ APPKIT_DB_NEW_BRANCH: DEV });
   });
 
   test("the profile init authenticated with wins over the host", async () => {

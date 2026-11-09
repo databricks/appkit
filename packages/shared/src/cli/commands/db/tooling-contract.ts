@@ -59,15 +59,22 @@ export interface CleanReport {
   readonly kept: readonly string[];
 }
 
+/** The app schema dropped, then recreated from the committed migrations. */
+export interface Rebuild {
+  readonly clean: CleanReport;
+  readonly migrate: MigrateReport;
+}
+
 export type InitStart =
   | { readonly kind: "none" }
   | { readonly kind: "migrate"; readonly migrate: MigrateReport }
-  | { readonly kind: "introspect"; readonly introspect: IntrospectReport }
   | {
-      readonly kind: "clean";
-      readonly clean: CleanReport;
-      readonly migrate: MigrateReport;
-    };
+      readonly kind: "introspect";
+      readonly introspect: IntrospectReport;
+      /** On a branch init forked: the schema introspect read, rebuilt from the migrations it wrote. */
+      readonly rebuilt: Rebuild | null;
+    }
+  | ({ readonly kind: "clean" } & Rebuild);
 
 export interface InitReport {
   readonly mode: BranchMode;

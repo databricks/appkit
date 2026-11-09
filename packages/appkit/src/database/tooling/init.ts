@@ -61,7 +61,11 @@ export type SchemaStart = "migrate" | "introspect" | "clean" | "none";
 export interface InitOptions {
   /** Default: this checkout's session branch when .env points at it, else your dev branch. */
   readonly mode?: BranchMode;
-  /** Default: migrate when schema.ts exists, introspect otherwise. */
+  /**
+   * Default: on a branch init forked, clean with schema.ts, else introspect
+   * followed by a rebuild from the migrations it wrote; on a reused branch,
+   * migrate with schema.ts, else introspect.
+   */
   readonly schema?: SchemaStart;
   /** A new session branch's TTL as `--ttl` takes it (30m, 1h, 7d); default seven days. */
   readonly ttl?: string;
@@ -75,15 +79,22 @@ export interface InitOptions {
 
 type RoleAction = "kept" | "created" | "updated";
 
+/** The app schema dropped, then recreated from the committed migrations. */
+interface Rebuild {
+  readonly clean: CleanReport;
+  readonly migrate: MigrateReport;
+}
+
 export type InitStart =
   | { readonly kind: "none" }
   | { readonly kind: "migrate"; readonly migrate: MigrateReport }
-  | { readonly kind: "introspect"; readonly introspect: IntrospectReport }
   | {
-      readonly kind: "clean";
-      readonly clean: CleanReport;
-      readonly migrate: MigrateReport;
-    };
+      readonly kind: "introspect";
+      readonly introspect: IntrospectReport;
+      /** On a branch init forked: the schema introspect read, rebuilt from the migrations it wrote. */
+      readonly rebuilt: Rebuild | null;
+    }
+  | ({ readonly kind: "clean" } & Rebuild);
 
 export interface InitReport {
   readonly mode: BranchMode;
@@ -188,12 +199,20 @@ interface BranchRequest {
   readonly ttl: { readonly api: string; readonly label: string };
   readonly boundary: DeployBoundary;
   readonly envFile: string;
+  /** The branch .env marks as forked but not started; see LocalTarget.newBranch. */
+  readonly newBranch: string | null;
   readonly onStep: (message: string) => void;
 }
 
 interface FoundBranch {
   readonly branch: LakebaseBranch;
+  /** Forked by this run. */
   readonly created: boolean;
+  /**
+   * Forked by init, in this run or in one that stopped before the schema
+   * start, so it still holds every row the fork copied.
+   */
+  readonly fresh: boolean;
   readonly sourceBranch?: string;
   readonly session: string | null;
 }
@@ -253,7 +272,12 @@ async function findOrCreateBranch(
       );
     }
     onStep(`Using ${resourceId(branch.name)}`);
-    return { branch, created: false, session };
+    return {
+      branch,
+      created: false,
+      fresh: branch.name === request.newBranch,
+      session,
+    };
   };
   const replaceGone = (name: string): void => {
     if (session === null) {
@@ -290,10 +314,15 @@ async function findOrCreateBranch(
     if (!parent) {
       throw new Error(`Project ${project} has no default branch to fork from.`);
     }
-    if (session !== null && session !== request.session) {
-      // Written first, so a failed or interrupted run reuses this id instead of forking again.
-      updateEnvFile(request.envFile, { APPKIT_DB_SESSION: session });
-    }
+    // Written before the fork, so a run that stops during or after it leaves
+    // its rerun what it needs: the session id, to reuse instead of forking
+    // again, and the branch name, to still give the fork its first start.
+    updateEnvFile(request.envFile, {
+      ...(session !== null && session !== request.session
+        ? { APPKIT_DB_SESSION: session }
+        : {}),
+      APPKIT_DB_NEW_BRANCH: name,
+    });
     onStep(
       `Creating ${resourceId(name)} from ${resourceId(parent.name)}${session === null ? "" : `, expiring after ${request.ttl.label}`}`,
     );
@@ -307,10 +336,15 @@ async function findOrCreateBranch(
       return {
         branch: branch?.name ? branch : { name },
         created: true,
+        fresh: true,
         sourceBranch: parent.name,
         session,
       };
     } catch (error) {
+      // These refusals mean no fork happened; any other error may have left one.
+      if (isPermissionDenied(error) || isBranchLimit(error)) {
+        updateEnvFile(request.envFile, { APPKIT_DB_NEW_BRANCH: null });
+      }
       if (isPermissionDenied(error)) {
         throw new Error(
           `Creating ${resourceId(name)} needs CAN MANAGE on ${project}. Ask a project owner for it, then rerun \`appkit db init\`.`,
@@ -533,9 +567,8 @@ async function initHolding(
   const envFile = path.join(ctx.root, ENV_FILE);
   refuseSymlink(envFile);
   const hasSchema = hasSchemaFile(ctx.root);
-  const startKind = options.schema ?? (hasSchema ? "migrate" : "introspect");
   const schemaName =
-    hasSchema && startKind !== "introspect" && startKind !== "none"
+    hasSchema && options.schema !== "introspect" && options.schema !== "none"
       ? (await loadDefaultDatabaseSchema(ctx.root, { showImportError: true }))
           .$schemaName
       : DEFAULT_SCHEMA_NAME;
@@ -565,9 +598,17 @@ async function initHolding(
     ttl,
     boundary: readDeployBoundary(ctx.root),
     envFile,
+    newBranch: local.newBranch,
     onStep,
   });
   const { branch } = found;
+  // A branch init forked holds every row the fork copied until its first
+  // start. Without --schema, that start rebuilds the app schema from the
+  // migrations, so none of them stay; a reused branch keeps its data.
+  const rebuild = found.fresh && options.schema === undefined;
+  const startKind: SchemaStart =
+    options.schema ??
+    (hasSchema ? (rebuild ? "clean" : "migrate") : "introspect");
 
   const {
     endpoint,
@@ -624,32 +665,49 @@ async function initHolding(
 
   // Without a lock (--schema none) the schema stays as the fork has it.
   let start: InitStart = { kind: "none" };
-  const on = `on ${resourceId(branch.name)}`;
-  if (lock && startKind === "migrate") {
-    onStep(`Migrating schema ${schemaName} ${on}`);
-    start = {
-      kind: "migrate",
-      migrate: await migrateHolding(branchCtx, lock, { interactive }),
-    };
-  } else if (lock && startKind === "introspect") {
-    onStep(`Writing schema.ts from schema ${schemaName} ${on}`);
-    start = {
-      kind: "introspect",
-      introspect: await introspectHolding(branchCtx, lock, { interactive }),
-    };
-  } else if (lock && startKind === "clean") {
-    onStep(`Dropping schema ${schemaName} ${on}`);
-    const clean = await cleanHolding(branchCtx, lock);
-    // Recreate from the committed migrations, so the startup check passes.
-    start = {
-      kind: "clean",
-      clean,
-      migrate: await migrateHolding(branchCtx, lock, {
+  if (lock) {
+    const on = `on ${resourceId(branch.name)}`;
+    const rebuildSchema = async (): Promise<Rebuild> => {
+      const why = rebuild
+        ? schemaName === "public"
+          ? ": a branch init forked starts without the rows it copied, as far as you own them; other roles' objects stay with theirs"
+          : ": a branch init forked starts without the rows it copied, and the committed migrations recreate its tables"
+        : "";
+      onStep(
+        schemaName === "public"
+          ? `Removing your objects in schema public ${on}${why}`
+          : `Dropping schema ${schemaName} ${on}${why}`,
+      );
+      const clean = await cleanHolding(branchCtx, lock);
+      // Recreated from the committed migrations, so the startup check passes.
+      const migrate = await migrateHolding(branchCtx, lock, {
         interactive,
         generate: false,
-      }),
+      });
+      return { clean, migrate };
     };
+    if (startKind === "migrate") {
+      onStep(`Migrating schema ${schemaName} ${on}`);
+      start = {
+        kind: "migrate",
+        migrate: await migrateHolding(branchCtx, lock, { interactive }),
+      };
+    } else if (startKind === "introspect") {
+      onStep(`Writing schema.ts from schema ${schemaName} ${on}`);
+      const introspect = await introspectHolding(branchCtx, lock, {
+        interactive,
+      });
+      start = {
+        kind: "introspect",
+        introspect,
+        rebuilt: rebuild ? await rebuildSchema() : null,
+      };
+    } else if (startKind === "clean") {
+      start = { kind: "clean", ...(await rebuildSchema()) };
+    }
   }
+  // Its start done, the branch no longer awaits one.
+  if (found.fresh) updateEnvFile(envFile, { APPKIT_DB_NEW_BRANCH: null });
 
   return {
     mode,

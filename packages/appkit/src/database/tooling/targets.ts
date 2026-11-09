@@ -62,6 +62,12 @@ export interface LocalTarget {
   readonly endpoint: string | null;
   readonly database: string | null;
   readonly session: string | null;
+  /**
+   * APPKIT_DB_NEW_BRANCH: a branch `appkit db init` forked whose schema it has
+   * not started yet, so it still holds every row the fork copied. init writes
+   * it before the fork and removes it when the start completes.
+   */
+  readonly newBranch: string | null;
 }
 
 export function readLocalTarget(env: NodeJS.ProcessEnv): LocalTarget {
@@ -76,6 +82,7 @@ export function readLocalTarget(env: NodeJS.ProcessEnv): LocalTarget {
     // Without a real endpoint PGDATABASE is a template placeholder too.
     database: endpoint ? env.PGDATABASE || null : null,
     session,
+    newBranch: parseResourceName(env.APPKIT_DB_NEW_BRANCH)?.branch ?? null,
   };
 }
 
