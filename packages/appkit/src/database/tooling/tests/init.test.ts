@@ -452,9 +452,12 @@ describe("runInit — a concurrent run on the same branch", () => {
         : endpoints;
     };
     const ctx = withApi(lakebase, api);
-    vi.useFakeTimers({ shouldAdvanceTime: true, advanceTimeDelta: 2_000 });
+    vi.useFakeTimers();
     try {
-      const { report, steps } = await init(ctx, { schema: "none" });
+      const run = init(ctx, { schema: "none" });
+      // init reaches its wait in microtasks; the async advance lets them run, then fires the wait's timer.
+      await vi.advanceTimersByTimeAsync(2_000);
+      const { report, steps } = await run;
 
       expect(report).toMatchObject({
         endpointCreated: false,
