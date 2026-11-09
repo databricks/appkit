@@ -383,15 +383,18 @@ export function discardMigrationFiles(
 ): void {
   lock.assertHeld();
   const { folder } = lock;
+  // The journal goes back first, as it is what names the migration: a crash
+  // after this point leaves files no journal names, never the reverse.
+  if (migration.journalBefore === null) {
+    fs.rmSync(journalFile(folder), { force: true });
+  } else {
+    writeFileAtomic(journalFile(folder), migration.journalBefore);
+  }
   fs.rmSync(migration.file, { force: true });
   fs.rmSync(snapshotFile(folder, Number.parseInt(migration.tag, 10)), {
     force: true,
   });
-  if (migration.journalBefore !== null) {
-    writeFileAtomic(journalFile(folder), migration.journalBefore);
-    return;
-  }
-  fs.rmSync(journalFile(folder), { force: true });
+  if (migration.journalBefore !== null) return;
   for (const dir of [metaFolder(folder), folder]) {
     if (fs.existsSync(dir) && fs.readdirSync(dir).length === 0)
       fs.rmdirSync(dir);
