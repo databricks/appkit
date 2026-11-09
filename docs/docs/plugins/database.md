@@ -209,7 +209,7 @@ A typical change:
 npx appkit db migrate            # writes and applies NNNN_migration.sql on your branch
 git add config/database          # commit schema.ts with its migrations
 databricks apps deploy           # the deployed app applies it on start
-npx appkit db verify --deployed  # the app runs, with every committed migration
+npx appkit db verify --deployed  # the app runs, and its source has every committed migration
 ```
 
 ### Your branch's data
@@ -402,11 +402,21 @@ on the branch, and the app is running. When the checkout has
 come from it, as a deploy from this checkout uses them. It also reads the source
 the app's active deployment runs: every committed migration must be there with
 the same journal entry and SQL, and the deployment must have no migration this
-checkout does not commit. When verify cannot read that source, it fails and
+checkout does not commit. It compares the deployment's journal entry by entry,
+so a duplicated, malformed or reordered entry fails too. When verify cannot read
+that source, or the API reports no service principal for the app, it fails and
 says why.
+
+It reads no database, so it does not check that the migrations ran on the
+deploy branch. An app with `APPKIT_DB_MIGRATE_ON_START=true` applies them on
+start, and a migration that fails stops the start; `databricks apps logs` shows
+why.
+
 `-t, --target` picks the target; without it, verify uses the bundle's default
 target. When the target's `workspace.host` is not the workspace your shell is
-authenticated against, verify refuses and names the profile to set. It needs no
+authenticated against, verify refuses and names the profile to set. A
+`workspace.host` the checkout's files cannot resolve, such as a `${var.…}` with
+no value, is refused before any API call. It needs no
 access to the deploy branch's database and changes nothing. A failed check names
 `databricks apps logs`, `start` or `deploy`.
 
