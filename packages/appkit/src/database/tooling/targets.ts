@@ -111,11 +111,18 @@ type BundleValue =
   /** As written: a `${…}` only a deploy resolves, no value, or not a resource name. */
   | { readonly kind: "unresolved"; readonly written: string };
 
-/** A value databricks.yml binds, and where it is written in the merged bundle. */
-interface BoundValue {
-  /** e.g. "resources.apps.app.resources[0].postgres.branch". */
+/** One postgres resource of an app. */
+interface PostgresBinding {
+  /**
+   * Where it is in the merged bundle, e.g. "resources.apps.app.resources[0].postgres",
+   * or where a `${…}` stands in for the app's resources, one of them, or a postgres block.
+   */
   readonly at: string;
-  readonly value: BundleValue;
+  readonly branch: BundleValue;
+  /** null when the binding names no database. */
+  readonly database: BundleValue | null;
+  /** A `${…}` stands where the structure should be; `branch` holds it, unresolved. */
+  readonly whole?: true;
 }
 
 /** An app one target of databricks.yml deploys. */
@@ -123,10 +130,10 @@ interface BundleApp {
   /** Its key under resources.apps. */
   readonly key: string;
   /**
-   * The branch and database of each postgres resource it has, and any `${…}`
-   * standing where its resources, one of them, or a postgres block should be.
+   * Every postgres resource it has, and any `${…}` standing where its
+   * resources, one of them, or a postgres block should be.
    */
-  readonly postgres: readonly BoundValue[];
+  readonly postgres: readonly PostgresBinding[];
 }
 
 /** What one target binds with one set of variable values. */
@@ -339,13 +346,15 @@ function bundleValue(
 }
 
 /** A `${…}` where only a deploy puts a structure: the files cannot say what it binds. */
-function unresolvedAt(at: string, written: unknown): BoundValue {
+function unresolvedAt(at: string, written: unknown): PostgresBinding {
   return {
     at,
-    value: {
+    branch: {
       kind: "unresolved",
       written: typeof written === "string" ? written : "",
     },
+    database: null,
+    whole: true,
   };
 }
 
@@ -354,29 +363,26 @@ function appPostgres(
   at: string,
   resources: unknown,
   resolve: (value: unknown) => string | null,
-): BoundValue[] {
+): PostgresBinding[] {
   if (resources == null) return [];
   if (!Array.isArray(resources)) return [unresolvedAt(at, resources)];
-  return resources.flatMap((resource, index): BoundValue[] => {
+  return resources.flatMap((resource, index): PostgresBinding[] => {
     const here = `${at}[${index}]`;
     const item = record(resource);
     if (!item) return [unresolvedAt(here, resource)];
     if (item.postgres == null) return [];
     const binding = record(item.postgres);
     if (!binding) return [unresolvedAt(`${here}.postgres`, item.postgres)];
-    const bound: BoundValue[] = [
+    return [
       {
-        at: `${here}.postgres.branch`,
-        value: bundleValue(binding.branch, resolve, "branch"),
+        at: `${here}.postgres`,
+        branch: bundleValue(binding.branch, resolve, "branch"),
+        database:
+          binding.database === undefined
+            ? null
+            : bundleValue(binding.database, resolve, "database"),
       },
     ];
-    if (binding.database !== undefined) {
-      bound.push({
-        at: `${here}.postgres.database`,
-        value: bundleValue(binding.database, resolve, "database"),
-      });
-    }
-    return bound;
   });
 }
 
@@ -410,20 +416,15 @@ export function readDeployTarget(root: string): DeployTarget | null {
   const bindings: TargetBindings = target.overridden ?? target;
   const resolved = (value: BundleValue | null) =>
     value?.kind === "resolved" ? value.name : null;
-  const bound = bindings.apps.flatMap((app) => app.postgres);
-  const binding = bound.find(
-    (candidate) =>
-      candidate.at.endsWith(".postgres.branch") &&
-      candidate.value.kind === "resolved",
-  );
-  const branch = resolved(binding?.value ?? bindings.postgresBranch);
+  const binding = bindings.apps
+    .flatMap((app) => app.postgres)
+    .find((candidate) => candidate.branch.kind === "resolved");
+  const branch = resolved(binding?.branch ?? bindings.postgresBranch);
   if (!branch) return null;
-  // The database written next to that branch, in the same postgres block.
-  const databaseAt = binding?.at.replace(/\.branch$/, ".database");
-  const database = binding
-    ? (bound.find((candidate) => candidate.at === databaseAt)?.value ?? null)
-    : bindings.postgresDatabase;
-  return { branch, database: resolved(database) };
+  return {
+    branch,
+    database: resolved(binding ? binding.database : bindings.postgresDatabase),
+  };
 }
 
 /**
@@ -544,10 +545,12 @@ export function readDeployBoundary(root: string): DeployBoundary {
         const branch = parseResourceName(value.name)?.branch;
         if (branch) branches.add(branch);
       };
-      for (const { at, value } of bindings.apps.flatMap(
-        (app) => app.postgres,
-      )) {
-        add(at, value);
+      for (const binding of bindings.apps.flatMap((app) => app.postgres)) {
+        add(
+          binding.whole ? binding.at : `${binding.at}.branch`,
+          binding.branch,
+        );
+        if (binding.database) add(`${binding.at}.database`, binding.database);
       }
       if (bindings.postgresBranch) {
         add("variables.postgres_branch", bindings.postgresBranch);
