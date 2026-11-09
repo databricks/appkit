@@ -141,10 +141,16 @@ you picked in its prompts, usually the branch the app deploys to, and
 2. It makes sure the branch has an endpoint and your Postgres role, points `.env`
    at the branch, and hands you the app schema the fork copied (see
    [One owner per branch](#one-owner-per-branch)).
-3. It sets up the schema. With `schema.ts` it runs `migrate`: it writes a
-   migration when `schema.ts` changed since the last one, then applies the
-   committed migrations. Without `schema.ts`, it writes `schema.ts` from the
-   branch's tables (`introspect`).
+3. It sets up the schema. On a branch it created in this run, it drops the app
+   schema the fork copied and rebuilds it from the committed migrations, so the
+   tables start without the copied rows. Without `schema.ts`, it first writes
+   `schema.ts` and a `0000_baseline` migration from the fork's tables
+   (`introspect`), then rebuilds from that baseline. In schema `public` it drops
+   only the tables you own, and lists the tables that keep their copied rows.
+   On a branch it reuses, it keeps the rows. With `schema.ts` it runs `migrate`,
+   which writes a migration when `schema.ts` changed since the last one, then
+   applies the committed migrations. Without `schema.ts`, it runs `introspect`.
+   To keep the copied rows on a new branch, pass `--schema migrate`.
    `--schema clean` drops the app schema first. Without a terminal,
    `--schema clean` needs `--yes`. `--schema none` only sets up the branch and
    `.env`: it reads no `schema.ts`, hands over no schema, and leaves the schema
@@ -158,11 +164,13 @@ branch `databricks.yml` deploys to, and never edits `databricks.yml`.
 
 :::caution[A new branch copies the default branch]
 New branches fork the project's default branch, so they start with a copy of its
-rows, production data included. Your role there is a member of
-`DATABRICKS_SUPERUSER`, which reads and writes every table on the branch and
-bypasses row-level security. Creating a branch needs CAN MANAGE on the Lakebase
-project, which also allows deleting any branch, the deploy branch included. Use a
-project whose default branch holds only data every developer may see.
+rows, production data included. By default, `db init` drops the copy in the app
+schema. Until it does, and in other schemas, the rows stay on the branch. Your
+role there is a member of `DATABRICKS_SUPERUSER`, which reads and writes every
+table on the branch and bypasses row-level security. Creating a branch needs CAN
+MANAGE on the Lakebase project, which also allows deleting any branch, the deploy
+branch included. Use a project whose default branch holds only data every
+developer may see.
 :::
 
 ### Commands
@@ -280,13 +288,24 @@ only some of them exist, the app does not start, and nothing is changed.
 
 - **Tables created by hand or by earlier code.** Without `schema.ts`,
   `npx appkit db init` creates your dev branch from the project's default branch and
-  introspects it: it writes `schema.ts` from the tables there and a `0000_baseline`
-  migration. With a `schema.ts` already, run `npx appkit db introspect` on your
-  branch. Commit both files: the deployed app records the baseline without running
-  it, because the tables already exist on the deploy branch.
+  introspects it. It writes `schema.ts` from the tables in schema `app` and a
+  `0000_baseline` migration. When init created the branch in this run, it then
+  rebuilds schema `app` from that baseline, so the tables start without the rows
+  the fork copied. With a `schema.ts` already, run
+  `npx appkit db init --schema introspect`. On a new branch, a plain `db init`
+  drops the app schema and rebuilds it from the committed migrations, so it keeps
+  only the tables those migrations create. Commit `schema.ts` and the baseline. The
+  deployed app records the baseline without running it, because the tables already
+  exist on the deploy branch. Once the baseline is committed,
+  `db init --schema migrate` keeps the rows a new branch copied.
 - **Tables in `public`.** Earlier releases used `public` by default. Keep them there
   with `schemaName: "public"`, as [Apps with tables in `public`](#apps-with-tables-in-public)
-  shows.
+  shows. With a `schema.ts`, `npx appkit db introspect` reads the schema it sets in
+  `schemaName`. Without one, `db init` and `db introspect` read schema `app`, so run
+  `npx appkit db init --schema none`, then
+  `npx appkit db introspect --schema-name public`. The `schema.ts` it writes
+  sets `schemaName: "public"`, so later runs read `public` without the flag. The
+  tables keep the rows the fork copied.
 - **No migrate-on-start flag.** Add `APPKIT_DB_MIGRATE_ON_START=true` to `app.yaml`,
   as [Migrations on deploy](#migrations-on-deploy) shows. Without it, the app checks
   its tables on start but creates none.
