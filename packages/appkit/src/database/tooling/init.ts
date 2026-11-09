@@ -37,6 +37,7 @@ import {
 import {
   devBranchId,
   isUsersBranchId,
+  isUsersSessionBranchId,
   newSessionId,
   parseTtl,
   SESSION_BRANCH_TTL,
@@ -155,12 +156,17 @@ function scopeToProject(
   };
 }
 
-/** Session when .env points at this checkout's session branch; dev otherwise. */
+/**
+ * Session when .env names a session id and points at one of your session
+ * branches: this checkout's, or the gone one a rotation replaced before it
+ * stopped short of rewriting .env, which the rerun then finishes. Dev
+ * otherwise.
+ */
 function defaultMode(local: LocalTarget, userName: string): BranchMode {
   const branch = parseResourceName(local.endpoint ?? undefined)?.branch;
   return local.session &&
     branch &&
-    resourceId(branch) === sessionBranchId(userName, local.session)
+    isUsersSessionBranchId(userName, resourceId(branch))
     ? "session"
     : "dev";
 }
