@@ -3,25 +3,25 @@
     {
       "name": "@databricks/appkit",
       "tarball": {
-        "packed": 1307985,
-        "unpacked": 4485075
+        "packed": 1308028,
+        "unpacked": 4485194
       },
       "dist": {
         "total": {
-          "raw": 4469680,
-          "gzip": 1533502
+          "raw": 4469799,
+          "gzip": 1533527
         },
         "js": {
-          "raw": 1330979,
-          "gzip": 473055
+          "raw": 1331073,
+          "gzip": 473068
         },
         "types": {
           "raw": 475865,
-          "gzip": 172554
+          "gzip": 172552
         },
         "maps": {
-          "raw": 2652041,
-          "gzip": 884075
+          "raw": 2652066,
+          "gzip": 884089
         },
         "css": {
           "raw": 0,
@@ -36,17 +36,17 @@
       "entries": [
         {
           "id": ".",
-          "gzip": 112484,
+          "gzip": 112481,
           "composition": {
-            "initialGzip": 109910,
-            "lazyGzip": 2574,
-            "totalGzip": 112484,
+            "initialGzip": 109908,
+            "lazyGzip": 2573,
+            "totalGzip": 112481,
             "own": 355340,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "index.js",
-                "gzip": 105240,
+                "gzip": 105238,
                 "kind": "initial"
               },
               {
@@ -56,7 +56,7 @@
               },
               {
                 "label": "remote-tunnel-manager.js",
-                "gzip": 2574,
+                "gzip": 2573,
                 "kind": "lazy"
               }
             ]
@@ -64,17 +64,17 @@
         },
         {
           "id": "./beta",
-          "gzip": 106319,
+          "gzip": 106325,
           "composition": {
-            "initialGzip": 105835,
-            "lazyGzip": 484,
-            "totalGzip": 106319,
+            "initialGzip": 105840,
+            "lazyGzip": 485,
+            "totalGzip": 106325,
             "own": 318267,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "beta.js",
-                "gzip": 85173,
+                "gzip": 85176,
                 "kind": "initial"
               },
               {
@@ -89,17 +89,17 @@
               },
               {
                 "label": "service-context.js",
-                "gzip": 4414,
+                "gzip": 4415,
                 "kind": "initial"
               },
               {
                 "label": "databricks.js",
-                "gzip": 3399,
+                "gzip": 3398,
                 "kind": "initial"
               },
               {
                 "label": "client.js",
-                "gzip": 646,
+                "gzip": 648,
                 "kind": "initial"
               },
               {
@@ -109,7 +109,7 @@
               },
               {
                 "label": "supervisor-api.js",
-                "gzip": 192,
+                "gzip": 193,
                 "kind": "lazy"
               },
               {
@@ -127,11 +127,11 @@
         },
         {
           "id": "./testing",
-          "gzip": 80853,
+          "gzip": 80857,
           "composition": {
             "initialGzip": 47237,
-            "lazyGzip": 33616,
-            "totalGzip": 80853,
+            "lazyGzip": 33620,
+            "totalGzip": 80857,
             "own": 233897,
             "nodeModules": null,
             "chunks": [
@@ -152,12 +152,12 @@
               },
               {
                 "label": "index.js",
-                "gzip": 29185,
+                "gzip": 29187,
                 "kind": "lazy"
               },
               {
                 "label": "remote-tunnel-manager.js",
-                "gzip": 2585,
+                "gzip": 2587,
                 "kind": "lazy"
               },
               {
@@ -209,7 +209,7 @@
     {
       "name": "@databricks/appkit-ui",
       "tarball": {
-        "packed": 406473,
+        "packed": 406472,
         "unpacked": 1601172
       },
       "dist": {
@@ -290,15 +290,15 @@
           "id": "./react",
           "gzip": 50934,
           "composition": {
-            "initialGzip": 444477,
+            "initialGzip": 450730,
             "lazyGzip": 49772,
-            "totalGzip": 494249,
-            "own": 181696,
-            "nodeModules": 1406372,
+            "totalGzip": 500502,
+            "own": 181750,
+            "nodeModules": 1416721,
             "chunks": [
               {
                 "label": "index.js",
-                "gzip": 442327,
+                "gzip": 448580,
                 "kind": "initial"
               },
               {
