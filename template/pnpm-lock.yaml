@@ -12,6 +12,8 @@ overrides:
   socks: 2.8.7
   bare-path: 3.1.1
   bare-url: 2.5.2
+  '@opentelemetry/instrumentation-bunyan>@opentelemetry/semantic-conventions': 1.44.0
+  '@opentelemetry/instrumentation-pino>@opentelemetry/semantic-conventions': 1.44.0
 
 importers:
 
@@ -1139,8 +1141,8 @@ packages:
     resolution: {integrity: sha512-kocjix+/sSggfJhwXqClZ3i9Y/MI0fp7b+g7kCRm6psy2dsf8uApTRclwG18h8Avm7C9+fnt+O36PspJ/OzoWg==}
     engines: {node: '>=14'}
 
-  '@opentelemetry/semantic-conventions@1.45.0':
-    resolution: {integrity: sha512-aOP45mbcOKbQVvFWfQmgoOPT8R2iwbbbgl83k4CujGV9BrJhFr3qG55MFpwFs4YLabpuW3HhzUY9eQxPlDqaZw==}
+  '@opentelemetry/semantic-conventions@1.44.0':
+    resolution: {integrity: sha512-E3JkOlMBi3N8OGGkbl7tFyqk2MAS6/lySRZBK3Mu7AzjF1fT8oIChH9ChE48SUWzDn9Kdwta+G/p5LJ4xW4CLQ==}
     engines: {node: '>=14'}
 
   '@opentelemetry/sql-common@0.42.0':
@@ -5438,7 +5440,7 @@ snapshots:
       '@opentelemetry/api': 1.9.0
       '@opentelemetry/api-logs': 0.223.0
       '@opentelemetry/instrumentation': 0.223.0(@opentelemetry/api@1.9.0)
-      '@opentelemetry/semantic-conventions': 1.45.0
+      '@opentelemetry/semantic-conventions': 1.44.0
     transitivePeerDependencies:
       - supports-color
 
@@ -5684,7 +5686,7 @@ snapshots:
       '@opentelemetry/api-logs': 0.223.0
       '@opentelemetry/core': 2.12.0(@opentelemetry/api@1.9.0)
       '@opentelemetry/instrumentation': 0.223.0(@opentelemetry/api@1.9.0)
-      '@opentelemetry/semantic-conventions': 1.45.0
+      '@opentelemetry/semantic-conventions': 1.44.0
     transitivePeerDependencies:
       - supports-color
 
@@ -5922,7 +5924,7 @@ snapshots:
 
   '@opentelemetry/semantic-conventions@1.38.0': {}
 
-  '@opentelemetry/semantic-conventions@1.45.0': {}
+  '@opentelemetry/semantic-conventions@1.44.0': {}
 
   '@opentelemetry/sql-common@0.42.0(@opentelemetry/api@1.9.0)':
     dependencies:

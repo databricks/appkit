@@ -79,6 +79,13 @@
     "fast-uri": "3.1.0",
     "socks": "2.8.7",
     "bare-path": "3.1.1",
-    "bare-url": "2.5.2"
+    "bare-url": "2.5.2",
+    "import-in-the-middle": "3.5.3",
+    "@opentelemetry/instrumentation-bunyan": {
+      "@opentelemetry/semantic-conventions": "1.44.0"
+    },
+    "@opentelemetry/instrumentation-pino": {
+      "@opentelemetry/semantic-conventions": "1.44.0"
+    }
   }
 }
