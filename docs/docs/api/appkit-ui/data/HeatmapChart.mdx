@@ -66,12 +66,12 @@ Supports both query mode (queryKey + parameters) and data mode (static data).
 | `parameters` | `Record<string, unknown>` |  | - | Query parameters passed to the analytics endpoint |
 | `format` | `"auto" \| "json_array" \| "arrow_stream" \| "json" \| "arrow"` |  | `"auto"` | Data format to use - "json_array": Use JSON format (smaller payloads, simpler) - "arrow_stream": Use Arrow format (faster for large datasets) - "auto": Automatically select based on expected data size |
 | `transformer` | `(<T>(data: T) => T)` |  | - | Transform raw data before rendering |
-| `data` | `ChartData` |  | - | Arrow Table or JSON array |
+| `data` | `ChartDataInput` |  | - | Arrow Table or JSON array |
 | `title` | `string` |  | - | Chart title |
 | `showLegend` | `boolean` |  | - | Show legend |
 | `colorPalette` | `"categorical" \| "sequential" \| "diverging"` |  | - | Color palette to use. Auto-selected based on chart type if not specified. - "categorical": Distinct colors for different categories (bar, pie, line) - "sequential": Gradient for magnitude/intensity (heatmap) - "diverging": Two-tone for positive/negative values |
 | `colors` | `string[]` |  | - | Custom colors for series (overrides colorPalette) |
-| `height` | `number` |  | `300` | Chart height in pixels |
+| `height` | `number` |  | - | Chart height in pixels. Defaults to filling its parent (see `chartSizeStyle`). |
 | `className` | `string` |  | - | Additional CSS classes |
 | `xKey` | `string` |  | - | X-axis field key. Auto-detected from schema if not provided. |
 | `yKey` | `string \| string[]` |  | - | Y-axis field key(s). Auto-detected from schema if not provided. |
