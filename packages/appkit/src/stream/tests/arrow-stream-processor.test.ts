@@ -272,19 +272,16 @@ describe("ArrowStreamProcessor.streamChunks", () => {
 });
 
 const response = (status: number, statusText = "") =>
-  ({ ok: false, status, statusText }) as Response;
+  new Response("denied", { status, statusText });
 const okResponse = (...pieces: number[]) =>
-  ({
-    ok: true,
-    status: 200,
-    body: streamOf(new Uint8Array(pieces)),
-  }) as unknown as Response;
+  new Response(streamOf(new Uint8Array(pieces)));
 
 async function failureOf(gen: AsyncGenerator<Uint8Array, void, unknown>) {
   try {
     await drain(gen);
   } catch (error) {
-    return error as ExecutionError;
+    if (error instanceof ExecutionError) return error;
+    throw error;
   }
   throw new Error("expected the download to fail");
 }

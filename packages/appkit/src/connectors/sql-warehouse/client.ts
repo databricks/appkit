@@ -1141,7 +1141,10 @@ export class SQLWarehouseConnector {
           error: response.status?.error,
         } as StatementStatus,
         columnNames: arrowColumnNames(response),
-        totalByteCount: response.manifest?.totalByteCount as number | undefined,
+        totalByteCount:
+          response.manifest?.totalByteCount === undefined
+            ? undefined
+            : Number(response.manifest.totalByteCount),
         // Resolve the pre-signed links for EVERY chunk in the caller's own
         // execution context. Streaming these directly (see
         // {@link streamExternalLinks}) avoids a second `getStatement` under

@@ -93,8 +93,8 @@ export function typedDataset(rows = 20): Dataset {
     flag: vectorFromArray(flag, new Bool()),
   });
 
-  const text = (v: unknown, render: (x: never) => string) =>
-    v === null ? null : render(v as never);
+  const text = <T>(v: T | null, render: (x: T) => string) =>
+    v === null ? null : render(v);
   const dataArray = Array.from({ length: rows }, (_, i) => [
     text(id[i], String),
     text(big[i], String),
@@ -135,7 +135,7 @@ export function typedDataset(rows = 20): Dataset {
 /** Every cell as a string, so schemas and values compare across Arrow builds. */
 export function cellsOf(table: Table): Array<Array<string | null>> {
   const columns = table.schema.fields.map((_f, index) =>
-    [...(table.getChildAt(index) as Iterable<unknown>)].map((v) =>
+    [...(table.getChildAt(index) ?? [])].map((v) =>
       v === null || v === undefined ? null : String(v),
     ),
   );

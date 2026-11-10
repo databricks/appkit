@@ -31,6 +31,15 @@ const EXTERNAL_LINK_DOWNLOAD_FAILED = "EXTERNAL_LINK_DOWNLOAD_FAILED";
 
 const BACKOFF_MULTIPLIER = 1000;
 
+type UsableLink = ExternalLink & { externalLink: string };
+
+const hasUrl = (link: ExternalLink | undefined): link is UsableLink =>
+  Boolean(link?.externalLink);
+
+/** A 4xx won't change on retry, except a request timeout (408) or a rate limit (429). */
+const isFinalStatus = (status: number) =>
+  status >= 400 && status < 500 && status !== 408 && status !== 429;
+
 interface DownloadFailure {
   status?: number;
   error: unknown;
@@ -144,13 +153,13 @@ export class ArrowStreamProcessor {
     refresh: RefreshChunkLink | undefined,
     fullHeaderWait: boolean,
   ): AsyncGenerator<Uint8Array, void, unknown> {
-    let link = chunk;
-    if (!link.externalLink) {
+    if (!hasUrl(chunk)) {
       // A missing link cannot be fixed by retrying — fail loudly.
       throw ExecutionError.statementFailed(
         `External link missing for chunk ${chunk.chunkIndex}`,
       );
     }
+    let link: UsableLink = chunk;
 
     const { timeout, retries, responseTimeoutMs } = this.options;
     const headerWaitMs = fullHeaderWait
@@ -182,7 +191,7 @@ export class ArrowStreamProcessor {
         attempts--;
         try {
           const fresh = await refresh(chunk.chunkIndex, signal);
-          if (fresh?.externalLink) link = fresh;
+          if (hasUrl(fresh)) link = fresh;
         } catch (refreshError) {
           // Retry the current URL; surface the original error if it fails.
           logger.warn(
@@ -193,15 +202,7 @@ export class ArrowStreamProcessor {
         }
         continue;
       }
-      if (
-        status !== undefined &&
-        status >= 400 &&
-        status < 500 &&
-        status !== 408 &&
-        status !== 429
-      ) {
-        break;
-      }
+      if (status !== undefined && isFinalStatus(status)) break;
       if (attempts < retries) {
         await this.delay(2 ** (attempts - 1) * BACKOFF_MULTIPLIER, signal);
       }
@@ -270,7 +271,7 @@ export class ArrowStreamProcessor {
 
   /** One GET; only the wait for response headers is timed. */
   private async connect(
-    link: ExternalLink,
+    link: UsableLink,
     headerWaitMs: number,
     signal?: AbortSignal,
   ): Promise<Connection> {
@@ -280,7 +281,7 @@ export class ArrowStreamProcessor {
     const detach = () => signal?.removeEventListener("abort", onAbort);
     const timer = setTimeout(() => controller.abort(), headerWaitMs);
     try {
-      const response = await fetch(link.externalLink as string, {
+      const response = await fetch(link.externalLink, {
         signal: controller.signal,
         headers: link.httpHeaders,
       });

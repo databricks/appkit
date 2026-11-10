@@ -1,4 +1,10 @@
-import { type DataType, Type } from "apache-arrow";
+import {
+  type DataType,
+  type Decimal,
+  type Int,
+  type Timestamp,
+  Type,
+} from "apache-arrow";
 
 /**
  * How one scalar type is written in an `INLINE` + `JSON_ARRAY` cell. `parse`
@@ -40,13 +46,12 @@ function epochMillis(text: string, kind: string, cell: string): number {
   return ms;
 }
 
-const hasTimezone = (type: DataType) =>
-  (type as DataType & { timezone?: string | null }).timezone != null;
+const hasTimezone = (type: Timestamp) => type.timezone != null;
 
 const CODECS: Partial<Record<Type, CellCodec>> = {
   [Type.Int]: {
-    parse(cell, type) {
-      const { bitWidth } = type as DataType & { bitWidth: number };
+    parse(cell, type: Int) {
+      const { bitWidth } = type;
       if (bitWidth === 64) {
         let n: bigint;
         try {
@@ -77,8 +82,8 @@ const CODECS: Partial<Record<Type, CellCodec>> = {
     },
   },
   [Type.Decimal]: {
-    format(value, type) {
-      const { scale } = type as DataType & { scale: number };
+    format(value, type: Decimal) {
+      const { scale } = type;
       const unscaled = String(value);
       if (scale <= 0) return unscaled;
       const negative = unscaled.startsWith("-");
@@ -88,11 +93,8 @@ const CODECS: Partial<Record<Type, CellCodec>> = {
       const out = `${digits.slice(0, point)}.${digits.slice(point)}`;
       return negative ? `-${out}` : out;
     },
-    parse(cell, type) {
-      const { scale, precision } = type as DataType & {
-        scale: number;
-        precision: number;
-      };
+    parse(cell, type: Decimal) {
+      const { scale, precision } = type;
       const match = DECIMAL_TEXT.exec(cell);
       if (!match) throw invalid("decimal", cell);
       const [, sign, whole, fraction = ""] = match;
@@ -115,11 +117,11 @@ const CODECS: Partial<Record<Type, CellCodec>> = {
     },
   },
   [Type.Timestamp]: {
-    format(value, type) {
+    format(value, type: Timestamp) {
       const iso = new Date(Number(value)).toISOString();
       return hasTimezone(type) ? iso : iso.slice(0, -1);
     },
-    parse(cell, type) {
+    parse(cell, type: Timestamp) {
       if (hasTimezone(type)) {
         if (!ZONED_TIMESTAMP_TEXT.test(cell)) throw invalid("timestamp", cell);
         return epochMillis(cell, "timestamp", cell);

@@ -1,7 +1,7 @@
 import {
   Binary,
   Bool,
-  type DataType,
+  DataType,
   DateDay,
   Decimal,
   DurationMicrosecond,
@@ -129,8 +129,8 @@ function vectorFromCells(col: ColumnInfo, cells: Array<string | null>) {
   const values = cells.map((cell) =>
     cell === null ? null : parseJsonArrayCell(cell, type),
   );
-  if (type.typeId === Type.Decimal) {
-    return decimalVector(values as Array<bigint | null>, type as Decimal);
+  if (DataType.isDecimal(type)) {
+    return decimalVector(values as Array<bigint | null>, type);
   }
   return vectorFromArray(values, type);
 }

@@ -125,11 +125,11 @@ describe("JSON_ARRAY cell codecs", () => {
   test.each(cases)(
     "%s: parsing the formatted text gives back the native Arrow value",
     (_name, build) => {
-      const column = tableFromIPC(
+      const table = tableFromIPC(
         tableToIPC(new Table({ c: build() }), "stream"),
-      ).getChildAt(0);
-      const type = column?.type as DataType;
-      for (const native of column ?? []) {
+      );
+      const { type } = table.schema.fields[0];
+      for (const native of table.getChildAt(0) ?? []) {
         const parsed = parseJsonArrayCell(
           formatJsonArrayCell(native, type),
           type,
@@ -140,26 +140,27 @@ describe("JSON_ARRAY cell codecs", () => {
   );
 
   test("formats match what a warehouse writes", () => {
-    const read = (vector: Vector) =>
-      tableFromIPC(tableToIPC(new Table({ c: vector }), "stream")).getChildAt(
-        0,
+    const formatted = (vector: Vector) => {
+      const table = tableFromIPC(
+        tableToIPC(new Table({ c: vector }), "stream"),
       );
-    const decimal = read(decimalVector([-50n, 51n], 2, 10));
-    const ntz = read(
-      vectorFromArray([Date.UTC(2026, 0, 1, 10)], new TimestampMicrosecond()),
-    );
-    const day = read(vectorFromArray([Date.UTC(2026, 0, 1)], new DateDay()));
+      const { type } = table.schema.fields[0];
+      return [...(table.getChildAt(0) ?? [])].map((v) =>
+        formatJsonArrayCell(v, type),
+      );
+    };
+    expect(formatted(decimalVector([-50n, 51n], 2, 10))).toEqual([
+      "-0.50",
+      "0.51",
+    ]);
     expect(
-      [...(decimal ?? [])].map((v) =>
-        formatJsonArrayCell(v, decimal?.type as DataType),
+      formatted(
+        vectorFromArray([Date.UTC(2026, 0, 1, 10)], new TimestampMicrosecond()),
       ),
-    ).toEqual(["-0.50", "0.51"]);
-    expect(formatJsonArrayCell(ntz?.get(0), ntz?.type as DataType)).toBe(
-      "2026-01-01T10:00:00.000",
-    );
-    expect(formatJsonArrayCell(day?.get(0), day?.type as DataType)).toBe(
-      "2026-01-01",
-    );
+    ).toEqual(["2026-01-01T10:00:00.000"]);
+    expect(
+      formatted(vectorFromArray([Date.UTC(2026, 0, 1)], new DateDay())),
+    ).toEqual(["2026-01-01"]);
   });
 
   test("a zoned TIMESTAMP keeps its instant when the warehouse writes the session offset", () => {

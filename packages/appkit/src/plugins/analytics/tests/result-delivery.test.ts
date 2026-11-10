@@ -456,7 +456,7 @@ describe("deliverArrowBytesWithFallback", () => {
     options: {
       storage?: Parameters<typeof startStorage>[0];
       totalByteCount?: number;
-      inline?: () => unknown;
+      inline?: () => Awaited<ReturnType<QueryExecutor["query"]>>;
       rows?: number;
     } = {},
   ) {
@@ -482,7 +482,7 @@ describe("deliverArrowBytesWithFallback", () => {
             external_links: [{ chunkIndex: 0, externalLink: storage.url() }],
           };
         }
-        if (options.inline) return options.inline() as never;
+        if (options.inline) return options.inline();
         return {
           statement_id: "stmt-json",
           columns: data.columns,
@@ -527,7 +527,8 @@ describe("deliverArrowBytesWithFallback", () => {
         chunks.push(bytes);
       }
     } catch (e) {
-      error = e as ExecutionError;
+      if (!(e instanceof ExecutionError)) throw e;
+      error = e;
     }
     const bytes = Buffer.concat(chunks.map((c) => Buffer.from(c)));
     return { bytes, out, reported, error };

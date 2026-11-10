@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import {
   Binary,
   Bool,
-  type DataType,
+  DataType,
   DateDay,
   Decimal,
   DurationMicrosecond,
@@ -532,8 +532,7 @@ describe("buildArrowIPCFromRows", () => {
     expected: unknown[];
   };
 
-  const decimalUnscaled = (v: unknown) =>
-    v === null ? null : String(v as { toString(): string });
+  const decimalUnscaled = (v: unknown) => (v === null ? null : String(v));
   const cases: Record<string, Case & { read?: (v: unknown) => unknown }> = {
     INT: {
       column: { name: "c", typeName: "INT", typeText: "INT" },
@@ -622,7 +621,7 @@ describe("buildArrowIPCFromRows", () => {
       column: { name: "c", typeName: "BINARY", typeText: "BINARY" },
       cells: ["AQI=", null],
       expected: [[1, 2], null],
-      read: (v) => (v === null ? null : [...(v as Uint8Array)]),
+      read: (v) => (v instanceof Uint8Array ? [...v] : v),
     },
     VOID: {
       column: { name: "c", typeName: "NULL", typeText: "VOID" },
@@ -644,16 +643,15 @@ describe("buildArrowIPCFromRows", () => {
       const field = table.schema.fields[0];
       expect(field.name).toBe(column.name);
       expect(field.typeId).toBe(native.typeId);
-      if (column.typeName === "DECIMAL") {
-        const type = field.type as Decimal;
-        expect([type.precision, type.scale]).toEqual([
+      if (DataType.isDecimal(field.type)) {
+        expect([field.type.precision, field.type.scale]).toEqual([
           column.typePrecision,
           column.typeScale,
         ]);
       } else {
         expect(String(field.type)).toBe(String(native));
       }
-      const values = [...(table.getChildAt(0) as Iterable<unknown>)];
+      const values = [...(table.getChildAt(0) ?? [])];
       expect(values.map((v) => (read ? read(v) : v))).toEqual(expected);
     },
   );
@@ -802,7 +800,7 @@ describe("buildArrowIPCFromRows against a captured warehouse response", () => {
     expect(fixture.dataArray[0][index]).toMatch(/\.\d{3}-\d{2}:\d{2}$/);
     expect(values(rebuilt, index)).toEqual(
       values(native, index).map((ms) =>
-        ms === null ? null : Math.trunc(ms as number),
+        ms === null ? null : Math.trunc(Number(ms)),
       ),
     );
   });
