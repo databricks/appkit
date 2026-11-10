@@ -39,7 +39,7 @@ Draggable panel that slides in from screen edges
 | `modal` | `boolean` |  | `true` | When `false` it allows to interact with elements outside of the drawer without closing it. |
 | `nested` | `boolean` |  | - | - |
 | `onClose` | `(() => void)` |  | - | - |
-| `direction` | `enum` |  | `'bottom'` | Direction of the drawer. Can be `top` or `bottom`, `left`, `right`. |
+| `direction` | `"top" \| "right" \| "bottom" \| "left"` |  | `'bottom'` | Direction of the drawer. Can be `top` or `bottom`, `left`, `right`. |
 | `defaultOpen` | `boolean` |  | `false` | Opened by default, skips initial enter animation. Still reacts to `open` state changes |
 | `disablePreventScroll` | `boolean` |  | `false` | When set to `true` prevents scrolling on the document body on mount, and restores it on unmount. |
 | `repositionInputs` | `boolean` |  | `true when {@link snapPoints } is defined` | When `true` Vaul will reposition inputs rather than scroll then into view if the keyboard is in the way. Setting it to `false` will fall back to the default browser behavior. |

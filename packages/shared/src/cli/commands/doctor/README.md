@@ -99,7 +99,8 @@ wiring):
   `databricks.yml` binding (the env var would never be injected).
 - `BUNDLE_REF_MISSING` — a `${resources.<type>.<key>.*}` binding references a
   resource not declared in the bundle (deploy would fail).
-- `ENV_UNWIRED` — a plugin needs an env var no `app.yaml` entry provides, so it
+- `ENV_UNWIRED` — a plugin needs an env var no `app.yaml` entry provides
+  (neither `valueFrom` nor a literal `value`), so it
   won't be set in the environment of the deployed app. Error for a required
   resource (a guaranteed break), warning for an optional one.
 

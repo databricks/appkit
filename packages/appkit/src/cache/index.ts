@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 
+import type { Pool } from "pg";
 import type { CacheConfig, CacheEntry, CacheStorage } from "shared";
 
-import { createLakebasePool } from "../connectors/lakebase";
-import { getClientOptions } from "../context/client-options";
+import { initializeLakebasePool } from "../connectors/lakebase";
 import { getCurrentPrincipalKey } from "../context/execution-context";
 import { AppKitError, ExecutionError, InitializationError } from "../errors";
 import { httpStatusOf } from "../errors/http-status";
@@ -11,7 +11,7 @@ import { createLogger } from "../logging/logger";
 import type { Counter, TelemetryProvider } from "../telemetry";
 import { SpanStatusCode, TelemetryManager } from "../telemetry";
 import { deepMerge } from "../utils";
-import { ApiError, createWorkspaceClient } from "../workspace-client";
+import { ApiError } from "../workspace-client";
 import { cacheDefaults } from "./defaults";
 import { InMemoryStorage, PersistentStorage } from "./storage";
 
@@ -159,12 +159,20 @@ export class CacheManager {
     userConfig?: Partial<CacheConfig>,
   ): Promise<CacheManager> {
     const config = deepMerge(cacheDefaults, userConfig);
+    const fallback = config.strictPersistence
+      ? "cache disabled (strictPersistence)"
+      : "using in-memory cache";
 
     if (config.storage) {
       const isHealthy = await config.storage.healthCheck();
       if (isHealthy) {
         return new CacheManager(config.storage, config);
       }
+
+      logger.warn(
+        "Configured cache storage failed its health check, %s",
+        fallback,
+      );
 
       if (config.strictPersistence) {
         const disabledConfig = { ...config, enabled: false };
@@ -177,24 +185,33 @@ export class CacheManager {
       return new CacheManager(new InMemoryStorage(config), config);
     }
 
-    // try to use lakebase storage
-    try {
-      const workspaceClient = createWorkspaceClient({
-        clientOptions: getClientOptions(),
-      });
-      const pool = createLakebasePool({ workspaceClient });
-      const persistentStorage = new PersistentStorage(config, pool);
+    // No Lakebase env and no strictPersistence: persistence was never asked for.
+    if (
+      !config.strictPersistence &&
+      !process.env.LAKEBASE_ENDPOINT &&
+      !process.env.PGHOST
+    ) {
+      logger.debug("Lakebase not configured, %s", fallback);
+    } else {
+      let pool: Pool | undefined;
+      try {
+        // Resolves the Postgres user like the lakebase plugin: PGUSER,
+        // DATABRICKS_CLIENT_ID, then currentUser.me().
+        pool = await initializeLakebasePool();
+        const persistentStorage = new PersistentStorage(config, pool);
 
-      const isHealthy = await persistentStorage.healthCheck();
-      if (isHealthy) {
+        // Query directly: healthCheck() returns a bare false and drops the cause.
+        await pool.query("SELECT 1");
         await persistentStorage.initialize();
         return new CacheManager(persistentStorage, config);
+      } catch (error) {
+        await pool?.end().catch(() => {});
+        logger.warn(
+          "Lakebase cache storage unavailable, %s: %O",
+          fallback,
+          error,
+        );
       }
-
-      // Health check failed, close the pool and fallback
-      await pool.end();
-    } catch {
-      // lakebase unavailable, continue with in-memory storage
     }
 
     if (config.strictPersistence) {

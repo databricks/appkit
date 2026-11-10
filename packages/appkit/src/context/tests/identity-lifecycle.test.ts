@@ -113,6 +113,10 @@ describe("identity expiration", () => {
     { status: 401 },
     { response: { status: 401 } },
     new Error("wrapper", { cause: upstream }),
+    // Databricks answers expired or revoked tokens with 403.
+    Object.assign(new Error("Invalid access token. secret-bearer-token"), {
+      statusCode: 403,
+    }),
   ])(
     "converts structured downstream failures without retaining credentials",
     async (error) => {
@@ -135,6 +139,9 @@ describe("identity expiration", () => {
     for (const error of [
       new Error("401 in text"),
       { statusCode: 403 },
+      Object.assign(new Error("User does not have USE CATALOG"), {
+        statusCode: 403,
+      }),
       AuthenticationError.missingToken(),
       new IdentityExpiredError("fingerprint"),
     ]) {
