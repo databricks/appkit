@@ -18,9 +18,14 @@ if (!version) {
   process.exit(1);
 }
 
-function run(cmd: string, args: string[], opts: { cwd?: string } = {}): number {
+function run(
+  cmd: string,
+  args: string[],
+  opts: { cwd?: string; env?: Record<string, string> } = {},
+): number {
   const result = spawnSync(cmd, args, {
     cwd: opts.cwd ?? ROOT,
+    env: { ...process.env, ...opts.env },
     stdio: "inherit",
   });
   return result.status ?? 1;
@@ -52,10 +57,11 @@ async function runInstallWithRetry(
   label: string,
   cmd: string,
   args: string[],
+  env?: Record<string, string>,
 ): Promise<number> {
   let lastStatus = 0;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const status = run(cmd, args, { cwd: templateDir });
+    const status = run(cmd, args, { cwd: templateDir, env });
     lastStatus = status;
     if (status === 0) {
       return 0;
@@ -114,19 +120,18 @@ if (run("pnpm", ["--version"]) !== 0) {
 
 // 2c. pnpm → pnpm-lock.yaml (--no-frozen-lockfile: pnpm defaults to frozen
 // under CI; --lockfile-only: skip the node_modules rebuild).
-// pnpm ignores minimumReleaseAge on the CLI; set it for this install only.
-const workspacePath = join(templateDir, "pnpm-workspace.yaml");
-const workspaceYaml = readFileSync(workspacePath, "utf-8");
-writeFileSync(
-  workspacePath,
-  `${workspaceYaml}\nminimumReleaseAge: ${RELEASE_AGE_DAYS * 24 * 60}\nminimumReleaseAgeExclude:\n  - "${RELEASE_AGE_EXCLUDE}"\n`,
+// pnpm ignores minimumReleaseAge CLI flags; the exclude env var must be a JSON array.
+const pnpmExit = await runInstallWithRetry(
+  "pnpm install",
+  "pnpm",
+  ["install", "--lockfile-only", "--no-frozen-lockfile"],
+  {
+    pnpm_config_minimum_release_age: String(RELEASE_AGE_DAYS * 24 * 60),
+    pnpm_config_minimum_release_age_exclude: JSON.stringify([
+      RELEASE_AGE_EXCLUDE,
+    ]),
+  },
 );
-const pnpmExit = await runInstallWithRetry("pnpm install", "pnpm", [
-  "install",
-  "--lockfile-only",
-  "--no-frozen-lockfile",
-]);
-writeFileSync(workspacePath, workspaceYaml);
 if (pnpmExit !== 0) {
   console.error(`pnpm install failed after ${MAX_ATTEMPTS} attempts`);
   process.exit(pnpmExit);
