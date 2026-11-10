@@ -71,8 +71,32 @@ async function runInstallWithRetry(
   return lastStatus;
 }
 
+// Matches CI's registry cooldown; newer versions 403 in template jobs.
+const RELEASE_AGE_DAYS = 7;
+const RELEASE_AGE_EXCLUDE = "@databricks/*";
+
+// npm ignores unknown config keys, which would silently drop the cooldown.
+const npmConfig = spawnSync(
+  "npm",
+  ["config", "get", "min-release-age-exclude"],
+  {
+    cwd: templateDir,
+    encoding: "utf-8",
+  },
+);
+if (npmConfig.status !== 0 || npmConfig.stdout.trim() === "undefined") {
+  console.error(
+    "npm does not support min-release-age-exclude; upgrade npm (11.19+ works).",
+  );
+  process.exit(1);
+}
+
 // 2a. npm → package-lock.json
-const npmExit = await runInstallWithRetry("npm install", "npm", ["install"]);
+const npmExit = await runInstallWithRetry("npm install", "npm", [
+  "install",
+  `--min-release-age=${RELEASE_AGE_DAYS}`,
+  `--min-release-age-exclude=${RELEASE_AGE_EXCLUDE}`,
+]);
 if (npmExit !== 0) {
   console.error(`npm install failed after ${MAX_ATTEMPTS} attempts`);
   process.exit(npmExit);
@@ -94,6 +118,8 @@ const pnpmExit = await runInstallWithRetry("pnpm install", "pnpm", [
   "install",
   "--lockfile-only",
   "--no-frozen-lockfile",
+  `--config.minimum-release-age=${RELEASE_AGE_DAYS * 24 * 60}`,
+  `--config.minimum-release-age-exclude=${RELEASE_AGE_EXCLUDE}`,
 ]);
 if (pnpmExit !== 0) {
   console.error(`pnpm install failed after ${MAX_ATTEMPTS} attempts`);
