@@ -196,6 +196,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.91.3](https://github.com/databricks/appkit/compare/v0.91.2...v0.91.3) (2026-11-10)
+
+### deps
+
+* **deps:** bump echarts, yaml and express pins with moderate advisories ([#724](https://github.com/databricks/appkit/issues/724)) ([2e51bc1](https://github.com/databricks/appkit/commit/2e51bc1d2bb6d743e98979af388e0ba7c4395ba5))
+
+
 ## [0.91.2](https://github.com/databricks/appkit/compare/v0.91.1...v0.91.2) (2026-11-09)
 
 ### deps
