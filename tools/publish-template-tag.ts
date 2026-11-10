@@ -109,8 +109,7 @@ if (npmExit !== 0) {
 }
 console.log("✓ template/package-lock.json updated (npm install)");
 
-// pnpm 11.1.2+ is needed for minimumReleaseAge on public npm (ERR_PNPM_MISSING_TIME,
-// pnpm/pnpm#11619); the template itself stays pinned to the Apps runtime's pnpm.
+// 11.1.2+ fixes minimumReleaseAge on public npm: https://github.com/pnpm/pnpm/issues/11619
 const PNPM = ["--yes", "pnpm@11.1.2"];
 
 // 2b. pnpm preflight — fail loud rather than silently skip the pnpm lock.
