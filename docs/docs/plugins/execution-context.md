@@ -142,10 +142,12 @@ resource metadata because no individual plugin has been selected yet.
 ## Credential expiration and telemetry
 
 A structured downstream HTTP 401 inside a caller scope throws
-`IdentityExpiredError` with code `IDENTITY_EXPIRED`. It includes the existing
-token fingerprint, not the token or upstream credential-bearing error. Obtain
-fresh user credentials before retrying. Non-401 failures and SP execution keep
-their existing behavior. Plugin `execute()` preserves its failed-result envelope
+`IdentityExpiredError` with code `IDENTITY_EXPIRED`. So does a 403 that reports
+an invalid token, which is how Databricks rejects expired or revoked PATs and
+expired OAuth tokens. It includes the existing token fingerprint, not the token
+or upstream credential-bearing error. Obtain fresh user credentials before
+retrying. Other failures, including permission-denied 403s, and SP execution
+keep their existing behavior. Plugin `execute()` preserves its failed-result envelope
 and adds the typed error in the optional `error` field; SSE streams expose `IDENTITY_EXPIRED`
 in the error payload's `errorCode` field.
 

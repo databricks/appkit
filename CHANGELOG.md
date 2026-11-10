@@ -190,6 +190,54 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+## [0.91.3](https://github.com/databricks/appkit/compare/v0.91.2...v0.91.3) (2026-11-10)
+
+### deps
+
+* **deps:** bump echarts, yaml and express pins with moderate advisories ([#724](https://github.com/databricks/appkit/issues/724)) ([2e51bc1](https://github.com/databricks/appkit/commit/2e51bc1d2bb6d743e98979af388e0ba7c4395ba5))
+
+
+## [0.91.2](https://github.com/databricks/appkit/compare/v0.91.1...v0.91.2) (2026-11-09)
+
+### deps
+
+* **deps:** bump pinned dependencies with high/critical advisories ([#720](https://github.com/databricks/appkit/issues/720)) ([0311d71](https://github.com/databricks/appkit/commit/0311d71dd765df423539f6bc6b4962c9aac6ed07))
+
+
+## [0.91.1](https://github.com/databricks/appkit/compare/v0.91.0...v0.91.1) (2026-11-09)
+
+### appkit
+
+* **appkit:** skip JSON body parsing for parameterized skipBodyParsing routes ([#712](https://github.com/databricks/appkit/issues/712)) ([d0fbefb](https://github.com/databricks/appkit/commit/d0fbefb2cff8e9a539febbeb2c9093b540096c2b))
+
+
+## [0.91.0](https://github.com/databricks/appkit/compare/v0.90.0...v0.91.0) (2026-11-09)
+
+### shared
+
+* **shared:** treat literal app.yaml env values as wired in doctor ([#710](https://github.com/databricks/appkit/issues/710)) ([0b0cf28](https://github.com/databricks/appkit/commit/0b0cf28285617bf052a5814b890c6d223c008233))
+
+### appkit
+
+* **appkit:** authenticate agent eval to deployed apps with the profile token ([#711](https://github.com/databricks/appkit/issues/711)) ([5a5a8ca](https://github.com/databricks/appkit/commit/5a5a8caa8bfffafc43425884a2c9e15762f379b3))
+* **appkit:** export MLflow traces when the request span has a remote parent ([#717](https://github.com/databricks/appkit/issues/717)) ([c6b5de2](https://github.com/databricks/appkit/commit/c6b5de210ef496e9c2c4350e94162deca405cc4e))
+* **appkit:** resolve the Lakebase user without PGUSER and log cache fallbacks ([#716](https://github.com/databricks/appkit/issues/716)) ([dd9ae95](https://github.com/databricks/appkit/commit/dd9ae95d5b00df7fd03898ad44549e6bb2df61aa))
+* **appkit:** surface invalid or expired user tokens as IDENTITY_EXPIRED ([#714](https://github.com/databricks/appkit/issues/714)) ([e2519bc](https://github.com/databricks/appkit/commit/e2519bcc19f4e64e557953c9c6aaf5efd9968bf0))
+* **appkit:** report type errors from the dev server ([#715](https://github.com/databricks/appkit/issues/715)) ([46ff6d2](https://github.com/databricks/appkit/commit/46ff6d2cddc4e29483d6cff17c220c64464f6870))
+
+### docs
+
+* **docs:** restore chart component pages in the appkit-ui reference ([#713](https://github.com/databricks/appkit/issues/713)) ([58630e4](https://github.com/databricks/appkit/commit/58630e4beacb0bceba2c072ab34cf46860956023))
+
+
 ## [0.90.0](https://github.com/databricks/appkit/compare/v0.89.0...v0.90.0) (2026-11-03)
 
 ### appkit

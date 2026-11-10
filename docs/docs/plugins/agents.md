@@ -343,7 +343,7 @@ In markdown, set `auth: on-behalf-of-user` in the frontmatter. A per-agent value
 An on-behalf-of-user agent fails closed:
 
 - No forwarded user token: `401` before any model or tool call, in production and in development. There is no service-principal fallback.
-- A `401` from the model mid-run becomes an `IDENTITY_EXPIRED` error event and the stream ends. The run is not retried as the service principal.
+- A `401` (or an invalid-token `403`) from the model mid-run becomes an `IDENTITY_EXPIRED` error event and the stream ends. The run is not retried as the service principal.
 - A sub-agent never widens: under an on-behalf-of-user parent, a mixed sub-agent also runs as the user.
 
 **Exceptions.** MLflow tracing, the thread store, and catalog skills (see [Catalog skills](#catalog-skills-unity-catalog-volume)) are app-owned and stay service principal in every mode. Thread rows are keyed by the user id.
@@ -888,7 +888,7 @@ appkit agent eval dataset --root apps/dev-playground --url http://localhost:3000
 | `--root <dir>` | Project root containing `server/agents/` (default: cwd) |
 | `--header <header...>` | Extra request header as `'Key: value'` (repeatable) |
 | `--tag <tag...>` | Only run evals tagged with one of these tags (repeatable) |
-| `--profile <name>` | Databricks CLI profile to authenticate with via OAuth (default: `DATABRICKS_CONFIG_PROFILE`) |
+| `--profile <name>` | Databricks CLI profile to authenticate with via OAuth; the token is also sent to a deployed `*.databricksapps.com` `--url` (default: `DATABRICKS_CONFIG_PROFILE`) |
 | `--databricks-host <host>` | Databricks host for writing MLflow assessments (default: `DATABRICKS_HOST`) |
 | `--databricks-token <token>` | Databricks token for writing MLflow assessments (default: `DATABRICKS_TOKEN`) |
 | `--experiment <id>` | MLflow experiment id for the evaluation run (default: `MLFLOW_EXPERIMENT_ID`) |
@@ -903,7 +903,7 @@ appkit agent eval dataset --root apps/dev-playground --url http://localhost:3000
 
 Notes:
 
-- **Auth is OAuth-first.** `--profile <name>` mints an OAuth token from your Databricks CLI profile — no PAT needed. An explicit `--databricks-host`/`--databricks-token` (or the `DATABRICKS_*` env vars) wins over the profile.
+- **Auth is OAuth-first.** `--profile <name>` mints an OAuth token from your Databricks CLI profile — no PAT needed. An explicit `--databricks-host`/`--databricks-token` (or the `DATABRICKS_*` env vars) wins over the profile. When `--url` is a deployed app (`https://*.databricksapps.com`), that token is sent as its `Authorization` bearer unless you pass your own with `--header`. Databricks Apps accept only OAuth tokens, so a PAT (`--databricks-token`, `DATABRICKS_TOKEN`) is rejected there with a 401.
 - **`--retries` only absorbs infra flakiness.** A retry fires only when an eval throws or times out (`result.error` set); a wrong reply is real signal and is never retried. Each attempt gets a fresh driver.
 - **Gating.** By default the run exits non-zero if any eval fails. `--min-pass-rate 0.9` switches to threshold mode: it exits non-zero only when the aggregate pass rate drops below the threshold. `--strict` additionally treats soft-assertion misses as failures.
 - **CI reports.** `--reporter junit --output results.xml` writes a JUnit file for CI test reporters; `--reporter json` emits machine-readable results. In machine reporters, human-facing lines go to stderr so stdout stays clean for the report.

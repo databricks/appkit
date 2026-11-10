@@ -43,6 +43,9 @@ export interface BundleInfo {
   bindings: Map<string, BundleBinding>;
   /** `app.yaml` env var name → binding name (from `valueFrom`). */
   envToBinding: Map<string, string>;
+  /** `app.yaml` env var names the platform sets on deploy: via `valueFrom` or a
+   * literal `value`. */
+  wiredEnvVars: Set<string>;
   /** Declared bundle resource keys, as `"<type>.<key>"`, for ref-integrity. */
   declaredResources: Set<string>;
   /** True when a `databricks.yml` was found and parsed. */
@@ -63,7 +66,7 @@ interface BundleDoc {
   };
 }
 interface AppYamlDoc {
-  env?: Array<{ name?: string; valueFrom?: string }>;
+  env?: Array<{ name?: string; valueFrom?: string; value?: unknown }>;
 }
 
 /** Classifies a binding by its typed sub-key and origin: scanning its field
@@ -126,11 +129,18 @@ export function readBundleInfo(
 ): BundleInfo {
   const bindings = new Map<string, BundleBinding>();
   const envToBinding = new Map<string, string>();
+  const wiredEnvVars = new Set<string>();
   const declaredResources = new Set<string>();
 
   const doc = readYaml<BundleDoc>(path.resolve(cwd, bundleFile));
   if (!doc) {
-    return { bindings, envToBinding, declaredResources, present: false };
+    return {
+      bindings,
+      envToBinding,
+      wiredEnvVars,
+      declaredResources,
+      present: false,
+    };
   }
 
   for (const [type, group] of Object.entries(doc.resources ?? {})) {
@@ -154,12 +164,23 @@ export function readBundleInfo(
 
   const appYaml = readYaml<AppYamlDoc>(path.resolve(cwd, appYamlFile));
   for (const entry of appYaml?.env ?? []) {
-    if (entry?.name && entry.valueFrom) {
+    if (!entry?.name) continue;
+    if (entry.valueFrom) {
       envToBinding.set(entry.name, entry.valueFrom);
+      wiredEnvVars.add(entry.name);
+    } else if (entry.value != null) {
+      // A literal `value: ""` still sets the var; a bare `value:` (null) doesn't.
+      wiredEnvVars.add(entry.name);
     }
   }
 
-  return { bindings, envToBinding, declaredResources, present: true };
+  return {
+    bindings,
+    envToBinding,
+    wiredEnvVars,
+    declaredResources,
+    present: true,
+  };
 }
 
 /**

@@ -26,7 +26,7 @@ Horizontal menu bar with dropdown menus
 | `defaultValue` | `string` |  | - | - |
 | `onValueChange` | `((value: string) => void)` |  | - | - |
 | `loop` | `boolean` |  | - | - |
-| `dir` | `enum` |  | - | - |
+| `dir` | `"ltr" \| "rtl"` |  | - | - |
 | `asChild` | `boolean` |  | - | - |
 
 
@@ -86,17 +86,17 @@ import { MenubarCheckboxItem } from '@databricks/appkit-ui';
 | `onInteractOutside` | `((event: FocusOutsideEvent \| PointerDownOutsideEvent) => void)` |  | - | - |
 | `onCloseAutoFocus` | `((event: Event) => void)` |  | - | Event handler called when auto-focusing on close. Can be prevented. |
 | `loop` | `boolean` |  | - | Whether keyboard navigation should loop around @defaultValue false |
-| `side` | `enum` |  | - | - |
+| `side` | `"top" \| "right" \| "bottom" \| "left"` |  | - | - |
 | `sideOffset` | `number` |  | - | - |
-| `align` | `enum` |  | - | - |
+| `align` | `"center" \| "start" \| "end"` |  | - | - |
 | `alignOffset` | `number` |  | - | - |
 | `arrowPadding` | `number` |  | - | - |
 | `avoidCollisions` | `boolean` |  | - | - |
 | `collisionBoundary` | `Boundary \| Boundary[]` |  | - | - |
 | `collisionPadding` | `number \| Partial<Record<"top" \| "right" \| "bottom" \| "left", number>>` |  | - | - |
-| `sticky` | `enum` |  | - | - |
+| `sticky` | `"partial" \| "always"` |  | - | - |
 | `hideWhenDetached` | `boolean` |  | - | - |
-| `updatePositionStrategy` | `enum` |  | - | - |
+| `updatePositionStrategy` | `"always" \| "optimized"` |  | - | - |
 
 
 
@@ -147,7 +147,7 @@ import { MenubarGroup } from '@databricks/appkit-ui';
 | `disabled` | `boolean` |  | - | - |
 | `textValue` | `string` |  | - | - |
 | `inset` | `boolean` |  | - | - |
-| `variant` | `enum` |  | `default` | - |
+| `variant` | `"default" \| "destructive"` |  | `default` | - |
 
 
 
@@ -376,9 +376,9 @@ import { MenubarSub } from '@databricks/appkit-ui';
 | `avoidCollisions` | `boolean` |  | - | - |
 | `collisionBoundary` | `Boundary \| Boundary[]` |  | - | - |
 | `collisionPadding` | `number \| Partial<Record<"top" \| "right" \| "bottom" \| "left", number>>` |  | - | - |
-| `sticky` | `enum` |  | - | - |
+| `sticky` | `"partial" \| "always"` |  | - | - |
 | `hideWhenDetached` | `boolean` |  | - | - |
-| `updatePositionStrategy` | `enum` |  | - | - |
+| `updatePositionStrategy` | `"always" \| "optimized"` |  | - | - |
 
 
 
