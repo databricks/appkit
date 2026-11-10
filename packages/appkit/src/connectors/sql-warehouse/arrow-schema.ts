@@ -78,15 +78,10 @@ export function buildEmptyArrowIPCBase64(columns: ColumnInfo[]): string {
 }
 
 /**
- * Rebuild the Arrow IPC stream a warehouse serves for `ARROW_STREAM` from the
- * positional string rows of an `INLINE` + `JSON_ARRAY` result. Fields carry the
- * manifest column names, duplicates included, like the native Cloud Fetch
- * stream, and each type is what {@link parseDatabricksType} gives that column,
- * with DECIMAL precision and scale taken from `typePrecision` and `typeScale`.
- *
- * Nested, interval, and geospatial columns arrive as strings on the JSON wire
- * and stay strings, and so does any type without a {@link parseJsonArrayCell}
- * codec. A cell that does not parse as its column type throws.
+ * Rebuild the `ARROW_STREAM` IPC bytes from the positional rows of an `INLINE`
+ * + `JSON_ARRAY` result, keeping the manifest column names (duplicates
+ * included). Columns without a {@link parseJsonArrayCell} codec stay Utf8, and
+ * a cell that does not parse as its column type throws.
  */
 export function buildArrowIPCFromRows(
   columns: ColumnInfo[],
@@ -116,19 +111,13 @@ export function buildArrowIPCFromRows(
 
 function vectorFromCells(col: ColumnInfo, cells: Array<string | null>) {
   const type = rebuildType(col);
-  if (type.typeId === Type.Null) {
-    return vectorFromArray(
-      cells.map(() => null),
-      type as never,
-    );
-  }
   const values = cells.map((cell) =>
     cell === null ? null : parseJsonArrayCell(cell, type),
   );
   if (type.typeId === Type.Decimal) {
     return decimalVector(values as Array<bigint | null>, type as Decimal);
   }
-  return vectorFromArray(values, type as never);
+  return vectorFromArray(values, type);
 }
 
 const STRING_ONLY_TYPES = new Set<Type>([

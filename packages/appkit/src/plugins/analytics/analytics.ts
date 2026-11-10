@@ -976,10 +976,6 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     }
   }
 
-  /**
-   * The remembered arrow capability for a warehouse. A lapsed `"links-denied"`
-   * reverts to `"external"`, so the next query tries Cloud Fetch again.
-   */
   private _arrowCapabilityHint(
     warehouseId: string,
   ): ArrowCapability | undefined {
@@ -1246,7 +1242,7 @@ export function writeChunk(
  */
 const DEFAULT_ARROW_FIRST_BYTE_TIMEOUT_MS = 120_000;
 
-/** How long a definite Cloud Fetch refusal is remembered before storage is tried again. */
+/** How long `"links-denied"` is remembered before Cloud Fetch is tried again. */
 const LINKS_DENIED_TTL_MS = 10 * 60_000;
 
 /**

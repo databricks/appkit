@@ -112,10 +112,9 @@ export class ArrowStreamProcessor {
    * so a mid-body failure propagates and the caller aborts the response. An
    * idle timeout, reset before every read, aborts a stalled download.
    *
-   * A 403 re-mints the link once and retries at once, since a pre-signed URL
-   * may have expired. Any other 4xx except 408 and 429 stops, and so does a
-   * wait for headers that outlasts the limit: a blocked host can hang for
-   * minutes instead of refusing, and a retry would only repeat the wait.
+   * A 403 re-mints the link once, since a pre-signed URL may have expired. Other
+   * 4xx (except 408/429) and header timeouts stop: a blocked host hangs instead
+   * of refusing, so a retry only repeats the wait.
    */
   private async *streamChunkBody(
     chunk: ExternalLink,
@@ -247,10 +246,7 @@ export class ArrowStreamProcessor {
     }
   }
 
-  /**
-   * One GET. Only the wait for response headers is timed here; the timer is
-   * cleared the moment they arrive, so a healthy chunk may stream for longer.
-   */
+  /** One GET; only the wait for response headers is timed. */
   private async connect(
     link: ExternalLink,
     headerWaitMs: number,

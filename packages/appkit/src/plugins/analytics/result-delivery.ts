@@ -76,9 +76,8 @@ export interface ArrowChunkStreamer {
 }
 
 /**
- * The arrow delivery mode a warehouse actually supports. `"links-denied"` means
- * storage refused or never answered the Cloud Fetch download, so results are served
- * from an inline `JSON_ARRAY` run until the caller lets the hint lapse.
+ * The arrow delivery mode a warehouse actually supports. `"links-denied"`:
+ * storage refused or never answered Cloud Fetch, so inline `JSON_ARRAY` goes first.
  */
 export type ArrowCapability = "inline" | "external" | "links-denied";
 
@@ -315,11 +314,7 @@ class InlineDoesNotFit extends Error {}
 
 type InlineAttempt = { bytes: Uint8Array } | { error: unknown };
 
-/**
- * Run the query as `INLINE` + `JSON_ARRAY` and rebuild the Arrow IPC stream a
- * Cloud Fetch download would have carried. The route sees the same bytes and
- * header names either way.
- */
+/** Run the query as `INLINE` + `JSON_ARRAY` and rebuild the Arrow bytes Cloud Fetch would have served. */
 async function inlineJsonAsArrow(
   executor: QueryExecutor,
   query: string,
@@ -387,21 +382,16 @@ function linksDenied(cause: ExecutionError): ExecutionError {
 }
 
 /**
- * {@link deliverArrowBytes} with a way out when the Cloud Fetch download fails
- * before its first byte (storage refuses, resets, or never answers).
+ * {@link deliverArrowBytes}, falling back to an inline `JSON_ARRAY` run when the
+ * Cloud Fetch download fails before its first byte (pulled here, before the
+ * route sends headers).
  *
- * The first chunk is pulled here, before the route sends headers, so a failed
- * download can still be replaced by `inlineJsonAsArrow`. A 400 or 403 that
- * survived the link re-mint reports `"links-denied"` at once. No response at all
- * reports it once the inline result has been served, or once the patient pass
- * also fails, because blocked hosts hang instead of refusing. A network error
- * or body failure falls back once and is forgotten. A result too large for
- * inline is never stranded: after an inconclusive failure Cloud Fetch gets one
- * more, patient pass, and after a definite refusal the error says why. Any
- * other inline failure is rethrown unchanged.
- *
- * With the `"links-denied"` hint the inline run goes first, and Cloud Fetch is
- * tried only if that cannot deliver.
+ * A 400/403 that survives the re-mint reports `"links-denied"` at once; a
+ * download that never answers reports it after the fallback, since blocked
+ * hosts hang instead of refusing. Other download errors fall back without being
+ * remembered. A result too large for inline gets one patient Cloud Fetch retry,
+ * or `EXTERNAL_LINKS_DENIED` after a refusal. With the `"links-denied"` hint,
+ * inline runs first.
  */
 export async function* deliverArrowBytesWithFallback(
   executor: QueryExecutor,

@@ -1,11 +1,9 @@
 import { type DataType, Type } from "apache-arrow";
 
 /**
- * How one scalar type is written in an `INLINE` + `JSON_ARRAY` result.
- * `format` turns an Arrow value into the warehouse's text, and `parse` turns
- * that text back into the value `vectorFromArray` accepts (an unscaled `bigint`
- * for DECIMAL, epoch milliseconds for DATE and TIMESTAMP). The text forms are
- * pinned to a captured warehouse response in `tests/fixtures/typed-values.json`.
+ * How one scalar type is written in an `INLINE` + `JSON_ARRAY` cell. `parse`
+ * returns what `vectorFromArray` accepts: an unscaled `bigint` for DECIMAL,
+ * epoch milliseconds for DATE and TIMESTAMP.
  */
 interface CellCodec {
   format(value: unknown, type: DataType): string;
