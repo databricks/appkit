@@ -1212,7 +1212,10 @@
                                   {
                                     "type": "string"
                                   }
-                                ]
+                                ],
+                                "additionalItems": false,
+                                "minItems": 2,
+                                "maxItems": 2
                               },
                               "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
                             },
@@ -1228,7 +1231,10 @@
                                   {
                                     "type": "string"
                                   }
-                                ]
+                                ],
+                                "additionalItems": false,
+                                "minItems": 2,
+                                "maxItems": 2
                               }
                             }
                           },
@@ -4440,7 +4446,10 @@
                                   {
                                     "type": "string"
                                   }
-                                ]
+                                ],
+                                "additionalItems": false,
+                                "minItems": 2,
+                                "maxItems": 2
                               },
                               "description": "[manifestField, dabsField] pairs. Each becomes ${var.<resourceKey>_<manifestField>} written to dabsField."
                             },
@@ -4456,7 +4465,10 @@
                                   {
                                     "type": "string"
                                   }
-                                ]
+                                ],
+                                "additionalItems": false,
+                                "minItems": 2,
+                                "maxItems": 2
                               }
                             }
                           },
