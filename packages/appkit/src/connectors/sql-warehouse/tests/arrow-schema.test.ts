@@ -679,6 +679,11 @@ describe("buildArrowIPCFromRows", () => {
     expect(table.getChildAt(2)?.get(0)).toBe(payload);
   });
 
+  test("an unnamed column gets the column_N name the header carries", () => {
+    const ipc = buildArrowIPCFromRows([{ name: "", typeText: "INT" }], [["1"]]);
+    expect(tableFromIPC(ipc).schema.fields[0].name).toBe("column_0");
+  });
+
   test("nested, interval and geospatial columns stay strings", () => {
     const columns = [
       { name: "a", typeText: "ARRAY<INT>" },
@@ -796,7 +801,9 @@ describe("buildArrowIPCFromRows against a captured warehouse response", () => {
     const index = fixture.columns.findIndex((c) => c.name === "ts_micro");
     expect(fixture.dataArray[0][index]).toMatch(/\.\d{3}-\d{2}:\d{2}$/);
     expect(values(rebuilt, index)).toEqual(
-      values(native, index).map((ms) => Math.trunc(ms as number)),
+      values(native, index).map((ms) =>
+        ms === null ? null : Math.trunc(ms as number),
+      ),
     );
   });
 

@@ -60,28 +60,43 @@ export function parseDatabricksType(typeText: string): DataType {
  * contract.
  */
 export function buildEmptyArrowIPCBase64(columns: ColumnInfo[]): string {
-  const fields = columns.map((col, index) => {
-    const typeText = col.typeText ?? col.typeName ?? "STRING";
-    let dataType: DataType;
-    try {
-      dataType = parseDatabricksType(typeText);
-    } catch {
-      dataType = new Utf8();
-    }
-    const name = col.name && col.name.length > 0 ? col.name : `column_${index}`;
-    return new Field(name, dataType, true);
-  });
+  const fields = columns.map(
+    (col, index) =>
+      new Field(manifestColumnName(col, index), columnArrowType(col), true),
+  );
   const schema = new Schema(fields);
   const table = new Table(schema);
   const ipc = tableToIPC(table, "stream");
   return Buffer.from(ipc).toString("base64");
 }
 
+/** A manifest column's name, or `column_N` when it has none. */
+export function manifestColumnName(
+  col: ColumnInfo | undefined,
+  index: number,
+): string {
+  return col?.name || `column_${index}`;
+}
+
+function columnTypeText(col: ColumnInfo): string {
+  return col.typeText ?? col.typeName ?? "STRING";
+}
+
+/** The Arrow type for a manifest column; unparseable type text becomes Utf8. */
+function columnArrowType(col: ColumnInfo): DataType {
+  try {
+    return parseDatabricksType(columnTypeText(col));
+  } catch {
+    return new Utf8();
+  }
+}
+
 /**
  * Rebuild the `ARROW_STREAM` IPC bytes from the positional rows of an `INLINE`
  * + `JSON_ARRAY` result, keeping the manifest column names (duplicates
  * included). Columns without a {@link parseJsonArrayCell} codec stay Utf8, and
- * a cell that does not parse as its column type throws.
+ * a cell that does not parse as its column type throws. Zoned TIMESTAMP columns
+ * are labelled UTC, since cells carry an offset rather than the session zone.
  */
 export function buildArrowIPCFromRows(
   columns: ColumnInfo[],
@@ -95,7 +110,7 @@ export function buildArrowIPCFromRows(
   );
   const fields = vectors.map(
     (vector, index) =>
-      new Field(columns[index].name || `col_${index}`, vector.type, true),
+      new Field(manifestColumnName(columns[index], index), vector.type, true),
   );
   const batch = new RecordBatch(
     new Schema(fields),
@@ -129,16 +144,13 @@ const STRING_ONLY_TYPES = new Set<Type>([
 ]);
 
 function rebuildType(col: ColumnInfo): DataType {
-  const typeText = col.typeText ?? col.typeName ?? "STRING";
-  let type: DataType;
-  try {
-    type = parseDatabricksType(typeText);
-  } catch {
-    return new Utf8();
-  }
+  const type = columnArrowType(col);
   if (STRING_ONLY_TYPES.has(type.typeId)) return new Utf8();
   // GEOGRAPHY and GEOMETRY map to Binary but arrive as text on the JSON wire.
-  if (type.typeId === Type.Binary && typeText.toUpperCase() !== "BINARY") {
+  if (
+    type.typeId === Type.Binary &&
+    columnTypeText(col).toUpperCase() !== "BINARY"
+  ) {
     return new Utf8();
   }
   if (type.typeId === Type.Decimal && col.typePrecision != null) {

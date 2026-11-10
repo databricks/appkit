@@ -7,7 +7,8 @@ import { formatJsonArrayCell } from "../../connectors/sql-warehouse/json-array-c
 import { ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
 import {
-  EXTERNAL_LINK_DOWNLOAD_FAILED,
+  type DownloadFailureKind,
+  downloadFailureKind,
   type RefreshChunkLink,
 } from "../../stream/arrow-stream-processor";
 import type { ColumnInfo, ExternalLink } from "../../workspace-client";
@@ -71,7 +72,7 @@ export interface ArrowChunkStreamer {
     chunks: ExternalLink[],
     signal?: AbortSignal,
     refresh?: RefreshChunkLink,
-    patient?: boolean,
+    fullHeaderWait?: boolean,
   ): AsyncGenerator<Uint8Array, void, unknown>;
 }
 
@@ -88,7 +89,7 @@ export interface ArrowDeliveryOut {
   /** Set once EXTERNAL_LINKS resolves. */
   cloudFetch?: {
     totalByteCount?: number;
-    stream(patient: boolean): AsyncGenerator<Uint8Array, void, unknown>;
+    stream(fullHeaderWait: boolean): AsyncGenerator<Uint8Array, void, unknown>;
   };
 }
 
@@ -303,8 +304,13 @@ export async function* deliverArrowBytes(
   // mismatched identity. `refreshChunkLink` (also bound to this context) lets
   // the streamer re-mint a link that expires mid-download.
   const links = ext.external_links;
-  const stream = (patient: boolean) =>
-    streamer.streamExternalLinks(links, signal, ext.refreshChunkLink, patient);
+  const stream = (fullHeaderWait: boolean) =>
+    streamer.streamExternalLinks(
+      links,
+      signal,
+      ext.refreshChunkLink,
+      fullHeaderWait,
+    );
   out.cloudFetch = { totalByteCount: ext.totalByteCount, stream };
   yield* stream(false);
 }
@@ -355,43 +361,55 @@ async function inlineJsonAsArrow(
   }
 }
 
-function isDownloadFailure(err: unknown): err is ExecutionError {
-  return (
-    err instanceof ExecutionError &&
-    err.errorCode === EXTERNAL_LINK_DOWNLOAD_FAILED
-  );
-}
-
-/** Storage answered 400 or 403 even after the link re-mint. */
-function isRefusal(err: ExecutionError): boolean {
-  const status = err.context?.httpStatus;
-  return status === 400 || status === 403;
-}
-
-/** Download refused (or unanswered) and the result cannot be sent inline. */
-function linksDenied(cause: ExecutionError): ExecutionError {
+/** Download refused or unanswered, and the result cannot be sent inline. */
+function linksDenied(cause: unknown): ExecutionError {
   return new ExecutionError(
-    `Cloud Fetch download failed and the result is too large to send inline: ${cause.message}`,
+    `Cloud Fetch download failed and the result is too large to send inline: ${errMessage(cause)}`,
     {
       errorCode: "EXTERNAL_LINKS_DENIED",
-      cause,
+      cause: cause instanceof Error ? cause : undefined,
       clientMessage:
-        "The query result could not be downloaded from workspace storage and is too large to send inline. Check the storage account's firewall and the app's network policy.",
+        "The query result could not be downloaded from workspace storage and is too large to send inline. Check the workspace storage firewall and the app's network policy.",
     },
   );
 }
 
+type Download =
+  | { stream: AsyncGenerator<Uint8Array, void, unknown> }
+  | { error: unknown; kind: DownloadFailureKind };
+
+/** Pull the first chunk, so a failed download surfaces before the route sends headers. */
+async function startDownload(
+  bytes: AsyncGenerator<Uint8Array, void, unknown>,
+  signal?: AbortSignal,
+): Promise<Download> {
+  let first: IteratorResult<Uint8Array, void>;
+  try {
+    first = await bytes.next();
+  } catch (error: unknown) {
+    const kind = signal?.aborted ? undefined : downloadFailureKind(error);
+    if (!kind) throw error;
+    return { error, kind };
+  }
+  return {
+    stream: (async function* () {
+      if (!first.done) yield first.value;
+      yield* bytes;
+    })(),
+  };
+}
+
 /**
  * {@link deliverArrowBytes}, falling back to an inline `JSON_ARRAY` run when the
- * Cloud Fetch download fails before its first byte (pulled here, before the
- * route sends headers).
+ * Cloud Fetch download fails before its first byte.
  *
- * A 400/403 that survives the re-mint reports `"links-denied"` at once; a
+ * A refusal (400/403 after the re-mint) reports `"links-denied"` at once; a
  * download that never answers reports it after the fallback, since blocked
  * hosts hang instead of refusing. Other download errors fall back without being
- * remembered. A result too large for inline gets one patient Cloud Fetch retry,
- * or `EXTERNAL_LINKS_DENIED` after a refusal. With the `"links-denied"` hint,
- * inline runs first.
+ * remembered. A result too large for inline gets one Cloud Fetch retry with the
+ * full header wait, and `EXTERNAL_LINKS_DENIED` only when storage refused or
+ * never answered. With the `"links-denied"` hint, inline runs first and only a
+ * result too large for it goes back to Cloud Fetch.
  */
 export async function* deliverArrowBytesWithFallback(
   executor: QueryExecutor,
@@ -402,88 +420,73 @@ export async function* deliverArrowBytesWithFallback(
   signal?: AbortSignal,
   opts?: ArrowDeliveryOptions,
 ): AsyncGenerator<Uint8Array, void, unknown> {
+  const inline = () =>
+    inlineJsonAsArrow(executor, query, processedParams, out, signal);
+  const remember = (capability: ArrowCapability) =>
+    opts?.onCapabilityResolved?.(capability);
   const hinted = opts?.capabilityHint === "links-denied";
   let tooLarge = false;
-  let inlineError: unknown;
   if (hinted) {
-    const inline = await inlineJsonAsArrow(
+    const attempt = await inline();
+    if ("bytes" in attempt) {
+      yield attempt.bytes;
+      return;
+    }
+    if (!(attempt.error instanceof InlineDoesNotFit)) throw attempt.error;
+    tooLarge = true;
+  }
+
+  const download = await startDownload(
+    deliverArrowBytes(
       executor,
+      streamer,
       query,
       processedParams,
       out,
       signal,
-    );
-    if ("bytes" in inline) {
-      yield inline.bytes;
-      return;
-    }
-    if (inline.error instanceof InlineDoesNotFit) tooLarge = true;
-    else inlineError = inline.error;
-  }
-
-  const bytes = deliverArrowBytes(
-    executor,
-    streamer,
-    query,
-    processedParams,
-    out,
+      hinted ? { capabilityHint: "external" } : opts,
+    ),
     signal,
-    hinted ? { capabilityHint: "external" } : opts,
   );
-  let first: IteratorResult<Uint8Array, void>;
-  let downloadError: ExecutionError | undefined;
-  try {
-    first = await bytes.next();
-  } catch (err: unknown) {
-    if (signal?.aborted || !isDownloadFailure(err)) throw err;
-    downloadError = err;
-    first = { done: true, value: undefined };
-  }
-  if (!downloadError) {
-    if (hinted) opts?.onCapabilityResolved?.("external");
-    if (!first.done) yield first.value;
-    yield* bytes;
+  if ("stream" in download) {
+    if (hinted) remember("external");
+    yield* download.stream;
     return;
   }
 
-  const refused = isRefusal(downloadError);
-  const unanswered = downloadError.context?.timedOut === true;
-  if (refused) opts?.onCapabilityResolved?.("links-denied");
+  const { kind } = download;
+  if (kind === "refused") remember("links-denied");
   const size = out.cloudFetch?.totalByteCount;
   tooLarge ||= size !== undefined && size > MAX_INLINE_ATTACHMENT_BYTES;
-  if (!tooLarge && inlineError === undefined) {
-    const inline = await inlineJsonAsArrow(
-      executor,
-      query,
-      processedParams,
-      out,
-      signal,
+  if (!tooLarge) {
+    logger.warn(
+      "Cloud Fetch download failed (%s), serving the result inline: %s",
+      kind,
+      errMessage(download.error),
     );
-    if ("bytes" in inline) {
-      if (unanswered) opts?.onCapabilityResolved?.("links-denied");
-      yield inline.bytes;
+    const attempt = await inline();
+    if ("bytes" in attempt) {
+      if (kind === "unanswered") remember("links-denied");
+      yield attempt.bytes;
       return;
     }
-    if (!(inline.error instanceof InlineDoesNotFit)) throw inline.error;
-    tooLarge = true;
+    if (!(attempt.error instanceof InlineDoesNotFit)) throw attempt.error;
   }
-  if (!tooLarge) throw inlineError;
-  if (refused || !out.cloudFetch) throw linksDenied(downloadError);
+  if (kind === "refused" || !out.cloudFetch) throw linksDenied(download.error);
 
-  const patient = out.cloudFetch.stream(true);
-  let retried: IteratorResult<Uint8Array, void>;
-  try {
-    retried = await patient.next();
-  } catch (err: unknown) {
-    if (signal?.aborted || !isDownloadFailure(err)) throw err;
-    if (isRefusal(err) || err.context?.timedOut === true) {
-      opts?.onCapabilityResolved?.("links-denied");
-    }
-    throw linksDenied(err);
+  logger.warn(
+    "Cloud Fetch download failed (%s) on a result too large for inline, retrying with the full header wait",
+    kind,
+  );
+  const retry = await startDownload(out.cloudFetch.stream(true), signal);
+  if ("stream" in retry) {
+    if (hinted) remember("external");
+    yield* retry.stream;
+    return;
   }
-  if (hinted) opts?.onCapabilityResolved?.("external");
-  if (!retried.done) yield retried.value;
-  yield* patient;
+  const denied = retry.kind !== "other";
+  if (denied || kind === "unanswered") remember("links-denied");
+  throw denied ? linksDenied(retry.error) : retry.error;
 }
 
 /** JSON row result plus the metadata the SSE `result` message forwards. */
@@ -611,6 +614,13 @@ function renderNestedValue(value: unknown, type: DataType): unknown {
   }
 }
 
+const NESTED_TYPES = new Set<Type>([
+  Type.List,
+  Type.FixedSizeList,
+  Type.Struct,
+  Type.Map,
+]);
+
 /** Parse a STRING cell that looks like JSON into an object/array. */
 function maybeParseJsonString(value: string): unknown {
   if (value && (value[0] === "{" || value[0] === "[")) {
@@ -668,35 +678,12 @@ export function decodeArrowAttachmentToRows(
       const v = col?.get(i);
       if (v == null) {
         row[name] = null;
-        continue;
-      }
-      switch (type.typeId) {
-        case Type.Decimal:
-        case Type.Timestamp:
-        case Type.Date:
-          row[name] = formatJsonArrayCell(v, type);
-          continue;
-        // Nested columns (STRUCT / ARRAY / MAP) arrive on the native
-        // JSON_ARRAY wire as a JSON string with every scalar leaf stringified
-        // by type; render the same shape and stringify so callers cannot tell
-        // the fallback path from the native one.
-        case Type.List:
-        case Type.FixedSizeList:
-        case Type.Struct:
-        case Type.Map:
-          row[name] = JSON.stringify(renderNestedValue(v, type));
-          continue;
-      }
-      if (
-        typeof v === "number" ||
-        typeof v === "bigint" ||
-        typeof v === "boolean"
-      ) {
-        row[name] = String(v);
+      } else if (NESTED_TYPES.has(type.typeId)) {
+        // The native JSON_ARRAY wire sends nested columns as JSON text with
+        // every scalar leaf stringified by type.
+        row[name] = JSON.stringify(renderNestedValue(v, type));
       } else if (typeof v === "string") {
         row[name] = maybeParseJsonString(v);
-      } else if (v instanceof Uint8Array) {
-        row[name] = Buffer.from(v).toString("base64");
       } else {
         row[name] = formatJsonArrayCell(v, type);
       }

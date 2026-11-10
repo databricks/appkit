@@ -497,8 +497,8 @@ describe("deliverArrowBytesWithFallback", () => {
       responseTimeoutMs: 100,
     });
     const streamer: ArrowChunkStreamer = {
-      streamExternalLinks: (links, signal, refresh, patient) =>
-        processor.streamChunks(links, signal, refresh, patient),
+      streamExternalLinks: (links, signal, refresh, fullHeaderWait) =>
+        processor.streamChunks(links, signal, refresh, fullHeaderWait),
     };
     return { data, storage, executions, executor, streamer };
   }
@@ -640,7 +640,7 @@ describe("deliverArrowBytesWithFallback", () => {
     expect(error?.errorCode).toBe("EXTERNAL_LINKS_DENIED");
     expect(error?.clientMessage).toMatch(/workspace storage/);
     expect(error?.clientMessage).toMatch(/too large to send inline/);
-    expect(error?.clientMessage).not.toMatch(/azure/i);
+    expect(error?.clientMessage).not.toMatch(/azure|storage account/i);
     expect(ctx.executions).toEqual([
       "INLINE+ARROW_STREAM",
       "EXTERNAL_LINKS+ARROW_STREAM",
@@ -648,7 +648,7 @@ describe("deliverArrowBytesWithFallback", () => {
     expect(reported.at(-1)).toBe("links-denied");
   });
 
-  test("a slow first byte on a large result gets one patient pass instead of a denial", async () => {
+  test("a slow first byte on a large result gets one retry with the full header wait instead of a denial", async () => {
     const ctx = await setup({
       storage: { kind: "ok", delayMs: 300 },
       totalByteCount: LARGE,
@@ -662,7 +662,7 @@ describe("deliverArrowBytesWithFallback", () => {
     expect(reported).not.toContain("links-denied");
   });
 
-  test("a large result whose storage never answers fails saying why after the patient pass", async () => {
+  test("a large result whose storage never answers fails saying why after the full-header-wait retry", async () => {
     const ctx = await setup({
       storage: { kind: "hang" },
       totalByteCount: LARGE,
@@ -674,6 +674,26 @@ describe("deliverArrowBytesWithFallback", () => {
     expect(ctx.executions).not.toContain("INLINE+JSON_ARRAY");
     expect(reported.at(-1)).toBe("links-denied");
   });
+
+  test.each([
+    ["never answered", { kind: "hang" }, true],
+    ["reset after headers", { kind: "reset-after-headers" }, false],
+  ] as const)(
+    "a large result whose download %s and whose retry then fails otherwise keeps the download error",
+    async (_name, storage, remembered) => {
+      const ctx = await setup({ storage, totalByteCount: LARGE });
+      const streamExternalLinks = ctx.streamer.streamExternalLinks;
+      ctx.streamer.streamExternalLinks = (links, signal, refresh, fullWait) => {
+        if (fullWait) ctx.storage.setMode({ kind: "status", status: 404 });
+        return streamExternalLinks(links, signal, refresh, fullWait);
+      };
+      const { error, reported } = await run(ctx);
+
+      expect(error?.errorCode).toBe("EXTERNAL_LINK_DOWNLOAD_FAILED");
+      expect(ctx.storage.gets()).toBe(2);
+      expect(reported.includes("links-denied")).toBe(remembered);
+    },
+  );
 
   test("an inline result that spans several chunks is not served truncated", async () => {
     const ctx = await setup({
@@ -726,7 +746,7 @@ describe("deliverArrowBytesWithFallback", () => {
     expect(error?.errorCode).toBe("EXTERNAL_LINKS_DENIED");
   });
 
-  test("with the links-denied hint, an unrelated inline failure is what the user sees when storage still refuses", async () => {
+  test("with the links-denied hint, an unrelated inline failure surfaces without running the query again", async () => {
     const ctx = await setup({
       storage: { kind: "status", status: 403 },
       inline: () => {
@@ -739,6 +759,8 @@ describe("deliverArrowBytesWithFallback", () => {
     const { error } = await run(ctx, "links-denied");
 
     expect(error?.errorCode).toBe("TEMPORARILY_UNAVAILABLE");
+    expect(ctx.executions).toEqual(["INLINE+JSON_ARRAY"]);
+    expect(ctx.storage.gets()).toBe(0);
   });
 
   test("a result the rebuild cannot parse fails with a code and a message, not a generic error", async () => {

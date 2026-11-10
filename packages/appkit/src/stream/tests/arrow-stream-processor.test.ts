@@ -503,7 +503,7 @@ describe("ArrowStreamProcessor — storage that stalls", () => {
     expect(error.errorCode).toBe(EXTERNAL_LINK_DOWNLOAD_FAILED);
   });
 
-  test("patient mode waits for headers as long as the attempt timeout", async () => {
+  test("fullHeaderWait waits for headers as long as the attempt timeout", async () => {
     handler = (_req, res) => {
       setTimeout(() => res.end(Buffer.from([9])), 300);
     };

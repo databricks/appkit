@@ -181,6 +181,8 @@ describe("JSON_ARRAY cell codecs", () => {
     ["BIGINT with a leading zero", new Int64(), "01"],
     ["empty DOUBLE", new Float64(), ""],
     ["DOUBLE that is not a number", new Float64(), "abc"],
+    ["DOUBLE in hex", new Float64(), "0x1A"],
+    ["DOUBLE with padding", new Float64(), " 1 "],
     [
       "DECIMAL with more digits than its scale",
       new Decimal(2, 10, 128),
@@ -188,6 +190,13 @@ describe("JSON_ARRAY cell codecs", () => {
     ],
     ["DECIMAL with two points", new Decimal(2, 10, 128), "1.2.3"],
     ["DECIMAL with a plus sign", new Decimal(2, 10, 128), "+1.00"],
+    [
+      "DECIMAL with more digits than its precision",
+      new Decimal(2, 5, 128),
+      "123456789.00",
+    ],
+    ["BINARY that is not base64", new Binary(), "not base64!!"],
+    ["DATE that is not on the calendar", new DateDay(), "2026-02-31"],
     ["DATE without zero padding", new DateDay(), "2026-1-1"],
     ["DATE with a time", new DateDay(), "2026-01-01T00:00:00Z"],
     [
@@ -199,6 +208,11 @@ describe("JSON_ARRAY cell codecs", () => {
       "zoned TIMESTAMP that is not a date",
       new TimestampMicrosecond("UTC"),
       "2026-13-01T10:00:00Z",
+    ],
+    [
+      "TIMESTAMP_NTZ that is not on the calendar",
+      new TimestampMicrosecond(),
+      "2026-02-30T10:00:00.000",
     ],
     [
       "TIMESTAMP_NTZ with Z",

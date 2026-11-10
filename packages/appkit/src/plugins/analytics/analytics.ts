@@ -130,12 +130,13 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    * on every query, so once learned we skip that doomed probe; Reyden stays
    * `"inline"`. Capability is a property of the warehouse, not the user, so it
    * is not user-scoped. Bounded by the number of distinct warehouses a process
-   * talks to (effectively one).
+   * talks to (effectively one). `"links-denied"` reads as `"external"` once
+   * `until` passes.
    */
-  private _arrowCapability = new Map<string, ArrowCapability>();
-
-  /** When each warehouse's `"links-denied"` entry lapses back to `"external"`. */
-  private _linksDeniedUntil = new Map<string, number>();
+  private _arrowCapability = new Map<
+    string,
+    { capability: ArrowCapability; until?: number }
+  >();
 
   constructor(config: IAnalyticsConfig) {
     super(config);
@@ -890,15 +891,14 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
           // Skip the doomed INLINE probe on a warehouse already known to need
           // EXTERNAL_LINKS; remember the resolved mode for next time.
           capabilityHint: this._arrowCapabilityHint(warehouseId),
-          onCapabilityResolved: (capability) => {
-            this._arrowCapability.set(warehouseId, capability);
-            if (capability === "links-denied") {
-              this._linksDeniedUntil.set(
-                warehouseId,
-                Date.now() + LINKS_DENIED_TTL_MS,
-              );
-            }
-          },
+          onCapabilityResolved: (capability) =>
+            this._arrowCapability.set(warehouseId, {
+              capability,
+              until:
+                capability === "links-denied"
+                  ? Date.now() + LINKS_DENIED_TTL_MS
+                  : undefined,
+            }),
         },
       );
       const first = await bytes.next();
@@ -979,15 +979,11 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
   private _arrowCapabilityHint(
     warehouseId: string,
   ): ArrowCapability | undefined {
-    const capability = this._arrowCapability.get(warehouseId);
-    if (
-      capability === "links-denied" &&
-      Date.now() >= (this._linksDeniedUntil.get(warehouseId) ?? 0)
-    ) {
-      this._arrowCapability.set(warehouseId, "external");
+    const entry = this._arrowCapability.get(warehouseId);
+    if (entry?.until !== undefined && Date.now() >= entry.until) {
       return "external";
     }
-    return capability;
+    return entry?.capability;
   }
 
   /**

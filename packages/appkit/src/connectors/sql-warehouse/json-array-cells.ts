@@ -6,11 +6,15 @@ import { type DataType, Type } from "apache-arrow";
  * epoch milliseconds for DATE and TIMESTAMP.
  */
 interface CellCodec {
-  format(value: unknown, type: DataType): string;
+  /** Defaults to `String(value)`, or base64 for bytes. */
+  format?(value: unknown, type: DataType): string;
   parse(cell: string, type: DataType): unknown;
 }
 
 const DECIMAL_TEXT = /^(-?)(\d+)(?:\.(\d+))?$/;
+const FLOAT_TEXT =
+  /^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$|^(?:NaN|-?Infinity)$/;
+const BASE64_TEXT = /^[A-Za-z0-9+/]*={0,2}$/;
 const DATE_TEXT = /^\d{4}-\d{2}-\d{2}$/;
 /** `TIMESTAMP` cells carry the session offset (or `Z`); `TIMESTAMP_NTZ` cells carry none. */
 const ZONED_TIMESTAMP_TEXT =
@@ -21,9 +25,18 @@ function invalid(kind: string, cell: string): Error {
   return new Error(`Invalid ${kind} "${cell}"`);
 }
 
+/** `Date.parse` rolls 2026-02-31 over to March, so the day must survive a round trip. */
 function epochMillis(text: string, kind: string, cell: string): number {
+  const day = cell.slice(0, 10);
   const ms = Date.parse(text);
-  if (Number.isNaN(ms)) throw invalid(kind, cell);
+  const dayMs = Date.parse(`${day}T00:00:00Z`);
+  if (
+    Number.isNaN(ms) ||
+    Number.isNaN(dayMs) ||
+    !new Date(dayMs).toISOString().startsWith(day)
+  ) {
+    throw invalid(kind, cell);
+  }
   return ms;
 }
 
@@ -32,7 +45,6 @@ const hasTimezone = (type: DataType) =>
 
 const CODECS: Partial<Record<Type, CellCodec>> = {
   [Type.Int]: {
-    format: (value) => String(value),
     parse(cell, type) {
       const { bitWidth } = type as DataType & { bitWidth: number };
       if (bitWidth === 64) {
@@ -59,13 +71,9 @@ const CODECS: Partial<Record<Type, CellCodec>> = {
     },
   },
   [Type.Float]: {
-    format: (value) => String(value),
     parse(cell) {
-      const n = Number(cell);
-      if (cell.trim() === "" || (Number.isNaN(n) && cell !== "NaN")) {
-        throw invalid("number", cell);
-      }
-      return n;
+      if (!FLOAT_TEXT.test(cell)) throw invalid("number", cell);
+      return Number(cell);
     },
   },
   [Type.Decimal]: {
@@ -81,11 +89,21 @@ const CODECS: Partial<Record<Type, CellCodec>> = {
       return negative ? `-${out}` : out;
     },
     parse(cell, type) {
-      const { scale } = type as DataType & { scale: number };
+      const { scale, precision } = type as DataType & {
+        scale: number;
+        precision: number;
+      };
       const match = DECIMAL_TEXT.exec(cell);
-      const [, sign, whole, fraction = ""] = match ?? [];
-      if (!match || fraction.length > scale) throw invalid("decimal", cell);
-      const unscaled = BigInt(`${whole}${fraction.padEnd(scale, "0")}`);
+      if (!match) throw invalid("decimal", cell);
+      const [, sign, whole, fraction = ""] = match;
+      const digits = `${whole}${fraction.padEnd(scale, "0")}`;
+      if (
+        fraction.length > scale ||
+        digits.replace(/^0+/, "").length > precision
+      ) {
+        throw invalid("decimal", cell);
+      }
+      const unscaled = BigInt(digits);
       return sign === "-" ? -unscaled : unscaled;
     },
   },
@@ -111,18 +129,18 @@ const CODECS: Partial<Record<Type, CellCodec>> = {
     },
   },
   [Type.Bool]: {
-    format: (value) => String(value),
     parse(cell) {
       if (cell !== "true" && cell !== "false") throw invalid("boolean", cell);
       return cell === "true";
     },
   },
   [Type.Binary]: {
-    format: (value) => Buffer.from(value as Uint8Array).toString("base64"),
-    parse: (cell) => new Uint8Array(Buffer.from(cell, "base64")),
+    parse(cell) {
+      if (!BASE64_TEXT.test(cell)) throw invalid("binary", cell);
+      return new Uint8Array(Buffer.from(cell, "base64"));
+    },
   },
   [Type.Utf8]: {
-    format: (value) => String(value),
     parse: (cell) => cell,
   },
 };
@@ -134,8 +152,8 @@ export function hasJsonArrayCodec(type: DataType): boolean {
 
 /** Render a scalar Arrow value the way the warehouse writes it under `JSON_ARRAY`. */
 export function formatJsonArrayCell(value: unknown, type: DataType): string {
-  const codec = CODECS[type.typeId];
-  if (codec) return codec.format(value, type);
+  const format = CODECS[type.typeId]?.format;
+  if (format) return format(value, type);
   if (value instanceof Uint8Array) return Buffer.from(value).toString("base64");
   if (value instanceof Date) return value.toISOString();
   return String(value);

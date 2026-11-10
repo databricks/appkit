@@ -18,7 +18,7 @@ export type RefreshChunkLink = (
 ) => Promise<ExternalLink | undefined>;
 
 interface ArrowStreamOptions {
-  /** Idle timeout (ms) for a single read, and the response wait in patient mode. */
+  /** Idle timeout (ms) for a single read, and the header wait with `fullHeaderWait`. */
   timeout: number;
   /** Attempts to establish a chunk's response before any bytes are yielded. */
   retries: number;
@@ -27,9 +27,15 @@ interface ArrowStreamOptions {
 }
 
 /** `errorCode` on every failure to download a chunk, whether before or after the response headers. */
-export const EXTERNAL_LINK_DOWNLOAD_FAILED = "EXTERNAL_LINK_DOWNLOAD_FAILED";
+const EXTERNAL_LINK_DOWNLOAD_FAILED = "EXTERNAL_LINK_DOWNLOAD_FAILED";
 
 const BACKOFF_MULTIPLIER = 1000;
+
+interface DownloadFailure {
+  status?: number;
+  error: unknown;
+  timedOut: boolean;
+}
 
 type Connection =
   | {
@@ -38,19 +44,35 @@ type Connection =
       controller: AbortController;
       detach: () => void;
     }
-  | { ok: false; status?: number; error: unknown; timedOut: boolean };
+  | ({ ok: false } & DownloadFailure);
 
 function downloadFailed(
   message: string,
-  httpStatus?: number,
-  cause?: unknown,
-  timedOut = false,
+  { status, error, timedOut }: DownloadFailure,
 ): ExecutionError {
   return new ExecutionError(message, {
     errorCode: EXTERNAL_LINK_DOWNLOAD_FAILED,
-    context: { httpStatus, timedOut },
-    cause: cause instanceof Error ? cause : undefined,
+    context: { httpStatus: status, timedOut },
+    cause: error instanceof Error ? error : undefined,
   });
+}
+
+/** Storage refused the download (400/403), never answered it, or it failed some other way. */
+export type DownloadFailureKind = "refused" | "unanswered" | "other";
+
+/** The {@link DownloadFailureKind} of `err`, or `undefined` when it is not a chunk download failure. */
+export function downloadFailureKind(
+  err: unknown,
+): DownloadFailureKind | undefined {
+  if (
+    !(err instanceof ExecutionError) ||
+    err.errorCode !== EXTERNAL_LINK_DOWNLOAD_FAILED
+  ) {
+    return undefined;
+  }
+  const status = err.context?.httpStatus;
+  if (status === 400 || status === 403) return "refused";
+  return err.context?.timedOut === true ? "unanswered" : "other";
 }
 
 /**
@@ -85,22 +107,22 @@ export class ArrowStreamProcessor {
    * concatenation of everything yielded is byte-identical to the raw Arrow
    * result, so the client parses it exactly as a buffered response.
    *
-   * `patient` waits for response headers as long as the per-attempt `timeout`
-   * instead of `responseTimeoutMs`, for a second pass over a download that
-   * only looked stalled.
+   * `fullHeaderWait` waits for response headers as long as the per-attempt
+   * `timeout` instead of `responseTimeoutMs`, for a second pass over a
+   * download that only looked stalled.
    */
   async *streamChunks(
     chunks: ExternalLink[],
     signal?: AbortSignal,
     refresh?: RefreshChunkLink,
-    patient = false,
+    fullHeaderWait = false,
   ): AsyncGenerator<Uint8Array, void, unknown> {
     if (chunks.length === 0) {
       throw ValidationError.missingField("chunks");
     }
 
     for (const chunk of chunks) {
-      yield* this.streamChunkBody(chunk, signal, refresh, patient);
+      yield* this.streamChunkBody(chunk, signal, refresh, fullHeaderWait);
     }
   }
 
@@ -120,7 +142,7 @@ export class ArrowStreamProcessor {
     chunk: ExternalLink,
     signal: AbortSignal | undefined,
     refresh: RefreshChunkLink | undefined,
-    patient: boolean,
+    fullHeaderWait: boolean,
   ): AsyncGenerator<Uint8Array, void, unknown> {
     let link = chunk;
     if (!link.externalLink) {
@@ -131,11 +153,14 @@ export class ArrowStreamProcessor {
     }
 
     const { timeout, retries, responseTimeoutMs } = this.options;
-    const headerWaitMs = patient
+    const headerWaitMs = fullHeaderWait
       ? timeout
       : Math.min(responseTimeoutMs, timeout);
     let connection: Extract<Connection, { ok: true }> | undefined;
-    let failure: Extract<Connection, { ok: false }> | undefined;
+    let failure: DownloadFailure = {
+      error: new Error("no download attempts"),
+      timedOut: false,
+    };
     let attempts = 0;
     let reminted = false;
 
@@ -183,16 +208,14 @@ export class ArrowStreamProcessor {
     }
 
     if (!connection) {
-      const reason = failure?.timedOut
+      const reason = failure.timedOut
         ? `no response within ${headerWaitMs}ms`
-        : failure?.error instanceof Error
+        : failure.error instanceof Error
           ? failure.error.message
-          : String(failure?.error);
+          : String(failure.error);
       throw downloadFailed(
         `Failed to download chunk ${chunk.chunkIndex}: ${reason}`,
-        failure?.status,
-        failure?.error,
-        failure?.timedOut,
+        failure,
       );
     }
 
@@ -237,8 +260,7 @@ export class ArrowStreamProcessor {
             `Failed streaming chunk ${chunk.chunkIndex}: ${
               error instanceof Error ? error.message : String(error)
             }`,
-            undefined,
-            error,
+            { error, timedOut: false },
           );
     } finally {
       clearTimeout(idleTimer);

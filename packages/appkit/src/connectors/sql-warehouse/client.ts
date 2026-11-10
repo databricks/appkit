@@ -31,7 +31,7 @@ import type {
   StatementStatus,
   WorkspaceClient,
 } from "../../workspace-client";
-import { buildEmptyArrowIPCBase64 } from "./arrow-schema";
+import { buildEmptyArrowIPCBase64, manifestColumnName } from "./arrow-schema";
 import { executeStatementDefaults } from "./defaults";
 import { WarehousePollBackoff } from "./warehouse-poll-backoff";
 import { WarehouseStatusEmitter } from "./warehouse-status-emitter";
@@ -48,15 +48,12 @@ const logger = createLogger("connectors:sql-warehouse");
 function arrowColumnNames(response: StatementResponse): string[] | undefined {
   const cols = response.manifest?.schema?.columns;
   if (!cols || cols.length === 0) return undefined;
-  return cols.map((c, i) =>
-    c.name && c.name.length > 0 ? c.name : `column_${i}`,
-  );
+  return cols.map(manifestColumnName);
 }
 
 /**
  * Coerce the modular SDK's `bigint` row/byte counts back to `number` (the type
- * the legacy SDK used). AppKit never does arithmetic on these — they are purely
- * informational — but a stray `bigint` makes `JSON.stringify` throw ("Do not
+ * the legacy SDK used). A stray `bigint` makes `JSON.stringify` throw ("Do not
  * know how to serialize a BigInt") the instant the result is cached or written
  * to an SSE frame. Reyden's INLINE + ARROW_STREAM result — which the analytics
  * arrow path caches — carries them on `result`/`manifest`, so normalize every
@@ -1030,7 +1027,7 @@ export class SQLWarehouseConnector {
       const obj: Record<string, unknown> = {};
       row.forEach((value, index) => {
         const column = columns[index];
-        const columnName = column?.name || `column_${index}`;
+        const columnName = manifestColumnName(column, index);
 
         // attempt to parse JSON strings for string columns
         if (
@@ -1251,9 +1248,14 @@ export class SQLWarehouseConnector {
     chunks: ExternalLink[],
     signal?: AbortSignal,
     refresh?: RefreshChunkLink,
-    patient?: boolean,
+    fullHeaderWait?: boolean,
   ): AsyncGenerator<Uint8Array, void, unknown> {
-    return this.arrowProcessor.streamChunks(chunks, signal, refresh, patient);
+    return this.arrowProcessor.streamChunks(
+      chunks,
+      signal,
+      refresh,
+      fullHeaderWait,
+    );
   }
 
   /**
