@@ -18,9 +18,14 @@ if (!version) {
   process.exit(1);
 }
 
-function run(cmd: string, args: string[], opts: { cwd?: string } = {}): number {
+function run(
+  cmd: string,
+  args: string[],
+  opts: { cwd?: string; env?: Record<string, string> } = {},
+): number {
   const result = spawnSync(cmd, args, {
     cwd: opts.cwd ?? ROOT,
+    env: { ...process.env, ...opts.env },
     stdio: "inherit",
   });
   return result.status ?? 1;
@@ -52,10 +57,11 @@ async function runInstallWithRetry(
   label: string,
   cmd: string,
   args: string[],
+  env?: Record<string, string>,
 ): Promise<number> {
   let lastStatus = 0;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const status = run(cmd, args, { cwd: templateDir });
+    const status = run(cmd, args, { cwd: templateDir, env });
     lastStatus = status;
     if (status === 0) {
       return 0;
@@ -71,8 +77,32 @@ async function runInstallWithRetry(
   return lastStatus;
 }
 
+// Matches CI's registry cooldown; newer versions 403 in template jobs.
+const RELEASE_AGE_DAYS = 7;
+const RELEASE_AGE_EXCLUDE = "@databricks/*";
+
+// npm ignores unknown config keys, which would silently drop the cooldown.
+const npmConfig = spawnSync(
+  "npm",
+  ["config", "get", "min-release-age-exclude"],
+  {
+    cwd: templateDir,
+    encoding: "utf-8",
+  },
+);
+if (npmConfig.status !== 0 || npmConfig.stdout.trim() === "undefined") {
+  console.error(
+    "npm does not support min-release-age-exclude; upgrade npm (11.19+ works).",
+  );
+  process.exit(1);
+}
+
 // 2a. npm → package-lock.json
-const npmExit = await runInstallWithRetry("npm install", "npm", ["install"]);
+const npmExit = await runInstallWithRetry("npm install", "npm", [
+  "install",
+  `--min-release-age=${RELEASE_AGE_DAYS}`,
+  `--min-release-age-exclude=${RELEASE_AGE_EXCLUDE}`,
+]);
 if (npmExit !== 0) {
   console.error(`npm install failed after ${MAX_ATTEMPTS} attempts`);
   process.exit(npmExit);
@@ -90,11 +120,18 @@ if (run("pnpm", ["--version"]) !== 0) {
 
 // 2c. pnpm → pnpm-lock.yaml (--no-frozen-lockfile: pnpm defaults to frozen
 // under CI; --lockfile-only: skip the node_modules rebuild).
-const pnpmExit = await runInstallWithRetry("pnpm install", "pnpm", [
-  "install",
-  "--lockfile-only",
-  "--no-frozen-lockfile",
-]);
+// pnpm ignores minimumReleaseAge CLI flags; the exclude env var must be a JSON array.
+const pnpmExit = await runInstallWithRetry(
+  "pnpm install",
+  "pnpm",
+  ["install", "--lockfile-only", "--no-frozen-lockfile"],
+  {
+    pnpm_config_minimum_release_age: String(RELEASE_AGE_DAYS * 24 * 60),
+    pnpm_config_minimum_release_age_exclude: JSON.stringify([
+      RELEASE_AGE_EXCLUDE,
+    ]),
+  },
+);
 if (pnpmExit !== 0) {
   console.error(`pnpm install failed after ${MAX_ATTEMPTS} attempts`);
   process.exit(pnpmExit);
