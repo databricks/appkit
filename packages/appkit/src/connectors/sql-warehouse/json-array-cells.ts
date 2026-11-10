@@ -12,7 +12,6 @@ import {
  * epoch milliseconds for DATE and TIMESTAMP.
  */
 interface CellCodec {
-  /** Defaults to `String(value)`, or base64 for bytes. */
   format?(value: unknown, type: DataType): string;
   parse(cell: string, type: DataType): unknown;
 }
@@ -143,9 +142,13 @@ const CODECS: Partial<Record<Type, CellCodec>> = {
   [Type.Utf8]: {
     parse: (cell) => cell,
   },
+  [Type.Null]: {
+    parse(cell) {
+      throw invalid("null", cell);
+    },
+  },
 };
 
-/** Whether {@link parseJsonArrayCell} can read cells of this Arrow type. */
 export function hasJsonArrayCodec(type: DataType): boolean {
   return CODECS[type.typeId] !== undefined;
 }
@@ -155,7 +158,6 @@ export function formatJsonArrayCell(value: unknown, type: DataType): string {
   const format = CODECS[type.typeId]?.format;
   if (format) return format(value, type);
   if (value instanceof Uint8Array) return Buffer.from(value).toString("base64");
-  if (value instanceof Date) return value.toISOString();
   return String(value);
 }
 

@@ -70,7 +70,6 @@ export function buildEmptyArrowIPCBase64(columns: ColumnInfo[]): string {
   return Buffer.from(ipc).toString("base64");
 }
 
-/** A manifest column's name, or `column_N` when it has none. */
 export function manifestColumnName(
   col: ColumnInfo | undefined,
   index: number,
@@ -82,13 +81,17 @@ function columnTypeText(col: ColumnInfo): string {
   return col.typeText ?? col.typeName ?? "STRING";
 }
 
-/** The Arrow type for a manifest column; unparseable type text becomes Utf8. */
 function columnArrowType(col: ColumnInfo): DataType {
+  let type: DataType;
   try {
-    return parseDatabricksType(columnTypeText(col));
+    type = parseDatabricksType(columnTypeText(col));
   } catch {
     return new Utf8();
   }
+  if (DataType.isDecimal(type) && col.typePrecision != null) {
+    return new Decimal(col.typeScale ?? 0, col.typePrecision, 128);
+  }
+  return type;
 }
 
 /**
@@ -100,7 +103,7 @@ function columnArrowType(col: ColumnInfo): DataType {
  */
 export function buildArrowIPCFromRows(
   columns: ColumnInfo[],
-  rows: Array<Array<string | null | undefined>>,
+  rows: ReadonlyArray<ReadonlyArray<unknown>>,
 ): Uint8Array {
   const vectors = columns.map((col, index) =>
     vectorFromCells(
@@ -124,10 +127,10 @@ export function buildArrowIPCFromRows(
   return tableToIPC(new Table(batch), "stream");
 }
 
-function vectorFromCells(col: ColumnInfo, cells: Array<string | null>) {
+function vectorFromCells(col: ColumnInfo, cells: unknown[]) {
   const type = rebuildType(col);
   const values = cells.map((cell) =>
-    cell === null ? null : parseJsonArrayCell(cell, type),
+    cell === null ? null : parseJsonArrayCell(String(cell), type),
   );
   if (DataType.isDecimal(type)) {
     return decimalVector(values as Array<bigint | null>, type);
@@ -135,17 +138,8 @@ function vectorFromCells(col: ColumnInfo, cells: Array<string | null>) {
   return vectorFromArray(values, type);
 }
 
-const STRING_ONLY_TYPES = new Set<Type>([
-  Type.List,
-  Type.Struct,
-  Type.Map,
-  Type.Interval,
-  Type.Duration,
-]);
-
 function rebuildType(col: ColumnInfo): DataType {
   const type = columnArrowType(col);
-  if (STRING_ONLY_TYPES.has(type.typeId)) return new Utf8();
   // GEOGRAPHY and GEOMETRY map to Binary but arrive as text on the JSON wire.
   if (
     type.typeId === Type.Binary &&
@@ -153,11 +147,7 @@ function rebuildType(col: ColumnInfo): DataType {
   ) {
     return new Utf8();
   }
-  if (type.typeId === Type.Decimal && col.typePrecision != null) {
-    return new Decimal(col.typeScale ?? 0, col.typePrecision, 128);
-  }
-  if (type.typeId !== Type.Null && !hasJsonArrayCodec(type)) return new Utf8();
-  return type;
+  return hasJsonArrayCodec(type) ? type : new Utf8();
 }
 
 /** `vectorFromArray` cannot build Decimal128, so write the 128-bit words directly. */

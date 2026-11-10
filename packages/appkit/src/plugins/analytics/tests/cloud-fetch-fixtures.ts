@@ -17,6 +17,7 @@ import {
   Utf8,
   vectorFromArray,
 } from "apache-arrow";
+import { vi } from "vitest";
 
 /** A standard SQL warehouse's view of one result: manifest columns, JSON rows, native Arrow. */
 export interface Dataset {
@@ -156,7 +157,10 @@ export type StorageMode =
   | { kind: "reset-after-headers" };
 
 export interface FakeStorage {
-  /** GETs received, whatever the answer. */
+  /**
+   * GETs sent to this host, counted on the client: a request aborted before it
+   * reaches the server still counts.
+   */
   readonly gets: () => number;
   readonly requestHeaders: IncomingMessage["headers"][];
   url(path?: string): string;
@@ -172,10 +176,9 @@ export async function startStorage(
 ): Promise<FakeStorage> {
   let mode = initial;
   let body: Uint8Array = new Uint8Array();
-  let gets = 0;
   const requestHeaders: IncomingMessage["headers"][] = [];
+  const fetches = vi.spyOn(globalThis, "fetch");
   const server: Server = createServer((req, res) => {
-    gets++;
     requestHeaders.push(req.headers);
     const current = mode;
     switch (current.kind) {
@@ -201,7 +204,9 @@ export async function startStorage(
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   return {
-    gets: () => gets,
+    gets: () =>
+      fetches.mock.calls.filter(([input]) => String(input).startsWith(base))
+        .length,
     requestHeaders,
     url: (path = "chunk") => `${base}/${path}`,
     setMode: (next) => {
@@ -212,6 +217,7 @@ export async function startStorage(
     },
     close: () =>
       new Promise<void>((resolve) => {
+        fetches.mockRestore();
         server.closeAllConnections();
         server.close(() => resolve());
       }),

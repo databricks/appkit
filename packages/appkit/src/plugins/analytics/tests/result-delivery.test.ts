@@ -7,6 +7,7 @@ import {
 } from "apache-arrow";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+import { MAX_INLINE_ATTACHMENT_BYTES } from "../../../connectors/sql-warehouse/defaults";
 import { ExecutionError } from "../../../errors";
 import { ArrowStreamProcessor } from "../../../stream/arrow-stream-processor";
 import {
@@ -16,7 +17,6 @@ import {
   arrowDeliveryUnsupported,
   classifyDispositionRejection,
   decodeArrowAttachmentToRows,
-  deliverArrowBytes,
   deliverArrowBytesWithFallback,
   deliverJsonResult,
   type QueryExecutor,
@@ -122,7 +122,7 @@ describe("classifyDispositionRejection", () => {
   });
 });
 
-describe("deliverArrowBytes — Reyden (ARROW + INLINE)", () => {
+describe("Arrow delivery — Reyden (ARROW + INLINE)", () => {
   test("streams the inline attachment and never touches external links", async () => {
     const b64 = arrowBase64(["col_0", "col_1"]);
     const { executor, calls } = executorFrom(async () => ({
@@ -136,7 +136,13 @@ describe("deliverArrowBytes — Reyden (ARROW + INLINE)", () => {
     const out: { columnNames?: string[]; statementId?: string } = {};
 
     const chunks = await collect(
-      deliverArrowBytes(executor, streamer, "SELECT 1", undefined, out),
+      deliverArrowBytesWithFallback(
+        executor,
+        streamer,
+        "SELECT 1",
+        undefined,
+        out,
+      ),
     );
 
     expect(calls).toEqual([{ disposition: "INLINE", format: "ARROW_STREAM" }]);
@@ -150,7 +156,7 @@ describe("deliverArrowBytes — Reyden (ARROW + INLINE)", () => {
   });
 });
 
-describe("deliverArrowBytes — normal warehouse (fallback to EXTERNAL_LINKS)", () => {
+describe("Arrow delivery — normal warehouse (fallback to EXTERNAL_LINKS)", () => {
   test("INLINE rejected → streams the external links from the execute response", async () => {
     const links = [{ external_link: "https://example.com/chunk-0" }];
     const { executor, calls } = executorFrom(async (fp) => {
@@ -175,7 +181,13 @@ describe("deliverArrowBytes — normal warehouse (fallback to EXTERNAL_LINKS)", 
     const out: { columnNames?: string[]; statementId?: string } = {};
 
     const chunks = await collect(
-      deliverArrowBytes(executor, streamer, "SELECT 1", undefined, out),
+      deliverArrowBytesWithFallback(
+        executor,
+        streamer,
+        "SELECT 1",
+        undefined,
+        out,
+      ),
     );
 
     expect(calls).toEqual([
@@ -212,7 +224,15 @@ describe("deliverArrowBytes — normal warehouse (fallback to EXTERNAL_LINKS)", 
     };
 
     await expect(
-      collect(deliverArrowBytes(executor, streamer, "SELECT 1", undefined, {})),
+      collect(
+        deliverArrowBytesWithFallback(
+          executor,
+          streamer,
+          "SELECT 1",
+          undefined,
+          {},
+        ),
+      ),
     ).rejects.toMatchObject({ errorCode: "ARROW_DELIVERY_UNSUPPORTED" });
   });
 
@@ -226,7 +246,15 @@ describe("deliverArrowBytes — normal warehouse (fallback to EXTERNAL_LINKS)", 
     };
 
     await expect(
-      collect(deliverArrowBytes(executor, streamer, "SELECT 1", undefined, {})),
+      collect(
+        deliverArrowBytesWithFallback(
+          executor,
+          streamer,
+          "SELECT 1",
+          undefined,
+          {},
+        ),
+      ),
     ).rejects.toBe(authErr);
     // Only the INLINE attempt — no EXTERNAL_LINKS fallback.
     expect(calls).toEqual([{ disposition: "INLINE", format: "ARROW_STREAM" }]);
@@ -282,7 +310,7 @@ describe("decodeArrowAttachmentToRows", () => {
   });
 });
 
-describe("deliverArrowBytes — capability memo", () => {
+describe("Arrow delivery — capability memo", () => {
   test("reports 'inline' when the INLINE attempt succeeds", async () => {
     const { executor } = executorFrom(async () => ({
       attachment: arrowBase64(["col_0", "col_1"]),
@@ -294,7 +322,7 @@ describe("deliverArrowBytes — capability memo", () => {
     };
     const resolved: string[] = [];
     await collect(
-      deliverArrowBytes(
+      deliverArrowBytesWithFallback(
         executor,
         streamer,
         "SELECT 1",
@@ -327,7 +355,7 @@ describe("deliverArrowBytes — capability memo", () => {
     };
     const resolved: string[] = [];
     await collect(
-      deliverArrowBytes(
+      deliverArrowBytesWithFallback(
         executor,
         streamer,
         "SELECT 1",
@@ -356,7 +384,7 @@ describe("deliverArrowBytes — capability memo", () => {
       }),
     };
     await collect(
-      deliverArrowBytes(
+      deliverArrowBytesWithFallback(
         executor,
         streamer,
         "SELECT 1",
@@ -445,8 +473,14 @@ describe("decodeArrowAttachmentToRows — captured Reyden fixtures", () => {
 });
 
 describe("deliverArrowBytesWithFallback", () => {
-  const LARGE = 26 * 1024 * 1024;
+  const LARGE = MAX_INLINE_ATTACHMENT_BYTES + 1;
   const storages: FakeStorage[] = [];
+  const overInlineLimit = () => {
+    throw ExecutionError.statementFailed(
+      "Inline byte limit exceeded. Statements executed with disposition=INLINE can have a result size of at most 26214400 bytes.",
+      "BAD_REQUEST",
+    );
+  };
 
   afterEach(async () => {
     await Promise.all(storages.splice(0).map((st) => st.close()));
@@ -458,6 +492,8 @@ describe("deliverArrowBytesWithFallback", () => {
       totalByteCount?: number;
       inline?: () => Awaited<ReturnType<QueryExecutor["query"]>>;
       rows?: number;
+      /** Set short only where the header wait has to fire. */
+      responseTimeoutMs?: number;
     } = {},
   ) {
     const data: Dataset = typedDataset(options.rows);
@@ -485,16 +521,15 @@ describe("deliverArrowBytesWithFallback", () => {
         if (options.inline) return options.inline();
         return {
           statement_id: "stmt-json",
-          columns: data.columns,
           columnNames: data.columns.map((c) => c.name),
-          dataArray: data.dataArray,
+          attachment: Buffer.from(data.ipc).toString("base64"),
         };
       },
     };
     const processor = new ArrowStreamProcessor({
       timeout: 1000,
       retries: 2,
-      responseTimeoutMs: 100,
+      responseTimeoutMs: options.responseTimeoutMs,
     });
     const streamer: ArrowChunkStreamer = {
       streamExternalLinks: (links, signal, refresh, fullHeaderWait) =>
@@ -575,7 +610,10 @@ describe("deliverArrowBytesWithFallback", () => {
   );
 
   test("storage that never answers falls back and is remembered as denied", async () => {
-    const ctx = await setup({ storage: { kind: "hang" } });
+    const ctx = await setup({
+      storage: { kind: "hang" },
+      responseTimeoutMs: 100,
+    });
     const { bytes, reported, error } = await run(ctx);
 
     expect(error).toBeUndefined();
@@ -652,6 +690,7 @@ describe("deliverArrowBytesWithFallback", () => {
   test("a slow first byte on a large result gets one retry with the full header wait instead of a denial", async () => {
     const ctx = await setup({
       storage: { kind: "ok", delayMs: 300 },
+      responseTimeoutMs: 100,
       totalByteCount: LARGE,
     });
     const { bytes, reported, error } = await run(ctx);
@@ -667,6 +706,7 @@ describe("deliverArrowBytesWithFallback", () => {
     const ctx = await setup({
       storage: { kind: "hang" },
       totalByteCount: LARGE,
+      responseTimeoutMs: 100,
     });
     const { error, reported } = await run(ctx);
 
@@ -682,7 +722,11 @@ describe("deliverArrowBytesWithFallback", () => {
   ] as const)(
     "a large result whose download %s and whose retry then fails otherwise keeps the download error",
     async (_name, storage, remembered) => {
-      const ctx = await setup({ storage, totalByteCount: LARGE });
+      const ctx = await setup({
+        storage,
+        totalByteCount: LARGE,
+        responseTimeoutMs: 100,
+      });
       const streamExternalLinks = ctx.streamer.streamExternalLinks;
       ctx.streamer.streamExternalLinks = (links, signal, refresh, fullWait) => {
         if (fullWait) ctx.storage.setMode({ kind: "status", status: 404 });
@@ -696,15 +740,10 @@ describe("deliverArrowBytesWithFallback", () => {
     },
   );
 
-  test("an inline result that spans several chunks is not served truncated", async () => {
+  test("a refused download whose inline run is over the warehouse's limit fails saying why", async () => {
     const ctx = await setup({
       storage: { kind: "status", status: 403 },
-      inline: () => ({
-        statement_id: "stmt-json",
-        columns: typedDataset().columns,
-        dataArray: typedDataset().dataArray.slice(0, 3),
-        nextChunkIndex: 1,
-      }),
+      inline: overInlineLimit,
     });
     const { error } = await run(ctx);
 
@@ -712,14 +751,7 @@ describe("deliverArrowBytesWithFallback", () => {
   });
 
   test("with the links-denied hint, a result too big for inline still downloads once storage recovers", async () => {
-    const ctx = await setup({
-      inline: () => ({
-        statement_id: "stmt-json",
-        columns: typedDataset().columns,
-        dataArray: [],
-        nextChunkIndex: 1,
-      }),
-    });
+    const ctx = await setup({ inline: overInlineLimit });
     const { bytes, reported, error } = await run(ctx, "links-denied");
 
     expect(error).toBeUndefined();
@@ -735,12 +767,7 @@ describe("deliverArrowBytesWithFallback", () => {
   test("with the links-denied hint, a too-big result while storage still refuses fails saying why", async () => {
     const ctx = await setup({
       storage: { kind: "status", status: 403 },
-      inline: () => ({
-        statement_id: "stmt-json",
-        columns: typedDataset().columns,
-        dataArray: [],
-        nextChunkIndex: 1,
-      }),
+      inline: overInlineLimit,
     });
     const { error } = await run(ctx, "links-denied");
 
@@ -762,20 +789,5 @@ describe("deliverArrowBytesWithFallback", () => {
     expect(error?.errorCode).toBe("TEMPORARILY_UNAVAILABLE");
     expect(ctx.executions).toEqual(["INLINE+JSON_ARRAY"]);
     expect(ctx.storage.gets()).toBe(0);
-  });
-
-  test("a result the rebuild cannot parse fails with a code and a message, not a generic error", async () => {
-    const ctx = await setup({
-      storage: { kind: "status", status: 403 },
-      inline: () => ({
-        statement_id: "stmt-json",
-        columns: [{ name: "n", typeName: "INT", typeText: "INT" }],
-        dataArray: [["not-a-number"]],
-      }),
-    });
-    const { error } = await run(ctx);
-
-    expect(error?.errorCode).toBe("ARROW_REBUILD_FAILED");
-    expect(error?.clientMessage).toMatch(/JSON_ARRAY/);
   });
 });

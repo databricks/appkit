@@ -18,15 +18,14 @@ export type RefreshChunkLink = (
 ) => Promise<ExternalLink | undefined>;
 
 interface ArrowStreamOptions {
-  /** Idle timeout (ms) for a single read, and the header wait with `fullHeaderWait`. */
+  /** Idle timeout (ms) for a single read, and the header wait of every chunk but a first that can still fall back. */
   timeout: number;
   /** Attempts to establish a chunk's response before any bytes are yielded. */
   retries: number;
-  /** Longest wait (ms) for response headers before the download counts as denied. */
+  /** Longest wait (ms) for the first chunk's response headers before the download counts as denied. */
   responseTimeoutMs: number;
 }
 
-/** `errorCode` on every failure to download a chunk, whether before or after the response headers. */
 const EXTERNAL_LINK_DOWNLOAD_FAILED = "EXTERNAL_LINK_DOWNLOAD_FAILED";
 
 const BACKOFF_MULTIPLIER = 1000;
@@ -35,6 +34,9 @@ type UsableLink = ExternalLink & { externalLink: string };
 
 const hasUrl = (link: ExternalLink | undefined): link is UsableLink =>
   Boolean(link?.externalLink);
+
+/** How storage refuses a presigned URL, including one that has expired. */
+const isRefusalStatus = (status: unknown) => status === 400 || status === 403;
 
 /** A 4xx won't change on retry, except a request timeout (408) or a rate limit (429). */
 const isFinalStatus = (status: number) =>
@@ -66,13 +68,15 @@ function downloadFailed(
   });
 }
 
-/** Storage refused the download (400/403), never answered it, or it failed some other way. */
-export type DownloadFailureKind = "refused" | "unanswered" | "other";
-
-/** The {@link DownloadFailureKind} of `err`, or `undefined` when it is not a chunk download failure. */
-export function downloadFailureKind(
+/**
+ * `err` as a chunk download failure: storage refused it (400/403), never
+ * answered, or it failed some other way. `undefined` for any other error.
+ */
+export function asDownloadFailure(
   err: unknown,
-): DownloadFailureKind | undefined {
+):
+  | { kind: "refused" | "unanswered" | "other"; error: ExecutionError }
+  | undefined {
   if (
     !(err instanceof ExecutionError) ||
     err.errorCode !== EXTERNAL_LINK_DOWNLOAD_FAILED
@@ -80,8 +84,12 @@ export function downloadFailureKind(
     return undefined;
   }
   const status = err.context?.httpStatus;
-  if (status === 400 || status === 403) return "refused";
-  return err.context?.timedOut === true ? "unanswered" : "other";
+  const kind = isRefusalStatus(status)
+    ? "refused"
+    : err.context?.timedOut === true
+      ? "unanswered"
+      : "other";
+  return { kind, error: err };
 }
 
 /**
@@ -116,8 +124,9 @@ export class ArrowStreamProcessor {
    * concatenation of everything yielded is byte-identical to the raw Arrow
    * result, so the client parses it exactly as a buffered response.
    *
-   * `fullHeaderWait` waits for response headers as long as the per-attempt
-   * `timeout` instead of `responseTimeoutMs`, for a second pass over a
+   * Only the first chunk waits `responseTimeoutMs` for headers and stops on a
+   * timeout, because only a failure before the first byte can still fall back.
+   * `fullHeaderWait` gives it the full `timeout` too, for a second pass over a
    * download that only looked stalled.
    */
   async *streamChunks(
@@ -130,8 +139,18 @@ export class ArrowStreamProcessor {
       throw ValidationError.missingField("chunks");
     }
 
-    for (const chunk of chunks) {
-      yield* this.streamChunkBody(chunk, signal, refresh, fullHeaderWait);
+    const { timeout, responseTimeoutMs } = this.options;
+    for (const [index, chunk] of chunks.entries()) {
+      const first = index === 0;
+      yield* this.streamChunkBody(
+        chunk,
+        signal,
+        refresh,
+        first && !fullHeaderWait
+          ? Math.min(responseTimeoutMs, timeout)
+          : timeout,
+        first,
+      );
     }
   }
 
@@ -143,15 +162,17 @@ export class ArrowStreamProcessor {
    * so a mid-body failure propagates and the caller aborts the response. An
    * idle timeout, reset before every read, aborts a stalled download.
    *
-   * A 403 re-mints the link once, since a pre-signed URL may have expired. Other
-   * 4xx (except 408/429) and header timeouts stop: a blocked host hangs instead
-   * of refusing, so a retry only repeats the wait.
+   * A 400 or 403 re-mints the link once, since a pre-signed URL may have expired. Other
+   * 4xx (except 408/429) stop, and so does a header timeout when
+   * `stopOnTimeout`: a blocked host hangs instead of refusing, so a retry only
+   * repeats the wait.
    */
   private async *streamChunkBody(
     chunk: ExternalLink,
     signal: AbortSignal | undefined,
     refresh: RefreshChunkLink | undefined,
-    fullHeaderWait: boolean,
+    headerWaitMs: number,
+    stopOnTimeout: boolean,
   ): AsyncGenerator<Uint8Array, void, unknown> {
     if (!hasUrl(chunk)) {
       // A missing link cannot be fixed by retrying — fail loudly.
@@ -161,10 +182,7 @@ export class ArrowStreamProcessor {
     }
     let link: UsableLink = chunk;
 
-    const { timeout, retries, responseTimeoutMs } = this.options;
-    const headerWaitMs = fullHeaderWait
-      ? timeout
-      : Math.min(responseTimeoutMs, timeout);
+    const { timeout, retries } = this.options;
     let connection: Extract<Connection, { ok: true }> | undefined;
     let failure: DownloadFailure = {
       error: new Error("no download attempts"),
@@ -183,17 +201,21 @@ export class ArrowStreamProcessor {
       }
       failure = result;
       if (signal?.aborted) throw ExecutionError.canceled();
-      if (result.timedOut) break;
+      if (result.timedOut && stopOnTimeout) break;
 
       const { status } = result;
-      if (status === 403 && refresh && chunk.chunkIndex != null && !reminted) {
+      if (
+        isRefusalStatus(status) &&
+        refresh &&
+        chunk.chunkIndex != null &&
+        !reminted
+      ) {
         reminted = true;
         attempts--;
         try {
           const fresh = await refresh(chunk.chunkIndex, signal);
           if (hasUrl(fresh)) link = fresh;
         } catch (refreshError) {
-          // Retry the current URL; surface the original error if it fails.
           logger.warn(
             "Failed to re-resolve link for chunk %s: %O",
             chunk.chunkIndex,
@@ -269,7 +291,6 @@ export class ArrowStreamProcessor {
     }
   }
 
-  /** One GET; only the wait for response headers is timed. */
   private async connect(
     link: UsableLink,
     headerWaitMs: number,

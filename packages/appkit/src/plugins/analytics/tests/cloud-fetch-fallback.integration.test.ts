@@ -7,7 +7,9 @@ import { tableFromIPC } from "apache-arrow";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { AppManager } from "../../../app";
+import { MAX_INLINE_ATTACHMENT_BYTES } from "../../../connectors/sql-warehouse/defaults";
 import { analytics } from "../index";
+import { LINKS_DENIED_TTL_MS } from "../result-delivery";
 import {
   cellsOf,
   type Dataset,
@@ -18,8 +20,7 @@ import {
   typedDataset,
 } from "./cloud-fetch-fixtures";
 
-const LARGE = 26 * 1024 * 1024;
-const TTL_MS = 10 * 60_000;
+const LARGE = MAX_INLINE_ATTACHMENT_BYTES + 1;
 
 const getAppQuerySpy = vi.spyOn(AppManager.prototype, "getAppQuery");
 
@@ -205,7 +206,7 @@ describe("Arrow charts when workspace storage refuses the Cloud Fetch download",
     await expectNativeArrow(await chart("second"));
     expect(warehouse.executions).toEqual([]);
 
-    vi.setSystemTime(Date.now() + TTL_MS + 1000);
+    vi.setSystemTime(Date.now() + LINKS_DENIED_TTL_MS + 1000);
     storage.setMode({ kind: "ok" });
     warehouse.executions.length = 0;
     const recovered = await chart("third");

@@ -31,8 +31,15 @@ import type {
   StatementStatus,
   WorkspaceClient,
 } from "../../workspace-client";
-import { buildEmptyArrowIPCBase64, manifestColumnName } from "./arrow-schema";
-import { executeStatementDefaults } from "./defaults";
+import {
+  buildArrowIPCFromRows,
+  buildEmptyArrowIPCBase64,
+  manifestColumnName,
+} from "./arrow-schema";
+import {
+  executeStatementDefaults,
+  MAX_INLINE_ATTACHMENT_BYTES,
+} from "./defaults";
 import { WarehousePollBackoff } from "./warehouse-poll-backoff";
 import { WarehouseStatusEmitter } from "./warehouse-status-emitter";
 
@@ -91,23 +98,11 @@ function normalizeStatementCounts<T extends StatementResponse>(response: T): T {
 }
 
 /**
- * Maximum size for inline Arrow IPC attachments (25 MiB decoded — the
- * Databricks Statement Execution API hard cap on INLINE responses).
- *
- * The analytics route streams the decoded attachment straight back on the
- * query response body; this cap bounds the single in-memory copy. Larger
- * results fall through to `disposition: "EXTERNAL_LINKS"`, which streams
- * chunk-by-chunk and is not bound by this limit.
- */
-export const MAX_INLINE_ATTACHMENT_BYTES = 25 * 1024 * 1024;
-
-/**
- * Safety cap on how many additional EXTERNAL_LINKS chunks
- * {@link SQLWarehouseConnector._resolveAllExternalLinks} will follow when the
- * manifest omits `totalChunkCount`. High enough to cover any real result;
+ * Safety cap on how many more chunks a multi-chunk result is followed for when
+ * the manifest omits `totalChunkCount`. High enough to cover any real result;
  * only bounds a misbehaving warehouse with a cyclic `nextChunkIndex`.
  */
-const MAX_EXTERNAL_CHUNK_FOLLOWS = 10_000;
+const MAX_CHUNK_FOLLOWS = 10_000;
 
 interface SQLWarehouseConfig {
   timeout?: number;
@@ -245,10 +240,10 @@ export class SQLWarehouseConnector {
     workspaceClient: WorkspaceClient,
     input: ExecuteStatementRequest & {
       /**
-       * Keep the warehouse's positional `dataArray` and carry the manifest
-       * `columns` on the result, instead of building keyed row objects.
+       * For `INLINE` + `JSON_ARRAY`: return every chunk's rows rebuilt as a
+       * base64 Arrow IPC `attachment`, like an `INLINE` + `ARROW_STREAM` result.
        */
-      rawRows?: boolean;
+      asArrow?: boolean;
     },
     signal?: AbortSignal,
   ) {
@@ -356,7 +351,7 @@ export class SQLWarehouseConnector {
                 statementId,
                 this.config.timeout,
                 signal,
-                input.rawRows,
+                input.asArrow,
               );
               break;
             case "SUCCEEDED":
@@ -364,7 +359,7 @@ export class SQLWarehouseConnector {
                 response,
                 workspaceClient,
                 signal,
-                input.rawRows,
+                input.asArrow,
               );
               break;
             case "FAILED":
@@ -835,7 +830,7 @@ export class SQLWarehouseConnector {
     statementId: string,
     timeout = executeStatementDefaults.timeout,
     signal?: AbortSignal,
-    rawRows?: boolean,
+    asArrow?: boolean,
   ) {
     return this.telemetry.startActiveSpan(
       "sql.poll",
@@ -914,7 +909,7 @@ export class SQLWarehouseConnector {
                   response,
                   workspaceClient,
                   signal,
-                  rawRows,
+                  asArrow,
                 );
               case "FAILED":
                 throw ExecutionError.statementFailed(
@@ -956,7 +951,7 @@ export class SQLWarehouseConnector {
     response: StatementResponse,
     workspaceClient: WorkspaceClient,
     signal?: AbortSignal,
-    rawRows?: boolean,
+    asArrow?: boolean,
   ) {
     if (response.manifest?.format === "ARROW_STREAM") {
       const result = response.result as
@@ -1007,12 +1002,24 @@ export class SQLWarehouseConnector {
     }
 
     const columns = response.manifest?.schema?.columns;
-    if (rawRows && columns) {
+    if (asArrow && columns) {
+      const rows = await this._allInlineRows(workspaceClient, response, signal);
+      let ipc: Uint8Array;
+      try {
+        ipc = buildArrowIPCFromRows(columns, rows);
+      } catch (err) {
+        throw ExecutionError.statementFailed(
+          `Failed to rebuild Arrow from inline JSON_ARRAY rows: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+          "ARROW_REBUILD_FAILED",
+          'The query result could not be converted to Arrow. Re-run the query with format="JSON_ARRAY".',
+        );
+      }
       return {
         ...response,
         result: {
-          ...response.result,
-          columns,
+          attachment: Buffer.from(ipc).toString("base64"),
           columnNames: arrowColumnNames(response),
           statement_id: response.statementId,
         },
@@ -1193,8 +1200,7 @@ export class SQLWarehouseConnector {
     // natural bound; fall back to a generous safety cap if it's absent (real
     // results still terminate earlier when `next_chunk_index` becomes null) so
     // a missing count doesn't silently truncate a genuine multi-chunk result.
-    const maxFetches =
-      response.manifest?.totalChunkCount ?? MAX_EXTERNAL_CHUNK_FOLLOWS;
+    const maxFetches = response.manifest?.totalChunkCount ?? MAX_CHUNK_FOLLOWS;
     let next = this._nextChunkIndex(first);
     for (let fetches = 0; next != null && fetches < maxFetches; fetches++) {
       if (signal?.aborted) throw ExecutionError.canceled();
@@ -1209,6 +1215,27 @@ export class SQLWarehouseConnector {
       next = this._nextChunkIndex(chunkLinks);
     }
     return links;
+  }
+
+  /** Every row of an INLINE result; the response carries only the first chunk. */
+  private async _allInlineRows(
+    workspaceClient: WorkspaceClient,
+    response: StatementResponse,
+    signal?: AbortSignal,
+  ) {
+    const rows = [...(response.result?.dataArray ?? [])];
+    const maxFetches = response.manifest?.totalChunkCount ?? MAX_CHUNK_FOLLOWS;
+    let next = response.result?.nextChunkIndex;
+    for (let fetches = 0; next != null && fetches < maxFetches; fetches++) {
+      if (signal?.aborted) throw ExecutionError.canceled();
+      const chunk = await workspaceClient.statementExecution.getResultData(
+        { statementId: response.statementId as string, chunkIndex: next },
+        { signal },
+      );
+      for (const row of chunk.dataArray ?? []) rows.push(row);
+      next = chunk.nextChunkIndex;
+    }
+    return rows;
   }
 
   /** The `nextChunkIndex` advertised by a chunk's links, if any. */
