@@ -114,13 +114,19 @@ if (run("pnpm", ["--version"]) !== 0) {
 
 // 2c. pnpm → pnpm-lock.yaml (--no-frozen-lockfile: pnpm defaults to frozen
 // under CI; --lockfile-only: skip the node_modules rebuild).
+// pnpm ignores minimumReleaseAge on the CLI; set it for this install only.
+const workspacePath = join(templateDir, "pnpm-workspace.yaml");
+const workspaceYaml = readFileSync(workspacePath, "utf-8");
+writeFileSync(
+  workspacePath,
+  `${workspaceYaml}\nminimumReleaseAge: ${RELEASE_AGE_DAYS * 24 * 60}\nminimumReleaseAgeExclude:\n  - "${RELEASE_AGE_EXCLUDE}"\n`,
+);
 const pnpmExit = await runInstallWithRetry("pnpm install", "pnpm", [
   "install",
   "--lockfile-only",
   "--no-frozen-lockfile",
-  `--config.minimum-release-age=${RELEASE_AGE_DAYS * 24 * 60}`,
-  `--config.minimum-release-age-exclude=${RELEASE_AGE_EXCLUDE}`,
 ]);
+writeFileSync(workspacePath, workspaceYaml);
 if (pnpmExit !== 0) {
   console.error(`pnpm install failed after ${MAX_ATTEMPTS} attempts`);
   process.exit(pnpmExit);
