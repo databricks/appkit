@@ -17,16 +17,6 @@ interface CellCodec {
   parse(cell: string, type: DataType): unknown;
 }
 
-const DECIMAL_TEXT = /^(-?)(\d+)(?:\.(\d+))?$/;
-const FLOAT_TEXT =
-  /^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$|^(?:NaN|-?Infinity)$/;
-const BASE64_TEXT = /^[A-Za-z0-9+/]*={0,2}$/;
-const DATE_TEXT = /^\d{4}-\d{2}-\d{2}$/;
-/** `TIMESTAMP` cells carry the session offset (or `Z`); `TIMESTAMP_NTZ` cells carry none. */
-const ZONED_TIMESTAMP_TEXT =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
-const LOCAL_TIMESTAMP_TEXT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
-
 function invalid(kind: string, cell: string): Error {
   return new Error(`Invalid ${kind} "${cell}"`);
 }
@@ -47,6 +37,9 @@ function epochMillis(text: string, kind: string, cell: string): number {
 }
 
 const hasTimezone = (type: Timestamp) => type.timezone != null;
+
+const isDigits = (text: string) =>
+  text !== "" && [...text].every((c) => c >= "0" && c <= "9");
 
 const CODECS: Partial<Record<Type, CellCodec>> = {
   [Type.Int]: {
@@ -77,8 +70,11 @@ const CODECS: Partial<Record<Type, CellCodec>> = {
   },
   [Type.Float]: {
     parse(cell) {
-      if (!FLOAT_TEXT.test(cell)) throw invalid("number", cell);
-      return Number(cell);
+      const n = Number(cell);
+      if (cell === "" || (Number.isNaN(n) && cell !== "NaN")) {
+        throw invalid("number", cell);
+      }
+      return n;
     },
   },
   [Type.Decimal]: {
@@ -94,27 +90,28 @@ const CODECS: Partial<Record<Type, CellCodec>> = {
       return negative ? `-${out}` : out;
     },
     parse(cell, type: Decimal) {
-      const { scale, precision } = type;
-      const match = DECIMAL_TEXT.exec(cell);
-      if (!match) throw invalid("decimal", cell);
-      const [, sign, whole, fraction = ""] = match;
-      const digits = `${whole}${fraction.padEnd(scale, "0")}`;
+      const negative = cell.startsWith("-");
+      const [whole, fraction = "", extra] = (
+        negative ? cell.slice(1) : cell
+      ).split(".");
       if (
-        fraction.length > scale ||
-        digits.replace(/^0+/, "").length > precision
+        extra !== undefined ||
+        !isDigits(whole) ||
+        (fraction !== "" && !isDigits(fraction)) ||
+        fraction.length > type.scale
       ) {
         throw invalid("decimal", cell);
       }
-      const unscaled = BigInt(digits);
-      return sign === "-" ? -unscaled : unscaled;
+      const unscaled = BigInt(`${whole}${fraction.padEnd(type.scale, "0")}`);
+      if (String(unscaled).length > type.precision) {
+        throw invalid("decimal", cell);
+      }
+      return negative ? -unscaled : unscaled;
     },
   },
   [Type.Date]: {
     format: (value) => new Date(Number(value)).toISOString().slice(0, 10),
-    parse(cell) {
-      if (!DATE_TEXT.test(cell)) throw invalid("date", cell);
-      return epochMillis(`${cell}T00:00:00Z`, "date", cell);
-    },
+    parse: (cell) => epochMillis(`${cell}T00:00:00Z`, "date", cell),
   },
   [Type.Timestamp]: {
     format(value, type: Timestamp) {
@@ -122,12 +119,11 @@ const CODECS: Partial<Record<Type, CellCodec>> = {
       return hasTimezone(type) ? iso : iso.slice(0, -1);
     },
     parse(cell, type: Timestamp) {
-      if (hasTimezone(type)) {
-        if (!ZONED_TIMESTAMP_TEXT.test(cell)) throw invalid("timestamp", cell);
-        return epochMillis(cell, "timestamp", cell);
-      }
-      if (!LOCAL_TIMESTAMP_TEXT.test(cell)) throw invalid("timestamp", cell);
-      return epochMillis(`${cell}Z`, "timestamp", cell);
+      // A cell that already ends in `Z` or `±hh:mm` stops parsing once another
+      // `Z` is appended. A zoned cell without one would be read in the server's zone.
+      const hasOffset = Number.isNaN(Date.parse(`${cell}Z`));
+      if (hasOffset !== hasTimezone(type)) throw invalid("timestamp", cell);
+      return epochMillis(hasOffset ? cell : `${cell}Z`, "timestamp", cell);
     },
   },
   [Type.Bool]: {
@@ -138,8 +134,10 @@ const CODECS: Partial<Record<Type, CellCodec>> = {
   },
   [Type.Binary]: {
     parse(cell) {
-      if (!BASE64_TEXT.test(cell)) throw invalid("binary", cell);
-      return new Uint8Array(Buffer.from(cell, "base64"));
+      // Buffer skips characters that aren't base64, so re-encode to catch them.
+      const bytes = Buffer.from(cell, "base64");
+      if (bytes.toString("base64") !== cell) throw invalid("binary", cell);
+      return new Uint8Array(bytes);
     },
   },
   [Type.Utf8]: {

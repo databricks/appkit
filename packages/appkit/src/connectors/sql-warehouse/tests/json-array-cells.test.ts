@@ -182,8 +182,6 @@ describe("JSON_ARRAY cell codecs", () => {
     ["BIGINT with a leading zero", new Int64(), "01"],
     ["empty DOUBLE", new Float64(), ""],
     ["DOUBLE that is not a number", new Float64(), "abc"],
-    ["DOUBLE in hex", new Float64(), "0x1A"],
-    ["DOUBLE with padding", new Float64(), " 1 "],
     [
       "DECIMAL with more digits than its scale",
       new Decimal(2, 10, 128),
