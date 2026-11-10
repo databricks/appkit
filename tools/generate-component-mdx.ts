@@ -192,7 +192,7 @@ ${fallback}
         ? `\`${prop.defaultValue.value}\``
         : MARKDOWN.EMPTY_VALUE;
       const desc = prop.description
-        ? sanitizeDescriptionText(prop.description)
+        ? sanitizeDescriptionText(prop.description).replace(/\|/g, "\\|")
         : MARKDOWN.EMPTY_VALUE;
       return `| \`${name}\` | \`${typeStr}\` | ${required} | ${defaultVal} | ${desc} |`;
     })
