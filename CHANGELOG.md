@@ -200,6 +200,16 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.93.0](https://github.com/databricks/appkit/compare/v0.92.0...v0.93.0) (2026-11-11)
+
+### appkit
+
+* **appkit:** add dev-only design pages plugin and ui-only template ([#680](https://github.com/databricks/appkit/issues/680)) ([3fba340](https://github.com/databricks/appkit/commit/3fba3405dd4031df9f57b43f204fc10787c578bc))
+* **appkit:** appkit plugin add with --auth-mode and --set resource config ([#679](https://github.com/databricks/appkit/issues/679)) ([e037300](https://github.com/databricks/appkit/commit/e03730051787fc83942fea9521364c913290fc37))
+
+
 ## [0.92.0](https://github.com/databricks/appkit/compare/v0.91.3...v0.92.0) (2026-11-11)
 
 ### appkit
