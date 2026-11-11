@@ -198,6 +198,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.92.0](https://github.com/databricks/appkit/compare/v0.91.3...v0.92.0) (2026-11-11)
+
+### appkit
+
+* **appkit:** add model_service resource and use it in the agents plugin ([#705](https://github.com/databricks/appkit/issues/705)) ([82869f3](https://github.com/databricks/appkit/commit/82869f32556f33335d7bcd05cc5f1e2b6b9d26df))
+
+
 ## [0.91.3](https://github.com/databricks/appkit/compare/v0.91.2...v0.91.3) (2026-11-10)
 
 ### deps
