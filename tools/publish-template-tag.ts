@@ -109,8 +109,11 @@ if (npmExit !== 0) {
 }
 console.log("✓ template/package-lock.json updated (npm install)");
 
+// 11.1.2+ fixes minimumReleaseAge on public npm: https://github.com/pnpm/pnpm/issues/11619
+const PNPM = ["--yes", "pnpm@11.1.2"];
+
 // 2b. pnpm preflight — fail loud rather than silently skip the pnpm lock.
-if (run("pnpm", ["--version"]) !== 0) {
+if (run("npx", [...PNPM, "--version"]) !== 0) {
   console.error(
     "pnpm is not invokable — cannot regenerate template/pnpm-lock.yaml. " +
       "Ensure the release runner's pnpm setup ran before this script.",
@@ -123,9 +126,11 @@ if (run("pnpm", ["--version"]) !== 0) {
 // pnpm ignores minimumReleaseAge CLI flags; the exclude env var must be a JSON array.
 const pnpmExit = await runInstallWithRetry(
   "pnpm install",
-  "pnpm",
-  ["install", "--lockfile-only", "--no-frozen-lockfile"],
+  "npx",
+  [...PNPM, "install", "--lockfile-only", "--no-frozen-lockfile"],
   {
+    // Don't switch to the template's packageManager pin.
+    pnpm_config_pm_on_fail: "ignore",
     pnpm_config_minimum_release_age: String(RELEASE_AGE_DAYS * 24 * 60),
     pnpm_config_minimum_release_age_exclude: JSON.stringify([
       RELEASE_AGE_EXCLUDE,
