@@ -184,9 +184,9 @@ ${fallback}
 `;
   }
 
+  // `appkit docs` reads this table back (tableCells in packages/shared/src/cli/commands/docs.ts).
   const rows = entries
     .map(([name, prop]) => {
-      const typeStr = formatPropType(prop.type).replace(/\|/g, "\\|");
       const required = prop.required ? MARKDOWN.REQUIRED_CHECKMARK : "";
       const defaultVal = prop.defaultValue?.value
         ? `\`${prop.defaultValue.value}\``
@@ -194,7 +194,14 @@ ${fallback}
       const desc = prop.description
         ? sanitizeDescriptionText(prop.description)
         : MARKDOWN.EMPTY_VALUE;
-      return `| \`${name}\` | \`${typeStr}\` | ${required} | ${defaultVal} | ${desc} |`;
+      const cells = [
+        `\`${name}\``,
+        `\`${formatPropType(prop.type)}\``,
+        required,
+        defaultVal,
+        desc,
+      ];
+      return `| ${cells.map((cell) => cell.replace(/\|/g, "\\|")).join(" | ")} |`;
     })
     .join("\n");
 

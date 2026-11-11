@@ -55,11 +55,11 @@ Supports both query mode (queryKey + parameters) and data mode (static data).
 | `parameters` | `Record<string, unknown>` |  | - | Query parameters passed to the analytics endpoint |
 | `format` | `"auto" \| "json_array" \| "arrow_stream" \| "json" \| "arrow"` |  | `"auto"` | Data format to use - "json_array": Use JSON format (smaller payloads, simpler) - "arrow_stream": Use Arrow format (faster for large datasets) - "auto": Automatically select based on expected data size |
 | `transformer` | `(<T>(data: T) => T)` |  | - | Transform raw data before rendering |
-| `data` | `ChartDataInput` |  | - | Arrow Table or JSON array |
+| `data` | `ChartDataInput` |  | - | Arrow Table or an array of row objects (interfaces and `as const` arrays too). |
 | `title` | `string` |  | - | Chart title |
 | `showLegend` | `boolean` |  | - | Show legend |
 | `colorPalette` | `"categorical" \| "sequential" \| "diverging"` |  | - | Color palette to use. Auto-selected based on chart type if not specified. - "categorical": Distinct colors for different categories (bar, pie, line) - "sequential": Gradient for magnitude/intensity (heatmap) - "diverging": Two-tone for positive/negative values |
-| `colors` | `string[]` |  | - | Custom colors for series (overrides colorPalette) |
+| `colors` | `string[]` |  | - | Custom colors for series (overrides colorPalette) as hex, `rgb()` or `hsl()` strings, since ECharts draws on a canvas and cannot resolve `var()` or parse `oklch()` (those draw gray); without it, series colors are the CSS variables `--chart-cat-1` to `--chart-cat-8` on `:root` (`--chart-seq-*` and `--chart-div-*` for the sequential and diverging palettes), held to the same formats. |
 | `height` | `number` |  | - | Chart height in pixels. Defaults to filling its parent (see `chartSizeStyle`). |
 | `className` | `string` |  | - | Additional CSS classes |
 | `xKey` | `string` |  | - | X-axis field key. Auto-detected from schema if not provided. |
@@ -67,7 +67,7 @@ Supports both query mode (queryKey + parameters) and data mode (static data).
 | `ariaLabel` | `string` |  | - | Accessibility label for screen readers |
 | `testId` | `string` |  | - | Test ID for automated testing |
 | `options` | `Record<string, unknown>` |  | - | Additional ECharts options to merge |
-| `valueFormatter` | `ChartValueFormatter` |  | - | Formats measure values in the chart's built-in value axes, tooltips, and value labels. `field` is the corresponding `yKey`, so one formatter can select a different format for each series. |
+| `valueFormatter` | `ChartValueFormatter` |  | - | `(value: string \| number, field: string) =&gt; string`. Formats measure values in the chart's built-in value axes, tooltips, and value labels. `field` is the corresponding `yKey`, so one formatter can select a different format for each series. |
 | `onDataClick` | `((datum: ChartClickDatum) => void)` |  | - | Pointer-only: charts render to &lt;canvas&gt;, so this does not fire for keyboard users. Provide a keyboard-accessible equivalent (e.g. a table row action) for the same action. |
 | `selected` | `string \| string[]` |  | - | Controlled selection by category name. Matching data element(s) render at full prominence while the rest are dimmed. Drive it from your own state to reflect a cross-filter or selection. Categorical charts (bar, pie/donut) show emphasis; other chart types ignore it. |
 | `orientation` | `"horizontal" \| "vertical"` |  | `"vertical"` | Chart orientation |
