@@ -184,9 +184,10 @@ export default function App() {
   return <RouterProvider router={router} />;
 }
 
+// `data-appkit-template-home` marks the placeholder home: remove it with the page.
 function HomePage() {
   return (
-    <div className="max-w-2xl mx-auto space-y-6 mt-8">
+    <div data-appkit-template-home className="max-w-2xl mx-auto space-y-6 mt-8">
       <div className="text-center">
         <h2 className="text-3xl font-bold mb-2 text-foreground">
           Welcome to your Databricks App

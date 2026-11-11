@@ -51,6 +51,9 @@ export interface BasePlugin {
 
   clientConfig?(): Record<string, unknown>;
 
+  /** Vite plugins added to the dev server (development only). Typed loosely so `shared` doesn't depend on `vite`. */
+  vitePlugins?(): unknown[];
+
   /**
    * Binds runtime dependencies (telemetry, cache, plugin context) after the
    * plugin has been constructed. Called by the AppKit core before `setup()`.

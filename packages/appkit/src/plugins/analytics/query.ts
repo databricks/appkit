@@ -4,6 +4,7 @@ import { isSQLTypeMarker, type SQLTypeMarker, sql as sqlHelpers } from "shared";
 
 import { getWorkspaceId } from "../../context";
 import { ValidationError } from "../../errors";
+import { extractParameters } from "../../utils/sql-parameters";
 import type { StatementParameter } from "../../workspace-client";
 
 type SQLParameterValue = SQLTypeMarker | null | undefined;
@@ -16,8 +17,7 @@ export class QueryProcessor {
     const processed = { ...parameters };
 
     // extract all params from the query
-    const paramMatches = query.matchAll(/:([a-zA-Z_]\w*)/g);
-    const queryParams = new Set(Array.from(paramMatches, (m) => m[1]));
+    const queryParams = new Set(extractParameters(query));
 
     // auto-inject workspaceId if needed and not provided
     if (queryParams.has("workspaceId") && !processed.workspaceId) {
@@ -42,8 +42,7 @@ export class QueryProcessor {
 
     if (parameters) {
       // extract all params from the query
-      const queryParamMatches = query.matchAll(/:([a-zA-Z_]\w*)/g);
-      const queryParams = new Set(Array.from(queryParamMatches, (m) => m[1]));
+      const queryParams = new Set(extractParameters(query));
 
       // only allow parameters that exist in the query
       for (const key of Object.keys(parameters)) {
