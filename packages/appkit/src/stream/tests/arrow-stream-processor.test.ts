@@ -382,6 +382,46 @@ describe("ArrowStreamProcessor — refused downloads", () => {
     },
   );
 
+  const connectTimeout = () =>
+    new TypeError("fetch failed", {
+      cause: Object.assign(
+        new Error(
+          "Connect Timeout Error (attempted address: 192.0.2.10:443, timeout: 10000ms)",
+        ),
+        { code: "UND_ERR_CONNECT_TIMEOUT" },
+      ),
+    });
+
+  test.each([false, true])(
+    "Node's connect timeout on the first chunk is no answer and is not retried (fullHeaderWait %s)",
+    async (fullHeaderWait) => {
+      const fetchMock = vi.fn().mockRejectedValue(connectTimeout());
+      globalThis.fetch = fetchMock;
+
+      const p = new ArrowStreamProcessor({ timeout: 5000, retries: 3 });
+      const error = await failureOf(
+        p.streamChunks(mockChunks(1), undefined, undefined, fullHeaderWait),
+      );
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(asDownloadFailure(error)?.kind).toBe("unanswered");
+      expect(error.message).toMatch(/Connect Timeout Error/);
+    },
+  );
+
+  test("Node's connect timeout on a later chunk is retried", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse(1))
+      .mockRejectedValueOnce(connectTimeout())
+      .mockResolvedValueOnce(okResponse(2));
+    globalThis.fetch = fetchMock;
+
+    const p = new ArrowStreamProcessor({ timeout: 5000, retries: 3 });
+    expect(await drain(p.streamChunks(mockChunks(2)))).toEqual([1, 2]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  }, 10000);
+
   test.each([429, 408])(
     "a %i is retried after the backoff and can succeed",
     async (status) => {

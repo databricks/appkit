@@ -38,6 +38,24 @@ const hasUrl = (link: ExternalLink | undefined): link is UsableLink =>
 /** How storage refuses a presigned URL, including one that has expired. */
 const isRefusalStatus = (status: unknown) => status === 400 || status === 403;
 
+/** Node's fetch stops connecting after 10 s on its own, before a longer header wait fires. */
+const isConnectTimeout = (error: unknown) => {
+  const cause = error instanceof Error ? error.cause : undefined;
+  return (
+    typeof cause === "object" &&
+    cause !== null &&
+    "code" in cause &&
+    cause.code === "UND_ERR_CONNECT_TIMEOUT"
+  );
+};
+
+const errorText = (error: unknown) =>
+  error instanceof Error
+    ? error.cause instanceof Error
+      ? `${error.message}: ${error.cause.message}`
+      : error.message
+    : String(error);
+
 /** A 4xx won't change on retry, except a request timeout (408) or a rate limit (429). */
 const isFinalStatus = (status: number) =>
   status >= 400 && status < 500 && status !== 408 && status !== 429;
@@ -163,7 +181,7 @@ export class ArrowStreamProcessor {
    * idle timeout, reset before every read, aborts a stalled download.
    *
    * A 400 or 403 re-mints the link once, since a pre-signed URL may have expired. Other
-   * 4xx (except 408/429) stop, and so does a header timeout when
+   * 4xx (except 408/429) stop, and so does a header or connect timeout when
    * `stopOnTimeout`: a blocked host hangs instead of refusing, so a retry only
    * repeats the wait.
    */
@@ -231,13 +249,8 @@ export class ArrowStreamProcessor {
     }
 
     if (!connection) {
-      const reason = failure.timedOut
-        ? `no response within ${headerWaitMs}ms`
-        : failure.error instanceof Error
-          ? failure.error.message
-          : String(failure.error);
       throw downloadFailed(
-        `Failed to download chunk ${chunk.chunkIndex}: ${reason}`,
+        `Failed to download chunk ${chunk.chunkIndex}: ${errorText(failure.error)}`,
         failure,
       );
     }
@@ -280,9 +293,7 @@ export class ArrowStreamProcessor {
       throw error instanceof ExecutionError
         ? error
         : downloadFailed(
-            `Failed streaming chunk ${chunk.chunkIndex}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
+            `Failed streaming chunk ${chunk.chunkIndex}: ${errorText(error)}`,
             { error, timedOut: false },
           );
     } finally {
@@ -319,10 +330,13 @@ export class ArrowStreamProcessor {
     } catch (error) {
       clearTimeout(timer);
       detach();
+      const headerWaitExpired = !signal?.aborted && controller.signal.aborted;
       return {
         ok: false,
-        error,
-        timedOut: !signal?.aborted && controller.signal.aborted,
+        error: headerWaitExpired
+          ? new Error(`no response within ${headerWaitMs}ms`)
+          : error,
+        timedOut: headerWaitExpired || isConnectTimeout(error),
       };
     }
   }
