@@ -54,14 +54,14 @@ test("agents OBO sets plugin auth; resources that can't be OBO don't block it", 
     resourceKey: "agents-mlflow-experiment",
   };
   const endpoint: ManifestResource = {
-    type: "serving_endpoint",
+    type: "model_service",
     alias: "LLM",
-    resourceKey: "agents-serving-endpoint",
+    resourceKey: "agents-model-service",
     scope: "model-serving",
   };
   expect(
     pluginConfig(plugin("agents"), [endpoint, experiment], {
-      "serving_endpoint:agents-serving-endpoint": "obo",
+      "model_service:agents-model-service": "obo",
     }),
   ).toEqual({
     auth: "on-behalf-of-user",
@@ -70,9 +70,9 @@ test("agents OBO sets plugin auth; resources that can't be OBO don't block it", 
 
 test("agents auth follows the model endpoint, not the skills volume", () => {
   const endpoint: ManifestResource = {
-    type: "serving_endpoint",
+    type: "model_service",
     alias: "LLM",
-    resourceKey: "agents-serving-endpoint",
+    resourceKey: "agents-model-service",
     scope: "model-serving",
   };
   const skills: ManifestResource = {
@@ -82,7 +82,7 @@ test("agents auth follows the model endpoint, not the skills volume", () => {
     scope: "files",
   };
   const modelObo = {
-    "serving_endpoint:agents-serving-endpoint": "obo",
+    "model_service:agents-model-service": "obo",
   } as const;
   expect(pluginConfig(plugin("agents"), [endpoint, skills], modelObo)).toEqual({
     auth: "on-behalf-of-user",
@@ -107,7 +107,7 @@ test("envConflicts flags env names bound to another resource or value", () => {
       { env: "B", value: "x" },
     ],
     appYamlEnv: [
-      { name: "C", valueFrom: "agents-serving-endpoint" },
+      { name: "C", valueFrom: "agents-model-service" },
       { name: "D", valueFrom: "same" },
     ],
     bundleVariables: [],

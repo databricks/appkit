@@ -195,7 +195,7 @@ test.each([[["agents", "serving"]], [["serving", "agents"]]])(
       [
         ...names,
         "--set",
-        "agents.agents-serving-endpoint.name=agent-model",
+        "agents.agents-model-service.name=agent-model",
         "--set",
         "serving.serving-endpoint.name=serving-model",
         "--yes",
@@ -208,10 +208,11 @@ test.each([[["agents", "serving"]], [["serving", "agents"]]])(
       path.join(dir, "server", "server.ts"),
       "utf-8",
     );
-    expect(server).toContain(`agents({ defaultModel: "agent-model" })`);
-    expect(fs.readFileSync(path.join(dir, ".env"), "utf-8")).toContain(
-      "DATABRICKS_SERVING_ENDPOINT_NAME=serving-model",
-    );
+    // agents' model_service has its own env var, so there's no clash to adapt to.
+    expect(server).toContain("agents()");
+    const env = fs.readFileSync(path.join(dir, ".env"), "utf-8");
+    expect(env).toContain("DATABRICKS_SERVING_ENDPOINT_NAME=serving-model");
+    expect(env).toContain("DATABRICKS_MODEL_SERVICE_NAME=agent-model");
   },
 );
 

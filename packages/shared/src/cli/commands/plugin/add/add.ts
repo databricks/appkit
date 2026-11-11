@@ -226,9 +226,6 @@ async function aiSearchColumns(
     .filter(Boolean);
 }
 
-/** The env var agents falls back to for its model; serving binds it too. */
-const AGENTS_MODEL_ENV = "DATABRICKS_SERVING_ENDPOINT_NAME";
-
 /** What an app.yaml env entry points at, for comparing two entries. */
 function entryKey(e: { valueFrom?: string; value?: string }): string {
   return JSON.stringify([e.valueFrom, e.value]);
@@ -359,7 +356,7 @@ async function preparePlugin(
   await fillMissing(missingNow(), values, interactive);
   resources = selectResources(plugin, values);
 
-  let config = pluginConfig(
+  const config = pluginConfig(
     plugin,
     resources,
     modes,
@@ -371,25 +368,6 @@ async function preparePlugin(
   const plan = buildAddPlan(plugin, resources, values, modes);
 
   const conflicts = envConflicts(cwd, plan, pending);
-  const model = values["agents-serving-endpoint.name"];
-  if (
-    plugin.name === "agents" &&
-    model &&
-    conflicts.includes(AGENTS_MODEL_ENV)
-  ) {
-    // agents takes its model from defaultModel before that env var.
-    config = { ...config, defaultModel: model };
-    plan.dotEnv = plan.dotEnv.filter((e) => e.env !== AGENTS_MODEL_ENV);
-    plan.appYamlEnv = plan.appYamlEnv.filter(
-      (e) => e.name !== AGENTS_MODEL_ENV,
-    );
-    conflicts.splice(conflicts.indexOf(AGENTS_MODEL_ENV), 1);
-    console.log(
-      pc.dim(
-        `${AGENTS_MODEL_ENV} is already used by another resource; agents gets the endpoint as defaultModel in its registration instead.`,
-      ),
-    );
-  }
   if (conflicts.length > 0) {
     throw new Error(
       `${conflicts.join(", ")} already set to a different resource or value in .env or app.yaml; nothing was written. Edit those entries by hand, then rerun.`,
@@ -479,13 +457,8 @@ async function runPluginAdd(names: string[], opts: AddOptions): Promise<void> {
     seen.add(r.name);
   }
 
-  // agents last: it adapts to env clashes, so it must see the others' entries.
-  const ordered = [
-    ...requests.filter((r) => r.name !== "agents"),
-    ...requests.filter((r) => r.name === "agents"),
-  ];
   const prepared: PreparedPlugin[] = [];
-  for (const req of ordered) {
+  for (const req of requests) {
     prepared.push(
       await preparePlugin(
         cwd,
@@ -592,7 +565,7 @@ export function pluginConfig(
     const governed = resources.filter(
       (r) =>
         oboCapable(r) &&
-        (plugin.name !== "agents" || r.type === "serving_endpoint"),
+        (plugin.name !== "agents" || r.type === "model_service"),
     );
     const oboRes = governed.filter((r) => modes[authKey(r)] === AUTH_MODE_OBO);
     obo = oboRes.length > 0 && oboRes.length === governed.length;
