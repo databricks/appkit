@@ -9,7 +9,7 @@ const __dirname = path.dirname(__filename);
 
 const COLLAPSED_MARKER = "[collapsed]";
 
-interface Section {
+export interface Section {
   name: string;
   body: string;
   collapsed: boolean;
@@ -98,61 +98,104 @@ function formatExpandedSection(section: Section): string {
   return `## ${section.name}${section.body}`;
 }
 
+type PageKind = "component" | "reference" | "guide";
+
 interface ApiEntry {
+  kind: PageKind;
   file: string;
   line: number;
   level: number;
 }
 
-/** Headings in component pages that name a page part, not an API. */
-const PAGE_PARTS = new Set(["Example", "Examples", "Props", "Usage", "Source"]);
-/** Prose this long that another name already printed is left out of a multi-name lookup. */
-const LONG_PROSE = 100;
-/** Sections a multi-name lookup leaves out: the signatures and props already say what they say. */
-const DETAIL_SECTIONS = /^(Example|Examples|Parameters|Returns|Usage|Source)\b/;
+type Printed = Map<string, string>;
+
+// Component pages (tools/generate-component-mdx.ts) put each component's sections under Example, Usage and Props
+// headings; TypeDoc's reference pages put theirs under Examples.
+const EXAMPLE_HEADINGS = new Set(["Example", "Examples"]);
+const COMPONENT_PAGE_HEADINGS = new Set([
+  ...EXAMPLE_HEADINGS,
+  "Usage",
+  "Props",
+]);
+// Code fences, table rows, comments and the generator's source link.
+const NOT_PROSE = /^(```|\||<!--|\*\*Source:\*\*)/;
 
 /** The exported docs carry each heading's anchor link (`## Props[​](#props "Direct link to Props")`). */
 function cleanLine(line: string): string {
   return line.replace(/\[\u200b\]\(#[^\s)]*(?: "[^"]*")?\)/g, "").trimEnd();
 }
 
-function readLines(file: string): string[] {
-  return fs.readFileSync(file, "utf-8").split("\n").map(cleanLine);
+/** A doc line, and whether it is code (a fence or inside one), where `#` starts no heading. */
+interface Line {
+  text: string;
+  code: boolean;
 }
+
+const linesByFile = new Map<string, Line[]>();
+function linesOf(file: string): Line[] {
+  let lines = linesByFile.get(file);
+  if (!lines) {
+    let inCode = false;
+    lines = fs
+      .readFileSync(file, "utf-8")
+      .split("\n")
+      .map((raw) => {
+        const fence = raw.startsWith("```");
+        if (fence) inCode = !inCode;
+        return { text: cleanLine(raw), code: fence || inCode };
+      });
+    linesByFile.set(file, lines);
+  }
+  return lines;
+}
+
+const headingOf = (line: Line) =>
+  line.code ? null : line.text.match(/^(#+) (.*)$/);
 
 function markdownFiles(dir: string): string[] {
   if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const file = path.join(dir, entry.name);
-    if (entry.isDirectory()) return markdownFiles(file);
-    return entry.name.endsWith(".md") ? [file] : [];
-  });
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .flatMap((entry) => {
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) return markdownFiles(file);
+      return entry.name.endsWith(".md") ? [file] : [];
+    });
 }
 
 /**
- * Every documented name: component pages and their parts (`docs/api/appkit-ui/<group>/<Name>.md`, `## SelectItem`),
- * reference pages (`docs/api/appkit/<Kind>.<name>.md`), and hooks documented in guides (`### useAnalyticsQuery`).
+ * Every documented name: component pages and their parts (`api/appkit-ui/<group>/<Name>.md`, `## SelectItem`),
+ * reference pages (`api/appkit/<Kind>.<name>.md`), and hooks documented in guides (`### useAnalyticsQuery`).
  */
-export function apiIndex(packageRoot: string): Map<string, ApiEntry> {
+function apiIndex(packageRoot: string): Map<string, ApiEntry> {
   const docsDir = path.join(packageRoot, "docs");
   const index = new Map<string, ApiEntry>();
-  const add = (name: string, entry: ApiEntry) => {
-    if (!index.has(name)) index.set(name, entry);
-  };
   for (const file of markdownFiles(docsDir)) {
     const rel = path.relative(docsDir, file).split(path.sep).join("/");
     const reference = rel.match(/^api\/appkit\/[A-Za-z]+\.(\w+)\.md$/);
+    const kind: PageKind = reference
+      ? "reference"
+      : /^api\/appkit-ui\/[^/]+\/[^/]+\.md$/.test(rel)
+        ? "component"
+        : "guide";
+    const add = (name: string, line: number, level: number) => {
+      if (!index.has(name)) index.set(name, { kind, file, line, level });
+    };
     if (reference) {
-      add(reference[1], { file, line: 0, level: 1 });
+      add(reference[1], 0, 1);
       continue;
     }
-    const componentPage = rel.startsWith("api/appkit-ui/");
-    readLines(file).forEach((line, i) => {
-      const heading = line.match(/^(#{1,4}) `?([A-Za-z]\w*)`?$/);
-      if (!heading || PAGE_PARTS.has(heading[2])) return;
-      if (componentPage || /^use[A-Z]/.test(heading[2])) {
-        add(heading[2], { file, line: i, level: heading[1].length });
-      }
+    linesOf(file).forEach((line, i) => {
+      const heading =
+        !line.code && line.text.match(/^(#{1,4}) `?([A-Za-z]\w*)`?$/);
+      if (!heading) return;
+      const [, hashes, name] = heading;
+      const isApi =
+        kind === "component"
+          ? !COMPONENT_PAGE_HEADINGS.has(name)
+          : /^use[A-Z]/.test(name);
+      if (isApi) add(name, i, hashes.length);
     });
   }
   return index;
@@ -167,6 +210,8 @@ const unescapeCell = (cell: string) =>
     .replace(/&#125;/g, "}")
     .replace(/`/g, "");
 
+// The props table buildPropsSection (tools/generate-component-mdx.ts) writes: Prop | Type | Required (✓) | Default
+// (- for none) | Description, with its escapes undone.
 function tableCells(row: string): string[] {
   return row
     .replace(/^\|\s*|\s*\|$/g, "")
@@ -174,52 +219,58 @@ function tableCells(row: string): string[] {
     .map(unescapeCell);
 }
 
-/** A prop description's first sentence; the next one starts with a capital, a backtick or a parenthesis. */
+/** A description's summary sentence (the TSDoc convention). */
 const firstSentence = (text: string) =>
   text.replace(/^(.+?\.)\s+[A-Z`(].*$/, "$1");
 
 /**
- * A doc section as an agent reads it: prose and signatures, one line per prop, no table chrome. A multi-name
- * lookup (`details` off) also drops examples and prints a prop that an earlier name already showed only by name.
+ * A doc section as an agent reads it: prose and signatures, one line per prop. Without `details` (several names),
+ * no examples and props get their summary sentence. Component pages repeat their description and share notes and
+ * props across pages, so on them what has been printed is referred back to instead.
  */
 function condense(
-  lines: string[],
-  details: boolean,
-  printed: Map<string, string>,
+  lines: Line[],
+  kind: PageKind,
   owner: string,
+  details: boolean,
+  printed: Printed,
 ): string {
   const out: string[] = [];
-  const repeated = new Map<string, string[]>();
-  let inCode = false;
+  let lastText = "";
+  let intro = "";
+  const push = (text: string) => {
+    out.push(text);
+    if (text.trim()) lastText = text;
+  };
+  const sharedProps = new Map<string, string[]>();
   let skipLevel = 0;
   let propsTable = false;
   for (const [i, line] of lines.entries()) {
-    const heading = !inCode && line.match(/^(#+) (.*)$/);
+    const { text } = line;
+    const heading = headingOf(line);
     if (heading) {
       const level = heading[1].length;
       if (skipLevel && level > skipLevel) continue;
-      skipLevel =
-        /^(Usage|Source)\b/.test(heading[2]) ||
-        (!details && DETAIL_SECTIONS.test(heading[2]))
-          ? level
-          : 0;
-      if (!skipLevel && heading[2] !== "Props") out.push(line);
+      const title = heading[2];
+      const skip =
+        (kind === "component" && title === "Usage") ||
+        (!details && EXAMPLE_HEADINGS.has(title));
+      skipLevel = skip ? level : 0;
+      if (!skip && !(kind === "component" && title === "Props")) push(text);
       continue;
     }
     if (skipLevel) continue;
-    if (line.startsWith("```")) inCode = !inCode;
-    if (inCode || line.startsWith("```")) {
-      out.push(line);
+    if (line.code) {
+      push(text);
       continue;
     }
-    if (/^<!--|^\*\*Source:\*\*/.test(line)) continue;
-    if (line.startsWith("|")) {
-      if (/^\|[\s:|-]+\|$/.test(line)) continue;
-      if (/^\|[\s:|-]+\|$/.test(lines[i + 1] ?? "")) {
-        propsTable = /^\|\s*Prop\s*\|/.test(line);
+    if (text.startsWith("|")) {
+      if (/^\|[\s:|-]+\|$/.test(text)) continue;
+      if (/^\|[\s:|-]+\|$/.test(lines[i + 1]?.text ?? "")) {
+        propsTable = /^\|\s*Prop\s*\|/.test(text);
         continue;
       }
-      const cells = tableCells(line);
+      const cells = tableCells(text);
       if (propsTable && cells.length === 5) {
         const [name, type, required, def, desc] = cells;
         const optional = required ? "" : "?";
@@ -231,43 +282,74 @@ function condense(
         const prop = `- ${name}${optional}: ${type}${value}${note}`;
         const earlier = details ? undefined : printed.get(prop);
         if (earlier) {
-          repeated.set(earlier, [...(repeated.get(earlier) ?? []), name]);
+          sharedProps.set(earlier, [...(sharedProps.get(earlier) ?? []), name]);
           continue;
         }
         printed.set(prop, owner);
-        out.push(prop);
+        push(prop);
       } else {
-        out.push(`- ${cells.join(" | ")}`);
+        push(`- ${cells.join(" | ")}`);
       }
       continue;
     }
-    // A description repeats under a page's title and its own section, and a long note across pages (the
-    // charts'); a short line said by another name is cheap and may be all that name has.
-    const earlier = printed.get(line);
-    if (
-      line.trim() &&
-      (earlier === owner || (earlier && line.length >= LONG_PROSE))
-    )
-      continue;
-    printed.set(line, owner);
-    if (line.trim() || (out.length && out[out.length - 1].trim()))
-      out.push(line);
+    if (NOT_PROSE.test(text)) continue;
+    if (kind === "component" && text.trim()) {
+      // The generator repeats a page's intro in its component's section; other names' text is referred back to.
+      const earlier = printed.get(text);
+      if (earlier && earlier !== owner) {
+        const reference = `(as in ${earlier})`;
+        if (lastText !== reference) push(reference);
+        continue;
+      }
+      if (text === intro) continue;
+      intro ||= text;
+      printed.set(text, owner);
+    }
+    if (text.trim() || (out.length && out[out.length - 1].trim())) push(text);
   }
-  for (const [earlier, props] of repeated) {
-    out.push(`- ${props.join(", ")}: as in ${earlier}`);
+  for (const [earlier, props] of sharedProps) {
+    push(`- ${props.join(", ")}: as in ${earlier}`);
   }
   return out.join("\n").trim();
 }
 
-function sectionLines(entry: ApiEntry): string[] {
-  const lines = readLines(entry.file);
+function sectionLines(entry: ApiEntry): Line[] {
+  const lines = linesOf(entry.file);
   let end = entry.line + 1;
-  while (end < lines.length) {
-    const heading = lines[end].match(/^(#+) /);
+  for (; end < lines.length; end++) {
+    const heading = headingOf(lines[end]);
     if (heading && heading[1].length <= entry.level) break;
-    end++;
   }
   return lines.slice(entry.line, end);
+}
+
+/** Reference pages detail every member; among several names, one gets its declaration and member names. */
+function declarationOnly(lines: Line[], name: string): Line[] {
+  const end = lines.findIndex(
+    (line, i) => i > 0 && headingOf(line)?.[1] === "##",
+  );
+  const declaration = end < 0 ? lines : lines.slice(0, end);
+  const members = lines.flatMap((line) => {
+    const heading = headingOf(line);
+    return heading?.[1] === "###" ? [heading[2]] : [];
+  });
+  if (!members.length) return declaration;
+  const prose = (text: string) => ({ text, code: false });
+  return [
+    ...declaration,
+    prose(""),
+    prose(`Members: ${members.join(", ")} (\`appkit docs ${name}\` for each)`),
+  ];
+}
+
+function firstProseLine(entry: ApiEntry): string {
+  for (const line of sectionLines(entry).slice(1)) {
+    if (headingOf(line)) return "";
+    if (!line.code && line.text.trim() && !NOT_PROSE.test(line.text)) {
+      return line.text.trim();
+    }
+  }
+  return "";
 }
 
 /** Names close to an unknown one: those sharing a word with it (DateRangePicker: date, range, picker). */
@@ -280,15 +362,11 @@ function similarNames(index: Map<string, ApiEntry>, name: string): string[] {
     words.filter((w) => text.toLowerCase().includes(w)).length;
   // A component's description names what it does ("Date picker component" for Calendar); reference pages'
   // descriptions are too generic to match on.
-  const score = (candidate: string, entry: ApiEntry) =>
-    2 * hits(candidate) +
-    (entry.file.includes(`${path.sep}appkit-ui${path.sep}`)
-      ? hits(description(entry))
-      : 0);
   const scores = new Map(
     [...index].map(([candidate, entry]) => [
       candidate,
-      score(candidate, entry),
+      2 * hits(candidate) +
+        (entry.kind === "component" ? hits(firstProseLine(entry)) : 0),
     ]),
   );
   return [...scores.keys()]
@@ -297,51 +375,48 @@ function similarNames(index: Map<string, ApiEntry>, name: string): string[] {
     .slice(0, 6);
 }
 
-/** The first line of prose under an entry's heading. */
-function description(entry: ApiEntry): string {
-  const lines = readLines(entry.file);
-  for (let i = entry.line + 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (/^#/.test(line)) return "";
-    if (line && !/^(```|\||<!--|\*\*Source)/.test(line)) return line;
-  }
-  return "";
-}
-
-export function lookupNames(packageRoot: string, names: string[]): string {
+/**
+ * `appkit docs NAME...`: what each name's docs say and whether any was found, or null for a section query. Names
+ * come as separate arguments or as one ("BarChart DataTable"); a section name has spaces too, so a single argument
+ * that isn't all names and matches a section is a section query. One that matches neither also lists the sections.
+ */
+export function lookUp(
+  packageRoot: string,
+  queries: string[],
+  sections: Section[],
+): { text: string; found: boolean } | null {
+  const names = queries.flatMap((q) => q.split(/[\s,]+/)).filter(Boolean);
+  if (!names.length) return null;
   const index = apiIndex(packageRoot);
+  const single = queries.length === 1;
+  const allNames = names.every((name) => index.has(name));
+  if (single && !allNames && findSections(sections, queries[0]).length) {
+    return null;
+  }
+
   const details = names.length === 1;
-  const printed = new Map<string, string>();
-  return names
-    .map((name) => {
-      const entry = index.get(name);
-      if (!entry) {
-        const similar = similarNames(index, name);
-        return `=== ${name}\nNot documented.${similar.length ? ` Similar: ${similar.join(", ")}` : ""}`;
-      }
-      let lines = sectionLines(entry);
-      // A reference page (`Variable.sql.md`) details every member; a multi-name lookup keeps the declaration.
-      const reference = path
-        .relative(packageRoot, entry.file)
-        .startsWith(path.join("docs", "api", "appkit") + path.sep);
-      if (reference && !details) {
-        const end = lines.findIndex(
-          (line, i) => i > 0 && line.startsWith("## "),
-        );
-        const members = lines
-          .filter((line) => line.startsWith("### "))
-          .map((line) => line.slice(4));
-        lines = lines.slice(0, end < 0 ? lines.length : end);
-        if (members.length)
-          lines.push(
-            "",
-            `Members: ${members.join(", ")} (\`appkit docs ${name}\` for each)`,
-          );
-      }
-      const source = path.relative(packageRoot, entry.file);
-      return `=== ${name} (${source})\n${condense(lines, details, printed, name)}`;
-    })
-    .join("\n\n");
+  const printed: Printed = new Map();
+  const entries = names.map((name) => {
+    const entry = index.get(name);
+    if (!entry) {
+      const similar = similarNames(index, name);
+      return `=== ${name}\nNot documented.${similar.length ? ` Similar: ${similar.join(", ")}` : ""}`;
+    }
+    const section = sectionLines(entry);
+    const lines =
+      entry.kind === "reference" && !details
+        ? declarationOnly(section, name)
+        : section;
+    const where = path.relative(packageRoot, entry.file);
+    return `=== ${name} (${where})\n${condense(lines, entry.kind, name, details, printed)}`;
+  });
+  const found = names.some((name) => index.has(name));
+  if (single && !found && sections.length) {
+    entries.push(
+      `No section matches either. Sections: ${sections.map((s) => s.name).join(", ")}`,
+    );
+  }
+  return { text: entries.join("\n\n"), found };
 }
 
 function runDocs(queries: string[], options: { full?: boolean }) {
@@ -353,35 +428,23 @@ function runDocs(queries: string[], options: { full?: boolean }) {
     return;
   }
 
-  // Names may come as separate arguments or as one ("BarChart DataTable"); a section name has spaces too, so a
-  // single argument is a list of names only when each of its words is one.
-  const names = queries.flatMap((q) => q.split(/[\s,]+/)).filter(Boolean);
-  if (names.length) {
-    const index = apiIndex(packageRoot);
-    if (queries.length > 1 || names.every((name) => index.has(name))) {
-      console.log(lookupNames(packageRoot, names));
-      return;
-    }
-  }
-
   const content = readLlmsTxt(packageRoot);
+  const { header, sections } = parseSections(content);
+
+  const answer = lookUp(packageRoot, queries, sections);
+  if (answer) {
+    console.log(answer.text);
+    if (!answer.found) process.exit(1);
+    return;
+  }
 
   if (options.full) {
     console.log(content.replaceAll(` ${COLLAPSED_MARKER}`, ""));
     return;
   }
 
-  const { header, sections } = parseSections(content);
-
-  if (query) {
-    const matched = findSections(sections, query);
-    if (matched.length === 0) {
-      const available = sections.map((s) => `  - ${s.name}`).join("\n");
-      console.error(
-        `No section matching "${query}". Available sections:\n${available}`,
-      );
-      process.exit(1);
-    }
+  const matched = query ? findSections(sections, query) : [];
+  if (matched.length) {
     console.log(matched.map(formatExpandedSection).join("\n"));
     return;
   }
