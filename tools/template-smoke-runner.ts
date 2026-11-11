@@ -138,7 +138,13 @@ export async function runTemplateSmoke(
       writeFileSync(lockPath, committedLock);
       run("npm", ["ci", "--no-audit", "--no-fund"]);
     } else {
-      run("pnpm", ["install", "--frozen-lockfile"]);
+      // Fresh store: pnpm 11 drops bundledDependencies (appkit's patched SDKs) on store reuse.
+      run("pnpm", [
+        "install",
+        "--frozen-lockfile",
+        "--store-dir",
+        join(guardDir, "pnpm-store"),
+      ]);
       const host: Record<string, string> = {
         os: process.platform,
         cpu: process.arch,

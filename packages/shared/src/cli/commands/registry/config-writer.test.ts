@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { parseDocument } from "yaml";
 
 import { buildConfigPlan } from "./config-plan";
-import { writeConfig } from "./config-writer";
+import { bundleConflicts, preflightConfig, writeConfig } from "./config-writer";
 import type { ResourceRequirementRow } from "./requirements";
 
 const FIXTURES = path.join(__dirname, "__fixtures__");
@@ -193,5 +193,142 @@ describe("writeConfig — additive patching", () => {
     const db = fs.readFileSync(path.join(cwd, "databricks.yml"), "utf-8");
     expect(() => parseDocument(db).toJSON()).not.toThrow();
     expect(sameYaml(db, db)).toBe(true);
+  });
+});
+
+describe("writeConfig — user_api_scopes and literal env values", () => {
+  it("adds missing scopes once and writes literal app.yaml values", () => {
+    const cwd = makeTempDir();
+    fs.writeFileSync(
+      path.join(cwd, "databricks.yml"),
+      "resources:\n  apps:\n    app:\n      user_api_scopes:\n        - sql\n",
+    );
+    const result = writeConfig(cwd, {
+      appYamlEnv: [{ name: "DATABRICKS_WAREHOUSE_ID", value: "wh" }],
+      bundleVariables: [],
+      resourceBindings: [],
+      userApiScopes: ["sql", "files.files"],
+      unverifiedTypes: [],
+    });
+    const db = parseDocument(
+      fs.readFileSync(path.join(cwd, "databricks.yml"), "utf-8"),
+    ).toJSON();
+    expect(db.resources.apps.app.user_api_scopes).toEqual([
+      "sql",
+      "files.files",
+    ]);
+    expect(result.databricksYmlChanged).toBe(true);
+    const app = parseDocument(
+      fs.readFileSync(path.join(cwd, "app.yaml"), "utf-8"),
+    ).toJSON();
+    expect(app.env).toEqual([{ name: "DATABRICKS_WAREHOUSE_ID", value: "wh" }]);
+  });
+});
+
+describe("writeConfig — app key", () => {
+  it("writes scopes and bindings to the bundle's only app, whatever its key", () => {
+    const cwd = makeTempDir();
+    fs.writeFileSync(
+      path.join(cwd, "databricks.yml"),
+      "resources:\n  apps:\n    dashboard:\n      name: dash\n",
+    );
+    writeConfig(cwd, {
+      appYamlEnv: [],
+      bundleVariables: [],
+      resourceBindings: [
+        {
+          name: "wh",
+          type: "sql_warehouse",
+          permission: "CAN_USE",
+          fields: {},
+        },
+      ],
+      userApiScopes: ["sql"],
+      unverifiedTypes: [],
+    });
+    const apps = parseDocument(
+      fs.readFileSync(path.join(cwd, "databricks.yml"), "utf-8"),
+    ).toJSON().resources.apps;
+    expect(Object.keys(apps)).toEqual(["dashboard"]);
+    expect(apps.dashboard.user_api_scopes).toEqual(["sql"]);
+    expect(apps.dashboard.resources[0].name).toBe("wh");
+  });
+});
+
+describe("preflightConfig", () => {
+  it("throws for several apps without one named app, before any write", () => {
+    const cwd = makeTempDir();
+    fs.writeFileSync(
+      path.join(cwd, "databricks.yml"),
+      "resources:\n  apps:\n    frontend: {}\n    backend: {}\n",
+    );
+    expect(() => preflightConfig(cwd)).toThrow("several apps");
+    fs.writeFileSync(
+      path.join(cwd, "databricks.yml"),
+      "resources:\n  apps:\n    dash: {}\n",
+    );
+    expect(() => preflightConfig(cwd)).not.toThrow();
+  });
+});
+
+describe("preflightConfig — invalid YAML", () => {
+  it.each([
+    ["app.yaml", "command: ['x']\ncommand: ['y']\n"],
+    ["databricks.yml", "resources: [\n"],
+  ])("rejects %s with parse errors, naming the file", (file, content) => {
+    const cwd = makeTempDir();
+    fs.writeFileSync(path.join(cwd, file), content);
+    expect(() => preflightConfig(cwd)).toThrow(`${file} is not valid YAML`);
+  });
+});
+
+describe("bundleConflicts", () => {
+  const plan = {
+    appYamlEnv: [],
+    bundleVariables: [{ name: "sql_warehouse_id", value: "new" }],
+    resourceBindings: [
+      {
+        name: "sql-warehouse",
+        type: "sql_warehouse",
+        permission: "CAN_USE",
+        fields: { id: "${var.sql_warehouse_id}" },
+      },
+    ],
+    unverifiedTypes: [],
+  };
+  const yml = (target: string, permission: string) =>
+    "resources:\n  apps:\n    app:\n      resources:\n        - name: sql-warehouse\n          sql_warehouse:\n            id: ${var.sql_warehouse_id}\n            permission: " +
+    permission +
+    "\ntargets:\n  default:\n    variables:\n      sql_warehouse_id: " +
+    target +
+    "\n";
+
+  it("flags a pinned variable value and a binding that differ", () => {
+    const cwd = makeTempDir();
+    fs.writeFileSync(
+      path.join(cwd, "databricks.yml"),
+      yml("old", "CAN_MANAGE"),
+    );
+    expect(bundleConflicts(cwd, plan)).toEqual([
+      "variable sql_warehouse_id",
+      "binding sql-warehouse",
+    ]);
+  });
+
+  it("accepts entries that already match", () => {
+    const cwd = makeTempDir();
+    fs.writeFileSync(path.join(cwd, "databricks.yml"), yml("new", "CAN_USE"));
+    expect(bundleConflicts(cwd, plan)).toEqual([]);
+  });
+
+  it("flags a clash with an earlier plan of the same run", () => {
+    const cwd = makeTempDir();
+    const earlier = {
+      ...plan,
+      bundleVariables: [{ name: "sql_warehouse_id", value: "other" }],
+    };
+    expect(bundleConflicts(cwd, plan, [earlier])).toEqual([
+      "variable sql_warehouse_id",
+    ]);
   });
 });
