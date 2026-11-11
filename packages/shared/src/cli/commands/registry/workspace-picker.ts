@@ -296,6 +296,8 @@ export interface ParentContextStep {
     command: string[];
     idField: string;
     labelField?: string;
+    /** Prefix stripped from each listed id (label and value). */
+    stripPrefix?: string;
   };
 }
 
@@ -358,6 +360,38 @@ export const PARENT_CONTEXT_CHAINS: Record<string, ParentContextStep[]> = {
       }),
     },
   ],
+  model_service: [
+    {
+      key: "catalog",
+      list: () => ({
+        command: ["catalogs", "list"],
+        idField: "name",
+        labelField: "name",
+      }),
+    },
+    {
+      key: "schema",
+      list: ([catalog]) => ({
+        command: ["schemas", "list", catalog],
+        idField: "name",
+        labelField: "name",
+      }),
+    },
+    {
+      key: "model service",
+      list: ([catalog, schema]) => ({
+        command: [
+          "ai-gateway",
+          "list-model-services",
+          "--parent",
+          `schemas/${catalog}.${schema}`,
+        ],
+        idField: "name",
+        // Listed as model-services/{catalog}.{schema}.{name}; apps bind the full name.
+        stripPrefix: "model-services/",
+      }),
+    },
+  ],
   secret: [
     {
       key: "scope",
@@ -396,6 +430,11 @@ export const PARENT_CONTEXT_CHAINS: Record<string, ParentContextStep[]> = {
   ],
 };
 
+/** Parents a drill-down opens on first; the full walk stays one pick away. */
+export const DEFAULT_PARENTS: Record<string, string[]> = {
+  model_service: ["system", "ai"],
+};
+
 /** True when a resource type needs a parent-context drill-down to list. */
 export function isParentContext(resourceType: string): boolean {
   return resourceType in PARENT_CONTEXT_CHAINS;
@@ -429,15 +468,24 @@ export function listParentContextStep(
     return { key: step.key, choices: [] };
   }
   const spec = step.list(parents);
+  const choices = runList(
+    spec.command,
+    spec.idField,
+    spec.labelField,
+    profile,
+    runner,
+  );
+  const prefix = spec.stripPrefix;
   return {
     key: step.key,
-    choices: runList(
-      spec.command,
-      spec.idField,
-      spec.labelField,
-      profile,
-      runner,
-    ),
+    choices: prefix
+      ? choices.map(({ value }) => {
+          const bare = value.startsWith(prefix)
+            ? value.slice(prefix.length)
+            : value;
+          return { value: bare, label: bare };
+        })
+      : choices,
   };
 }
 

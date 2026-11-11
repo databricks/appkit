@@ -304,7 +304,7 @@ deployment).
 ## Existence coverage
 
 Control-plane `.get()` for `sql_warehouse`, `serving_endpoint`, `genie_space`,
-`job`, `volume`, `vector_search_index`, and `uc_function`; a real `SELECT 1`
+`job`, `volume`, `vector_search_index`, `uc_function`, and `model_service`; a real `SELECT 1`
 connection for `postgres`/Lakebase. Other types report `skipped`.
 
 Requires live credentials (a configured Databricks profile/token).

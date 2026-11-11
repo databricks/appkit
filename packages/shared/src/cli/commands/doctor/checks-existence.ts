@@ -38,6 +38,7 @@ interface DoctorWorkspaceClient {
   functions: {
     getFunction: (r: { fullNameArg: string }) => Promise<unknown>;
   };
+  request: (r: { method: string; path: string }) => Promise<Response>;
 }
 
 type ExistenceProbe = (
@@ -269,6 +270,24 @@ const probeFunction: ExistenceProbe = async (client, target) => {
   }
 };
 
+// request() resolves on any status; throw non-OK so classifyError reads it.
+const probeModelService: ExistenceProbe = async (client, target) => {
+  const name = field(target, "name");
+  if (!name) return missingField("name");
+  try {
+    const res = await client.request({
+      method: "GET",
+      path: `/api/2.1/unity-catalog/model-services/${encodeURIComponent(name)}`,
+    });
+    if (res.ok) return EXISTENCE_OK;
+    throw Object.assign(new Error(await res.text()), {
+      statusCode: res.status,
+    });
+  } catch (err) {
+    return classifyError(err, target);
+  }
+};
+
 function lakebaseAuthHint(message: string): string | undefined {
   if (/password authentication failed/i.test(message)) {
     return (
@@ -343,6 +362,7 @@ const PROBES: Record<string, ExistenceProbe> = {
   volume: probeVolume,
   vector_search_index: probeVectorIndex,
   uc_function: probeFunction,
+  model_service: probeModelService,
   postgres: probePostgres,
 };
 

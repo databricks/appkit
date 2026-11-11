@@ -340,10 +340,11 @@ async function resolveAdapter(
   def: AgentDefinition,
   onBehalfOfUser: boolean,
 ): Promise<AgentAdapter> {
-  // Explicit model wins; otherwise fall back to the
-  // DATABRICKS_SERVING_ENDPOINT_NAME env default. A string from either source
-  // routes by name (system.* → AI Gateway, else Model Serving).
-  const source = def.model ?? process.env.DATABRICKS_SERVING_ENDPOINT_NAME;
+  // Explicit model wins, then the model_service env, then the legacy serving env.
+  const source =
+    def.model ??
+    process.env.DATABRICKS_MODEL_SERVICE_NAME ??
+    process.env.DATABRICKS_SERVING_ENDPOINT_NAME;
   if (!source) {
     // No model and no env default: let fromModelServing() surface the
     // canonical "set DATABRICKS_SERVING_ENDPOINT_NAME" error.
