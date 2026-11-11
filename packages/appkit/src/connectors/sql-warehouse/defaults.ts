@@ -16,3 +16,14 @@ export const executeStatementDefaults: ExecuteStatementDefaults = {
   onWaitTimeout: "CONTINUE",
   timeout: 60000,
 };
+
+/**
+ * Maximum size for inline Arrow IPC attachments (25 MiB decoded — the
+ * Databricks Statement Execution API hard cap on INLINE responses).
+ *
+ * The analytics route streams the decoded attachment straight back on the
+ * query response body; this cap bounds the single in-memory copy. Larger
+ * results fall through to `disposition: "EXTERNAL_LINKS"`, which streams
+ * chunk-by-chunk and is not bound by this limit.
+ */
+export const MAX_INLINE_ATTACHMENT_BYTES = 25 * 1024 * 1024;

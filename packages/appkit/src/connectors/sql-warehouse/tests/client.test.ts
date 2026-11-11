@@ -427,6 +427,86 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
     });
   });
 
+  describe("INLINE + JSON_ARRAY as Arrow", () => {
+    const columns = [{ name: "n", typeName: "INT", typeText: "INT" }];
+    const inlineAsArrow = (
+      connector: SQLWarehouseConnector,
+      response: unknown,
+      workspaceClient: unknown = {},
+    ) =>
+      (connector as any)._transformDataArray(
+        response,
+        workspaceClient,
+        undefined,
+        true,
+      );
+
+    test("reads every inline chunk into one Arrow attachment", async () => {
+      const getResultData = vi
+        .fn()
+        .mockResolvedValueOnce({ dataArray: [["3"]] });
+      const result = await inlineAsArrow(
+        createConnector(),
+        {
+          statementId: "stmt-inline",
+          status: { state: "SUCCEEDED" },
+          manifest: {
+            format: "JSON_ARRAY",
+            totalChunkCount: 2,
+            schema: { columns },
+          },
+          result: { dataArray: [["1"], ["2"]], nextChunkIndex: 1 },
+        },
+        { statementExecution: { getResultData } },
+      );
+
+      expect(getResultData).toHaveBeenCalledWith(
+        { statementId: "stmt-inline", chunkIndex: 1 },
+        expect.anything(),
+      );
+      const table = tableFromIPC(
+        Buffer.from(result.result.attachment, "base64"),
+      );
+      expect([...(table.getChild("n") ?? [])]).toEqual([1, 2, 3]);
+      expect(result.result.columnNames).toEqual(["n"]);
+      expect(result.result.statement_id).toBe("stmt-inline");
+    });
+
+    test("reads a chunk with more rows than a function call takes arguments", async () => {
+      const many = Array.from({ length: 200_000 }, () => ["7"]);
+      const getResultData = vi.fn().mockResolvedValueOnce({ dataArray: many });
+      const result = await inlineAsArrow(
+        createConnector(),
+        {
+          statementId: "stmt-inline",
+          status: { state: "SUCCEEDED" },
+          manifest: { format: "JSON_ARRAY", schema: { columns } },
+          result: { dataArray: [["1"]], nextChunkIndex: 1 },
+        },
+        { statementExecution: { getResultData } },
+      );
+
+      const table = tableFromIPC(
+        Buffer.from(result.result.attachment, "base64"),
+      );
+      expect(table.numRows).toBe(200_001);
+    });
+
+    test("a cell that does not parse as its column type fails with a code and a message", async () => {
+      await expect(
+        inlineAsArrow(createConnector(), {
+          statementId: "stmt-inline",
+          status: { state: "SUCCEEDED" },
+          manifest: { format: "JSON_ARRAY", schema: { columns } },
+          result: { dataArray: [["not-a-number"]] },
+        }),
+      ).rejects.toMatchObject({
+        errorCode: "ARROW_REBUILD_FAILED",
+        clientMessage: expect.stringMatching(/JSON_ARRAY/),
+      });
+    });
+  });
+
   describe("multi-chunk EXTERNAL_LINKS pagination", () => {
     function multiChunkResponse(totalChunks: number): StatementResponse {
       return {

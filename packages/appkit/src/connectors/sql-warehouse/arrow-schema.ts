@@ -1,7 +1,7 @@
 import {
   Binary,
   Bool,
-  type DataType,
+  DataType,
   DateDay,
   Decimal,
   DurationMicrosecond,
@@ -16,13 +16,21 @@ import {
   List,
   Map_,
   Null,
+  RecordBatch,
   Schema,
   Struct,
   Table,
   TimestampMicrosecond,
   tableToIPC,
+  Type,
   Utf8,
+  makeData,
+  makeVector,
+  vectorFromArray,
 } from "apache-arrow";
+
+import type { ColumnInfo } from "../../workspace-client";
+import { hasJsonArrayCodec, parseJsonArrayCell } from "./json-array-cells";
 
 /**
  * Parse a Databricks SQL type text (the value returned by the Statement
@@ -51,28 +59,124 @@ export function parseDatabricksType(typeText: string): DataType {
  * deliver a real Arrow Table to the client, preserving the hook's typed
  * contract.
  */
-export function buildEmptyArrowIPCBase64(
-  columns: Array<{
-    name?: string;
-    typeText?: string;
-    typeName?: string;
-  }>,
-): string {
-  const fields = columns.map((col, index) => {
-    const typeText = col.typeText ?? col.typeName ?? "STRING";
-    let dataType: DataType;
-    try {
-      dataType = parseDatabricksType(typeText);
-    } catch {
-      dataType = new Utf8();
-    }
-    const name = col.name && col.name.length > 0 ? col.name : `column_${index}`;
-    return new Field(name, dataType, true);
-  });
+export function buildEmptyArrowIPCBase64(columns: ColumnInfo[]): string {
+  const fields = columns.map(
+    (col, index) =>
+      new Field(manifestColumnName(col, index), columnArrowType(col), true),
+  );
   const schema = new Schema(fields);
   const table = new Table(schema);
   const ipc = tableToIPC(table, "stream");
   return Buffer.from(ipc).toString("base64");
+}
+
+export function manifestColumnName(
+  col: ColumnInfo | undefined,
+  index: number,
+): string {
+  return col?.name || `column_${index}`;
+}
+
+function columnTypeText(col: ColumnInfo): string {
+  return col.typeText ?? col.typeName ?? "STRING";
+}
+
+function columnArrowType(col: ColumnInfo): DataType {
+  let type: DataType;
+  try {
+    type = parseDatabricksType(columnTypeText(col));
+  } catch {
+    return new Utf8();
+  }
+  if (DataType.isDecimal(type) && col.typePrecision != null) {
+    return new Decimal(col.typeScale ?? 0, col.typePrecision, 128);
+  }
+  return type;
+}
+
+/**
+ * Rebuild the `ARROW_STREAM` IPC bytes from the positional rows of an `INLINE`
+ * + `JSON_ARRAY` result, keeping the manifest column names (duplicates
+ * included). Columns without a {@link parseJsonArrayCell} codec stay Utf8, and
+ * a cell that does not parse as its column type throws. Zoned TIMESTAMP columns
+ * are labelled UTC, since cells carry an offset rather than the session zone.
+ */
+export function buildArrowIPCFromRows(
+  columns: ColumnInfo[],
+  rows: ReadonlyArray<ReadonlyArray<unknown>>,
+): Uint8Array {
+  const vectors = columns.map((col, index) =>
+    vectorFromCells(
+      col,
+      rows.map((row) => row[index] ?? null),
+    ),
+  );
+  const fields = vectors.map(
+    (vector, index) =>
+      new Field(manifestColumnName(columns[index], index), vector.type, true),
+  );
+  const batch = new RecordBatch(
+    new Schema(fields),
+    makeData({
+      type: new Struct(fields),
+      length: rows.length,
+      nullCount: 0,
+      children: vectors.map((vector) => vector.data[0]),
+    }),
+  );
+  return tableToIPC(new Table(batch), "stream");
+}
+
+function vectorFromCells(col: ColumnInfo, cells: unknown[]) {
+  const type = rebuildType(col);
+  const values = cells.map((cell) =>
+    cell === null ? null : parseJsonArrayCell(String(cell), type),
+  );
+  if (DataType.isDecimal(type)) {
+    return decimalVector(values as Array<bigint | null>, type);
+  }
+  return vectorFromArray(values, type);
+}
+
+function rebuildType(col: ColumnInfo): DataType {
+  const type = columnArrowType(col);
+  // GEOGRAPHY and GEOMETRY map to Binary but arrive as text on the JSON wire.
+  if (
+    type.typeId === Type.Binary &&
+    columnTypeText(col).toUpperCase() !== "BINARY"
+  ) {
+    return new Utf8();
+  }
+  return hasJsonArrayCodec(type) ? type : new Utf8();
+}
+
+/** `vectorFromArray` cannot build Decimal128, so write the 128-bit words directly. */
+function decimalVector(unscaled: Array<bigint | null>, type: Decimal) {
+  const words = new Uint32Array(unscaled.length * 4);
+  const validity = new Uint8Array(Math.ceil(unscaled.length / 8));
+  let nullCount = 0;
+  unscaled.forEach((value, i) => {
+    if (value === null) {
+      nullCount++;
+      return;
+    }
+    validity[i >> 3] |= 1 << (i & 7);
+    const twosComplement = value < 0n ? (1n << 128n) + value : value;
+    for (let w = 0; w < 4; w++) {
+      words[i * 4 + w] = Number(
+        (twosComplement >> BigInt(32 * w)) & 0xffffffffn,
+      );
+    }
+  });
+  return makeVector(
+    makeData({
+      type: new Decimal(type.scale, type.precision, 128),
+      length: unscaled.length,
+      nullCount,
+      nullBitmap: validity,
+      data: words,
+    }),
+  );
 }
 
 // ============================================================================

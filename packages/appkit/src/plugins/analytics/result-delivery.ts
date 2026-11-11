@@ -1,9 +1,14 @@
 import { type DataType, type Field, Type, tableFromIPC } from "apache-arrow";
 import type { SQLTypeMarker } from "shared";
 
+import { MAX_INLINE_ATTACHMENT_BYTES } from "../../connectors/sql-warehouse/defaults";
+import { formatJsonArrayCell } from "../../connectors/sql-warehouse/json-array-cells";
 import { ExecutionError } from "../../errors";
 import { createLogger } from "../../logging/logger";
-import type { RefreshChunkLink } from "../../stream/arrow-stream-processor";
+import {
+  asDownloadFailure,
+  type RefreshChunkLink,
+} from "../../stream/arrow-stream-processor";
 import type { ExternalLink } from "../../workspace-client";
 
 /**
@@ -33,7 +38,11 @@ export interface QueryExecutor {
   query(
     query: string,
     parameters: Record<string, SQLTypeMarker | null | undefined> | undefined,
-    formatParameters: { disposition: string; format: string },
+    formatParameters: {
+      disposition: string;
+      format: string;
+      asArrow?: boolean;
+    },
     signal?: AbortSignal,
   ): Promise<
     | {
@@ -41,6 +50,7 @@ export interface QueryExecutor {
         data?: Record<string, unknown>[];
         external_links?: ExternalLink[];
         columnNames?: string[];
+        totalByteCount?: number;
         statement_id?: string;
         status?: unknown;
         refreshChunkLink?: RefreshChunkLink;
@@ -55,24 +65,73 @@ export interface ArrowChunkStreamer {
     chunks: ExternalLink[],
     signal?: AbortSignal,
     refresh?: RefreshChunkLink,
+    fullHeaderWait?: boolean,
   ): AsyncGenerator<Uint8Array, void, unknown>;
 }
 
-/** The arrow delivery mode a warehouse actually supports. */
-export type ArrowCapability = "inline" | "external";
+/**
+ * The arrow delivery mode a warehouse actually supports. `"links-denied"`:
+ * storage refused or never answered Cloud Fetch, so inline `JSON_ARRAY` goes first.
+ */
+export type ArrowCapability = "inline" | "external" | "links-denied";
 
-/** Optional per-warehouse capability memo, avoiding a doomed probe per query. */
+/** Filled in before the first byte, so the route can send them as headers. */
+export interface ArrowDeliveryOut {
+  columnNames?: string[];
+  statementId?: string;
+}
+
+/** What {@link deliverArrowBytes} leaves for the fallback to retry a Cloud Fetch download with. */
+interface DeliveryState extends ArrowDeliveryOut {
+  cloudFetch?: {
+    totalByteCount?: number;
+    stream(fullHeaderWait: boolean): AsyncGenerator<Uint8Array, void, unknown>;
+  };
+}
+
+export const LINKS_DENIED_TTL_MS = 10 * 60_000;
+
+/**
+ * Per-warehouse {@link ArrowCapability}, so a query skips delivery modes the
+ * warehouse is known not to serve. `"links-denied"` lapses after ten minutes and
+ * then reads as `"external"`, so Cloud Fetch is tried again.
+ */
+export class ArrowCapabilityMemo {
+  private readonly entries = new Map<
+    string,
+    { capability: ArrowCapability; until?: number }
+  >();
+
+  get(warehouseId: string): ArrowCapability | undefined {
+    const entry = this.entries.get(warehouseId);
+    if (entry?.until !== undefined && Date.now() >= entry.until) {
+      return "external";
+    }
+    return entry?.capability;
+  }
+
+  set(warehouseId: string, capability: ArrowCapability): void {
+    this.entries.set(warehouseId, {
+      capability,
+      until:
+        capability === "links-denied"
+          ? Date.now() + LINKS_DENIED_TTL_MS
+          : undefined,
+    });
+  }
+}
+
+/** A capability hint and a report callback, so the caller can memoize the mode per warehouse. */
 interface ArrowDeliveryOptions {
   /**
-   * When `"external"`, skip the `INLINE+ARROW_STREAM` attempt and go straight
-   * to `EXTERNAL_LINKS` — a standard warehouse rejects INLINE arrow on every
-   * query, so once we've learned that, the probe is pure waste. `"inline"` or
-   * undefined attempts INLINE first (the common/Reyden path).
+   * `"inline"` or undefined attempts `INLINE+ARROW_STREAM` first (the Reyden
+   * path). Any other hint skips it — a standard warehouse rejects INLINE arrow
+   * on every query, so once we've learned that, the probe is pure waste.
    */
   capabilityHint?: ArrowCapability;
   /**
-   * Called once the working delivery mode is known, so the caller can memoize
-   * it per warehouse for subsequent queries.
+   * Called when a delivery mode delivers its first byte, or when storage is
+   * shown to deny Cloud Fetch (`"links-denied"`).
    */
   onCapabilityResolved?: (capability: ArrowCapability) => void;
 }
@@ -169,6 +228,12 @@ export function arrowDeliveryUnsupported(): ExecutionError {
 const errMessage = (err: unknown): string =>
   err instanceof Error ? err.message : String(err);
 
+/** A view over a base64 attachment's bytes, decoded once. */
+function attachmentBytes(attachment: string): Uint8Array {
+  const decoded = Buffer.from(attachment, "base64");
+  return new Uint8Array(decoded.buffer, decoded.byteOffset, decoded.byteLength);
+}
+
 /**
  * Produce the raw Arrow IPC bytes for an ARROW_STREAM query, applying the
  * capability fallback:
@@ -185,19 +250,16 @@ const errMessage = (err: unknown): string =>
  * first chunk is yielded, so the caller can emit them (e.g. as a header)
  * ahead of the body.
  */
-export async function* deliverArrowBytes(
+async function* deliverArrowBytes(
   executor: QueryExecutor,
   streamer: ArrowChunkStreamer,
   query: string,
   processedParams: Record<string, SQLTypeMarker | null | undefined> | undefined,
-  out: { columnNames?: string[]; statementId?: string },
+  out: DeliveryState,
   signal?: AbortSignal,
   opts?: ArrowDeliveryOptions,
 ): AsyncGenerator<Uint8Array, void, unknown> {
-  // Skip the INLINE probe when a prior query already learned this warehouse
-  // only serves arrow via EXTERNAL_LINKS (standard warehouses reject INLINE
-  // arrow on every query, so probing each time is pure waste).
-  if (opts?.capabilityHint !== "external") {
+  if (opts?.capabilityHint === undefined || opts.capabilityHint === "inline") {
     try {
       const result = await executor.query(
         query,
@@ -209,13 +271,7 @@ export async function* deliverArrowBytes(
         opts?.onCapabilityResolved?.("inline");
         out.columnNames = result.columnNames;
         out.statementId = result.statement_id;
-        // Decode base64 once; yield a view over the Buffer (no copy, no parse).
-        const decoded = Buffer.from(result.attachment, "base64");
-        yield new Uint8Array(
-          decoded.buffer,
-          decoded.byteOffset,
-          decoded.byteLength,
-        );
+        yield attachmentBytes(result.attachment);
         return;
       }
       // INLINE succeeded but returned no attachment (rare: inline data_array
@@ -263,7 +319,6 @@ export async function* deliverArrowBytes(
   if (!ext?.external_links) {
     throw ExecutionError.missingData("external_links");
   }
-  opts?.onCapabilityResolved?.("external");
   out.columnNames = ext.columnNames;
   out.statementId = ext.statement_id;
   // Stream the pre-signed links resolved in THIS request's execution context
@@ -271,11 +326,179 @@ export async function* deliverArrowBytes(
   // need no auth to download, so there is no second `getStatement` under a
   // mismatched identity. `refreshChunkLink` (also bound to this context) lets
   // the streamer re-mint a link that expires mid-download.
-  yield* streamer.streamExternalLinks(
-    ext.external_links,
-    signal,
-    ext.refreshChunkLink,
+  const links = ext.external_links;
+  const refresh = ext.refreshChunkLink;
+  async function* stream(fullHeaderWait: boolean) {
+    const bytes = streamer.streamExternalLinks(
+      links,
+      signal,
+      refresh,
+      fullHeaderWait,
+    );
+    const first = await bytes.next();
+    opts?.onCapabilityResolved?.("external");
+    if (!first.done) yield first.value;
+    yield* bytes;
+  }
+  out.cloudFetch = { totalByteCount: ext.totalByteCount, stream };
+  yield* stream(false);
+}
+
+/** The warehouse aborts an INLINE statement whose result is over 25 MiB. */
+function isInlineLimitExceeded(err: unknown): boolean {
+  return (
+    err instanceof ExecutionError &&
+    err.errorCode === "BAD_REQUEST" &&
+    err.message.toLowerCase().includes("inline byte limit exceeded")
   );
+}
+
+/** `undefined` when the result is too large to send inline. */
+async function inlineJsonAsArrow(
+  executor: QueryExecutor,
+  query: string,
+  processedParams: Record<string, SQLTypeMarker | null | undefined> | undefined,
+  out: ArrowDeliveryOut,
+  signal?: AbortSignal,
+): Promise<Uint8Array | undefined> {
+  let result: Awaited<ReturnType<QueryExecutor["query"]>>;
+  try {
+    result = await executor.query(
+      query,
+      processedParams,
+      { disposition: "INLINE", format: "JSON_ARRAY", asArrow: true },
+      signal,
+    );
+  } catch (err: unknown) {
+    if (isInlineLimitExceeded(err)) return undefined;
+    throw err;
+  }
+  if (!result?.attachment) throw ExecutionError.missingData("attachment");
+  out.columnNames = result.columnNames;
+  out.statementId = result.statement_id;
+  return attachmentBytes(result.attachment);
+}
+
+function linksDenied(cause: ExecutionError): ExecutionError {
+  return new ExecutionError(
+    `Cloud Fetch download failed and the result is too large to send inline: ${cause.message}`,
+    {
+      errorCode: "EXTERNAL_LINKS_DENIED",
+      cause,
+      clientMessage:
+        "The query result could not be downloaded from workspace storage and is too large to send inline. Check the workspace storage firewall and the app's network policy.",
+    },
+  );
+}
+
+type Download =
+  | { stream: AsyncGenerator<Uint8Array, void, unknown> }
+  | NonNullable<ReturnType<typeof asDownloadFailure>>;
+
+/** Pull the first chunk, so a failed download surfaces before the route sends headers. */
+async function startDownload(
+  bytes: AsyncGenerator<Uint8Array, void, unknown>,
+): Promise<Download> {
+  let first: IteratorResult<Uint8Array, void>;
+  try {
+    first = await bytes.next();
+  } catch (error: unknown) {
+    const failure = asDownloadFailure(error);
+    if (!failure) throw error;
+    return failure;
+  }
+  return {
+    stream: (async function* () {
+      if (!first.done) yield first.value;
+      yield* bytes;
+    })(),
+  };
+}
+
+/**
+ * {@link deliverArrowBytes}, falling back to an inline `JSON_ARRAY` run when the
+ * Cloud Fetch download fails before its first byte.
+ *
+ * A refusal (400/403 after the re-mint) reports `"links-denied"` at once; a
+ * download that never answers reports it after the fallback, since blocked
+ * hosts hang instead of refusing. Other download errors fall back without being
+ * remembered. A result too large for inline fails with `EXTERNAL_LINKS_DENIED`
+ * after a refusal; otherwise it gets one Cloud Fetch retry with the full header
+ * wait, and `EXTERNAL_LINKS_DENIED` only if storage again refuses or never answers. With the `"links-denied"` hint, inline runs first and only a
+ * result too large for it goes back to Cloud Fetch.
+ */
+export async function* deliverArrowBytesWithFallback(
+  executor: QueryExecutor,
+  streamer: ArrowChunkStreamer,
+  query: string,
+  processedParams: Record<string, SQLTypeMarker | null | undefined> | undefined,
+  out: ArrowDeliveryOut,
+  signal?: AbortSignal,
+  opts?: ArrowDeliveryOptions,
+): AsyncGenerator<Uint8Array, void, unknown> {
+  const state: DeliveryState = out;
+  const inline = () =>
+    inlineJsonAsArrow(executor, query, processedParams, out, signal);
+  const remember = (capability: ArrowCapability) =>
+    opts?.onCapabilityResolved?.(capability);
+  let tooLarge = false;
+  if (opts?.capabilityHint === "links-denied") {
+    const bytes = await inline();
+    if (bytes) {
+      yield bytes;
+      return;
+    }
+    tooLarge = true;
+  }
+
+  const download = await startDownload(
+    deliverArrowBytes(
+      executor,
+      streamer,
+      query,
+      processedParams,
+      state,
+      signal,
+      opts,
+    ),
+  );
+  if ("stream" in download) {
+    yield* download.stream;
+    return;
+  }
+
+  const { kind, error } = download;
+  if (kind === "refused") remember("links-denied");
+  const size = state.cloudFetch?.totalByteCount;
+  tooLarge ||= size !== undefined && size > MAX_INLINE_ATTACHMENT_BYTES;
+  if (!tooLarge) {
+    logger.warn(
+      "Cloud Fetch download failed (%s), serving the result inline: %s",
+      kind,
+      error.message,
+    );
+    const bytes = await inline();
+    if (bytes) {
+      if (kind === "unanswered") remember("links-denied");
+      yield bytes;
+      return;
+    }
+  }
+  if (kind === "refused") throw linksDenied(error);
+  if (!state.cloudFetch) throw error;
+
+  logger.warn(
+    "Cloud Fetch download failed (%s) on a result too large for inline, retrying with the full header wait",
+    kind,
+  );
+  const retry = await startDownload(state.cloudFetch.stream(true));
+  if ("stream" in retry) {
+    yield* retry.stream;
+    return;
+  }
+  const denied = retry.kind !== "other";
+  if (denied || kind === "unanswered") remember("links-denied");
+  throw denied ? linksDenied(retry.error) : retry.error;
 }
 
 /** JSON row result plus the metadata the SSE `result` message forwards. */
@@ -355,70 +578,11 @@ export async function deliverJsonResult(
 const JSON_ARRAY_FALLBACK_MAX_ROWS = 100_000;
 const JSON_ARRAY_FALLBACK_MAX_BYTES = 64 * 1024 * 1024;
 
-/** Render an apache-arrow Decimal cell to a fixed-point string. */
-function formatDecimalCell(
-  value: { toString(): string },
-  scale: number,
-): string {
-  const unscaled = value.toString();
-  if (scale <= 0) return unscaled;
-  const negative = unscaled.startsWith("-");
-  let digits = negative ? unscaled.slice(1) : unscaled;
-  if (digits.length <= scale) digits = digits.padStart(scale + 1, "0");
-  const point = digits.length - scale;
-  const out = `${digits.slice(0, point)}.${digits.slice(point)}`;
-  return negative ? `-${out}` : out;
-}
-
-/**
- * Render an apache-arrow Timestamp cell to ISO-8601 ms precision — `Z` for
- * zoned columns, no `Z` for TIMESTAMP_NTZ — matching native JSON_ARRAY.
- */
-function formatTimestampCell(epochMs: number, hasTimezone: boolean): string {
-  const iso = new Date(epochMs).toISOString();
-  return hasTimezone ? iso : iso.slice(0, -1);
-}
-
-/** Render an apache-arrow Date cell to `yyyy-MM-dd` (UTC). */
-function formatDateCell(epochMs: number): string {
-  return new Date(epochMs).toISOString().slice(0, 10);
-}
-
-/**
- * Render a single scalar Arrow value to the string form the warehouse emits
- * under native JSON_ARRAY. Used for both top-level cells and (recursively, via
- * {@link renderNestedValue}) scalar leaves inside List/Struct/Map columns,
- * keyed on the Arrow field type so a nested `DECIMAL` keeps its scale and a
- * nested `TIMESTAMP` becomes ISO-8601 instead of raw epoch-ms.
- */
-function formatScalarCell(value: unknown, type: DataType): string {
-  switch (type.typeId) {
-    case Type.Decimal:
-      return formatDecimalCell(
-        value as { toString(): string },
-        (type as DataType & { scale: number }).scale,
-      );
-    case Type.Timestamp:
-      return formatTimestampCell(
-        Number(value),
-        (type as DataType & { timezone?: string | null }).timezone != null,
-      );
-    case Type.Date:
-      return formatDateCell(Number(value));
-    default:
-      if (value instanceof Uint8Array) {
-        return Buffer.from(value).toString("base64");
-      }
-      if (value instanceof Date) return value.toISOString();
-      return String(value);
-  }
-}
-
 /**
  * Recursively render a nested Arrow value (List / Struct / Map, or a scalar
  * leaf) to the plain JS shape the warehouse nests inside a JSON_ARRAY cell:
  * structs and maps become objects, lists become arrays, and every scalar leaf
- * is stringified per {@link formatScalarCell}. The caller `JSON.stringify`s the
+ * is stringified per {@link formatJsonArrayCell}. The caller `JSON.stringify`s the
  * result so nested columns match the warehouse's native `data_array` exactly.
  */
 function renderNestedValue(value: unknown, type: DataType): unknown {
@@ -458,9 +622,16 @@ function renderNestedValue(value: unknown, type: DataType): unknown {
       return obj;
     }
     default:
-      return formatScalarCell(value, type);
+      return formatJsonArrayCell(value, type);
   }
 }
+
+const NESTED_TYPES = new Set<Type>([
+  Type.List,
+  Type.FixedSizeList,
+  Type.Struct,
+  Type.Map,
+]);
 
 /** Parse a STRING cell that looks like JSON into an object/array. */
 function maybeParseJsonString(value: string): unknown {
@@ -519,37 +690,14 @@ export function decodeArrowAttachmentToRows(
       const v = col?.get(i);
       if (v == null) {
         row[name] = null;
-        continue;
-      }
-      switch (type.typeId) {
-        case Type.Decimal:
-        case Type.Timestamp:
-        case Type.Date:
-          row[name] = formatScalarCell(v, type);
-          continue;
-        // Nested columns (STRUCT / ARRAY / MAP) arrive on the native
-        // JSON_ARRAY wire as a JSON string with every scalar leaf stringified
-        // by type; render the same shape and stringify so callers cannot tell
-        // the fallback path from the native one.
-        case Type.List:
-        case Type.FixedSizeList:
-        case Type.Struct:
-        case Type.Map:
-          row[name] = JSON.stringify(renderNestedValue(v, type));
-          continue;
-      }
-      if (
-        typeof v === "number" ||
-        typeof v === "bigint" ||
-        typeof v === "boolean"
-      ) {
-        row[name] = String(v);
+      } else if (NESTED_TYPES.has(type.typeId)) {
+        // The native JSON_ARRAY wire sends nested columns as JSON text with
+        // every scalar leaf stringified by type.
+        row[name] = JSON.stringify(renderNestedValue(v, type));
       } else if (typeof v === "string") {
         row[name] = maybeParseJsonString(v);
-      } else if (v instanceof Uint8Array) {
-        row[name] = Buffer.from(v).toString("base64");
       } else {
-        row[name] = formatScalarCell(v, type);
+        row[name] = formatJsonArrayCell(v, type);
       }
     }
     rows.push(row);
