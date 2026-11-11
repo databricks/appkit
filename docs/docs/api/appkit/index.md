@@ -190,6 +190,7 @@ surface with `@databricks/appkit/beta`. Not meant for application imports.
 | ------ | ------ |
 | [agents](Variable.agents.md) | Plugin factory for the agents plugin. Discovers agents from `server/agents/<id>/agent.{ts,md}` by default (markdown still in `config/agents/` is read as a deprecated fallback), resolves toolkits/tools from registered plugins, exposes the `appkit.agents.*` runtime API and mounts `POST /invocations` and `POST /responses` (aliased non-streaming invoke endpoints) plus `POST /chat` (streaming, HITL-capable). |
 | [aiSearch](Variable.aiSearch.md) | - |
+| [design](Variable.design.md) | - |
 | [READ\_ACTIONS](Variable.READ_ACTIONS.md) | Actions that only read data. |
 | [sql](Variable.sql.md) | SQL helper namespace |
 | [SUPERVISOR\_EXTENSION\_KEY](Variable.SUPERVISOR_EXTENSION_KEY.md) | Namespace key under which the adapter reads its hosted-tool payload from [AgentInput.extensions](Interface.AgentInput.md#extensions). Exported so the agents plugin and standalone `runAgent` (the producers) can write under the same key the adapter reads. |

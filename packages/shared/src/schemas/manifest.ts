@@ -40,6 +40,7 @@ export const resourceTypeSchema = z
     "job",
     "sql_warehouse",
     "serving_endpoint",
+    "model_service",
     "volume",
     "vector_search_index",
     "uc_function",
@@ -112,6 +113,11 @@ export const DABS_BINDING_BY_TYPE = {
   serving_endpoint: {
     yamlKey: "serving_endpoint",
     varFields: [["name", "name"]],
+  },
+  model_service: {
+    yamlKey: "uc_securable",
+    varFields: [["name", "securable_full_name"]],
+    staticFields: [["securable_type", "MODEL_SERVICE"]],
   },
   experiment: {
     yamlKey: "experiment",
@@ -221,6 +227,10 @@ export const servingEndpointPermissionSchema = z
 export const volumePermissionSchema = z
   .enum(["READ_VOLUME", "WRITE_VOLUME"])
   .describe("Permission for Unity Catalog volume resources");
+
+export const modelServicePermissionSchema = z
+  .enum(["EXECUTE"])
+  .describe("Permission for Unity Catalog model service resources");
 
 export const vectorSearchIndexPermissionSchema = z
   .enum(["SELECT"])
@@ -659,6 +669,10 @@ export const resourceRequirementSchema = z
       z.literal("serving_endpoint"),
       servingEndpointPermissionSchema,
     ),
+    makeResourceVariant(
+      z.literal("model_service"),
+      modelServicePermissionSchema,
+    ),
     makeResourceVariant(z.literal("volume"), volumePermissionSchema),
     makeResourceVariant(
       z.literal("vector_search_index"),
@@ -1061,6 +1075,10 @@ export const templateResourceRequirementSchema = z
       z.literal("serving_endpoint"),
       servingEndpointPermissionSchema,
     ),
+    makeTemplateResourceVariant(
+      z.literal("model_service"),
+      modelServicePermissionSchema,
+    ),
     makeTemplateResourceVariant(z.literal("volume"), volumePermissionSchema),
     makeTemplateResourceVariant(
       z.literal("vector_search_index"),
@@ -1367,6 +1385,9 @@ export type SqlWarehousePermission = z.infer<
 >;
 export type ServingEndpointPermission = z.infer<
   typeof servingEndpointPermissionSchema
+>;
+export type ModelServicePermission = z.infer<
+  typeof modelServicePermissionSchema
 >;
 export type VolumePermission = z.infer<typeof volumePermissionSchema>;
 export type VectorSearchIndexPermission = z.infer<

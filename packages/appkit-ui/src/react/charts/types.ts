@@ -38,6 +38,12 @@ export type ChartType =
 /** Data that can be passed to unified charts */
 export type ChartData = Table | Record<string, unknown>[];
 
+/** One row of chart data (indexable, to type plain data modules). */
+export type ChartRow = Record<string, unknown>;
+
+/** A chart's `data`: an Arrow Table, or rows (interfaces and `as const` arrays too). */
+export type ChartDataInput = Table | readonly object[];
+
 /** Formats a measure value for chart axes, tooltips, and value labels. */
 export type ChartValueFormatter = (
   value: string | number,
@@ -78,7 +84,7 @@ export interface ChartBaseProps {
   colorPalette?: ChartColorPalette;
   /** Custom colors for series (overrides colorPalette) */
   colors?: string[];
-  /** Chart height in pixels @default 300 */
+  /** Chart height in pixels. Defaults to filling its parent (see `chartSizeStyle`). */
   height?: number;
   /** Additional CSS classes */
   className?: string;
@@ -188,7 +194,7 @@ export interface QueryProps extends ChartBaseProps {
 /** Props for direct data injection */
 export interface DataProps extends ChartBaseProps {
   /** Arrow Table or JSON array */
-  data: ChartData;
+  data: ChartDataInput;
 
   // Discriminator: cannot use query props with direct data
   queryKey?: never;
