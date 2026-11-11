@@ -11,7 +11,8 @@ import { APP_YAML_FILE } from "../../../deploy-config";
 import { findServerRoot, profileFromEnv } from "../../registry/add";
 import type { ConfigPlan } from "../../registry/config-plan";
 import {
-  assertBundleApp,
+  bundleConflicts,
+  preflightConfig,
   planHasContent,
   reportConfigWrite,
   validateBundle,
@@ -367,10 +368,13 @@ async function preparePlugin(
 
   const plan = buildAddPlan(plugin, resources, values, modes);
 
-  const conflicts = envConflicts(cwd, plan, pending);
+  const conflicts = [
+    ...envConflicts(cwd, plan, pending),
+    ...bundleConflicts(cwd, plan, pending),
+  ];
   if (conflicts.length > 0) {
     throw new Error(
-      `${conflicts.join(", ")} already set to a different resource or value in .env or app.yaml; nothing was written. Edit those entries by hand, then rerun.`,
+      `${conflicts.join(", ")} already set to a different resource or value in .env, app.yaml or databricks.yml; nothing was written. Edit those entries by hand, then rerun.`,
     );
   }
 
@@ -457,6 +461,9 @@ async function runPluginAdd(names: string[], opts: AddOptions): Promise<void> {
     seen.add(r.name);
   }
 
+  // Fail before any prompt or write rather than leave a partial install.
+  preflightConfig(cwd);
+
   const prepared: PreparedPlugin[] = [];
   for (const req of requests) {
     prepared.push(
@@ -468,9 +475,6 @@ async function runPluginAdd(names: string[], opts: AddOptions): Promise<void> {
       ),
     );
   }
-
-  // Fail before any write rather than leave a partial install.
-  assertBundleApp(cwd);
 
   if (opts.register === false) {
     for (const { plugin, config } of prepared) {

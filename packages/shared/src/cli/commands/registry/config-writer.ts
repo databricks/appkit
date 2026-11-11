@@ -24,10 +24,14 @@ export interface ConfigWriteResult {
 
 /** Reads and parses a YAML file into a Document, or a fresh doc if absent. */
 function loadDoc(file: string): ReturnType<typeof parseDocument> {
-  if (fs.existsSync(file)) {
-    return parseDocument(fs.readFileSync(file, "utf-8"));
+  if (!fs.existsSync(file)) return parseDocument("");
+  const doc = parseDocument(fs.readFileSync(file, "utf-8"));
+  if (doc.errors.length > 0) {
+    throw new Error(
+      `${path.basename(file)} is not valid YAML: ${doc.errors[0].message}`,
+    );
   }
-  return parseDocument("");
+  return doc;
 }
 
 /**
@@ -89,9 +93,81 @@ function appKey(doc: ReturnType<typeof parseDocument>): string {
   );
 }
 
-/** Throws when databricks.yml has no single target app (see appKey). */
-export function assertBundleApp(cwd: string): void {
+/** Throws before any write when app.yaml or databricks.yml can't be patched. */
+export function preflightConfig(cwd: string): void {
+  loadDoc(path.join(cwd, APP_YAML_FILE));
   appKey(loadDoc(path.join(cwd, DATABRICKS_YML_FILE)));
+}
+
+/** JSON with sorted keys, for comparing YAML nodes regardless of key order. */
+function canonical(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonical).join(",")}]`;
+  if (v && typeof v === "object") {
+    return `{${Object.keys(v)
+      .sort()
+      .map(
+        (k) =>
+          `${JSON.stringify(k)}:${canonical((v as Record<string, unknown>)[k])}`,
+      )
+      .join(",")}}`;
+  }
+  return JSON.stringify(v);
+}
+
+/**
+ * Bundle variables and bindings the plan would set differently from
+ * databricks.yml (any target's value or a variable default) or from earlier
+ * plans of the same run, which the additive writer would silently keep.
+ */
+export function bundleConflicts(
+  cwd: string,
+  plan: ConfigPlan,
+  pending: ConfigPlan[] = [],
+): string[] {
+  const doc = loadDoc(path.join(cwd, DATABRICKS_YML_FILE));
+  const json = (doc.toJSON() ?? {}) as {
+    variables?: Record<string, { default?: unknown } | null>;
+    targets?: Record<string, { variables?: Record<string, unknown> } | null>;
+    resources?: { apps?: Record<string, { resources?: { name?: string }[] }> };
+  };
+  const values = new Map<string, Set<string>>();
+  const addValue = (name: string, v: unknown) => {
+    if (v === undefined || v === null) return;
+    if (!values.has(name)) values.set(name, new Set());
+    values.get(name)?.add(String(v));
+  };
+  for (const [name, v] of Object.entries(json.variables ?? {}))
+    addValue(name, v?.default);
+  for (const t of Object.values(json.targets ?? {})) {
+    for (const [name, v] of Object.entries(t?.variables ?? {}))
+      addValue(name, v);
+  }
+  const bindings = new Map<string, string>();
+  for (const b of json.resources?.apps?.[appKey(doc)]?.resources ?? []) {
+    if (b?.name) bindings.set(b.name, canonical(b));
+  }
+  for (const p of pending) {
+    for (const v of p.bundleVariables)
+      if (!values.has(v.name)) addValue(v.name, v.value);
+    for (const b of p.resourceBindings) {
+      if (!bindings.has(b.name))
+        bindings.set(b.name, canonical(bindingToNode(b)));
+    }
+  }
+  const out: string[] = [];
+  for (const v of plan.bundleVariables) {
+    const have = values.get(v.name);
+    if (v.value !== undefined && have && [...have].some((x) => x !== v.value)) {
+      out.push(`variable ${v.name}`);
+    }
+  }
+  for (const b of plan.resourceBindings) {
+    const have = bindings.get(b.name);
+    if (have !== undefined && have !== canonical(bindingToNode(b))) {
+      out.push(`binding ${b.name}`);
+    }
+  }
+  return out;
 }
 
 /**
