@@ -204,6 +204,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.94.1](https://github.com/databricks/appkit/compare/v0.94.0...v0.94.1) (2026-11-12)
+
+### appkit
+
+* **appkit:** return numbers and booleans from analytics queries ([#709](https://github.com/databricks/appkit/issues/709)) ([bc36740](https://github.com/databricks/appkit/commit/bc36740959d7328f14b914969593fa14d3ad3710))
+
+
 ## [0.94.0](https://github.com/databricks/appkit/compare/v0.93.0...v0.94.0) (2026-11-11)
 
 ### docs
