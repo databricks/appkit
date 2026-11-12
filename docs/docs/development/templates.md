@@ -30,6 +30,7 @@ Files named with a `_` prefix are renamed to `.` prefix (e.g. `_gitignore` → `
 | `.dotEnv.example` | Generated `.env.example` content with placeholders |
 | `.bundle.*` | Generated `databricks.yml` sections (variables, resources, target variables) |
 | `.appEnv` | Generated `app.yaml` env entries |
+| `.skipExamples` | `true` with `databricks apps init --skip-examples`, used by app builders that replace the starter files. The template then leaves out its example queries (`config/queries/hello_world.sql`, `mocked_sales.sql`) and example test (`server/example.test.ts`), and the Analytics page reads no queries. CLIs without the flag omit the variable, so test it as `{{if not .skipExamples}}` to keep the examples by default. |
 
 ### Conditional content
 

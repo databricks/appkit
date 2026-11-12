@@ -1,3 +1,4 @@
+{{if not .skipExamples -}}
 import { Plugin, type PluginManifest, toPlugin } from '@databricks/appkit';
 import { createTestApp, createTestPluginContext, expectStream } from '@databricks/appkit/testing';
 import { describe, expect, test } from 'vitest';
@@ -7,7 +8,8 @@ import { describe, expect, test } from 'vitest';
  *
  * The kit lets you test a plugin with NO Databricks workspace, credentials, or
  * network — so these tests run anywhere, including CI. Delete this file, or use
- * it as a starting point for testing your own plugins.
+ * it as a starting point for testing your own plugins. Scaffolds created with
+ * `databricks apps init --skip-examples` leave it out.
  *
  * Three headline helpers are shown below:
  *  - `createTestApp({ plugins })` — boot a real app (real Express, real routes,
@@ -34,15 +36,17 @@ class GreeterPlugin extends Plugin {
     resources: { required: [], optional: [] },
   } as PluginManifest<'greeter'>;
 
-  async setup() {
+  setup() {
     // Routes registered here are captured by createTestPluginContext().routes.
     this.context?.addRoute('get', '/hello', (_req, res) => {
       res.end();
     });
+    return Promise.resolve();
   }
 
   // A stand-in for a streaming handler: yields SSE-style event objects.
-  async *greet(name: string) {
+  // expectStream also takes async iterables and SSE responses.
+  *greet(name: string) {
     yield { type: 'greeting_start', name };
     yield { type: 'greeting_end', message: `Hello, ${name}!` };
   }
@@ -53,9 +57,10 @@ class GreeterPlugin extends Plugin {
       name: 'greet',
       method: 'post',
       path: '/greet',
-      handler: async (req, res) => {
+      handler: (req, res) => {
         const { name } = req.body as { name: string };
         res.json({ message: `Hello, ${name}!` });
+        return Promise.resolve();
       },
     });
   }
@@ -98,3 +103,4 @@ describe('testing kit example', () => {
     }
   });
 });
+{{- end}}

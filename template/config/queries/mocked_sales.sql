@@ -1,4 +1,4 @@
-{{if .plugins.analytics -}}
+{{if and .plugins.analytics (not .skipExamples) -}}
 -- @param max_month_num INT
 WITH mock_data AS (
   SELECT 'January' AS month, 1 AS month_num, 65000 AS revenue, 45000 AS expenses, 850 AS customers

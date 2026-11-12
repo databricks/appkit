@@ -1,4 +1,23 @@
 {{if .plugins.analytics -}}
+{{if .skipExamples -}}
+import { Card, CardContent, CardHeader, CardTitle } from '@databricks/appkit-ui/react';
+
+export function AnalyticsPage() {
+  return (
+    <div className="w-full max-w-7xl mx-auto">
+      <Card className="shadow-lg">
+        <CardHeader>
+          <CardTitle>Analytics</CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm text-muted-foreground">
+          No queries yet. Add a SQL file such as <code>config/queries/my_query.sql</code> and read it with{' '}
+          <code>{"useAnalyticsQuery('my_query')"}</code>.
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+{{- else -}}
 import {
   useAnalyticsQuery,
   AreaChart,
@@ -105,4 +124,5 @@ export function AnalyticsPage() {
     </div>
   );
 }
+{{- end}}
 {{- end}}

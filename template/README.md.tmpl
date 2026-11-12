@@ -152,6 +152,49 @@ There are a few commands to help you with code quality:
 {{or .packageManager "pnpm"}} run format
 {{or .packageManager "pnpm"}} run format:fix
 ```
+{{- if .plugins.analytics}}
+
+## SQL Queries
+
+The Analytics plugin runs the `.sql` files in `config/queries/`. The file name is the query key:
+
+- `config/queries/<query_key>.sql` runs as the app's service principal, with one cache shared by all users
+- `config/queries/<query_key>.obo.sql` runs as the signed-in user, with a cache per user
+
+Declare each parameter in a `-- @param <name> <TYPE>` comment and reference it as `:name`:
+
+```sql
+-- @param max_month INT
+SELECT month, revenue
+FROM my_catalog.my_schema.sales
+WHERE month_num <= :max_month
+ORDER BY month_num;
+```
+
+Read the result in the client with `useAnalyticsQuery`, or pass the query key to a chart:
+
+```tsx
+import { AreaChart, useAnalyticsQuery } from '@databricks/appkit-ui/react';
+import { sql } from '@databricks/appkit-ui/js';
+
+const params = { max_month: sql.number(6) };
+const { data, loading, error } = useAnalyticsQuery('sales', params);
+
+<AreaChart queryKey="sales" parameters={params} />;
+```
+
+`{{or .packageManager "pnpm"}} run typegen` generates the result types of every query into `shared/appkit-types/`. See the [Analytics plugin documentation](https://developers.databricks.com/docs/appkit/v0/plugins/analytics).
+{{- end}}
+
+## Testing
+
+`{{or .packageManager "pnpm"}} test` runs the [Vitest](https://vitest.dev/) suite. `@databricks/appkit/testing` tests plugins with no Databricks workspace, credentials or network:
+
+- `createTestApp({ plugins })` boots the app on an ephemeral port so you can call its routes over HTTP. Call `close()` when done.
+- `createTestPluginContext()` attaches a plugin to a real context with faked edges, for unit tests without a server.
+- `expectStream(source).toEmit(...)` asserts the ordered events of a streaming handler.
+
+See the [testing documentation](https://developers.databricks.com/docs/appkit/v0/plugins/testing).
 
 ## Deployment with Databricks Asset Bundles
 

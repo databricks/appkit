@@ -288,16 +288,6 @@ jobs:
       - name: Verify bundled SDKs in both template locks
         run: pnpm exec tsx tools/check-template-artifact.ts pr-template
 
-      # The scaffold's own vitest suite, run against the tarballs built above
-      # rather than the published versions template/package.json pins. This is
-      # the only CI check that exercises the template's example test, and the
-      # only one that consumes @databricks/appkit/testing the way a customer
-      # does — through a real npm install of a packed tarball. Before the zip,
-      # so a broken example fails the build instead of shipping.
-      - name: Run the template's own tests
-        working-directory: pr-template
-        run: npm test
-
       # npm install above runs under the JFrog .npmrc (setup-jfrog-npm), which
       # bakes internal registry URLs into the regenerated locks. Rewrite them back
       # to public npm and fail-closed if any non-public registry remains, so the
@@ -311,6 +301,20 @@ jobs:
       - name: Create zip artifact
         working-directory: pr-template
         run: zip -r "../appkit-template-${{ steps.version.outputs.version }}.zip" . -x 'node_modules/*'
+
+      # The scaffold's own vitest suite, run against the tarballs built above
+      # rather than the published versions template/package.json pins. This is
+      # the only CI check that exercises the template's example test, and the
+      # only one that consumes @databricks/appkit/testing the way a customer
+      # does — through a real npm install of a packed tarball. The example test
+      # is wrapped in a Go template conditional (`apps init --skip-examples`
+      # leaves it out), so render it first: after the zip, which must keep the
+      # conditional, and before the upload, so a broken example fails the build
+      # instead of shipping.
+      - name: Run the template's own tests
+        run: |
+          pnpm exec tsx tools/template-render.ts pr-template/server/example.test.ts
+          cd pr-template && npm test
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
