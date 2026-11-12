@@ -157,6 +157,19 @@ resolve a real table. The sample value is used only at type-generation time; the
 runtime query still binds the actual parameter. See
 [SQL parameters → Sample values](../plugins/analytics.md#sample-values-for-type-generation).
 
+### Result value types
+
+Numeric columns (`TINYINT`, `SMALLINT`, `INT`, `BIGINT`, `FLOAT`, `DOUBLE`,
+`DECIMAL`) are typed `number` and `BOOLEAN` columns `boolean`. The warehouse
+returns every JSON_ARRAY cell as a string, so the analytics query route converts
+these columns to match. `NaN` and `±Infinity` in `DOUBLE` and `FLOAT` columns
+have no JSON number, so they stay the strings `"NaN"`, `"Infinity"` and
+`"-Infinity"`. Date and timestamp columns stay ISO strings. A `BIGINT`
+beyond `Number.MAX_SAFE_INTEGER` or a `DECIMAL` with more than ~15 significant
+digits loses precision as a JS number; `CAST` such a column to `STRING` in SQL to
+keep it exact (it is then typed `string`). Metric-view rows keep the warehouse's
+string values; see [Metric-view types](#metric-view-types).
+
 ## Using generated types
 
 Once types are generated, your IDE will provide autocomplete and type checking:
