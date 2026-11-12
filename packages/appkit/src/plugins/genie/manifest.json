@@ -47,6 +47,13 @@
             "type": "string"
           }
         },
+        "agents": {
+          "type": "object",
+          "description": "Map of alias names to Genie Space IDs used in agent mode (streamed reasoning and PNG visualizations)",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
         "timeout": {
           "type": "number",
           "default": 120000,

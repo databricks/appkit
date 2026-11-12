@@ -1,5 +1,15 @@
 import { createLogger } from "../../logging";
+import { readSseEvents } from "../../stream/sse-reader";
 import type { GenieMessage, WorkspaceClient } from "../../workspace-client";
+import {
+  addAgentItem,
+  agentToolStatus,
+  type GenieAgentItem,
+  type GenieAgentStreamEvent,
+  type GenieAgentTurn,
+  newAgentTurn,
+  withAgentTurn,
+} from "./agent";
 import { genieConnectorDefaults } from "./defaults";
 import { type Pollable, pollWaiter } from "./poll-waiter";
 import type {
@@ -26,12 +36,22 @@ type CreateMessageWaiter = Pollable<GenieMessage>;
 const DEFAULT_WAIT_TIMEOUT_MS = 10 * 60_000;
 const MAX_POLL_INTERVAL_MS = 10_000;
 
+// The agent items endpoint returns at most 100 items per page.
+const AGENT_ITEMS_PAGE_SIZE = 100;
+const MAX_AGENT_ITEM_PAGES = 20;
+
+// IDs Genie hands out (hex ids, `pub_toolu_…_output` attachment ids).
+const GENIE_ID_PATTERN = /^[\w-]+$/;
+
 interface GenieConnectorConfig {
   timeout?: number;
   maxMessages?: number;
 }
 
-function mapAttachments(message: GenieMessage): GenieAttachmentResponse[] {
+function mapAttachments(
+  message: GenieMessage,
+  includeViz: boolean,
+): GenieAttachmentResponse[] {
   return (
     message.attachments?.map(({ attachmentId, attachment }) => ({
       attachmentId,
@@ -52,18 +72,28 @@ function mapAttachments(message: GenieMessage): GenieAttachmentResponse[] {
         attachment?.$case === "suggestedQuestions"
           ? attachment.suggestedQuestions.questions
           : undefined,
+      viz:
+        includeViz && attachment?.$case === "viz"
+          ? {
+              title: attachment.viz.title,
+              queryAttachmentId: attachment.viz.queryAttachmentId,
+            }
+          : undefined,
     })) ?? []
   );
 }
 
-function toMessageResponse(message: GenieMessage): GenieMessageResponse {
+function toMessageResponse(
+  message: GenieMessage,
+  includeViz = false,
+): GenieMessageResponse {
   return {
     messageId: message.messageId ?? "",
     conversationId: message.conversationId ?? "",
     spaceId: message.spaceId ?? "",
     status: message.status ?? "COMPLETED",
     content: message.content ?? "",
-    attachments: mapAttachments(message),
+    attachments: mapAttachments(message, includeViz),
     error: message.error?.error,
   };
 }
@@ -92,6 +122,18 @@ function classifyGenieError(error: unknown): string {
   }
 
   return message || GenieErrors.REQUEST_FAILED;
+}
+
+/** Agent endpoints answer `{"error": {"type", "message"}}`, a shape ApiError doesn't parse. */
+function classifyGenieAgentError(error: unknown): string {
+  const nested = (error as { response?: { error?: { message?: unknown } } })
+    ?.response?.error?.message;
+  return typeof nested === "string" ? nested : classifyGenieError(error);
+}
+
+/** Whether `id` is safe to put into a Genie resource path. */
+export function isGenieId(id: string): boolean {
+  return GENIE_ID_PATTERN.test(id);
 }
 
 export class GenieConnector {
@@ -197,7 +239,7 @@ export class GenieConnector {
     workspaceClient: WorkspaceClient,
     spaceId: string,
     conversationId: string,
-    options?: { pageSize?: number; pageToken?: string },
+    options?: { pageSize?: number; pageToken?: string; includeViz?: boolean },
   ): Promise<{
     messages: GenieMessageResponse[];
     nextPageToken: string | null;
@@ -212,7 +254,9 @@ export class GenieConnector {
       ...(options?.pageToken ? { pageToken: options.pageToken } : {}),
     });
 
-    const messages = (response.messages ?? []).reverse().map(toMessageResponse);
+    const messages = (response.messages ?? [])
+      .reverse()
+      .map((message) => toMessageResponse(message, options?.includeViz));
 
     return {
       messages,
@@ -298,6 +342,176 @@ export class GenieConnector {
     }
   }
 
+  /**
+   * Agent mode: runs one agent turn (`POST /genie/agents/{id}/responses`, which
+   * the SDK doesn't cover) and maps its stream onto the chat-mode events, plus
+   * a `reasoning` event per reasoning step. Once the turn completes, the
+   * message is read back for its query and chart attachments.
+   */
+  async *streamAgentResponse(
+    workspaceClient: WorkspaceClient,
+    agentId: string,
+    content: string,
+    conversationId: string | undefined,
+    options?: { signal?: AbortSignal },
+  ): AsyncGenerator<GenieStreamEvent> {
+    const signal = options?.signal;
+    try {
+      const response = await workspaceClient.request({
+        method: "POST",
+        path: `/api/2.0/genie/agents/${encodeURIComponent(agentId)}/responses`,
+        headers: new Headers({
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+        }),
+        body: JSON.stringify({
+          enable_viz: true,
+          conversation_id: conversationId,
+          input: [
+            {
+              type: "message",
+              role: "user",
+              content: [{ type: "input_text", text: content }],
+            },
+          ],
+        }),
+        signal,
+      });
+      if (!response.body) throw new Error(GenieErrors.REQUEST_FAILED);
+
+      const turn = newAgentTurn();
+      let started: { conversationId: string; messageId: string } | undefined;
+      let completed = false;
+      for await (const { data } of readSseEvents(response.body, signal)) {
+        const event = JSON.parse(data) as GenieAgentStreamEvent;
+        if (event.type === "response.created" && event.response) {
+          started = {
+            conversationId: event.response.conversation_id,
+            messageId: event.response.id,
+          };
+          yield { type: "message_start", ...started, spaceId: agentId };
+        } else if (event.type === "response.output_item.done" && event.item) {
+          const status = agentToolStatus(event.item);
+          if (status) yield { type: "status", status };
+          const reasoning = addAgentItem(turn, event.item);
+          if (reasoning) yield { type: "reasoning", content: reasoning };
+        } else if (event.type === "response.completed") {
+          completed = true;
+        } else if (event.type === "response.failed" || event.type === "error") {
+          throw new Error(
+            event.response?.error?.message ??
+              event.message ??
+              GenieErrors.REQUEST_FAILED,
+          );
+        }
+      }
+      if (signal?.aborted) return;
+      if (!started || !completed) {
+        throw new Error("Genie agent response ended before it completed");
+      }
+
+      const message = await workspaceClient.genie.genieGetConversationMessage(
+        { spaceId: agentId, ...started },
+        { signal },
+      );
+      const messageResponse = withAgentTurn(
+        toMessageResponse(message, true),
+        turn,
+      );
+      yield { type: "message_result", message: messageResponse };
+      yield* this.emitQueryResults(
+        workspaceClient,
+        agentId,
+        started.conversationId,
+        started.messageId,
+        messageResponse,
+      );
+    } catch (error) {
+      if (signal?.aborted) return;
+      logger.error(
+        "Genie agent response error (agentId=%s, conversationId=%s): %O",
+        agentId,
+        conversationId ?? "new",
+        error,
+      );
+      yield { type: "error", error: classifyGenieAgentError(error) };
+    }
+  }
+
+  /**
+   * Agent mode: adds the answer text and reasoning to messages read from the
+   * message projection, which has neither. They come from the conversation's
+   * items (`GET /genie/agents/{id}/conversations/{cid}/items`).
+   */
+  private async withAgentTurns(
+    workspaceClient: WorkspaceClient,
+    agentId: string,
+    conversationId: string,
+    messages: GenieMessageResponse[],
+    signal?: AbortSignal,
+  ): Promise<GenieMessageResponse[]> {
+    const turns = new Map<string, GenieAgentTurn>();
+    let after: string | undefined;
+    // shortcut: reads every item of the conversation for each history page; align item pages with message pages if long agent conversations matter.
+    for (let page = 0; page < MAX_AGENT_ITEM_PAGES; page++) {
+      const response = await workspaceClient.request({
+        method: "GET",
+        path: `/api/2.0/genie/agents/${encodeURIComponent(agentId)}/conversations/${encodeURIComponent(conversationId)}/items`,
+        query: {
+          limit: String(AGENT_ITEMS_PAGE_SIZE),
+          ...(after ? { after } : {}),
+        },
+        signal,
+      });
+      const body = (await response.json()) as {
+        data?: GenieAgentItem[];
+        has_more?: boolean;
+        last_id?: string;
+      };
+      for (const item of body.data ?? []) {
+        const messageId = item.metadata?.message_id;
+        if (!messageId) continue;
+        let turn = turns.get(messageId);
+        if (!turn) {
+          turn = newAgentTurn();
+          turns.set(messageId, turn);
+        }
+        addAgentItem(turn, item);
+      }
+      if (!body.has_more || !body.last_id) break;
+      after = body.last_id;
+    }
+    return messages.map((message) =>
+      withAgentTurn(message, turns.get(message.messageId)),
+    );
+  }
+
+  /**
+   * Downloads the PNG Genie rendered for a visualization attachment. The
+   * message must be COMPLETED.
+   */
+  async downloadVisualization(
+    workspaceClient: WorkspaceClient,
+    spaceId: string,
+    conversationId: string,
+    messageId: string,
+    attachmentId: string,
+    signal?: AbortSignal,
+  ): Promise<ReadableStream | undefined> {
+    // The SDK puts `name` into the URL unencoded, so only plain ids may reach it.
+    if (![spaceId, conversationId, messageId, attachmentId].every(isGenieId)) {
+      throw new Error("Invalid Genie id");
+    }
+    const { contents } =
+      await workspaceClient.genie.downloadMessageAttachmentVisualization(
+        {
+          name: `spaces/${spaceId}/conversations/${conversationId}/messages/${messageId}/attachments/${attachmentId}`,
+        },
+        { signal },
+      );
+    return contents;
+  }
+
   private async *emitQueryResults(
     workspaceClient: WorkspaceClient,
     spaceId: string,
@@ -347,18 +561,33 @@ export class GenieConnector {
       pageSize?: number;
       pageToken?: string;
       signal?: AbortSignal;
+      /** The space is used in agent mode. */
+      agent?: boolean;
     },
   ): AsyncGenerator<GenieStreamEvent> {
     const includeQueryResults = options?.includeQueryResults !== false;
 
     try {
-      const { messages: messageResponses, nextPageToken } =
-        await this.listConversationMessages(
-          workspaceClient,
-          spaceId,
-          conversationId,
-          { pageSize: options?.pageSize, pageToken: options?.pageToken },
-        );
+      const page = await this.listConversationMessages(
+        workspaceClient,
+        spaceId,
+        conversationId,
+        {
+          pageSize: options?.pageSize,
+          pageToken: options?.pageToken,
+          includeViz: options?.agent,
+        },
+      );
+      const { nextPageToken } = page;
+      const messageResponses = options?.agent
+        ? await this.withAgentTurns(
+            workspaceClient,
+            spaceId,
+            conversationId,
+            page.messages,
+            options.signal,
+          )
+        : page.messages;
 
       for (const messageResponse of messageResponses) {
         yield { type: "message_result", message: messageResponse };
@@ -449,7 +678,13 @@ export class GenieConnector {
     spaceId: string,
     conversationId: string,
     messageId: string,
-    options?: { timeout?: number; pollInterval?: number; signal?: AbortSignal },
+    options?: {
+      timeout?: number;
+      pollInterval?: number;
+      signal?: AbortSignal;
+      /** The space is used in agent mode. */
+      agent?: boolean;
+    },
   ): AsyncGenerator<GenieStreamEvent> {
     const pollInterval = options?.pollInterval ?? 3_000;
     const signal = options?.signal;
@@ -472,7 +707,16 @@ export class GenieConnector {
         const isTerminal =
           message.status === "COMPLETED" || message.status === "FAILED";
         if (isTerminal) {
-          const messageResponse = toMessageResponse(message);
+          let messageResponse = toMessageResponse(message, options?.agent);
+          if (options?.agent) {
+            [messageResponse] = await this.withAgentTurns(
+              workspaceClient,
+              spaceId,
+              conversationId,
+              [messageResponse],
+              signal,
+            );
+          }
           yield { type: "message_result", message: messageResponse };
           yield* this.emitQueryResults(
             workspaceClient,
@@ -534,6 +778,7 @@ export class GenieConnector {
     workspaceClient: WorkspaceClient,
     spaceId: string,
     conversationId: string,
+    options?: { agent?: boolean },
   ): Promise<GenieConversationHistoryResponse> {
     const allMessages: GenieMessageResponse[] = [];
     let pageToken: string | undefined;
@@ -546,16 +791,25 @@ export class GenieConnector {
         {
           pageSize: genieConnectorDefaults.pageSize,
           pageToken,
+          includeViz: options?.agent,
         },
       );
       allMessages.push(...messages);
       pageToken = nextPageToken ?? undefined;
     } while (pageToken && allMessages.length < this.config.maxMessages);
 
+    const kept = allMessages.slice(0, this.config.maxMessages);
     return {
       conversationId,
       spaceId,
-      messages: allMessages.slice(0, this.config.maxMessages),
+      messages: options?.agent
+        ? await this.withAgentTurns(
+            workspaceClient,
+            spaceId,
+            conversationId,
+            kept,
+          )
+        : kept,
     };
   }
 }
