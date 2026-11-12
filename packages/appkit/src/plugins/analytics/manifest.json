@@ -31,7 +31,7 @@
         "Before init, ensure the SQL Warehouse passed via --set analytics.sql-warehouse.id is running"
       ],
       "should": [
-        "After init, ensure config/queries/ has at least one .sql file before running npm run typegen"
+        "Add .sql files to config/queries/ only for queries the app runs; typegen and build work without the folder"
       ]
     }
   },
