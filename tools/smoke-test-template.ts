@@ -10,9 +10,10 @@
  * - {{.projectName}} → smoke-test-app
  * - {{.appDescription}} → Smoke test app
  * - {{.appEnv}} → (empty, which means the conditional block is omitted)
+ * - {{.skipExamples}} → the --skip-examples flag
  *
  * Usage:
- *   tsx tools/smoke-test-template.ts [--output-dir <path>] [--package-manager <pm>] [--run]
+ *   tsx tools/smoke-test-template.ts [--output-dir <path>] [--package-manager <pm>] [--run] [--skip-examples]
  *
  * Options:
  *   --output-dir        Optional. Scratch directory for the scaffolded app.
@@ -20,6 +21,8 @@
  *   --package-manager   Optional. Package manager to scaffold (pnpm or npm).
  *                       Defaults to "pnpm". (short: -p)
  *   --run              Install, build with prebuild, and check HTTP startup.
+ *   --skip-examples    Scaffold as the Builder does (`apps init --skip-examples`):
+ *                      no example queries or example test.
  */
 
 import {
@@ -35,6 +38,10 @@ import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 import {
+  renderTemplateConditionals,
+  type TemplateVars,
+} from "./template-render";
+import {
   runTemplateSmoke,
   selectSmokePackageManager,
 } from "./template-smoke-runner";
@@ -46,6 +53,7 @@ const { values } = parseArgs({
     "output-dir": { type: "string", default: ".smoke-test/app" },
     "package-manager": { type: "string", default: "pnpm", short: "p" },
     run: { type: "boolean", default: false },
+    "skip-examples": { type: "boolean", default: false },
   },
   strict: true,
 });
@@ -76,6 +84,13 @@ console.log(`✓ Copied template → ${outputDir}`);
 
 selectSmokePackageManager(SCRATCH_DIR, packageManager);
 
+// Server-only scaffold: no plugins selected, so every plugin block is dropped.
+const templateVars: TemplateVars = {
+  plugins: {},
+  appEnv: "",
+  skipExamples: values["skip-examples"],
+};
+
 // Render placeholders in key files
 const placeholders = {
   "{{.projectName}}": "smoke-test-app",
@@ -86,7 +101,7 @@ const placeholders = {
 /**
  * Recursively process all files in the scaffold directory to:
  * 1. Replace simple placeholders ({{.projectName}}, {{.appDescription}})
- * 2. Remove Go template conditionals for plugins and appEnv
+ * 2. Render Go template conditionals on plugins, appEnv and skipExamples
  */
 function processAllFiles(dir: string): void {
   const entries = readdirSync(dir, { withFileTypes: true });
@@ -111,6 +126,7 @@ function processAllFiles(dir: string): void {
         fullPath.endsWith(".ts") ||
         fullPath.endsWith(".json") ||
         fullPath.endsWith(".html") ||
+        fullPath.endsWith(".sql") ||
         fullPath.endsWith(".tmpl") ||
         fullPath.endsWith(".yaml") ||
         fullPath.endsWith(".yml"))
@@ -126,26 +142,11 @@ function processAllFiles(dir: string): void {
         }
       }
 
-      // Remove Go template conditionals: {{- if .appEnv}} blocks
-      if (content.includes("{{") && content.includes(".appEnv")) {
-        const beforeLen = content.length;
-        content = content.replace(
-          /{{-?\s*if\s+\.appEnv\s*}}[\s\S]*?{{-?\s*end\s*}}/g,
-          "",
-        );
-        if (beforeLen !== content.length) {
-          modified = true;
-        }
-      }
-
-      // Remove Go template conditionals: {{- if .plugins.*}} blocks
-      if (content.includes("{{") && content.includes(".plugins.")) {
-        const beforeLen = content.length;
-        content = content.replace(
-          /{{-?\s*if\s+\.plugins\.[a-zA-Z0-9_-]+\s*-?\s*}}[\s\S]*?{{-?\s*end\s*-?\s*}}/g,
-          "",
-        );
-        if (beforeLen !== content.length) {
+      // Render the {{if}} chains on plugins, appEnv and skipExamples
+      if (content.includes("{{")) {
+        const rendered = renderTemplateConditionals(content, templateVars);
+        if (rendered !== content) {
+          content = rendered;
           modified = true;
         }
       }
