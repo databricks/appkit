@@ -21,8 +21,8 @@
  *   --package-manager   Optional. Package manager to scaffold (pnpm or npm).
  *                       Defaults to "pnpm". (short: -p)
  *   --run              Install, build with prebuild, and check HTTP startup.
- *   --skip-examples    Scaffold as the Builder does (`apps init --skip-examples`):
- *                      no example queries or example test.
+ *   --skip-examples    Set the `.skipExamples` template variable, as the Builder
+ *                      will: no example queries or example test.
  */
 
 import {

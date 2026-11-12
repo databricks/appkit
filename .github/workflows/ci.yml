@@ -307,8 +307,8 @@ jobs:
       # the only CI check that exercises the template's example test, and the
       # only one that consumes @databricks/appkit/testing the way a customer
       # does — through a real npm install of a packed tarball. The example test
-      # is wrapped in a Go template conditional (`apps init --skip-examples`
-      # leaves it out), so render it first: after the zip, which must keep the
+      # is wrapped in a Go template conditional (`.skipExamples` leaves it
+      # out), so render it first: after the zip, which must keep the
       # conditional, and before the upload, so a broken example fails the build
       # instead of shipping.
       - name: Run the template's own tests

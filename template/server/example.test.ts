@@ -8,8 +8,7 @@ import { describe, expect, test } from 'vitest';
  *
  * The kit lets you test a plugin with NO Databricks workspace, credentials, or
  * network — so these tests run anywhere, including CI. Delete this file, or use
- * it as a starting point for testing your own plugins. Scaffolds created with
- * `databricks apps init --skip-examples` leave it out.
+ * it as a starting point for testing your own plugins.
  *
  * Three headline helpers are shown below:
  *  - `createTestApp({ plugins })` — boot a real app (real Express, real routes,
