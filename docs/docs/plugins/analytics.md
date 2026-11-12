@@ -286,7 +286,7 @@ Editing `definitions.json` is picked up on the next request — no server restar
 
 ### useAnalyticsQuery
 
-React hook that subscribes to an analytics query over SSE and returns its latest result.
+React hook that subscribes to an analytics query over SSE and returns its latest result. Wrap `parameters` in `useMemo` (see [Memoization](#memoization)): the query re-runs whenever the parameters object is a new reference.
 
 ```ts
 import { useAnalyticsQuery } from "@databricks/appkit-ui/react";

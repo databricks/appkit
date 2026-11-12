@@ -259,6 +259,7 @@ npx @databricks/appkit docs <query>
 \`\`\`
 
 - View documentation index: \`npx @databricks/appkit docs\`
+- Look up components, hooks and functions by name: \`npx @databricks/appkit docs BarChart DataTable Select useAnalyticsQuery sql\`
 - View a section: \`npx @databricks/appkit docs "appkit-ui API reference"\`
 - Full index (all API entries): \`npx @databricks/appkit docs --full\`
 - View specific doc: \`npx @databricks/appkit docs ./docs/plugins/analytics.md\`

@@ -202,6 +202,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.94.0](https://github.com/databricks/appkit/compare/v0.93.0...v0.94.0) (2026-11-11)
+
+### docs
+
+* **docs:** look up the API by name with `appkit docs NAME...` ([#727](https://github.com/databricks/appkit/issues/727)) ([ac4263a](https://github.com/databricks/appkit/commit/ac4263ad729a9ab96ab033c04495ef1c1f091155))
+
+
 ## [0.93.0](https://github.com/databricks/appkit/compare/v0.92.0...v0.93.0) (2026-11-11)
 
 ### appkit
