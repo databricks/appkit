@@ -97,11 +97,15 @@ describe("connection lifetime warnings", () => {
 
   // pg-pool would close every connection as soon as it opens for a negative
   // lifetime, and never recycle for NaN (it turns NaN into 0), so these must
-  // not reach pg.Pool.
+  // not reach pg.Pool. Above 2^31 - 1 ms, Node's setTimeout fires after 1 ms,
+  // so pg-pool would close every connection after one use.
   test.each([
     ["negative", -5],
     ["NaN", Number.NaN],
     ["infinite", Number.POSITIVE_INFINITY],
+    ["past Node's timer limit", 2_147_484],
+    ["just past Node's timer limit, fractionally", 2_147_483.7],
+    ["30 days", 30 * 24 * 60 * 60],
   ])(
     "uses the default lifetime and warns when the lifetime is %s",
     (_name, value) => {
@@ -112,6 +116,16 @@ describe("connection lifetime warnings", () => {
       expect(logger.warn).toHaveBeenCalled();
     },
   );
+
+  // The longest whole-second lifetime Node's timer can hold is still valid:
+  // it's kept (with the too-long warning), not replaced by the default.
+  test("keeps the longest lifetime Node's timer can hold", () => {
+    const logger = makeLogger();
+    const pool = makePool({ maxLifetimeSeconds: 2_147_483, logger });
+
+    expect(pool.options.maxLifetimeSeconds).toBe(2_147_483);
+    expect(logger.warn).toHaveBeenCalled();
+  });
 
   test("warns when the lifetime is too long to recycle connections before claims lapse", () => {
     const logger = makeLogger();

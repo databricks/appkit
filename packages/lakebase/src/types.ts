@@ -88,8 +88,9 @@ export interface LakebasePoolConfig extends PoolConfig {
    * granted through Unity Catalog claims in the token can stop working on a
    * connection that stays open for hours. Recycling connections keeps that
    * from happening. Values up to 9000 (2.5 hours) are safe; larger values, and
-   * `0` (never recycle), log a warning. A negative or non-numeric value logs a
-   * warning and the default is used instead.
+   * `0` (never recycle), log a warning. A negative or non-numeric value, or
+   * one above 2147483 (about 24.8 days, the longest timer Node supports), logs
+   * a warning and the default is used instead.
    *
    * pg-pool recycles only idle connections: a client you check out and hold
    * isn't closed until you release it.

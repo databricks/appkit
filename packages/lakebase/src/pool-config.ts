@@ -20,12 +20,20 @@ const DEFAULT_MAX_LIFETIME_SECONDS = 30 * 60;
 const MAX_SAFE_LIFETIME_SECONDS = 4 * 3600 - 3600 - 30 * 60;
 
 /**
+ * Longest delay Node's `setTimeout` accepts (about 24.8 days). pg-pool passes
+ * `maxLifetimeSeconds * 1000` to it, and a longer delay fires after 1 ms, so
+ * every connection would close after a single use.
+ */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+/**
  * Resolve the connection lifetime, keeping an explicit 0 (never recycle), and
  * warn when connections could outlive a token's Unity Catalog claims.
  *
  * pg-pool closes a connection right after it opens when the lifetime is
- * negative, and never recycles it when the lifetime is NaN, so an invalid
- * value falls back to the default instead of reaching pg-pool.
+ * negative or overflows Node's timer, and never recycles it when the lifetime
+ * is NaN, so an invalid value falls back to the default instead of reaching
+ * pg-pool.
  */
 function resolveMaxLifetimeSeconds(
   userConfig: Partial<LakebasePoolConfig>,
@@ -34,9 +42,14 @@ function resolveMaxLifetimeSeconds(
   const maxLifetimeSeconds =
     userConfig.maxLifetimeSeconds ?? DEFAULT_MAX_LIFETIME_SECONDS;
 
-  if (!Number.isFinite(maxLifetimeSeconds) || maxLifetimeSeconds < 0) {
+  if (
+    !Number.isFinite(maxLifetimeSeconds) ||
+    maxLifetimeSeconds < 0 ||
+    maxLifetimeSeconds * 1000 > MAX_TIMER_MS
+  ) {
     logger?.warn(
-      "maxLifetimeSeconds must be a number of seconds, 0 or more, but is %s. Using the default of %d seconds.",
+      "maxLifetimeSeconds must be a number of seconds from 0 to %d, but is %s. Using the default of %d seconds.",
+      Math.floor(MAX_TIMER_MS / 1000),
       String(maxLifetimeSeconds),
       DEFAULT_MAX_LIFETIME_SECONDS,
     );
