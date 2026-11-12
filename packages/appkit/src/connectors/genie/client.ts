@@ -48,10 +48,7 @@ interface GenieConnectorConfig {
   maxMessages?: number;
 }
 
-function mapAttachments(
-  message: GenieMessage,
-  includeViz: boolean,
-): GenieAttachmentResponse[] {
+function mapAttachments(message: GenieMessage): GenieAttachmentResponse[] {
   return (
     message.attachments?.map(({ attachmentId, attachment }) => ({
       attachmentId,
@@ -73,7 +70,7 @@ function mapAttachments(
           ? attachment.suggestedQuestions.questions
           : undefined,
       viz:
-        includeViz && attachment?.$case === "viz"
+        attachment?.$case === "viz"
           ? {
               title: attachment.viz.title,
               queryAttachmentId: attachment.viz.queryAttachmentId,
@@ -83,17 +80,14 @@ function mapAttachments(
   );
 }
 
-function toMessageResponse(
-  message: GenieMessage,
-  includeViz = false,
-): GenieMessageResponse {
+function toMessageResponse(message: GenieMessage): GenieMessageResponse {
   return {
     messageId: message.messageId ?? "",
     conversationId: message.conversationId ?? "",
     spaceId: message.spaceId ?? "",
     status: message.status ?? "COMPLETED",
     content: message.content ?? "",
-    attachments: mapAttachments(message, includeViz),
+    attachments: mapAttachments(message),
     error: message.error?.error,
   };
 }
@@ -239,7 +233,7 @@ export class GenieConnector {
     workspaceClient: WorkspaceClient,
     spaceId: string,
     conversationId: string,
-    options?: { pageSize?: number; pageToken?: string; includeViz?: boolean },
+    options?: { pageSize?: number; pageToken?: string },
   ): Promise<{
     messages: GenieMessageResponse[];
     nextPageToken: string | null;
@@ -254,9 +248,7 @@ export class GenieConnector {
       ...(options?.pageToken ? { pageToken: options.pageToken } : {}),
     });
 
-    const messages = (response.messages ?? [])
-      .reverse()
-      .map((message) => toMessageResponse(message, options?.includeViz));
+    const messages = (response.messages ?? []).reverse().map(toMessageResponse);
 
     return {
       messages,
@@ -414,10 +406,7 @@ export class GenieConnector {
         { spaceId: agentId, ...started },
         { signal },
       );
-      const messageResponse = withAgentTurn(
-        toMessageResponse(message, true),
-        turn,
-      );
+      const messageResponse = withAgentTurn(toMessageResponse(message), turn);
       yield { type: "message_result", message: messageResponse };
       yield* this.emitQueryResults(
         workspaceClient,
@@ -575,7 +564,6 @@ export class GenieConnector {
         {
           pageSize: options?.pageSize,
           pageToken: options?.pageToken,
-          includeViz: options?.agent,
         },
       );
       const { nextPageToken } = page;
@@ -707,7 +695,7 @@ export class GenieConnector {
         const isTerminal =
           message.status === "COMPLETED" || message.status === "FAILED";
         if (isTerminal) {
-          let messageResponse = toMessageResponse(message, options?.agent);
+          let messageResponse = toMessageResponse(message);
           if (options?.agent) {
             [messageResponse] = await this.withAgentTurns(
               workspaceClient,
@@ -791,7 +779,6 @@ export class GenieConnector {
         {
           pageSize: genieConnectorDefaults.pageSize,
           pageToken,
-          includeViz: options?.agent,
         },
       );
       allMessages.push(...messages);

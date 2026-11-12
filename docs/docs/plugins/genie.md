@@ -11,6 +11,7 @@ Integrates [Databricks AI/BI Genie](https://docs.databricks.com/en/genie/index.h
 - SSE streaming with real-time status updates
 - Conversation history replay with automatic reconnection
 - Query result attachment fetching
+- Genie's charts, served as PNG images
 - Agent mode: the agent's reasoning, streamed as it works, and the charts it draws
 - On-behalf-of (OBO) user execution
 
@@ -64,7 +65,7 @@ genie({
 An agent alias works with the same routes, the same `sendMessage` and `getConversation` exports, and the same `<GenieChat alias="analyst" />` component as a chat space. The difference is in what it returns:
 
 - `reasoning` events stream the agent's reasoning while it works. The completed message carries the steps in `reasoning`.
-- Charts arrive as `viz` attachments. The [visualization endpoint](#get-a-visualization) serves each one as a PNG, and `GenieChat` shows it in place of the chart it would otherwise infer from the query result.
+- Visualizations are always turned on. The charts the agent draws arrive as `viz` attachments, like a chat space's charts (see [Get a visualization](#get-a-visualization)).
 
 An alias can be either a chat space or an agent, not both. To use one space both ways, give it two aliases, as in the example above. Conversations don't carry over between the two modes.
 
@@ -132,6 +133,8 @@ GET /api/genie/:alias/conversations/:conversationId/messages/:messageId/attachme
 ```
 
 Returns the PNG Genie rendered for a `viz` attachment, so it can be used directly as an `<img>` source. Use the `attachmentId` of the `viz` attachment, not its `queryAttachmentId`. The message must be completed.
+
+Chat spaces and agents both return `viz` attachments when Genie draws a chart. For a query with a `viz` attachment, `GenieChat` shows Genie's chart in place of the chart it would otherwise infer from the query result.
 
 ## Programmatic access
 
