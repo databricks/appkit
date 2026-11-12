@@ -34,15 +34,16 @@ class GreeterPlugin extends Plugin {
     resources: { required: [], optional: [] },
   } as PluginManifest<'greeter'>;
 
-  async setup() {
+  setup() {
     // Routes registered here are captured by createTestPluginContext().routes.
     this.context?.addRoute('get', '/hello', (_req, res) => {
       res.end();
     });
+    return Promise.resolve();
   }
 
   // A stand-in for a streaming handler: yields SSE-style event objects.
-  async *greet(name: string) {
+  *greet(name: string) {
     yield { type: 'greeting_start', name };
     yield { type: 'greeting_end', message: `Hello, ${name}!` };
   }
@@ -53,9 +54,10 @@ class GreeterPlugin extends Plugin {
       name: 'greet',
       method: 'post',
       path: '/greet',
-      handler: async (req, res) => {
+      handler: (req, res) => {
         const { name } = req.body as { name: string };
         res.json({ message: `Hello, ${name}!` });
+        return Promise.resolve();
       },
     });
   }
