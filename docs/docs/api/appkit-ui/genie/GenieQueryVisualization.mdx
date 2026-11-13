@@ -7,9 +7,10 @@ Renders a chart + data table for a Genie query result.
 
 Renders a chart + data table for a Genie query result.
 
+- When `chartImageUrl` is set: the Chart tab shows that image; if it fails to load, the inferred chart
 - When a chart type can be inferred: shows Tabs with "Chart" (default) and "Table"
 - When no chart fits: shows only the data table
-- When data is empty/malformed: renders nothing
+- When data is empty/malformed: renders only the chart image, if any
 
 
 **Source:** [`packages/appkit-ui/src/react/genie/genie-query-visualization.tsx`](https://github.com/databricks/appkit/blob/main/packages/appkit-ui/src/react/genie/genie-query-visualization.tsx)
@@ -20,6 +21,8 @@ Renders a chart + data table for a Genie query result.
 | Prop | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
 | `data` | `GenieStatementResponse` | ✓ | - | Raw statement_response from the Genie API |
+| `chartImageUrl` | `string` |  | - | URL of a chart Genie rendered for this query, shown in place of the inferred chart |
+| `chartImageAlt` | `string` |  | - | Alt text for `chartImageUrl` |
 | `className` | `string` |  | - | Additional CSS classes |
 
 

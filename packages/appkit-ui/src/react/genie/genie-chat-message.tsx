@@ -38,6 +38,26 @@ function isQueryAttachment(att: GenieAttachmentResponse): boolean {
   return !!(att.query?.title || att.query?.query);
 }
 
+interface Visualization {
+  url: string;
+  title?: string;
+  queryAttachmentId?: string;
+}
+
+/** A chart Genie rendered, shown as the PNG the genie plugin serves. */
+function GenieVisualizationImage({ viz }: { viz: Visualization }) {
+  return (
+    <Card className="w-full px-4 py-3 overflow-hidden">
+      <img
+        src={viz.url}
+        alt={viz.title ?? "Visualization"}
+        loading="lazy"
+        className="w-full h-auto"
+      />
+    </Card>
+  );
+}
+
 /** Renders a single Genie message bubble with optional expandable SQL query attachments. */
 export function GenieChatMessage({
   message,
@@ -45,6 +65,16 @@ export function GenieChatMessage({
 }: GenieChatMessageProps) {
   const isUser = message.role === "user";
   const queryAttachments = message.attachments.filter(isQueryAttachment);
+  const visualizations: Visualization[] = message.attachments.flatMap((att) => {
+    const url =
+      att.attachmentId && message.visualizationUrls?.[att.attachmentId];
+    return att.viz && url ? [{ url, ...att.viz }] : [];
+  });
+  const queryIds = new Set(queryAttachments.map((att) => att.attachmentId));
+  // Charts whose query isn't among the attachments still get shown, after the queries.
+  const unmatchedVisualizations = visualizations.filter(
+    (viz) => !queryIds.has(viz.queryAttachmentId),
+  );
   const html = useMemo(
     () =>
       message.content
@@ -81,6 +111,22 @@ export function GenieChatMessage({
               : "bg-muted",
           )}
         >
+          {message.reasoning && message.reasoning.length > 0 && (
+            <details
+              open={!message.content}
+              className="text-xs text-muted-foreground mb-2"
+            >
+              <summary className="cursor-pointer select-none font-medium">
+                Thinking
+              </summary>
+              <ul className="mt-1 flex flex-col gap-1 list-disc pl-4">
+                {message.reasoning.map((step, i) => (
+                  <li key={i}>{step}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+
           {html && (
             <div
               className={markdownStyles}
@@ -100,6 +146,14 @@ export function GenieChatMessage({
               const queryResult = att.attachmentId
                 ? message.queryResults.get(att.attachmentId)
                 : undefined;
+              const queryVisualizations = visualizations.filter(
+                (viz) => viz.queryAttachmentId === att.attachmentId,
+              );
+              // The first chart goes into the result's Chart tab; any others, or all
+              // of them while there's no result, are shown as plain images.
+              const [chartViz, ...otherVisualizations] = queryVisualizations;
+              const standaloneVisualizations =
+                queryResult != null ? otherVisualizations : queryVisualizations;
 
               return (
                 <div key={key} className="flex flex-col gap-2">
@@ -124,14 +178,25 @@ export function GenieChatMessage({
                   </Card>
                   {queryResult != null && (
                     <Card className="w-full px-4 py-3 overflow-hidden">
-                      <GenieQueryVisualization data={queryResult} />
+                      <GenieQueryVisualization
+                        data={queryResult}
+                        chartImageUrl={chartViz?.url}
+                        chartImageAlt={chartViz?.title}
+                      />
                     </Card>
                   )}
+                  {standaloneVisualizations.map((viz) => (
+                    <GenieVisualizationImage key={viz.url} viz={viz} />
+                  ))}
                 </div>
               );
             })}
           </div>
         )}
+
+        {unmatchedVisualizations.map((viz) => (
+          <GenieVisualizationImage key={viz.url} viz={viz} />
+        ))}
       </div>
     </div>
   );

@@ -1,3 +1,5 @@
+import { PassThrough } from "node:stream";
+
 import {
   createMockRequest,
   createMockResponse,
@@ -78,6 +80,7 @@ function createMockGenieService() {
   );
 
   const genieListConversationMessages = vi.fn();
+  const downloadMessageAttachmentVisualization = vi.fn();
 
   return {
     genieStartConversation,
@@ -85,6 +88,7 @@ function createMockGenieService() {
     genieGetConversationMessage,
     genieGetMessageAttachmentQueryResult,
     genieListConversationMessages,
+    downloadMessageAttachmentVisualization,
     register,
   };
 }
@@ -93,6 +97,8 @@ describe("Genie Plugin", () => {
   let config: IGenieConfig;
   let serviceContextMock: Awaited<ReturnType<typeof mockServiceContext>>;
   let mockGenieService: ReturnType<typeof createMockGenieService>;
+  // Raw workspace requests (the agent-mode endpoints the SDK doesn't cover).
+  let mockRequest: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     config = {
@@ -127,9 +133,11 @@ describe("Genie Plugin", () => {
       },
     });
 
+    mockRequest = vi.fn();
     serviceContextMock = await mockServiceContext({
       userDatabricksClient: {
         genie: mockGenieService,
+        request: mockRequest,
       },
     });
   });
@@ -161,13 +169,17 @@ describe("Genie Plugin", () => {
         expect.any(Function),
       );
 
-      expect(router.get).toHaveBeenCalledTimes(2);
+      expect(router.get).toHaveBeenCalledTimes(3);
       expect(router.get).toHaveBeenCalledWith(
         "/:alias/conversations/:conversationId",
         expect.any(Function),
       );
       expect(router.get).toHaveBeenCalledWith(
         "/:alias/conversations/:conversationId/messages/:messageId",
+        expect.any(Function),
+      );
+      expect(router.get).toHaveBeenCalledWith(
+        "/:alias/conversations/:conversationId/messages/:messageId/attachments/:attachmentId/visualization",
         expect.any(Function),
       );
     });
@@ -1388,6 +1400,286 @@ describe("Genie Plugin", () => {
           }),
         }),
       );
+    });
+  });
+  describe("agent mode", () => {
+    const userHeaders = {
+      "x-forwarded-access-token": "user-token",
+      "x-forwarded-user": "user-1",
+    };
+
+    function agentTurn(): Response {
+      const events = [
+        {
+          type: "response.created",
+          response: { id: "agent-msg", conversation_id: "agent-conv" },
+        },
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "reasoning",
+            content: [{ type: "reasoning_text", text: "Counting franchises." }],
+          },
+        },
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "Japan has the most." }],
+          },
+        },
+        { type: "response.completed", response: { id: "agent-msg" } },
+      ];
+      return new Response(
+        events.map((e) => `data:${JSON.stringify(e)}\n\n`).join(""),
+      );
+    }
+
+    test("defines tools for agent aliases", () => {
+      const plugin = new GeniePlugin({
+        ...config,
+        agents: { analyst: "agent-space-id" },
+      });
+      const names = plugin.getAgentTools().map((t) => t.name);
+
+      expect(names).toContain("analyst.sendMessage");
+      expect(names).toContain("analyst.getConversation");
+      expect(names).toHaveLength(6);
+    });
+
+    test("throws at construction when an alias is both a space and an agent", () => {
+      expect(
+        () =>
+          new GeniePlugin({ ...config, agents: { myspace: "agent-space-id" } }),
+      ).toThrow(/"myspace" configured in both `spaces` and `agents`/);
+    });
+
+    test("throws at construction when an agent id is missing", () => {
+      expect(
+        () => new GeniePlugin({ ...config, agents: { analyst: undefined } }),
+      ).toThrow(/alias "analyst" was configured with a missing Genie Space ID/);
+    });
+
+    test("sends messages to the agent responses endpoint", async () => {
+      const plugin = new GeniePlugin({
+        ...config,
+        agents: { analyst: "agent-space-id" },
+      });
+      const { router, getHandler } = createMockRouter();
+      plugin.injectRoutes(router);
+      mockRequest.mockResolvedValue(agentTurn());
+      mockGenieService.register("agent-conv", "agent-msg");
+
+      const mockRes = createMockResponse();
+      await getHandler("POST", "/:alias/messages")(
+        createMockRequest({
+          params: { alias: "analyst" },
+          body: { content: "Franchises by country?" },
+          headers: userHeaders,
+        }),
+        mockRes,
+      );
+
+      expect(mockGenieService.genieStartConversation).not.toHaveBeenCalled();
+      expect(mockRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: "POST",
+          path: "/api/2.0/genie/agents/agent-space-id/responses",
+        }),
+      );
+      const stream = expectStream(mockRes);
+      await stream.toEmit("message_start", "reasoning", "message_result");
+      const events = await stream.collect();
+      expect(events.find((e) => e.type === "message_result")).toMatchObject({
+        message: {
+          reasoning: ["Counting franchises."],
+          attachments: [{ text: { content: "Japan has the most." } }],
+        },
+      });
+    });
+
+    test("reads agent conversation history with the items endpoint", async () => {
+      const plugin = new GeniePlugin({
+        ...config,
+        agents: { analyst: "agent-space-id" },
+      });
+      const { router, getHandler } = createMockRouter();
+      plugin.injectRoutes(router);
+      mockGenieService.genieListConversationMessages.mockResolvedValue({
+        messages: [],
+      });
+      mockRequest.mockResolvedValue(Response.json({ data: [] }));
+
+      await getHandler("GET", "/:alias/conversations/:conversationId")(
+        createMockRequest({
+          params: { alias: "analyst", conversationId: "agent-conv" },
+          headers: userHeaders,
+        }),
+        createMockResponse(),
+      );
+
+      expect(mockRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: "/api/2.0/genie/agents/agent-space-id/conversations/agent-conv/items",
+        }),
+      );
+    });
+
+    test("chat aliases keep using the chat API", async () => {
+      const plugin = new GeniePlugin({
+        ...config,
+        agents: { analyst: "agent-space-id" },
+      });
+      const { router, getHandler } = createMockRouter();
+      plugin.injectRoutes(router);
+
+      await getHandler("POST", "/:alias/messages")(
+        createMockRequest({
+          params: { alias: "myspace" },
+          body: { content: "Top customers?" },
+          headers: userHeaders,
+        }),
+        createMockResponse(),
+      );
+
+      expect(mockGenieService.genieStartConversation).toHaveBeenCalled();
+      expect(mockRequest).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("getVisualization", () => {
+    const vizPath =
+      "/:alias/conversations/:conversationId/messages/:messageId/attachments/:attachmentId/visualization";
+
+    function vizRequest(params: Record<string, string>) {
+      return createMockRequest({
+        params: {
+          alias: "myspace",
+          conversationId: "conv-1",
+          messageId: "msg-1",
+          attachmentId: "viz-1_output",
+          ...params,
+        },
+        headers: {
+          "x-forwarded-access-token": "user-token",
+          "x-forwarded-user": "user-1",
+        },
+      });
+    }
+
+    // A real Writable, so the handler can pipe the PNG into it.
+    function streamResponse() {
+      const res: any = new PassThrough();
+      res.status = vi.fn().mockReturnValue(res);
+      res.json = vi.fn().mockReturnValue(res);
+      res.setHeader = vi.fn().mockReturnValue(res);
+      return res;
+    }
+
+    async function readAll(res: PassThrough): Promise<Buffer> {
+      const chunks: Buffer[] = [];
+      for await (const chunk of res) chunks.push(chunk as Buffer);
+      return Buffer.concat(chunks);
+    }
+
+    test("streams the PNG Genie rendered for the attachment", async () => {
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+      plugin.injectRoutes(router);
+      const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+      mockGenieService.downloadMessageAttachmentVisualization.mockResolvedValue(
+        {
+          contents: new Response(png).body,
+        },
+      );
+      const res = streamResponse();
+
+      await getHandler("GET", vizPath)(vizRequest({}), res);
+
+      expect(await readAll(res)).toEqual(png);
+      expect(res.setHeader).toHaveBeenCalledWith("Content-Type", "image/png");
+      expect(res.setHeader).toHaveBeenCalledWith(
+        "X-Content-Type-Options",
+        "nosniff",
+      );
+      expect(
+        mockGenieService.downloadMessageAttachmentVisualization,
+      ).toHaveBeenCalledWith(
+        {
+          name: "spaces/test-space-id/conversations/conv-1/messages/msg-1/attachments/viz-1_output",
+        },
+        expect.anything(),
+      );
+    });
+
+    test("cancels the download when the client goes away", async () => {
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+      plugin.injectRoutes(router);
+      const cancel = vi.fn();
+      mockGenieService.downloadMessageAttachmentVisualization.mockResolvedValue(
+        {
+          // Sends one chunk, then stalls like a slow upstream.
+          contents: new ReadableStream({
+            start(controller) {
+              controller.enqueue(new Uint8Array([0x89]));
+            },
+            cancel,
+          }),
+        },
+      );
+      const res = streamResponse();
+      res.once("data", () => res.destroy());
+
+      await getHandler("GET", vizPath)(vizRequest({}), res);
+
+      expect(cancel).toHaveBeenCalled();
+    });
+
+    test("returns 400 for ids that could change the resource path", async () => {
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+      plugin.injectRoutes(router);
+      const res = streamResponse();
+
+      await getHandler("GET", vizPath)(
+        vizRequest({ attachmentId: "../../x" }),
+        res,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(
+        mockGenieService.downloadMessageAttachmentVisualization,
+      ).not.toHaveBeenCalled();
+    });
+
+    test("returns 404 for an unknown alias", async () => {
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+      plugin.injectRoutes(router);
+      const res = streamResponse();
+
+      await getHandler("GET", vizPath)(vizRequest({ alias: "unknown" }), res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+    });
+
+    test("passes on Genie's status when the attachment isn't a visualization", async () => {
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+      plugin.injectRoutes(router);
+      mockGenieService.downloadMessageAttachmentVisualization.mockRejectedValue(
+        Object.assign(new Error(""), { statusCode: 404 }),
+      );
+      const res = streamResponse();
+
+      await getHandler("GET", vizPath)(vizRequest({}), res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({
+        error: "Visualization not available",
+      });
     });
   });
 });
