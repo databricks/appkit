@@ -256,11 +256,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/Interface.EntityMutationHooks",
-          label: "EntityMutationHooks"
-        },
-        {
-          type: "doc",
           id: "api/appkit/Interface.EvalDefinition",
           label: "EvalDefinition"
         },
@@ -313,16 +308,6 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.GenerationParams",
           label: "GenerationParams"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.HookApp",
-          label: "HookApp"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.HookContext",
-          label: "HookContext"
         },
         {
           type: "doc",
@@ -433,11 +418,6 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.ReadEvalDatasetOptions",
           label: "ReadEvalDatasetOptions"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.ReadSerializerContext",
-          label: "ReadSerializerContext"
         },
         {
           type: "doc",
@@ -682,11 +662,6 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/TypeAlias.EntityHooks",
-          label: "EntityHooks"
-        },
-        {
-          type: "doc",
           id: "api/appkit/TypeAlias.EvalProgress",
           label: "EvalProgress"
         },
@@ -754,11 +729,6 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/TypeAlias.Plugins",
           label: "Plugins"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/TypeAlias.ReadSerializer",
-          label: "ReadSerializer"
         },
         {
           type: "doc",

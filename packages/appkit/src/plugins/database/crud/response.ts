@@ -79,9 +79,9 @@ export function sendEmpty(res: Response, status: number): void {
 }
 
 /**
- * Convert a failure into its safe category. A hook's deliberate validation
- * error is the one signal that reaches the caller, and only through the issues
- * naming a public column of this table.
+ * Convert a failure into its safe category. A deliberate validation error is
+ * the one signal that reaches the caller, and only through the issues naming a
+ * public column of this table.
  */
 function safeError(
   table: CrudTable,
