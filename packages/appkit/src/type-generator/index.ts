@@ -47,14 +47,17 @@ import { generateServingTypes as generateServingTypesImpl } from "./serving/gene
 import { createTypegenWorkspaceClient } from "./typegen-client";
 import type { QueryFatalError, QuerySchema, QuerySyntaxError } from "./types";
 import {
+  describeStatusTimeout,
   describeWaitTimeout,
   getWarehouseState,
   remainingWaitMs,
   resolveWarehouseWaitTimeoutMs,
   startWarehouse,
+  statusRequestTimeoutMs,
   WAREHOUSE_UNAVAILABLE_CODE,
   WAREHOUSE_WAIT_TIMEOUT_ENV,
   type WarehouseState,
+  WarehouseStatusTimeoutError,
   WarehouseWaitTimeoutError,
   waitUntilRunning,
 } from "./warehouse-status";
@@ -758,7 +761,11 @@ export async function syncMetricViewsTypes(options: {
     describeNeeded.length > 0
   ) {
     try {
-      const state = await getWarehouseState(getMvClient(), warehouseId);
+      const state = await getWarehouseState(getMvClient(), warehouseId, {
+        timeoutMs: statusRequestTimeoutMs(
+          remainingWaitMs(waitTimeoutMs, options.waitDeadline),
+        ),
+      });
       const decision = decidePreflight(state, mode);
       if (decision === "fatal") {
         preflightFatalMessage = `warehouse ${warehouseId} is ${state}`;
@@ -768,10 +775,15 @@ export async function syncMetricViewsTypes(options: {
       } else if (decision === "startWaitProceed") {
         // treatStoppedAsTransient rides out the stale pre-start STOPPED/STOPPING
         // reading, same as the query preflight.
-        await startWarehouse(getMvClient(), warehouseId);
+        await startWarehouse(getMvClient(), warehouseId, {
+          timeoutMs: statusRequestTimeoutMs(
+            remainingWaitMs(waitTimeoutMs, options.waitDeadline),
+          ),
+        });
         const settled = await waitUntilRunning(getMvClient(), warehouseId, {
           maxMs: remainingWaitMs(waitTimeoutMs, options.waitDeadline),
           treatStoppedAsTransient: true,
+          lastKnownState: state,
         });
         if (settled !== "RUNNING") {
           // With treatStoppedAsTransient, a non-RUNNING resolve is exactly
@@ -782,6 +794,7 @@ export async function syncMetricViewsTypes(options: {
       } else if (decision === "waitThenProceed") {
         const settled = await waitUntilRunning(getMvClient(), warehouseId, {
           maxMs: remainingWaitMs(waitTimeoutMs, options.waitDeadline),
+          lastKnownState: state,
         });
         if (settled === "DELETED" || settled === "DELETING") {
           // Deleted mid-wait: fatal. Environmental (state-based).
@@ -794,6 +807,12 @@ export async function syncMetricViewsTypes(options: {
         // Wait limit ran out: skip the DESCRIBEs (they'd only queue on the
         // still-starting warehouse) and degrade for the committed-types gate.
         preflightFatalMessage = describeWaitTimeout(err, waitTimeoutMs);
+        hadEnvironmentalFailure = true;
+        environmentalCause = "unavailable";
+        environmentalDetail = preflightFatalMessage;
+      } else if (err instanceof WarehouseStatusTimeoutError) {
+        // The warehouse API itself didn't answer in time: same handling.
+        preflightFatalMessage = describeStatusTimeout(err);
         hadEnvironmentalFailure = true;
         environmentalCause = "unavailable";
         environmentalDetail = preflightFatalMessage;

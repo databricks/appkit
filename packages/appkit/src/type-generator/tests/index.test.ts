@@ -773,6 +773,8 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(mocks.startWarehouse).toHaveBeenCalledWith(
       expect.anything(),
       "wh-1",
+      // Bounded like the status check, so a start that never answers can't hang.
+      { timeoutMs: 30_000 },
     );
     expect(mocks.waitUntilRunning).toHaveBeenCalledWith(
       expect.anything(),

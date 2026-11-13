@@ -31,11 +31,14 @@ import {
   sqlTypeToMarker,
 } from "./types";
 import {
+  describeStatusTimeout,
   describeWaitTimeout,
   getWarehouseState,
   remainingWaitMs,
   resolveWarehouseWaitTimeoutMs,
   startWarehouse,
+  statusRequestTimeoutMs,
+  WarehouseStatusTimeoutError,
   WarehouseWaitTimeoutError,
   waitUntilRunning,
 } from "./warehouse-status";
@@ -681,7 +684,11 @@ export async function generateQueriesFromDescribe(
       decision = "degradeAll";
     } else {
       try {
-        const state = await getWarehouseState(client, warehouseId);
+        const state = await getWarehouseState(client, warehouseId, {
+          timeoutMs: statusRequestTimeoutMs(
+            remainingWaitMs(waitTimeoutMs, options.waitDeadline),
+          ),
+        });
         decision = decidePreflight(state, mode);
         if (decision === "fatal") {
           // DELETED/DELETING is state-based and environmental.
@@ -694,10 +701,15 @@ export async function generateQueriesFromDescribe(
           // poll to RUNNING. treatStoppedAsTransient rides out the stale
           // pre-start STOPPED/STOPPING reading the start hasn't propagated past
           // yet — only DELETED/DELETING (or the deadline) ends the wait early.
-          await startWarehouse(client, warehouseId);
+          await startWarehouse(client, warehouseId, {
+            timeoutMs: statusRequestTimeoutMs(
+              remainingWaitMs(waitTimeoutMs, options.waitDeadline),
+            ),
+          });
           const final = await waitUntilRunning(client, warehouseId, {
             maxMs: remainingWaitMs(waitTimeoutMs, options.waitDeadline),
             treatStoppedAsTransient: true,
+            lastKnownState: state,
           });
           if (final === "RUNNING") {
             decision = "proceed";
@@ -711,6 +723,7 @@ export async function generateQueriesFromDescribe(
         if (decision === "waitThenProceed") {
           const final = await waitUntilRunning(client, warehouseId, {
             maxMs: remainingWaitMs(waitTimeoutMs, options.waitDeadline),
+            lastKnownState: state,
           });
           if (final === "RUNNING") {
             decision = "proceed";
@@ -730,6 +743,12 @@ export async function generateQueriesFromDescribe(
           isEnvironmental = true;
           environmentalCause = "unavailable";
           environmentalDetail = describeWaitTimeout(err, waitTimeoutMs);
+        } else if (err instanceof WarehouseStatusTimeoutError) {
+          // The warehouse API itself didn't answer in time: same handling.
+          decision = "degradeAll";
+          isEnvironmental = true;
+          environmentalCause = "unavailable";
+          environmentalDetail = describeStatusTimeout(err);
         } else if (isConnectivityError(err)) {
           // Warehouse unreachable (transient outage): degrade rather than fail —
           // never fail a build on a blip. Still environmental, so the caller's

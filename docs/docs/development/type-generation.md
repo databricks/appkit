@@ -102,6 +102,8 @@ npx @databricks/appkit generate-types --wait
 
 One limit covers the whole run: query types and metric-view types share it, so a stuck warehouse costs at most one limit. A warehouse that is already `RUNNING` is not affected.
 
+The limit also holds when the warehouse API stops answering: every status request made while waiting is cut off when the limit runs out. The first status check, and the start request for a stopped warehouse, each get the time left in the limit, but at least 10 seconds and at most 30 seconds. So with a limit under 10 seconds, a slow API can still take up to 10 seconds to answer.
+
 Set the limit in seconds with the `--wait-timeout` flag or the `APPKIT_TYPEGEN_WAIT_TIMEOUT` environment variable (the flag wins). `0` checks the warehouse once and doesn't wait. The environment variable also applies to `appKitTypesPlugin()` when it runs in a production Vite build.
 
 ```bash

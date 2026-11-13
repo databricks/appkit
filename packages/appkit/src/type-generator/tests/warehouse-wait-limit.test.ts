@@ -234,10 +234,37 @@ describe("generate-types --wait: warehouse wait limit", () => {
       }),
     );
 
-    expect(mocks.startWarehouse).toHaveBeenCalledWith({ id: "wh-cold" });
+    expect(mocks.startWarehouse).toHaveBeenCalledWith(
+      { id: "wh-cold" },
+      { signal: expect.any(AbortSignal) },
+    );
     expect(error).toBeInstanceOf(TypegenFatalError);
     expect((error as Error).message).toContain(
       "warehouse wh-cold is still STARTING after the 50ms wait limit",
+    );
+  });
+
+  test("a status request that hangs mid-wait still ends at the limit", async () => {
+    // Preflight says STARTING, then every warehouses.get hangs.
+    mocks.getWarehouse
+      .mockResolvedValueOnce({ state: "STARTING" })
+      .mockImplementation(() => new Promise(() => {}));
+
+    const started = Date.now();
+    const error = await rejection(
+      generateFromEntryPoint({
+        outFile,
+        queryFolder,
+        warehouseId: "wh-hung",
+        mode: "blocking",
+        waitTimeoutMs: 50,
+      }),
+    );
+
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(error).toBeInstanceOf(TypegenFatalError);
+    expect((error as Error).message).toContain(
+      "warehouse_unavailable: warehouse wh-hung is still STARTING after the 50ms wait limit",
     );
   });
 
