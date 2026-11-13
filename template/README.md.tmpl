@@ -48,6 +48,25 @@ DATABRICKS_APP_PORT=8000
 #### Lakebase Configuration
 
 The Lakebase plugin requires additional environment variables for PostgreSQL connectivity. To learn how to configure the Lakebase plugin, see the [Lakebase plugin documentation](https://developers.databricks.com/docs/appkit/v0/plugins/lakebase).
+
+#### Correlate app requests with Lakebase query plans
+
+The sample routes execute Lakebase SQL through `withLakebaseTraceContext`. At query execution time, the wrapper reads the active AppKit request span and prepends its W3C `traceparent` plus a sanitized service label as a SQL comment. The label comes from `OTEL_SERVICE_NAME`, then `DATABRICKS_APP_NAME`, then `databricks-app`. If you configure a different AppKit telemetry service name, pass that name as the wrapper's second argument. The wrapper does not create a span, interpolate parameters, cache annotated SQL, or store request state on the connection pool. Without a valid active span, it sends the original SQL unchanged.
+
+When Databricks Apps provides `OTEL_EXPORTER_OTLP_ENDPOINT`, AppKit initializes request instrumentation and OTLP export. Configure an Apps OpenTelemetry destination to have the runtime inject that endpoint and make sampled application spans available in Unity Catalog:
+
+```yaml
+resources:
+  apps:
+    app:
+      telemetry_export_destinations:
+        - unity_catalog:
+            logs_table: <catalog>.<schema>.<app>_otel_logs
+            metrics_table: <catalog>.<schema>.<app>_otel_metrics
+            traces_table: <catalog>.<schema>.<app>_otel_spans
+```
+
+When Lakebase captures a query plan, it parses the SQL comment into `system.lakebase.plan_history`; it does not export the application span. For sampled requests, query the configured traces table for the app-side span and look for a captured plan with matching `trace_id` or `span_id`. Plan capture filters and retention still apply. Code that bypasses the wrapper (for example, a raw pool, checked-out client, ORM, or the opt-in Lakebase agent tool) is not covered by this template helper.
 {{- end}}
 
 {{- if .plugins.database}}
