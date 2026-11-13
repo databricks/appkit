@@ -9,6 +9,7 @@ import {
   getSpawnLockPath,
   releaseSpawnLock,
   SPAWN_LOCK_STALE_MS,
+  spawnLockStaleMsFor,
 } from "./spawn-lock";
 
 describe("spawn-lock", () => {
@@ -91,5 +92,16 @@ describe("spawn-lock", () => {
     expect(acquireSpawnLock(lockPath)).toBe(false); // held
     releaseSpawnLock(lockPath);
     expect(acquireSpawnLock(lockPath)).toBe(true); // freed → re-acquirable
+  });
+});
+
+describe("spawnLockStaleMsFor", () => {
+  test("keeps the default window for the default or a shorter wait limit", () => {
+    expect(spawnLockStaleMsFor()).toBe(SPAWN_LOCK_STALE_MS);
+    expect(spawnLockStaleMsFor(60_000)).toBe(SPAWN_LOCK_STALE_MS);
+  });
+
+  test("stretches past a long wait limit with describe headroom", () => {
+    expect(spawnLockStaleMsFor(15 * 60_000)).toBe(16 * 60_000);
   });
 });

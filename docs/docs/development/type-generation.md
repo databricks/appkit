@@ -93,6 +93,22 @@ Pass `--wait` for CI and production builds, where accurate types must be present
 npx @databricks/appkit generate-types --wait
 ```
 
+#### Wait limit
+
+`--wait` never waits forever. If the warehouse hasn't reached `RUNNING` within the limit (default **300 seconds**), the generator stops waiting:
+
+- If committed types exist, it keeps them, prints a warning and exits 0. The warning includes the error code, the warehouse ID, the state it was stuck in and the limit, e.g. `warehouse_unavailable: warehouse abc123 is still STARTING after the 300s wait limit; kept existing analytics.d.ts`.
+- If there are no committed types to fall back on, it fails with exit code 1 and a message with the same `warehouse_unavailable: …` line.
+
+One limit covers the whole run: query types and metric-view types share it, so a stuck warehouse costs at most one limit. A warehouse that is already `RUNNING` is not affected.
+
+Set the limit in seconds with the `--wait-timeout` flag or the `APPKIT_TYPEGEN_WAIT_TIMEOUT` environment variable (the flag wins). `0` checks the warehouse once and doesn't wait. The environment variable also applies to `appKitTypesPlugin()` when it runs in a production Vite build.
+
+```bash
+npx @databricks/appkit generate-types --wait --wait-timeout 120
+APPKIT_TYPEGEN_WAIT_TIMEOUT=120 npm run build
+```
+
 #### CI resilience: committed types as fallback
 
 In blocking mode (`--wait`), the generator attempts to fetch real types from your warehouse, but delegates to **committed type files** (`shared/appkit-types/analytics.d.ts` and, when Metric Views are configured, `shared/appkit-types/metric-views.d.ts`) as the fallback when the warehouse is unreachable. These generated files should be part of your repository. On a fresh CI checkout, every build attempts to DESCRIBE against the warehouse; the committed types are used only when that cannot complete.
@@ -102,7 +118,7 @@ The generator **never overwrites committed types with degraded (`result: unknown
 A **two-bucket failure taxonomy** determines whether the build crashes or falls back to committed types:
 
 - **Deterministic failures (always crash):** SQL syntax errors in your queries (genuine DESCRIBE failure against a reachable warehouse), HTTP 404 (bad or unknown warehouse ID), HTTP 400 (malformed request). These are developer or configuration errors that committed types must not hide.
-- **Environmental failures (gate on committed types):** Authentication failures (401/403), network unreachability, warehouse unavailability (cold, deleting, or deleted), wait timeout on `RUNNING`, or any unrecognized failure. If every type file required by the app exists, the build **keeps them, emits a loud warning to stderr, and succeeds (exit 0)**. If a required file is missing, the build **crashes** with a message instructing you to run `npx @databricks/appkit generate-types --wait` locally (against a reachable warehouse) and commit the generated type files.
+- **Environmental failures (gate on committed types):** Authentication failures (401/403), network unreachability, warehouse unavailability (cold, deleting, or deleted), the [wait limit](#wait-limit) running out before `RUNNING`, or any unrecognized failure. If every type file required by the app exists, the build **keeps them, emits a loud warning to stderr, and succeeds (exit 0)**. If a required file is missing, the build **crashes** with a message instructing you to run `npx @databricks/appkit generate-types --wait` locally (against a reachable warehouse) and commit the generated type files.
 
 The loud warning is a single greppable stderr line naming the coarse cause (auth blocked / warehouse unreachable / warehouse unavailable) and the warehouse ID, so CI logs surface that the build fell back to committed types.
 

@@ -31,19 +31,16 @@ import {
   sqlTypeToMarker,
 } from "./types";
 import {
+  describeWaitTimeout,
   getWarehouseState,
+  remainingWaitMs,
+  resolveWarehouseWaitTimeoutMs,
   startWarehouse,
+  WarehouseWaitTimeoutError,
   waitUntilRunning,
 } from "./warehouse-status";
 
 const logger = createLogger("type-generator:query-registry");
-
-/**
- * Upper bound on how long a `blocking`-mode preflight will wait for a starting
- * warehouse to reach RUNNING before giving up (~5 min). Generous enough to ride
- * out a cold start without hanging an interactive CLI invocation indefinitely.
- */
-const PREFLIGHT_WAIT_MAX_MS = 300_000;
 
 /**
  * Numeric-context patterns for positional type inference.
@@ -498,6 +495,11 @@ export function inferParameterTypes(
  *   immediately), "blocking" waits for a starting warehouse and starts (then
  *   waits for) a stopped one, treating only a deleted/deleting warehouse as
  *   fatal. Defaults to "non-blocking".
+ * @param options.waitTimeoutMs - "blocking" only: how long to wait for the
+ *   warehouse to reach RUNNING. Defaults to {@link resolveWarehouseWaitTimeoutMs}
+ *   (`APPKIT_TYPEGEN_WAIT_TIMEOUT` seconds, else 5 min). When it runs out the
+ *   run degrades like any environmental failure and reports the timeout in
+ *   `environmentalDetail`.
  * @returns an array of query schemas
  */
 export async function generateQueriesFromDescribe(
@@ -507,6 +509,9 @@ export async function generateQueriesFromDescribe(
     noCache?: boolean;
     concurrency?: number;
     mode?: PreflightMode;
+    waitTimeoutMs?: number;
+    /** Internal: epoch-ms deadline shared with the metric-view wait. */
+    waitDeadline?: number;
   } = {},
 ): Promise<QueryGenerationResult> {
   const {
@@ -514,6 +519,7 @@ export async function generateQueriesFromDescribe(
     concurrency: rawConcurrency = 10,
     mode = "non-blocking",
   } = options;
+  const waitTimeoutMs = resolveWarehouseWaitTimeoutMs(options.waitTimeoutMs);
   const concurrency =
     typeof rawConcurrency === "number" && Number.isFinite(rawConcurrency)
       ? Math.max(1, Math.floor(rawConcurrency))
@@ -651,6 +657,9 @@ export async function generateQueriesFromDescribe(
   // gate's warning can say why generation fell back to committed types.
   let hadEnvironmentalFailure = false;
   let environmentalCause: "auth" | "unreachable" | "unavailable" | undefined;
+  // Human-readable reason for the environmental failure, when there is a more
+  // specific one than the coarse cause (e.g. the wait limit ran out).
+  let environmentalDetail: string | undefined;
 
   if (uncachedQueries.length > 0) {
     // One-time warehouse preflight (before issuing any DESCRIBE). A single
@@ -687,7 +696,7 @@ export async function generateQueriesFromDescribe(
           // yet — only DELETED/DELETING (or the deadline) ends the wait early.
           await startWarehouse(client, warehouseId);
           const final = await waitUntilRunning(client, warehouseId, {
-            maxMs: PREFLIGHT_WAIT_MAX_MS,
+            maxMs: remainingWaitMs(waitTimeoutMs, options.waitDeadline),
             treatStoppedAsTransient: true,
           });
           if (final === "RUNNING") {
@@ -701,7 +710,7 @@ export async function generateQueriesFromDescribe(
         }
         if (decision === "waitThenProceed") {
           const final = await waitUntilRunning(client, warehouseId, {
-            maxMs: PREFLIGHT_WAIT_MAX_MS,
+            maxMs: remainingWaitMs(waitTimeoutMs, options.waitDeadline),
           });
           if (final === "RUNNING") {
             decision = "proceed";
@@ -713,7 +722,15 @@ export async function generateQueriesFromDescribe(
           }
         }
       } catch (err) {
-        if (isConnectivityError(err)) {
+        if (err instanceof WarehouseWaitTimeoutError) {
+          // The wait limit ran out with the warehouse still not RUNNING. This is
+          // environmental: the has-types gate falls back to committed types or
+          // fails with this detail.
+          decision = "degradeAll";
+          isEnvironmental = true;
+          environmentalCause = "unavailable";
+          environmentalDetail = describeWaitTimeout(err, waitTimeoutMs);
+        } else if (isConnectivityError(err)) {
           // Warehouse unreachable (transient outage): degrade rather than fail —
           // never fail a build on a blip. Still environmental, so the caller's
           // has-types gate decides warn-and-fall-back (committed types present)
@@ -1079,6 +1096,9 @@ export async function generateQueriesFromDescribe(
     hadEnvironmentalFailure,
     environmentalCause: hadEnvironmentalFailure
       ? environmentalCause
+      : undefined,
+    environmentalDetail: hadEnvironmentalFailure
+      ? environmentalDetail
       : undefined,
   };
 }

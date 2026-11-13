@@ -47,9 +47,15 @@ import { generateServingTypes as generateServingTypesImpl } from "./serving/gene
 import { createTypegenWorkspaceClient } from "./typegen-client";
 import type { QueryFatalError, QuerySchema, QuerySyntaxError } from "./types";
 import {
+  describeWaitTimeout,
   getWarehouseState,
+  remainingWaitMs,
+  resolveWarehouseWaitTimeoutMs,
   startWarehouse,
+  WAREHOUSE_UNAVAILABLE_CODE,
+  WAREHOUSE_WAIT_TIMEOUT_ENV,
   type WarehouseState,
+  WarehouseWaitTimeoutError,
   waitUntilRunning,
 } from "./warehouse-status";
 
@@ -57,16 +63,11 @@ dotenv.config();
 
 const logger = createLogger("type-generator");
 
-/**
- * Upper bound (~5 min) on how long the Metric Views path's `blocking`-mode preflight
- * waits for a warehouse to reach RUNNING. Mirrors the query path's (unexported)
- * `PREFLIGHT_WAIT_MAX_MS` in query-registry.ts.
- */
-const MV_PREFLIGHT_WAIT_MAX_MS = 300_000;
-
 function determineWarningMessage(
   cause: "auth" | "unreachable" | "unavailable",
   warehouseId: string,
+  detail?: string,
+  keptFiles: string[] = [],
 ): string {
   const causeLabel =
     cause === "auth"
@@ -75,7 +76,11 @@ function determineWarningMessage(
         ? "warehouse unreachable"
         : "warehouse unavailable";
   // Use a stable prefix for greppability and CI log matching.
-  return `AppKit typegen: using committed types — warehouse ${warehouseId} ${causeLabel}; please check warehouse status and retry`;
+  const base = `AppKit typegen: using committed types — warehouse ${warehouseId} ${causeLabel}; please check warehouse status and retry`;
+  if (!detail) return base;
+  const kept =
+    keptFiles.length > 0 ? `; kept existing ${keptFiles.join(", ")}` : "";
+  return `${base} (${detail}${kept})`;
 }
 
 type TypegenFailure = QuerySyntaxError | QueryFatalError;
@@ -136,6 +141,8 @@ function formatTypegenFailureMessage(options: {
   title: string;
   causes: string[];
   nextStep: string;
+  /** Replaces the default "N queries could not be described" summary lines. */
+  summary?: string[];
 }) {
   const { syntaxErrors, fatalErrors = [], warehouseId, title } = options;
   const total = syntaxErrors.length + fatalErrors.length;
@@ -143,12 +150,15 @@ function formatTypegenFailureMessage(options: {
   const warehouse = warehouseId
     ? ` against ${pc.dim(`warehouse ${warehouseId}`)}`
     : "";
+  const summary = options.summary ?? [
+    `${title}: ${total} ${plural(total, "query", "queries")} could not be described${warehouse}.`,
+    `AppKit wrote generated types with ${pc.bold("result: unknown")} for the failed ${plural(total, "query", "queries")}.`,
+  ];
 
   return [
     `  ${pc.bold(pc.red("Type generation failed"))}`,
     `  ${separator}`,
-    `  ${title}: ${total} ${plural(total, "query", "queries")} could not be described${warehouse}.`,
-    `  AppKit wrote generated types with ${pc.bold("result: unknown")} for the failed ${plural(total, "query", "queries")}.`,
+    ...summary.map((line) => `  ${line}`),
     "",
     ...formatFailureRows("SQL ERR", syntaxErrors, pc.red),
     ...(syntaxErrors.length > 0 && fatalErrors.length > 0 ? [""] : []),
@@ -205,31 +215,82 @@ export class TypegenSyntaxError extends Error {
  * setup/request problem, such as missing permissions, invalid warehouse IDs, or
  * malformed SDK configuration. Like TypegenSyntaxError, this is thrown only
  * after the declaration file has been written with `result: unknown` entries.
+ *
+ * Also thrown, with `code: "warehouse_unavailable"`, when `--wait` ran out of
+ * time waiting for the warehouse and there are no committed types to keep (see
+ * {@link warehouseUnavailableError}).
  */
 export class TypegenFatalError extends Error {
   readonly queries: QueryFatalError[];
+  /** Machine-readable reason, when there is one (e.g. `warehouse_unavailable`). */
+  readonly code?: string;
 
-  constructor(queries: QueryFatalError[], warehouseId?: string) {
+  constructor(
+    queries: QueryFatalError[],
+    warehouseId?: string,
+    format?: {
+      code?: string;
+      summary: string[];
+      causes: string[];
+      nextStep: string;
+    },
+  ) {
     super(
       formatTypegenFailureMessage({
         syntaxErrors: [],
         fatalErrors: queries,
         warehouseId,
         title: "DESCRIBE QUERY could not be requested",
-        causes: [
+        summary: format?.summary,
+        causes: format?.causes ?? [
           "missing warehouse permissions",
           "invalid warehouse ID",
           "authentication failure",
           "SDK configuration errors",
         ],
-        nextStep: warehouseId
-          ? `Verify access to warehouse ${pc.bold(warehouseId)} and rerun type generation.`
-          : "Verify warehouse access and rerun type generation.",
+        nextStep:
+          format?.nextStep ??
+          (warehouseId
+            ? `Verify access to warehouse ${pc.bold(warehouseId)} and rerun type generation.`
+            : "Verify warehouse access and rerun type generation."),
       }),
     );
     this.name = "TypegenFatalError";
     this.queries = queries;
+    this.code = format?.code;
   }
+}
+
+/**
+ * The `--wait` failure for a warehouse that didn't reach RUNNING within the
+ * wait limit when no committed types exist to fall back on.
+ */
+function warehouseUnavailableError(
+  warehouseId: string,
+  detail: string,
+  missingFiles: string[],
+): TypegenFatalError {
+  return new TypegenFatalError(
+    [
+      {
+        name: "type-generator",
+        message: `${detail}; no committed types to fall back on (missing: ${missingFiles.join(", ")})`,
+      },
+    ],
+    warehouseId,
+    {
+      code: WAREHOUSE_UNAVAILABLE_CODE,
+      summary: [
+        `Warehouse ${pc.bold(warehouseId)} was not ready in time, and there are no committed types to use instead.`,
+        "No type files were written.",
+      ],
+      causes: [
+        "the warehouse is still starting (slow cold start, capacity, or a stuck start)",
+        "the warehouse was stopped and did not finish starting within the limit",
+      ],
+      nextStep: `Check warehouse ${pc.bold(warehouseId)} in the Databricks UI and rerun. If it just needs longer, raise the limit with --wait-timeout <seconds> or ${WAREHOUSE_WAIT_TIMEOUT_ENV}. To build without the warehouse, run 'npx @databricks/appkit generate-types --wait' where it is reachable and commit the generated type files.`,
+    },
+  );
 }
 
 /**
@@ -304,6 +365,12 @@ async function probeWarehouseState(
  *   only when the warehouse is already RUNNING, otherwise emits permissive
  *   degraded types immediately. `"blocking"` waits for / starts the warehouse
  *   first, failing the build only for a deleted/deleting one.
+ * @param options.waitTimeoutMs - `"blocking"` only: the limit, in milliseconds,
+ *   on waiting for the warehouse to reach RUNNING. One budget covers the whole
+ *   run (queries and metric views). Defaults to `APPKIT_TYPEGEN_WAIT_TIMEOUT`
+ *   (seconds), else 5 minutes. When it runs out, committed types are kept with
+ *   a warning, or — when there are none — the run throws a
+ *   {@link TypegenFatalError} naming the warehouse, its state and the limit.
  * @param options.metricViewsFolder - folder that holds `definitions.json`
  *   (`<root>/config/metric-views`). Optional and independent of `queryFolder`:
  *   metric-view types generate whenever this folder holds a config, even if the
@@ -326,6 +393,7 @@ export async function generateFromEntryPoint(options: {
   warehouseId: string;
   noCache?: boolean;
   mode?: PreflightMode;
+  waitTimeoutMs?: number;
   mvOutFile?: string;
   metricFetcher?: DescribeFetcher;
 }) {
@@ -351,6 +419,19 @@ export async function generateFromEntryPoint(options: {
 
   const projectRoot = resolveProjectRoot(outFile);
 
+  // One wait budget for the whole run: the metric-view preflight gets whatever
+  // the query preflight left, so a stuck warehouse costs at most one limit.
+  const waitTimeoutMs = resolveWarehouseWaitTimeoutMs(
+    options.waitTimeoutMs,
+    (raw) =>
+      logger.warn(
+        "Ignoring %s=%s: expected a number of seconds (>= 0). Using the default wait limit.",
+        WAREHOUSE_WAIT_TIMEOUT_ENV,
+        raw,
+      ),
+  );
+  const waitDeadline = Date.now() + waitTimeoutMs;
+
   logger.debug("Starting type generation...");
 
   let queryRegistry: QuerySchema[] = [];
@@ -361,11 +442,15 @@ export async function generateFromEntryPoint(options: {
   let metricsHadEnvironmentalFailure = false;
   // Track the coarse cause of the environmental failure for the warning message.
   let environmentalCause: "auth" | "unreachable" | "unavailable" | undefined;
+  // A more specific reason, when known (e.g. the wait limit ran out).
+  let environmentalDetail: string | undefined;
 
   if (queryFolder) {
     const result = await generateQueriesFromDescribe(queryFolder, warehouseId, {
       noCache,
       mode,
+      waitTimeoutMs,
+      waitDeadline,
     });
     queryRegistry = result.schemas;
     syntaxErrors = result.syntaxErrors ?? [];
@@ -373,6 +458,7 @@ export async function generateFromEntryPoint(options: {
     queryHadEnvironmentalFailure = result.hadEnvironmentalFailure ?? false;
     environmentalCause =
       environmentalCause ?? result.environmentalCause ?? undefined;
+    environmentalDetail = result.environmentalDetail;
   }
 
   const typeDeclarations = generateTypeDeclarations(queryRegistry);
@@ -409,6 +495,8 @@ export async function generateFromEntryPoint(options: {
         cache: !noCache,
         metricFetcher,
         mode,
+        waitTimeoutMs,
+        waitDeadline,
         // In blocking mode, never overwrite committed metric types with a
         // degraded result — including on runs that go on to throw, so a failing
         // build leaves the committed type file intact. Non-blocking always writes.
@@ -439,6 +527,7 @@ export async function generateFromEntryPoint(options: {
       (mode === "blocking" && hasAnyDegradedMetrics(mvResult.schemas));
     environmentalCause =
       environmentalCause ?? mvResult.environmentalCause ?? undefined;
+    environmentalDetail = environmentalDetail ?? mvResult.environmentalDetail;
 
     // Blocking (`--wait` / prod Vite) escalates only deterministic per-key
     // DESCRIBE failures. Transient connectivity failures are already recorded
@@ -480,12 +569,26 @@ export async function generateFromEntryPoint(options: {
 
     if (missingCommittedTypes.length === 0) {
       // Committed types present: emit loud warning and exit 0.
+      const keptFiles: string[] = [];
+      if (queryHadEnvironmentalFailure) keptFiles.push(path.basename(outFile));
+      if (metricsHadEnvironmentalFailure) {
+        keptFiles.push(path.basename(resolvedMvFile));
+      }
       const warningMessage = determineWarningMessage(
         environmentalCause ?? "unavailable",
         warehouseId,
+        environmentalDetail,
+        keptFiles,
       );
       logger.warn(warningMessage);
     } else {
+      if (environmentalDetail) {
+        throw warehouseUnavailableError(
+          warehouseId,
+          environmentalDetail,
+          missingCommittedTypes,
+        );
+      }
       throw new TypegenFatalError(
         [
           {
@@ -539,6 +642,8 @@ export interface SyncMetricViewsTypesResult {
    * hadEnvironmentalFailure is true; used by the warning message.
    */
   environmentalCause?: "auth" | "unreachable" | "unavailable";
+  /** Specific reason for the environmental failure (e.g. wait limit reached). */
+  environmentalDetail?: string;
 }
 
 /**
@@ -557,6 +662,8 @@ export interface SyncMetricViewsTypesResult {
  * @param options.metricFetcher - optional injected {@link DescribeFetcher}
  * @param options.mode - preflight/gate policy, default `"describe-now"`. When set to `"blocking"`,
  *   metric-view `.ts` writes are suppressed if any metric is degraded (to preserve committed files).
+ * @param options.waitTimeoutMs - `"blocking"` only: limit on waiting for the
+ *   warehouse to reach RUNNING (see {@link generateFromEntryPoint}).
  * @param options.suppressDegradedWrite - when true (only in `mode === "blocking"` context), skip
  *   the metricOutFile write if any metric schema has `degraded === true`. Used to prevent
  *   overwriting committed type files with degraded types in blocking mode.
@@ -568,6 +675,9 @@ export async function syncMetricViewsTypes(options: {
   cache?: boolean;
   metricFetcher?: DescribeFetcher;
   mode?: "describe-now" | "non-blocking" | "blocking";
+  waitTimeoutMs?: number;
+  /** Internal: epoch-ms deadline shared with the query wait. */
+  waitDeadline?: number;
   suppressDegradedWrite?: boolean;
 }): Promise<SyncMetricViewsTypesResult> {
   const {
@@ -582,6 +692,7 @@ export async function syncMetricViewsTypes(options: {
 
   // Only `cache === false` disables caching; `undefined`/`true` keep it on.
   const noCache = cacheEnabled === false;
+  const waitTimeoutMs = resolveWarehouseWaitTimeoutMs(options.waitTimeoutMs);
 
   const mvConfig = await readMetricConfig(metricViewsFolder);
   if (!mvConfig) {
@@ -636,10 +747,11 @@ export async function syncMetricViewsTypes(options: {
   };
 
   // Blocking-mode preflight: ensure the warehouse is running before the MV DESCRIBE
-  // batch (probe → decide → wait / start+wait; only DELETED/DELETING is fatal). Two softenings vs the query preflight: a failed probe and a timed-out wait are NOT fatal here — we fall through to syncMetrics, which classifies a still-not-ready warehouse as degraded rather than failing the build. Skipped for `describe-now`/`non-blocking` (only `mode === "blocking"` enters here).
+  // batch (probe → decide → wait / start+wait; only DELETED/DELETING is fatal). A connectivity blip falls through to syncMetrics, which classifies a still-not-ready warehouse as degraded; a timed-out wait skips the DESCRIBEs and degrades for the committed-types gate. Skipped for `describe-now`/`non-blocking` (only `mode === "blocking"` enters here).
   let preflightFatalMessage: string | undefined;
   let hadEnvironmentalFailure = false;
   let environmentalCause: "auth" | "unreachable" | "unavailable" | undefined;
+  let environmentalDetail: string | undefined;
   if (
     mode === "blocking" &&
     metricFetcher === undefined &&
@@ -658,7 +770,7 @@ export async function syncMetricViewsTypes(options: {
         // reading, same as the query preflight.
         await startWarehouse(getMvClient(), warehouseId);
         const settled = await waitUntilRunning(getMvClient(), warehouseId, {
-          maxMs: MV_PREFLIGHT_WAIT_MAX_MS,
+          maxMs: remainingWaitMs(waitTimeoutMs, options.waitDeadline),
           treatStoppedAsTransient: true,
         });
         if (settled !== "RUNNING") {
@@ -669,7 +781,7 @@ export async function syncMetricViewsTypes(options: {
         }
       } else if (decision === "waitThenProceed") {
         const settled = await waitUntilRunning(getMvClient(), warehouseId, {
-          maxMs: MV_PREFLIGHT_WAIT_MAX_MS,
+          maxMs: remainingWaitMs(waitTimeoutMs, options.waitDeadline),
         });
         if (settled === "DELETED" || settled === "DELETING") {
           // Deleted mid-wait: fatal. Environmental (state-based).
@@ -678,9 +790,16 @@ export async function syncMetricViewsTypes(options: {
         }
       }
     } catch (err) {
-      // Connectivity blip: fall through to syncMetrics, whose DESCRIBEs degrade
-      // a not-ready / unreachable warehouse rather than throwing.
-      if (!isConnectivityError(err)) {
+      if (err instanceof WarehouseWaitTimeoutError) {
+        // Wait limit ran out: skip the DESCRIBEs (they'd only queue on the
+        // still-starting warehouse) and degrade for the committed-types gate.
+        preflightFatalMessage = describeWaitTimeout(err, waitTimeoutMs);
+        hadEnvironmentalFailure = true;
+        environmentalCause = "unavailable";
+        environmentalDetail = preflightFatalMessage;
+      } else if (!isConnectivityError(err)) {
+        // Connectivity blip: fall through to syncMetrics, whose DESCRIBEs
+        // degrade a not-ready / unreachable warehouse rather than throwing.
         // Deterministic failures become fatal errors; environmental failures
         // degrade for the committed-types gate.
         const classification = classifyBlockingFailure(err);
@@ -889,6 +1008,10 @@ export async function syncMetricViewsTypes(options: {
     environmentalCause:
       mode === "blocking" && hadEnvironmentalFailure
         ? environmentalCause
+        : undefined,
+    environmentalDetail:
+      mode === "blocking" && hadEnvironmentalFailure
+        ? environmentalDetail
         : undefined,
   };
 }
