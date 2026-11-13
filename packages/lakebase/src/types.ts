@@ -81,6 +81,25 @@ export interface LakebasePoolConfig extends PoolConfig {
   sslMode?: "require" | "disable" | "prefer";
 
   /**
+   * Maximum time, in seconds, a connection may stay open before the pool
+   * closes it and opens a new one. Passed to `pg.Pool`.
+   *
+   * Lakebase checks the OAuth token only when a connection opens, and access
+   * granted through Unity Catalog claims in the token can stop working on a
+   * connection that stays open for hours. Recycling connections keeps that
+   * from happening. Values up to 9000 (2.5 hours) are safe; larger values, and
+   * `0` (never recycle), log a warning. A negative or non-numeric value, or
+   * one above 2147483 (about 24.8 days, the longest timer Node supports), logs
+   * a warning and the default is used instead.
+   *
+   * pg-pool recycles only idle connections: a client you check out and hold
+   * isn't closed until you release it.
+   *
+   * @default 1800 (30 minutes)
+   */
+  maxLifetimeSeconds?: number;
+
+  /**
    * Telemetry configuration
    *
    * - `true` or omitted: enable all telemetry (traces, metrics) -- no-op when OTEL is not configured

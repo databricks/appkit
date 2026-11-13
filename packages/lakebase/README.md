@@ -214,9 +214,7 @@ const users = await prisma.user.findMany();
 
 ```typescript
 import { DataSource } from "typeorm";
-import { createLakebasePool } from "@databricks/lakebase";
-
-const pool = createLakebasePool();
+import { getLakebaseOrmConfig } from "@databricks/lakebase";
 
 const dataSource = new DataSource({
   type: "postgres",
@@ -239,6 +237,34 @@ import { getLakebaseOrmConfig } from "@databricks/lakebase";
 const sequelize = new Sequelize({
   dialect: "postgres",
   ...getLakebaseOrmConfig(),
+});
+```
+
+`getLakebaseOrmConfig()` returns the pool and client settings (connection lifetime, pool size, timeouts, SSL) where each ORM reads them:
+
+- **TypeORM:** pool size, connect timeout and application name go under TypeORM's own `poolSize`, `connectTimeoutMS` and `applicationName`, so values you set after the spread still win. The rest (connection lifetime, idle timeout, statement and query timeouts) goes under `extra`, which TypeORM merges into the `pg.Pool` options.
+- **Sequelize:** `dialectOptions` (passed to each `pg.Client`, including SSL), `pool` and `hooks`. Sequelize's pool has no lifetime option, so connections are recycled by age through `pool.validate` and an `afterConnect` hook.
+
+The result carries keys for both ORMs, and each ignores the other's: Sequelize ignores `poolSize`, `connectTimeoutMS`, `applicationName` and `extra`, and TypeORM ignores `dialectOptions`, `pool` and `hooks`.
+
+If you set `extra`, `pool`, `dialectOptions` or `hooks` yourself, merge with the returned values instead of replacing them, or those settings are lost. Replacing `hooks` makes connection lifetimes count from a connection's first reuse instead of when it opened, and logs a warning if you passed a `logger` (nothing is logged without one).
+
+```typescript
+const ormConfig = getLakebaseOrmConfig();
+
+// TypeORM
+const dataSource = new DataSource({
+  type: "postgres",
+  ...ormConfig,
+  extra: { ...ormConfig.extra, allowExitOnIdle: true },
+});
+
+// Sequelize
+const sequelize = new Sequelize({
+  dialect: "postgres",
+  ...ormConfig,
+  pool: { ...ormConfig.pool, min: 2 },
+  hooks: { ...ormConfig.hooks, beforeConnect: async () => {} },
 });
 ```
 

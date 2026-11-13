@@ -644,6 +644,12 @@ importers:
       '@types/pg':
         specifier: 8.16.0
         version: 8.16.0
+      sequelize:
+        specifier: 6.37.7
+        version: 6.37.7(pg@8.18.0)
+      typeorm:
+        specifier: 0.3.28
+        version: 0.3.28(pg@8.18.0)
 
   packages/shared:
     dependencies:
