@@ -65,15 +65,21 @@ export function GenieChatMessage({
 }: GenieChatMessageProps) {
   const isUser = message.role === "user";
   const queryAttachments = message.attachments.filter(isQueryAttachment);
+  const queryById = new Map(
+    queryAttachments.map((att) => [att.attachmentId, att.query]),
+  );
   const visualizations: Visualization[] = message.attachments.flatMap((att) => {
     const url =
       att.attachmentId && message.visualizationUrls?.[att.attachmentId];
-    return att.viz && url ? [{ url, ...att.viz }] : [];
+    if (!att.viz || !url) return [];
+    const query = queryById.get(att.viz.queryAttachmentId);
+    // Chat-mode charts have no title; describe them by the query they plot.
+    const title = att.viz.title || query?.title || query?.description;
+    return [{ url, ...att.viz, title }];
   });
-  const queryIds = new Set(queryAttachments.map((att) => att.attachmentId));
   // Charts whose query isn't among the attachments still get shown, after the queries.
   const unmatchedVisualizations = visualizations.filter(
-    (viz) => !queryIds.has(viz.queryAttachmentId),
+    (viz) => !queryById.has(viz.queryAttachmentId),
   );
   const html = useMemo(
     () =>
