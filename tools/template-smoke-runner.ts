@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import {
+  existsSync,
   globSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -15,6 +17,8 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import { parse } from "yaml";
 
+import { NEUTRAL_DATABASE_TYPES } from "../packages/appkit/src/type-generator/database/generate";
+import { generateMetricTypeDeclarations } from "../packages/appkit/src/type-generator/mv-registry/render-types";
 import { checkTemplateLint } from "./template-lint-fixtures";
 
 export type PackageManager = "npm" | "pnpm";
@@ -177,6 +181,18 @@ export async function runTemplateSmoke(
     run(process.execPath, ["--input-type=commonjs", "-e", nativeCheck]);
     checkTemplateLint(appDir, env);
     run(pm, ["run", "build"]);
+    // The build ran typegen. Add the declarations it writes for an app with no database schema
+    // or metric views (empty registry interfaces), then lint the app as a user would get it.
+    const typesDir = join(appDir, "shared/appkit-types");
+    mkdirSync(typesDir, { recursive: true });
+    for (const [file, content] of [
+      ["database.d.ts", NEUTRAL_DATABASE_TYPES],
+      ["metric-views.d.ts", generateMetricTypeDeclarations([])],
+    ]) {
+      if (!existsSync(join(typesDir, file)))
+        writeFileSync(join(typesDir, file), content);
+    }
+    run(pm, ["run", "lint"]);
     const html = readFileSync(join(appDir, "client/dist/index.html"), "utf-8");
     assert(readFileSync(join(appDir, "dist/server.js"), "utf-8").length > 0);
     const manifest = parse(readFileSync(join(appDir, "app.yaml"), "utf-8"));
