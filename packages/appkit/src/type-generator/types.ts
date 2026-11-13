@@ -164,4 +164,6 @@ export interface QueryGenerationResult {
   fatalErrors: QueryFatalError[];
   hadEnvironmentalFailure?: boolean;
   environmentalCause?: "auth" | "unreachable" | "unavailable";
+  /** Specific reason for the environmental failure (e.g. wait limit reached). */
+  environmentalDetail?: string;
 }

@@ -7,12 +7,29 @@ import path from "node:path";
  * older than this the lock is presumed orphaned (the worker crashed/was killed
  * before it could release) and is stolen.
  *
- * Must comfortably exceed the worker's worst-case runtime: the blocking preflight
- * wait cap (PREFLIGHT_WAIT_MAX_MS = 5 min in the type-generator) plus a DESCRIBE
- * budget. Six minutes leaves ~1 min of headroom over a worker that waits the full
- * preflight window and then describes.
+ * Must comfortably exceed the worker's worst-case runtime: the default warehouse
+ * wait limit (5 min in the type-generator) plus a DESCRIBE budget. Six minutes
+ * leaves ~1 min of headroom over a worker that waits the full limit and then
+ * describes. A longer configured limit stretches it — see
+ * {@link spawnLockStaleMsFor}.
  */
 export const SPAWN_LOCK_STALE_MS = 6 * 60 * 1000;
+
+/** Headroom over the wait limit for the worker's DESCRIBE work. */
+const DESCRIBE_HEADROOM_MS = 60 * 1000;
+
+/**
+ * Staleness threshold for a worker that may wait up to `waitTimeoutMs` for the
+ * warehouse: never shorter than {@link SPAWN_LOCK_STALE_MS}, and always at
+ * least the limit plus describe headroom, so a live worker on a long limit
+ * isn't mistaken for an orphan.
+ */
+export function spawnLockStaleMsFor(waitTimeoutMs?: number): number {
+  if (waitTimeoutMs === undefined || !Number.isFinite(waitTimeoutMs)) {
+    return SPAWN_LOCK_STALE_MS;
+  }
+  return Math.max(SPAWN_LOCK_STALE_MS, waitTimeoutMs + DESCRIBE_HEADROOM_MS);
+}
 
 /**
  * Resolve the on-disk path of the single-flight spawn lock for a project.

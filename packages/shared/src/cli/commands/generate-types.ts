@@ -2,14 +2,21 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { Command, Option } from "commander";
+import { Command, InvalidArgumentError, Option } from "commander";
 
 import { METRIC_CONFIG_FILE } from "../../schemas/metric-fqn";
 import {
   acquireSpawnLock,
   getSpawnLockPath,
   releaseSpawnLock,
+  spawnLockStaleMsFor,
 } from "./spawn-lock.js";
+
+/**
+ * Env var for the warehouse wait limit, in seconds. Read by the type generator;
+ * the CLI only reads it to size the background worker's lock.
+ */
+const WAIT_TIMEOUT_ENV = "APPKIT_TYPEGEN_WAIT_TIMEOUT";
 
 /**
  * Resolve the typegen pre-flight mode for the CLI. Defaults to "non-blocking" —
@@ -27,10 +34,40 @@ export function resolveTypegenMode(options?: {
   return options?.wait ? "blocking" : "non-blocking";
 }
 
+/**
+ * Parse `--wait-timeout <seconds>`: a non-negative number of seconds. `0` means
+ * "check the warehouse once, don't wait".
+ */
+export function parseWaitTimeoutSeconds(value: string): number {
+  const seconds = Number(value);
+  if (value.trim() === "" || !Number.isFinite(seconds) || seconds < 0) {
+    throw new InvalidArgumentError("Expected a number of seconds (0 or more).");
+  }
+  return seconds;
+}
+
+/**
+ * The wait limit the background worker will use, in milliseconds, when one is
+ * configured (flag first, then env). `undefined` means the generator default.
+ */
+function configuredWaitTimeoutMs(flagSeconds?: number): number | undefined {
+  if (flagSeconds !== undefined) return flagSeconds * 1000;
+  const raw = process.env[WAIT_TIMEOUT_ENV]?.trim();
+  if (!raw) return undefined;
+  const seconds = Number(raw);
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined;
+}
+
 /** Options parsed by commander for the generate-types command. */
 interface GenerateTypesOptions {
   noCache?: boolean;
   wait?: boolean;
+  /**
+   * `--wait-timeout <seconds>`: limit on waiting for the warehouse to reach
+   * RUNNING under `--wait`. Unset → `APPKIT_TYPEGEN_WAIT_TIMEOUT`, else 5 min
+   * (resolved by the type generator).
+   */
+  waitTimeout?: number;
   /**
    * Internal: present only on the detached worker invocation. Carries the path
    * of the single-flight lock this worker must release when it finishes. Its
@@ -85,6 +122,10 @@ async function runGenerateTypes(
           warehouseId: resolvedWarehouseId,
           noCache,
           mode,
+          waitTimeoutMs:
+            options?.waitTimeout === undefined
+              ? undefined
+              : options.waitTimeout * 1000,
         });
 
         if (hasQueries) {
@@ -183,7 +224,12 @@ async function runGenerateTypes(
  */
 export function spawnTypegenWorker(
   lockPath: string,
-  targets: { rootDir?: string; outFile?: string; warehouseId?: string },
+  targets: {
+    rootDir?: string;
+    outFile?: string;
+    warehouseId?: string;
+    waitTimeout?: number;
+  },
 ): boolean {
   // The script the runtime launched us with (the `appkit` bin shim). Re-running
   // it under the same node binary reproduces this exact CLI in the worker.
@@ -212,6 +258,9 @@ export function spawnTypegenWorker(
     "--wait",
     "--worker-lock",
     lockPath,
+    ...(targets.waitTimeout === undefined
+      ? []
+      : ["--wait-timeout", String(targets.waitTimeout)]),
     ...positionals,
   ];
 
@@ -276,8 +325,16 @@ async function generateTypesAction(
     const resolvedRootDir = rootDir || process.cwd();
     const lockPath = getSpawnLockPath(resolvedRootDir);
 
-    if (acquireSpawnLock(lockPath)) {
-      spawnTypegenWorker(lockPath, { rootDir, outFile, warehouseId });
+    const staleMs = spawnLockStaleMsFor(
+      configuredWaitTimeoutMs(options.waitTimeout),
+    );
+    if (acquireSpawnLock(lockPath, staleMs)) {
+      spawnTypegenWorker(lockPath, {
+        rootDir,
+        outFile,
+        warehouseId,
+        waitTimeout: options.waitTimeout,
+      });
     } else {
       console.log("Type refresh already in progress, skipping.");
     }
@@ -298,6 +355,11 @@ export const generateTypesCommand = new Command("generate-types")
     "--wait",
     "Wait for warehouse readiness instead of degrading (use for CI)",
   )
+  .option(
+    "--wait-timeout <seconds>",
+    "With --wait: give up waiting for the warehouse after this many seconds, then keep committed types or fail (default: $APPKIT_TYPEGEN_WAIT_TIMEOUT, else 300)",
+    parseWaitTimeoutSeconds,
+  )
   // Internal: marks the detached background worker and carries the lock it must
   // release. Hidden from --help; users should never pass it.
   .addOption(
@@ -314,6 +376,7 @@ Examples:
   $ appkit generate-types . shared/appkit-types/analytics.d.ts
   $ appkit generate-types . shared/appkit-types/analytics.d.ts my-warehouse-id
   $ appkit generate-types --no-cache
-  $ appkit generate-types --wait   # CI: wait for the warehouse and fail on a cold one`,
+  $ appkit generate-types --wait   # CI: wait for the warehouse and fail on a cold one
+  $ appkit generate-types --wait --wait-timeout 120   # give up on the warehouse after 2 minutes`,
   )
   .action(generateTypesAction);
