@@ -15,7 +15,14 @@ export interface IGenieConfig extends BasePluginConfig {
    * fails fast rather than masquerading as an unknown-alias 404 at request time.
    */
   spaces?: Record<string, string | undefined>;
-  /** Genie polling timeout in ms. Set to 0 for indefinite. Default: 120000 (2 min) */
+  /**
+   * Map of alias → Genie Space ID for spaces used in agent mode. Agent mode
+   * streams the agent's reasoning and returns its charts as PNG
+   * visualizations. Any Genie space can be used as an agent. Aliases share one
+   * namespace with `spaces`, so an alias can't be in both maps.
+   */
+  agents?: Record<string, string | undefined>;
+  /** Timeout in ms for a Genie chat message or agent turn. Set to 0 for indefinite. Default: 120000 (2 min) */
   timeout?: number;
 }
 
