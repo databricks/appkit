@@ -149,6 +149,11 @@ export function GenieChatMessage({
               const queryVisualizations = visualizations.filter(
                 (viz) => viz.queryAttachmentId === att.attachmentId,
               );
+              // The first chart goes into the result's Chart tab; any others, or all
+              // of them while there's no result, are shown as plain images.
+              const [chartViz, ...otherVisualizations] = queryVisualizations;
+              const standaloneVisualizations =
+                queryResult != null ? otherVisualizations : queryVisualizations;
 
               return (
                 <div key={key} className="flex flex-col gap-2">
@@ -171,15 +176,18 @@ export function GenieChatMessage({
                       </div>
                     </details>
                   </Card>
-                  {queryVisualizations.length > 0
-                    ? queryVisualizations.map((viz) => (
-                        <GenieVisualizationImage key={viz.url} viz={viz} />
-                      ))
-                    : queryResult != null && (
-                        <Card className="w-full px-4 py-3 overflow-hidden">
-                          <GenieQueryVisualization data={queryResult} />
-                        </Card>
-                      )}
+                  {queryResult != null && (
+                    <Card className="w-full px-4 py-3 overflow-hidden">
+                      <GenieQueryVisualization
+                        data={queryResult}
+                        chartImageUrl={chartViz?.url}
+                        chartImageAlt={chartViz?.title}
+                      />
+                    </Card>
+                  )}
+                  {standaloneVisualizations.map((viz) => (
+                    <GenieVisualizationImage key={viz.url} viz={viz} />
+                  ))}
                 </div>
               );
             })}

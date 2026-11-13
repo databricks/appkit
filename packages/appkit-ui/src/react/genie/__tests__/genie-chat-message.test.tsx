@@ -2,7 +2,9 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 vi.mock("../genie-query-visualization", () => ({
-  GenieQueryVisualization: () => <div data-testid="inferred-chart" />,
+  GenieQueryVisualization: (props: { chartImageUrl?: string }) => (
+    <div data-testid="query-result" data-chart-image={props.chartImageUrl} />
+  ),
 }));
 
 import { GenieChatMessage } from "../genie-chat-message";
@@ -28,7 +30,7 @@ function assistant(overrides: Partial<GenieMessageItem>): GenieMessageItem {
 describe("GenieChatMessage", () => {
   afterEach(cleanup);
 
-  test("shows Genie's chart instead of the inferred one for a query with a visualization", () => {
+  test("hands Genie's chart to the query result, which keeps its table", () => {
     render(
       <GenieChatMessage
         message={assistant({
@@ -48,12 +50,38 @@ describe("GenieChatMessage", () => {
       />,
     );
 
-    const img = screen.getByRole("img", { name: "Franchises by Country" });
-    expect(img.getAttribute("src")).toBe("/api/genie/a/viz-1.png");
-    expect(screen.queryByTestId("inferred-chart")).toBeNull();
+    const result = screen.getByTestId("query-result");
+    expect(result.getAttribute("data-chart-image")).toBe(
+      "/api/genie/a/viz-1.png",
+    );
+    expect(screen.queryByRole("img")).toBeNull();
   });
 
-  test("keeps the inferred chart for a query without a visualization", () => {
+  test("shows Genie's chart as an image while there's no query result", () => {
+    render(
+      <GenieChatMessage
+        message={assistant({
+          attachments: [
+            { attachmentId: "query-1", query: { title: "Franchises" } },
+            {
+              attachmentId: "viz-1",
+              viz: {
+                title: "Franchises by Country",
+                queryAttachmentId: "query-1",
+              },
+            },
+          ],
+          visualizationUrls: { "viz-1": "/api/genie/a/viz-1.png" },
+        })}
+      />,
+    );
+
+    const img = screen.getByRole("img", { name: "Franchises by Country" });
+    expect(img.getAttribute("src")).toBe("/api/genie/a/viz-1.png");
+    expect(screen.queryByTestId("query-result")).toBeNull();
+  });
+
+  test("leaves the query result alone for a query without a visualization", () => {
     render(
       <GenieChatMessage
         message={assistant({
@@ -65,7 +93,8 @@ describe("GenieChatMessage", () => {
       />,
     );
 
-    expect(screen.getByTestId("inferred-chart")).toBeTruthy();
+    const result = screen.getByTestId("query-result");
+    expect(result.getAttribute("data-chart-image")).toBeNull();
     expect(screen.queryByRole("img")).toBeNull();
   });
 

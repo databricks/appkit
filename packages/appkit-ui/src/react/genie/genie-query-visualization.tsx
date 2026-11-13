@@ -47,6 +47,10 @@ const CHART_TYPE_LABELS: Record<ChartType, string> = {
 interface GenieQueryVisualizationProps {
   /** Raw statement_response from the Genie API */
   data: GenieStatementResponse;
+  /** URL of a chart Genie rendered for this query, shown in place of the inferred chart */
+  chartImageUrl?: string;
+  /** Alt text for `chartImageUrl` */
+  chartImageAlt?: string;
   /** Additional CSS classes */
   className?: string;
 }
@@ -54,12 +58,15 @@ interface GenieQueryVisualizationProps {
 /**
  * Renders a chart + data table for a Genie query result.
  *
+ * - When `chartImageUrl` is set: the Chart tab shows that image; if it fails to load, the inferred chart
  * - When a chart type can be inferred: shows Tabs with "Chart" (default) and "Table"
  * - When no chart fits: shows only the data table
- * - When data is empty/malformed: renders nothing
+ * - When data is empty/malformed: renders only the chart image, if any
  */
 export function GenieQueryVisualization({
   data,
+  chartImageUrl,
+  chartImageAlt,
   className,
 }: GenieQueryVisualizationProps) {
   const transformed = useMemo(() => transformGenieData(data), [data]);
@@ -76,8 +83,24 @@ export function GenieQueryVisualization({
   const [chartTypeOverride, setChartTypeOverride] = useState<ChartType | null>(
     null,
   );
+  const [imageFailed, setImageFailed] = useState(false);
 
-  if (!transformed || transformed.rows.length === 0) return null;
+  const chartImage =
+    chartImageUrl && !imageFailed ? (
+      <img
+        src={chartImageUrl}
+        alt={chartImageAlt ?? "Visualization"}
+        loading="lazy"
+        className="w-full h-auto"
+        onError={() => setImageFailed(true)}
+      />
+    ) : null;
+
+  if (!transformed || transformed.rows.length === 0) {
+    return (
+      chartImage && <div className={cn("min-w-0", className)}>{chartImage}</div>
+    );
+  }
 
   const { rows, columns } = transformed;
   const truncated = rows.length > TABLE_ROW_LIMIT;
@@ -118,7 +141,22 @@ export function GenieQueryVisualization({
     </div>
   );
 
-  if (!inference || !activeChartType) {
+  const chart =
+    chartImage ??
+    (inference && activeChartType ? (
+      <ChartErrorBoundary fallback={dataTable}>
+        <BaseChart
+          data={rows}
+          chartType={activeChartType}
+          xKey={inference.xKey}
+          yKey={inference.yKey}
+          height={CHART_HEIGHT}
+          showLegend={Array.isArray(inference.yKey)}
+        />
+      </ChartErrorBoundary>
+    ) : null);
+
+  if (!chart) {
     return <div className={cn("min-w-0", className)}>{dataTable}</div>;
   }
 
@@ -129,7 +167,7 @@ export function GenieQueryVisualization({
           <TabsTrigger value="chart">Chart</TabsTrigger>
           <TabsTrigger value="table">Table</TabsTrigger>
         </TabsList>
-        {compatibleTypes.length > 1 && (
+        {!chartImage && compatibleTypes.length > 1 && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -145,7 +183,7 @@ export function GenieQueryVisualization({
             <DropdownMenuContent align="end">
               <DropdownMenuLabel>Chart type</DropdownMenuLabel>
               <DropdownMenuRadioGroup
-                value={activeChartType}
+                value={activeChartType ?? undefined}
                 onValueChange={(v) => setChartTypeOverride(v as ChartType)}
               >
                 {compatibleTypes.map((type) => (
@@ -164,16 +202,7 @@ export function GenieQueryVisualization({
           forceMount
           className="data-[state=inactive]:invisible"
         >
-          <ChartErrorBoundary fallback={dataTable}>
-            <BaseChart
-              data={rows}
-              chartType={activeChartType}
-              xKey={inference.xKey}
-              yKey={inference.yKey}
-              height={CHART_HEIGHT}
-              showLegend={Array.isArray(inference.yKey)}
-            />
-          </ChartErrorBoundary>
+          {chart}
         </TabsContent>
         <TabsContent
           value="table"
