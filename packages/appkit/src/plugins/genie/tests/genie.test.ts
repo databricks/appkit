@@ -1613,6 +1613,30 @@ describe("Genie Plugin", () => {
       );
     });
 
+    test("cancels the download when the client goes away", async () => {
+      const plugin = new GeniePlugin(config);
+      const { router, getHandler } = createMockRouter();
+      plugin.injectRoutes(router);
+      const cancel = vi.fn();
+      mockGenieService.downloadMessageAttachmentVisualization.mockResolvedValue(
+        {
+          // Sends one chunk, then stalls like a slow upstream.
+          contents: new ReadableStream({
+            start(controller) {
+              controller.enqueue(new Uint8Array([0x89]));
+            },
+            cancel,
+          }),
+        },
+      );
+      const res = streamResponse();
+      res.once("data", () => res.destroy());
+
+      await getHandler("GET", vizPath)(vizRequest({}), res);
+
+      expect(cancel).toHaveBeenCalled();
+    });
+
     test("returns 400 for ids that could change the resource path", async () => {
       const plugin = new GeniePlugin(config);
       const { router, getHandler } = createMockRouter();

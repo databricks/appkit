@@ -338,16 +338,25 @@ export class GenieConnector {
    * Agent mode: runs one agent turn (`POST /genie/agents/{id}/responses`, which
    * the SDK doesn't cover) and maps its stream onto the chat-mode events, plus
    * a `reasoning` event per reasoning step. Once the turn completes, the
-   * message is read back for its query and chart attachments.
+   * message is read back for its query and chart attachments. A turn that is
+   * aborted or times out before it completes is cancelled upstream.
    */
   async *streamAgentResponse(
     workspaceClient: WorkspaceClient,
     agentId: string,
     content: string,
     conversationId: string | undefined,
-    options?: { signal?: AbortSignal },
+    options?: { timeout?: number; signal?: AbortSignal },
   ): AsyncGenerator<GenieStreamEvent> {
-    const signal = options?.signal;
+    const callerSignal = options?.signal;
+    const timeout = options?.timeout ?? this.config.timeout;
+    const timeoutSignal =
+      timeout > 0 ? AbortSignal.timeout(timeout) : undefined;
+    const signal = AbortSignal.any(
+      [callerSignal, timeoutSignal].filter((s) => s !== undefined),
+    );
+    let started: { conversationId: string; messageId: string } | undefined;
+    let completed = false;
     try {
       const response = await workspaceClient.request({
         method: "POST",
@@ -372,8 +381,6 @@ export class GenieConnector {
       if (!response.body) throw new Error(GenieErrors.REQUEST_FAILED);
 
       const turn = newAgentTurn();
-      let started: { conversationId: string; messageId: string } | undefined;
-      let completed = false;
       for await (const { data } of readSseEvents(response.body, signal)) {
         const event = JSON.parse(data) as GenieAgentStreamEvent;
         if (event.type === "response.created" && event.response) {
@@ -388,6 +395,11 @@ export class GenieConnector {
           const reasoning = addAgentItem(turn, event.item);
           if (reasoning) yield { type: "reasoning", content: reasoning };
         } else if (event.type === "response.completed") {
+          // A turn cancelled elsewhere (another client, Genie itself) also ends here.
+          const status = event.response?.status;
+          if (status && status !== "completed") {
+            throw new Error(`Genie agent response ${status}`);
+          }
           completed = true;
         } else if (event.type === "response.failed" || event.type === "error") {
           throw new Error(
@@ -397,7 +409,7 @@ export class GenieConnector {
           );
         }
       }
-      if (signal?.aborted) return;
+      signal.throwIfAborted();
       if (!started || !completed) {
         throw new Error("Genie agent response ended before it completed");
       }
@@ -416,7 +428,17 @@ export class GenieConnector {
         messageResponse,
       );
     } catch (error) {
-      if (signal?.aborted) return;
+      if (signal.aborted && started && !completed) {
+        this.cancelAgentResponse(workspaceClient, agentId, started);
+      }
+      if (callerSignal?.aborted) return;
+      if (timeoutSignal?.aborted) {
+        yield {
+          type: "error",
+          error: `Genie agent response timed out after ${timeout} ms`,
+        };
+        return;
+      }
       logger.error(
         "Genie agent response error (agentId=%s, conversationId=%s): %O",
         agentId,
@@ -425,6 +447,26 @@ export class GenieConnector {
       );
       yield { type: "error", error: classifyGenieAgentError(error) };
     }
+  }
+
+  /** Best effort: stops an abandoned agent turn so it doesn't keep running upstream. */
+  private cancelAgentResponse(
+    workspaceClient: WorkspaceClient,
+    agentId: string,
+    {
+      conversationId,
+      messageId,
+    }: { conversationId: string; messageId: string },
+  ): void {
+    workspaceClient.genie
+      .genieCancelResponse({ agentId, conversationId, responseId: messageId })
+      .catch((error) =>
+        logger.warn(
+          "Failed to cancel Genie agent response %s: %O",
+          messageId,
+          error,
+        ),
+      );
   }
 
   /**
@@ -441,34 +483,46 @@ export class GenieConnector {
   ): Promise<GenieMessageResponse[]> {
     const turns = new Map<string, GenieAgentTurn>();
     let after: string | undefined;
-    // shortcut: reads every item of the conversation for each history page; align item pages with message pages if long agent conversations matter.
-    for (let page = 0; page < MAX_AGENT_ITEM_PAGES; page++) {
-      const response = await workspaceClient.request({
-        method: "GET",
-        path: `/api/2.0/genie/agents/${encodeURIComponent(agentId)}/conversations/${encodeURIComponent(conversationId)}/items`,
-        query: {
-          limit: String(AGENT_ITEMS_PAGE_SIZE),
-          ...(after ? { after } : {}),
-        },
-        signal,
-      });
-      const body = (await response.json()) as {
-        data?: GenieAgentItem[];
-        has_more?: boolean;
-        last_id?: string;
-      };
-      for (const item of body.data ?? []) {
-        const messageId = item.metadata?.message_id;
-        if (!messageId) continue;
-        let turn = turns.get(messageId);
-        if (!turn) {
-          turn = newAgentTurn();
-          turns.set(messageId, turn);
+    try {
+      // shortcut: reads every item of the conversation for each history page; align item pages with message pages if long agent conversations matter.
+      for (let page = 0; page < MAX_AGENT_ITEM_PAGES; page++) {
+        const response = await workspaceClient.request({
+          method: "GET",
+          path: `/api/2.0/genie/agents/${encodeURIComponent(agentId)}/conversations/${encodeURIComponent(conversationId)}/items`,
+          query: {
+            limit: String(AGENT_ITEMS_PAGE_SIZE),
+            ...(after ? { after } : {}),
+          },
+          signal,
+        });
+        const body = (await response.json()) as {
+          data?: GenieAgentItem[];
+          has_more?: boolean;
+          last_id?: string;
+        };
+        for (const item of body.data ?? []) {
+          const messageId = item.metadata?.message_id;
+          if (!messageId) continue;
+          let turn = turns.get(messageId);
+          if (!turn) {
+            turn = newAgentTurn();
+            turns.set(messageId, turn);
+          }
+          addAgentItem(turn, item);
         }
-        addAgentItem(turn, item);
+        if (!body.has_more || !body.last_id) break;
+        after = body.last_id;
       }
-      if (!body.has_more || !body.last_id) break;
-      after = body.last_id;
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      // E.g. a chat conversation opened through an agent alias: its messages already carry their text.
+      logger.warn(
+        "Genie agent items unavailable (agentId=%s, conversationId=%s), returning messages without them: %O",
+        agentId,
+        conversationId,
+        error,
+      );
+      return messages;
     }
     return messages.map((message) =>
       withAgentTurn(message, turns.get(message.messageId)),

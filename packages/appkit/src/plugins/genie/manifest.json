@@ -57,7 +57,7 @@
         "timeout": {
           "type": "number",
           "default": 120000,
-          "description": "Genie polling timeout in ms. Set to 0 for indefinite."
+          "description": "Timeout in ms for a Genie chat message or agent turn. Set to 0 for indefinite."
         }
       },
       "required": ["spaces"]

@@ -126,9 +126,25 @@ function createMockWorkspaceClient() {
         },
       }),
       downloadMessageAttachmentVisualization: vi.fn(),
+      genieCancelResponse: vi.fn().mockResolvedValue({ status: "CANCELLED" }),
     },
   } as any;
 }
+
+/** A turn that starts and then never sends another event. */
+function stalledAfterCreated(): Response {
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(`data:${JSON.stringify(created)}\n\n`),
+        );
+      },
+    }),
+  );
+}
+
+const cancelArgs = { agentId: AGENT_ID, conversationId: CONV, responseId: MSG };
 
 async function collect(
   gen: AsyncGenerator<GenieStreamEvent>,
@@ -189,6 +205,7 @@ describe("GenieConnector agent mode", () => {
         { spaceId: AGENT_ID, conversationId: CONV, messageId: MSG },
         expect.anything(),
       );
+      expect(ws.genie.genieCancelResponse).not.toHaveBeenCalled();
     });
 
     test("starts a new conversation with viz enabled", async () => {
@@ -296,6 +313,112 @@ describe("GenieConnector agent mode", () => {
       expect(events).toEqual([
         { type: "error", error: "NOT_FOUND: Space with id agent-1 not found" },
       ]);
+    });
+
+    test("yields an error for a turn cancelled elsewhere", async () => {
+      const ws = createMockWorkspaceClient();
+      ws.request.mockResolvedValue(
+        sse([
+          created,
+          {
+            type: "response.completed",
+            response: { id: MSG, conversation_id: CONV, status: "cancelled" },
+          },
+        ]),
+      );
+
+      const events = await collect(
+        new GenieConnector().streamAgentResponse(ws, AGENT_ID, "Hi", undefined),
+      );
+
+      expect(events.map((e) => e.type)).toEqual(["message_start", "error"]);
+      expect(events[1]).toEqual({
+        type: "error",
+        error: "Genie agent response cancelled",
+      });
+      expect(ws.genie.genieGetConversationMessage).not.toHaveBeenCalled();
+      expect(ws.genie.genieCancelResponse).not.toHaveBeenCalled();
+    });
+
+    test("times out a stalled turn and cancels it upstream", async () => {
+      const ws = createMockWorkspaceClient();
+      ws.request.mockResolvedValue(stalledAfterCreated());
+
+      const events = await collect(
+        new GenieConnector({ timeout: 50 }).streamAgentResponse(
+          ws,
+          AGENT_ID,
+          "Hi",
+          undefined,
+        ),
+      );
+
+      expect(events.map((e) => e.type)).toEqual(["message_start", "error"]);
+      expect(events[1]).toEqual({
+        type: "error",
+        error: "Genie agent response timed out after 50 ms",
+      });
+      expect(ws.genie.genieCancelResponse).toHaveBeenCalledWith(cancelArgs);
+    });
+
+    test("ends silently and cancels upstream when the caller aborts mid-turn", async () => {
+      const ws = createMockWorkspaceClient();
+      ws.request.mockResolvedValue(stalledAfterCreated());
+      const controller = new AbortController();
+      const turn = new GenieConnector().streamAgentResponse(
+        ws,
+        AGENT_ID,
+        "Hi",
+        undefined,
+        { signal: controller.signal },
+      );
+
+      expect((await turn.next()).value).toMatchObject({
+        type: "message_start",
+      });
+      controller.abort();
+
+      expect(await collect(turn)).toEqual([]);
+      expect(ws.genie.genieCancelResponse).toHaveBeenCalledWith(cancelArgs);
+    });
+
+    test("doesn't cancel a turn that was aborted before it started", async () => {
+      const ws = createMockWorkspaceClient();
+      ws.request.mockResolvedValue(sse(fullTurn));
+      const controller = new AbortController();
+      controller.abort();
+
+      const events = await collect(
+        new GenieConnector().streamAgentResponse(
+          ws,
+          AGENT_ID,
+          "Hi",
+          undefined,
+          {
+            signal: controller.signal,
+          },
+        ),
+      );
+
+      expect(events).toEqual([]);
+      expect(ws.genie.genieCancelResponse).not.toHaveBeenCalled();
+    });
+
+    test("runs without a time limit when timeout is 0", async () => {
+      const ws = createMockWorkspaceClient();
+      ws.request.mockResolvedValue(sse(fullTurn));
+
+      const events = await collect(
+        new GenieConnector({ timeout: 0 }).streamAgentResponse(
+          ws,
+          AGENT_ID,
+          "Hi",
+          undefined,
+        ),
+      );
+
+      expect(events.map((e) => e.type)).toContain("message_result");
+      expect(events.map((e) => e.type)).not.toContain("error");
     });
   });
 
@@ -405,6 +528,58 @@ describe("GenieConnector agent mode", () => {
       );
 
       expect(ws.request).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("history when the items endpoint fails", () => {
+    // What the items endpoint answers for a chat conversation.
+    const itemsNotFound = () =>
+      Object.assign(new Error("Response from server (Not Found)"), {
+        statusCode: 404,
+        response: {
+          error: {
+            type: "NOT_FOUND",
+            message:
+              "NOT_FOUND: This conversation cannot be retrieved via the items endpoint. Only agent mode conversations are supported.",
+          },
+        },
+      });
+
+    test("streamConversation still returns the messages", async () => {
+      const ws = createMockWorkspaceClient();
+      ws.genie.genieListConversationMessages.mockResolvedValue({
+        messages: [projection],
+      });
+      ws.request.mockRejectedValue(itemsNotFound());
+
+      const events = await collect(
+        new GenieConnector().streamConversation(ws, AGENT_ID, CONV, {
+          agent: true,
+          includeQueryResults: false,
+        }),
+      );
+
+      expect(events.map((e) => e.type)).toEqual([
+        "message_result",
+        "history_info",
+      ]);
+      expect((events[0] as any).message.reasoning).toBeUndefined();
+    });
+
+    test("streamGetMessage still returns the message", async () => {
+      const ws = createMockWorkspaceClient();
+      ws.request.mockRejectedValue(itemsNotFound());
+
+      const events = await collect(
+        new GenieConnector().streamGetMessage(ws, AGENT_ID, CONV, MSG, {
+          agent: true,
+        }),
+      );
+
+      expect(events.map((e) => e.type)).not.toContain("error");
+      expect(events.find((e) => e.type === "message_result")).toMatchObject({
+        message: { messageId: MSG },
+      });
     });
   });
 

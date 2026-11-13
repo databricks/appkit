@@ -21,6 +21,7 @@ export interface GenieAgentStreamEvent {
   response?: {
     id: string;
     conversation_id: string;
+    status?: string;
     error?: { message?: string };
   };
   item?: GenieAgentItem;

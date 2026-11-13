@@ -34,7 +34,7 @@ await createApp({
 |--------|------|---------|-------------|
 | `spaces` | `Record<string, string>` | `{ default: DATABRICKS_GENIE_SPACE_ID }` | Map of alias names to Genie Space IDs |
 | `agents` | `Record<string, string>` | `{}` | Map of alias names to Genie Space IDs used in [agent mode](#agent-mode) |
-| `timeout` | `number` | `120000` | Polling timeout in ms. Set to `0` for indefinite |
+| `timeout` | `number` | `120000` | Timeout in ms for a chat message or an agent turn. Set to `0` for indefinite |
 
 ### Space aliases
 

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 
 import type express from "express";
@@ -253,7 +254,7 @@ export class GeniePlugin extends Plugin implements ToolProvider {
               spaceId,
               content,
               conversationId,
-              { signal },
+              { timeout, signal },
             )
           : this.genieConnector.streamSendMessage(
               workspaceClient,
@@ -424,12 +425,16 @@ export class GeniePlugin extends Plugin implements ToolProvider {
       res.end();
       return;
     }
-    const image = Readable.fromWeb(result.data as NodeReadableStream);
-    image.on("error", (error) => {
-      logger.error("Visualization stream error: %O", error);
-      res.destroy();
-    });
-    image.pipe(res);
+    try {
+      // Unlike pipe(), pipeline() also cancels the download when the client goes away.
+      await pipeline(Readable.fromWeb(result.data as NodeReadableStream), res);
+    } catch (error) {
+      if (
+        (error as NodeJS.ErrnoException).code !== "ERR_STREAM_PREMATURE_CLOSE"
+      ) {
+        logger.error("Visualization stream error: %O", error);
+      }
+    }
   }
 
   async getConversation(
@@ -474,17 +479,17 @@ export class GeniePlugin extends Plugin implements ToolProvider {
       throw new Error(`Unknown space alias: ${alias}`);
     }
     const workspaceClient = getWorkspaceClient();
+    const timeout = options?.timeout ?? this.config.timeout ?? 120_000;
     if (this.isAgent(alias)) {
       yield* this.genieConnector.streamAgentResponse(
         workspaceClient,
         spaceId,
         content,
         conversationId,
-        { signal: options?.signal },
+        { timeout, signal: options?.signal },
       );
       return;
     }
-    const timeout = options?.timeout ?? this.config.timeout ?? 120_000;
     yield* this.genieConnector.streamSendMessage(
       workspaceClient,
       spaceId,
