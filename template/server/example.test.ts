@@ -44,7 +44,6 @@ class GreeterPlugin extends Plugin {
   }
 
   // A stand-in for a streaming handler: yields SSE-style event objects.
-  // expectStream also takes async iterables and SSE responses.
   *greet(name: string) {
     yield { type: 'greeting_start', name };
     yield { type: 'greeting_end', message: `Hello, ${name}!` };
