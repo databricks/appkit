@@ -206,6 +206,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.95.0](https://github.com/databricks/appkit/compare/v0.94.1...v0.95.0) (2026-11-13)
+
+### appkit
+
+* **appkit:** support Genie agent mode with reasoning and visualizations ([#732](https://github.com/databricks/appkit/issues/732)) ([2248be0](https://github.com/databricks/appkit/commit/2248be03c9eaab1cb49939b57b8288bba4a9633f))
+
+
 ## [0.94.1](https://github.com/databricks/appkit/compare/v0.94.0...v0.94.1) (2026-11-12)
 
 ### appkit
