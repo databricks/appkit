@@ -97,6 +97,12 @@ export interface InitOptions {
   readonly interactive?: boolean;
   /** One line per step that calls the Lakebase API or changes a file. */
   readonly onStep?: (message: string) => void;
+  /**
+   * What a run should know before it goes on: a copy's rebuild that cannot be
+   * marked on the branch, so a stop would leave it looking like your working
+   * branch. Default: onStep.
+   */
+  readonly onWarning?: (message: string) => void;
   /** Runs the drizzle-kit install. */
   readonly runCommand?: RunCommand;
 }
@@ -617,6 +623,7 @@ async function initHolding(
   options: InitOptions,
 ): Promise<InitReport> {
   const onStep = options.onStep ?? (() => undefined);
+  const onWarning = options.onWarning ?? onStep;
   const interactive = options.interactive ?? false;
   const ttl =
     options.ttl === undefined
@@ -770,7 +777,14 @@ async function initHolding(
     introspected = await introspect(false);
   }
 
-  if (plan.tag) await onBranch((client) => tagForkCopy(client, schemaName));
+  if (
+    plan.tag &&
+    !(await onBranch((client) => tagForkCopy(client, schemaName)))
+  ) {
+    onWarning(
+      `Could not mark schema ${schemaName} ${on} as the fork's copy. It has no journal table, or one owned by a role init does not trust. If this run stops before the rebuild finishes, the next \`appkit db init\` will see a schema that looks like your working branch and keep the copied rows. Run \`appkit db init --schema clean\` then.`,
+    );
+  }
   const handedOff = plan.handOff
     ? await handOffAppSchema(branchCtx, {
         branch: branch.name,

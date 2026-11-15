@@ -124,6 +124,7 @@ async function runDbInit(flags: InitFlags): Promise<void> {
       ...(flags.schema === "clean" && !flags.yes ? { confirmClean } : {}),
       interactive: !flags.yes && isInteractive(),
       onStep: info,
+      onWarning: warn,
     };
     printInitReport(
       await tooling.runInit(tooling.createDbContext(), options),
@@ -178,10 +179,14 @@ the branch databricks.yml deploys to, else the project's default branch, which
 copies its rows, production data included. init reads from the branch whether
 the app schema is still that copy. If it is, init takes the schema over and
 rebuilds it from the committed migrations (written first by introspect when
-there is no schema.ts), so the branch starts without the copied rows. A run
-that stops before the rebuild finishes is finished by the next init, from any
-checkout. --schema migrate, or --schema introspect, keeps the copied rows and
-says so. Your working branch keeps its data: init migrates it. --schema clean
+there is no schema.ts), so the branch starts without the copied rows. A branch
+init forked in this run is rebuilt even when you already owned its schema on
+the source. init marks the copy in its migration journal first, so a run that
+stops before the rebuild finishes is finished by the next init, from any
+checkout. When the copy has no journal init can write, init warns instead,
+and after a stop you run --schema clean yourself. --schema migrate, or
+--schema introspect, keeps the copied rows and says so. Your working branch
+keeps its data: init migrates it. --schema clean
 rebuilds your working branch too, after a confirmation or with --yes; a copy's
 rebuild asks nothing. In schema public only your own objects go; what other
 roles own stays with its rows, and init lists it. init never changes the

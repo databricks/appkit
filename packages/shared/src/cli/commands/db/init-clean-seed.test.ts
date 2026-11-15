@@ -155,7 +155,11 @@ describe("appkit db init", () => {
     expect(prompts.confirm).not.toHaveBeenCalled();
     expect(tooling.runInit).toHaveBeenCalledWith(
       { root: "/app", env: {} },
-      { interactive: true, onStep: expect.any(Function) },
+      {
+        interactive: true,
+        onStep: expect.any(Function),
+        onWarning: expect.any(Function),
+      },
     );
   });
 
@@ -168,6 +172,7 @@ describe("appkit db init", () => {
       ttl: "1h",
       interactive: false,
       onStep: expect.any(Function),
+      onWarning: expect.any(Function),
     });
 
     resetOptionValues();
@@ -301,6 +306,20 @@ describe("appkit db init", () => {
     // The schema is yours after a keep, so a plain init migrates it and keeps the rows.
     expect(output(log)).toContain(
       "Kept the rows the fork copied from production, as --schema migrate asks. The app schema is yours now, so a plain `appkit db init` keeps them. `appkit db init --schema clean` drops the app schema with everything in it and rebuilds it from the committed migrations, after a confirmation or with --yes.",
+    );
+  });
+
+  test("a warning from init prints as a warning while init runs", async () => {
+    tooling.runInit.mockImplementation(async (_ctx, options) => {
+      options.onWarning?.(
+        "Could not mark schema app on dev-alice-3f9a2c as the fork's copy.",
+      );
+      return report;
+    });
+    await init();
+
+    expect(output(log)).toContain(
+      "! Could not mark schema app on dev-alice-3f9a2c as the fork's copy.",
     );
   });
 

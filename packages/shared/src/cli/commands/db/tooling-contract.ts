@@ -50,6 +50,8 @@ export interface InitOptions {
   readonly ttl?: string;
   readonly interactive?: boolean;
   readonly onStep?: (message: string) => void;
+  /** A copy's rebuild that cannot be marked on the branch, which a stop would leave looking like your working branch. */
+  readonly onWarning?: (message: string) => void;
   /**
    * Asked before an explicit --schema clean drops a schema that may hold your
    * work. init reads from the branch whether it does, and asks nothing for a

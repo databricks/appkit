@@ -190,15 +190,27 @@ function envFile(root: string): Record<string, string> {
   );
 }
 
-/** Run init, collecting its progress lines. */
+/** Run init, collecting its progress lines and warnings, and both in the order they came. */
 async function init(ctx: DbContext, options: InitOptions = {}) {
   const steps: string[] = [];
+  const warnings: string[] = [];
+  const events: string[] = [];
   const report = await runInit(ctx, {
     ...options,
-    onStep: (step) => steps.push(step),
+    onStep: (step) => {
+      steps.push(step);
+      events.push(step);
+    },
+    onWarning: (warning) => {
+      warnings.push(warning);
+      events.push(warning);
+    },
   });
-  return { report, steps };
+  return { report, steps, warnings, events };
 }
+
+const UNTAGGED =
+  /^Could not mark schema app on .* as the fork's copy\. It has no journal table, or one owned by a role init does not trust\. If this run stops before the rebuild finishes, the next `appkit db init` will see a schema that looks like your working branch and keep the copied rows\. Run `appkit db init --schema clean` then\.$/;
 
 function conflict(name: string): LakebaseApiError {
   return new LakebaseApiError(`create branch ${name}`, "ALREADY_EXISTS", {
@@ -1255,22 +1267,43 @@ describe("runInit — the start follows the branch's own state", () => {
     expect(cleanHolding).not.toHaveBeenCalled();
   });
 
-  test("a copy without a journal is rebuilt without a tag", async () => {
+  test("a copy without a journal is rebuilt without a tag, with a warning before the hand-off that says what to do after a stop", async () => {
     journal = false;
 
-    const { report } = await init(appOn(project()));
+    const { report, warnings, events } = await init(appOn(project()));
 
     expect(report.start.kind).toBe("clean");
     expect(tagWrites()).toEqual([]);
+    expect(warnings).toEqual([expect.stringMatching(UNTAGGED)]);
+    expect(events.findIndex((event) => UNTAGGED.test(event))).toBeLessThan(
+      events.findIndex((event) => event.startsWith("Handing schema app")),
+    );
   });
 
-  test("a copy whose journal a role you do not trust owns is rebuilt without a tag: a write there could run that role's code as you", async () => {
+  test("a copy whose journal a role you do not trust owns is rebuilt without a tag, with the same warning: a write there could run that role's code as you", async () => {
     journalTrusted = false;
 
-    const { report } = await init(appOn(project()));
+    const { report, warnings } = await init(appOn(project()));
 
     expect(report.start.kind).toBe("clean");
     expect(tagWrites()).toEqual([]);
+    expect(warnings).toEqual([expect.stringMatching(UNTAGGED)]);
+  });
+
+  test("without an onWarning, the warning goes to onStep", async () => {
+    journal = false;
+    const steps: string[] = [];
+
+    await runInit(appOn(project()), { onStep: (step) => steps.push(step) });
+
+    expect(steps).toContainEqual(expect.stringMatching(UNTAGGED));
+  });
+
+  test("a tagged copy gets no warning", async () => {
+    const { warnings } = await init(appOn(project()));
+
+    expect(tagWrites()).toEqual(["insert"]);
+    expect(warnings).toEqual([]);
   });
 
   test("--schema migrate or --schema introspect on a copy keeps the copied rows: handed off, untagged, and reported", async () => {
