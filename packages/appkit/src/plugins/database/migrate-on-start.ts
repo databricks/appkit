@@ -24,21 +24,20 @@ import { createLogger } from "../../logging/logger";
 
 const logger = createLogger("database");
 
-/** Whether this process applies the committed migrations when it starts. */
 export type MigrateOnStartDecision =
-  /** APPKIT_DB_MIGRATE_ON_START is not "true": a local start, or an app that never opted in. */
   | { readonly kind: "off" }
-  /** The flag is on, but this process does not run as the app's own service principal. */
   | { readonly kind: "skipped"; readonly reason: string }
   | { readonly kind: "migrate" };
 
 /**
  * Migrate on start only when the app opted in with APPKIT_DB_MIGRATE_ON_START=true
- * (app.yaml) and the process runs as the app's own service principal. Databricks
- * Apps sets DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET and, for a bound
- * database, PGUSER (the client id) for the deployed app. A local start, or
- * `databricks apps run-local` with exported M2M credentials, has the developer's
- * PGUSER from `.env`, and must not migrate as them.
+ * (app.yaml) and the process has the identity Databricks Apps gives a deployed
+ * app with a bound database. That is DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET
+ * and PGUSER set to the client id. A local start, or `databricks apps run-local`
+ * with exported M2M credentials, has the developer's PGUSER from `.env` or none
+ * at all, and must not migrate. An unset PGUSER skips because the Lakebase pool
+ * then falls back to the client id, and a developer's process would migrate as
+ * the service principal.
  */
 export function decideMigrateOnStart(
   env: NodeJS.ProcessEnv = process.env,
@@ -47,7 +46,14 @@ export function decideMigrateOnStart(
   for (const name of ["DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"]) {
     if (!env[name]) return { kind: "skipped", reason: `${name} is not set.` };
   }
-  if (env.PGUSER && env.PGUSER !== env.DATABRICKS_CLIENT_ID) {
+  if (!env.PGUSER) {
+    return {
+      kind: "skipped",
+      reason:
+        "PGUSER is not set. The deployed app gets it from its database resource.",
+    };
+  }
+  if (env.PGUSER !== env.DATABRICKS_CLIENT_ID) {
     return {
       kind: "skipped",
       reason: `PGUSER is "${env.PGUSER}", not the app's client id in DATABRICKS_CLIENT_ID.`,
@@ -61,20 +67,13 @@ function endpointBranch(endpoint: string | undefined): string | undefined {
   return endpoint?.match(/\/branches\/([^/]+)\//)?.[1];
 }
 
-/** Lakebase branch ids are at most 63 characters. */
 const BRANCH_ID_MAX_LENGTH = 63;
 
-/**
- * The exact shapes AppKit gives the branches of one developer
- * (dev-<slug>-<6 hex>) and of one agent session (session-<6 hex>-<id>). Only
- * they migrate those branches, so a deployed app bound to one is misconfigured.
- */
 const DEVELOPMENT_BRANCH_SHAPES = {
   "a developer": /^dev-[a-z0-9]+(?:-[a-z0-9]+)*-[0-9a-f]{6}$/,
   "an agent session": /^session-[0-9a-f]{6}-[a-z0-9]{1,48}$/,
 };
 
-/** Whose branch the id names, by its exact shape; undefined for any other id. */
 function developmentBranchOwner(branch: string): string | undefined {
   if (branch.length > BRANCH_ID_MAX_LENGTH) return undefined;
   return Object.entries(DEVELOPMENT_BRANCH_SHAPES).find(([, shape]) =>
@@ -127,7 +126,6 @@ export async function migrateOnStart(
     result = await applyPendingMigrations(pool, {
       migrationsFolder: folder,
       schemaName: schema.$schemaName,
-      // The deploy branch only ever runs merged files as they were merged.
       onDrift: "refuse",
     });
   } catch (error) {

@@ -4,12 +4,7 @@ export interface MigrationFile {
   readonly idx: number;
   /** The journal's `when`, recorded as `created_at`. */
   readonly when: number;
-  /** sha256 of the .sql file as checked out here, recorded as `hash`. */
   readonly hash: string;
-  /**
-   * Every hash a checkout of this file records: as is, with CRLF read as LF,
-   * and with LF read as CRLF. A row with any of them is this file.
-   */
   readonly hashes: readonly string[];
   /** The file split on `--> statement-breakpoint`. */
   readonly statements: readonly string[];
