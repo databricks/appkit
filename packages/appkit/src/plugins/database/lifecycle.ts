@@ -23,7 +23,7 @@ import type {
   SqlTag,
   TransactionClient,
 } from "./entity-types";
-import { migrateOnStart, shouldMigrateOnStart } from "./migrate-on-start";
+import { decideMigrateOnStart, migrateOnStart } from "./migrate-on-start";
 import { assertSchemaMatchesDatabase } from "./schema-check";
 import { createMutationScope, type MutationScope } from "./scope";
 import type { DatabaseHooks } from "./types";
@@ -191,7 +191,14 @@ export async function createDatabaseState<TSchema extends Schema>(
       idle_in_transaction_session_timeout: IDLE_IN_TRANSACTION_TIMEOUT_MS,
     });
     // A deployed app applies committed migrations as its own identity before the checks below.
-    if (shouldMigrateOnStart()) await migrateOnStart(pool, schema);
+    const migration = decideMigrateOnStart();
+    if (migration.kind === "skipped") {
+      logger.warn(
+        "APPKIT_DB_MIGRATE_ON_START is true, but this process is not the deployed app, so it did not migrate. %s Databricks Apps sets DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET and PGUSER for the deployed app.",
+        migration.reason,
+      );
+    }
+    if (migration.kind === "migrate") await migrateOnStart(pool, schema);
     const db = createDrizzleDb(pool, schema);
     const dataPath = createDrizzleDataPath(db, schema, {
       columnAccess: "trusted",
@@ -208,7 +215,7 @@ export async function createDatabaseState<TSchema extends Schema>(
     });
     // Do not publish exports until an authenticated statement succeeds.
     await dataPath.raw`select 1`;
-    await assertSchemaMatchesDatabase(dataPath, schema);
+    await assertSchemaMatchesDatabase(dataPath, schema, migration);
     return {
       pool,
       exports,

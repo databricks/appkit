@@ -5,7 +5,7 @@ import {
   fail,
   isInteractive,
   printMigrateReport,
-  warnBreaking,
+  warnMigration,
 } from "./output";
 import type { UnappliedMigration } from "./tooling-contract";
 
@@ -13,7 +13,8 @@ import type { UnappliedMigration } from "./tooling-contract";
 function unappliedMigration(error: unknown): UnappliedMigration | null {
   const candidate = error as Partial<UnappliedMigration> | null;
   return typeof candidate?.generated?.tag === "string" &&
-    Array.isArray(candidate.breaking)
+    Array.isArray(candidate.breaking) &&
+    Array.isArray(candidate.dataDependent)
     ? (candidate as UnappliedMigration)
     : null;
 }
@@ -28,7 +29,7 @@ async function runDbMigrate(): Promise<void> {
   } catch (error) {
     fail(error);
     const kept = unappliedMigration(error);
-    if (kept) warnBreaking(kept.generated.tag, kept.breaking);
+    if (kept) warnMigration(kept.generated.tag, kept);
   }
 }
 
