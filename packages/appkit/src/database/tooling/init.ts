@@ -325,9 +325,7 @@ async function findOrCreateBranch(
     if (!parent) {
       throw new Error(`Project ${project} has no default branch to fork from.`);
     }
-    if (session !== null && session !== request.session) {
-      updateEnvFile(request.envFile, { APPKIT_DB_SESSION: session });
-    }
+    persistSessionIdBeforeFork(request, session);
     onStep(
       `Creating ${resourceId(name)} from ${resourceId(parent.name)} (${deployed ? "the branch databricks.yml deploys to" : "the project's default branch"})${session === null ? "" : `, expiring after ${request.ttl.label}`}`,
     );
@@ -360,6 +358,15 @@ async function findOrCreateBranch(
       if (raced && !isGone(raced)) return reuse(raced);
       replaceGone(name);
     }
+  }
+}
+
+function persistSessionIdBeforeFork(
+  request: BranchRequest,
+  session: string | null,
+): void {
+  if (session !== null && session !== request.session) {
+    updateEnvFile(request.envFile, { APPKIT_DB_SESSION: session });
   }
 }
 
