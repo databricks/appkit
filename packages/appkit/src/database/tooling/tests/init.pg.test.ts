@@ -254,7 +254,11 @@ describe.skipIf(!url)("runInit against Postgres", () => {
       sourceBranch: PRODUCTION,
       handedOff: sp,
       keptCopy: null,
-      start: { kind: "clean", migrate: { applied: ["0000_migration"] } },
+      start: {
+        kind: "clean",
+        reason: "fork-copy",
+        migrate: { applied: ["0000_migration"] },
+      },
     });
     expect(steps).toContain(
       `Dropping schema ${app} on ${devBranchId(USER)}: the branch still holds the rows the fork copied, and the committed migrations recreate its tables`,
@@ -396,7 +400,10 @@ describe.skipIf(!url)("runInit against Postgres", () => {
       },
     });
     expect(asked).toEqual([app]);
-    expect(cleaned.report.start.kind).toBe("clean");
+    expect(cleaned.report.start).toMatchObject({
+      kind: "clean",
+      reason: "requested",
+    });
     expect(await rows(`"${app}".notes`)).toEqual([]);
   });
 

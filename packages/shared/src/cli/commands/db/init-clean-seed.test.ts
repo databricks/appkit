@@ -248,6 +248,7 @@ describe("appkit db init", () => {
           kept: [],
         },
         migrate,
+        reason: "requested",
       },
     });
     await init("--schema", "clean", "--yes");
@@ -261,7 +262,7 @@ describe("appkit db init", () => {
   });
 
   test("a rebuild without --schema says the copied rows went and how to keep them; with --schema clean it does not", async () => {
-    const rebuilt = {
+    const rebuilt = (reason: "fork-copy" | "requested") => ({
       ...report,
       start: {
         kind: "clean",
@@ -272,9 +273,10 @@ describe("appkit db init", () => {
           kept: [],
         },
         migrate,
+        reason,
       },
-    };
-    tooling.runInit.mockResolvedValue(rebuilt);
+    });
+    tooling.runInit.mockResolvedValue(rebuilt("fork-copy"));
     await init();
     expect(output(log)).toContain(
       "The branch still held the rows the fork copied: the app schema was rebuilt from the committed migrations. `appkit db init --schema migrate` keeps them.",
@@ -282,6 +284,7 @@ describe("appkit db init", () => {
 
     log.mockClear();
     resetOptionValues();
+    tooling.runInit.mockResolvedValue(rebuilt("requested"));
     await init("--schema", "clean", "--yes");
     expect(output(log)).toContain("Dropped schema app on dev-alice-3f9a2c");
     expect(output(log)).not.toContain("The branch still held the rows");
@@ -359,6 +362,7 @@ describe("appkit db init", () => {
             kept: [],
           },
           migrate: { ...migrate, applied: ["0000_baseline"] },
+          reason: "fork-copy",
         },
       },
     });

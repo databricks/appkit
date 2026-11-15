@@ -93,10 +93,13 @@ export interface InitOptions {
 
 type RoleAction = "kept" | "created" | "updated";
 
+type RebuildReason = "fork-copy" | "requested";
+
 /** The app schema dropped, then recreated from the committed migrations. */
 interface Rebuild {
   readonly clean: CleanReport;
   readonly migrate: MigrateReport;
+  readonly reason: RebuildReason;
 }
 
 export type InitStart =
@@ -757,8 +760,10 @@ async function initHolding(
   }
 
   const rebuildSchema = async (): Promise<Rebuild> => {
+    const reason: RebuildReason =
+      requested === undefined ? "fork-copy" : "requested";
     const why =
-      requested === undefined
+      reason === "fork-copy"
         ? ": the branch still holds the rows the fork copied, and the committed migrations recreate its tables"
         : "";
     onStep(
@@ -771,7 +776,7 @@ async function initHolding(
       interactive,
       generate: false,
     });
-    return { clean, migrate };
+    return { clean, migrate, reason };
   };
   let start: InitStart;
   if (plan.kind === "migrate") {

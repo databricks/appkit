@@ -69,6 +69,7 @@ export interface CleanReport {
 export interface Rebuild {
   readonly clean: CleanReport;
   readonly migrate: MigrateReport;
+  readonly reason: "fork-copy" | "requested";
 }
 
 export type KeptCopy =

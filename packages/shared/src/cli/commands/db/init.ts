@@ -15,6 +15,7 @@ import {
 import type {
   InitOptions,
   InitReport,
+  InitStart,
   Rebuild,
   SchemaStart,
 } from "./tooling-contract";
@@ -48,6 +49,12 @@ const confirmClean: NonNullable<InitOptions["confirmClean"]> = async ({
   return !isCancel(answer) && answer;
 };
 
+function rebuildOf(start: InitStart): Rebuild | null {
+  if (start.kind === "clean") return start;
+  if (start.kind === "introspect") return start.rebuilt;
+  return null;
+}
+
 function printRebuild(rebuild: Rebuild): void {
   printCleanReport(rebuild.clean);
   printMigrateReport(rebuild.migrate);
@@ -80,9 +87,7 @@ function printInitReport(
   if (report.installed) ok(`Installed drizzle-kit (${report.installed})`);
 
   const { start, keptCopy } = report;
-  const rebuilt =
-    start.kind === "clean" || (start.kind === "introspect" && start.rebuilt);
-  if (rebuilt && schemaFlag === undefined) {
+  if (rebuildOf(start)?.reason === "fork-copy") {
     info(
       `The branch still held the rows the fork copied: the app schema was rebuilt from the committed migrations. \`appkit db init --schema ${start.kind === "introspect" ? "introspect" : "migrate"}\` keeps them.`,
     );

@@ -267,6 +267,7 @@ describe("runInit — dev branch", () => {
         kind: "clean",
         clean: { branch: DEV, schemaName: "app", dependents: [], kept: [] },
         migrate: migrateReport,
+        reason: "fork-copy",
       },
     });
     expect(steps).toEqual([
@@ -977,6 +978,7 @@ describe("runInit — schema start", () => {
       rebuilt: {
         clean: { branch: DEV, schemaName: "app", dependents: [], kept: [] },
         migrate: migrateReport,
+        reason: "fork-copy",
       },
     });
     expect(introspectHolding.mock.calls[0]?.[2]).toEqual({
@@ -1054,6 +1056,7 @@ describe("runInit — schema start", () => {
       kind: "clean",
       clean: { branch: DEV, schemaName: "app", dependents: [], kept: [] },
       migrate: migrateReport,
+      reason: "requested",
     });
   });
 
@@ -1335,13 +1338,27 @@ describe("runInit — the start follows the branch's own state", () => {
       return true;
     };
 
-    await init(appOn(project()), { schema: "clean", confirmClean });
+    const onCopy = await init(appOn(project()), {
+      schema: "clean",
+      confirmClean,
+    });
     expect(asked).toEqual([]);
+    expect(onCopy.report.start).toMatchObject({
+      kind: "clean",
+      reason: "requested",
+    });
 
     schemaOwner = USER;
     tagged = false;
-    await init(appOn(existingDev()), { schema: "clean", confirmClean });
+    const onYours = await init(appOn(existingDev()), {
+      schema: "clean",
+      confirmClean,
+    });
     expect(asked).toEqual([{ branch: DEV, schemaName: "app" }]);
+    expect(onYours.report.start).toMatchObject({
+      kind: "clean",
+      reason: "requested",
+    });
   });
 
   test("a no to the confirmation stops before the drop, with .env already pointing at the branch", async () => {
