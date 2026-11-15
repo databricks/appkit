@@ -10,6 +10,7 @@ import { createLogger } from "../../logging/logger";
 import {
   type AmbiguousTimestamp,
   type MigrationFile,
+  type MigrationHistory,
   type RecordedMigration,
   reconcileMigrations,
 } from "./history";
@@ -29,6 +30,17 @@ import {
 
 const logger = createLogger("database");
 
+/**
+ * What to do when the recorded history drifted from the committed one: a
+ * recorded migration whose file changed since, or committed migrations the
+ * database never recorded next to rows this checkout lacks. "warn" logs and
+ * applies what is pending, so a developer can rework their own unapplied
+ * migration. "refuse" throws MigrationHistoryError before applying anything,
+ * as a deploy start must, since the deploy branch only ever runs merged files
+ * as they were merged.
+ */
+type DriftPolicy = "warn" | "refuse";
+
 interface ApplyMigrationsOptions {
   /** Absolute path of the committed migrations folder. */
   readonly migrationsFolder: string;
@@ -38,6 +50,8 @@ interface ApplyMigrationsOptions {
   readonly lockWaitMs?: number;
   /** Longest wait for each table lock a migration takes, in milliseconds. */
   readonly lockTimeoutMs?: number;
+  /** Defaults to "warn". */
+  readonly onDrift?: DriftPolicy;
 }
 
 interface ApplyMigrationsResult {
@@ -159,32 +173,44 @@ type HistoryRefusal =
   /** Older than the last recorded migration and never applied, so they would never run. */
   | { readonly stranded: readonly string[]; readonly last: string }
   /** Files and rows at one timestamp that cannot be told apart. */
-  | { readonly ambiguous: AmbiguousTimestamp };
+  | { readonly ambiguous: AmbiguousTimestamp }
+  /** Recorded migrations whose committed file changed since (onDrift "refuse"). */
+  | { readonly edited: readonly string[] }
+  /**
+   * Committed migrations never recorded, pending or stranded, while the
+   * database recorded migrations this checkout lacks (onDrift "refuse"): the
+   * two histories diverged.
+   */
+  | {
+      readonly diverged: {
+        readonly unrecorded: readonly string[];
+        readonly unknown: readonly RecordedMigration[];
+      };
+    };
 
 /**
  * The committed migrations and the recorded ones disagree in a way the
  * migrator refuses to resolve by itself. Nothing was applied.
  */
 export class MigrationHistoryError extends Error {
-  /** Committed migrations older than the last recorded one that never ran. */
-  readonly stranded: readonly string[];
-  /** Committed migrations whose timestamp the database recorded with hashes none of them has. */
-  readonly ambiguous: readonly string[];
-
-  constructor(schemaName: string, refusal: HistoryRefusal) {
-    super(
-      "stranded" in refusal
-        ? strandedMessage(schemaName, refusal.stranded, refusal.last)
-        : ambiguousMessage(schemaName, refusal.ambiguous),
-    );
+  constructor(
+    schemaName: string,
+    readonly refusal: HistoryRefusal,
+  ) {
+    super(refusalMessage(schemaName, refusal));
     this.name = "MigrationHistoryError";
-    this.stranded = Object.freeze(
-      "stranded" in refusal ? [...refusal.stranded] : [],
-    );
-    this.ambiguous = Object.freeze(
-      "ambiguous" in refusal ? tags(refusal.ambiguous.files) : [],
-    );
   }
+}
+
+function refusalMessage(schemaName: string, refusal: HistoryRefusal): string {
+  if ("stranded" in refusal) {
+    return strandedMessage(schemaName, refusal.stranded, refusal.last);
+  }
+  if ("ambiguous" in refusal) {
+    return ambiguousMessage(schemaName, refusal.ambiguous);
+  }
+  if ("edited" in refusal) return editedMessage(schemaName, refusal.edited);
+  return divergedMessage(schemaName, refusal.diverged);
 }
 
 function strandedMessage(
@@ -211,6 +237,40 @@ function ambiguousMessage(
     "The migrator cannot tell which of them ran and changed since, and which never ran. " +
     `Compare the hash column of ${journalTable(schemaName)} with the sha256 of each file's versions in version control. ` +
     "Restore the applied versions; for the others, delete the .sql file, snapshot and journal entry and generate the migration again from schema.ts. " +
+    "No migration was applied."
+  );
+}
+
+function editedMessage(schemaName: string, edited: readonly string[]): string {
+  const many = edited.length > 1;
+  return (
+    `Migration${many ? "s" : ""} ${edited.join(", ")} changed after schema "${schemaName}" applied ${many ? "them" : "it"}, ` +
+    `so ${many ? "their files are" : "its file is"} not what this branch ran. ` +
+    `Restore ${many ? "each" : "the"} file to the version this branch applied and put the change in a new migration. ` +
+    "If the migration failed on deploy because of data, repair the rows on the deploy branch and deploy the unchanged file again. " +
+    "No migration was applied."
+  );
+}
+
+function divergedMessage(
+  schemaName: string,
+  {
+    unrecorded,
+    unknown,
+  }: { unrecorded: readonly string[]; unknown: readonly RecordedMigration[] },
+): string {
+  const created = unknown
+    .map((row) =>
+      row.createdAt === null
+        ? "no timestamp"
+        : new Date(row.createdAt).toISOString(),
+    )
+    .join(", ");
+  return (
+    `Schema "${schemaName}" recorded ${unknown.length} migration${unknown.length === 1 ? "" : "s"} this checkout does not have (created ${created}), ` +
+    `and ${unrecorded.join(", ")} ${unrecorded.length === 1 ? "is" : "are"} committed here but not applied. ` +
+    "The deploy branch ran migrations from a commit this one lacks. " +
+    "Deploy a commit whose journal contains the recorded migrations, or merge them into main unchanged, before main's own migrations. " +
     "No migration was applied."
   );
 }
@@ -288,7 +348,8 @@ function journalRefusalMessage(
 ): string {
   const table = journalTable(schemaName);
   const untrusted = `The migrator connects as "${relation.currentUser}", which neither owns it nor inherits "${relation.owner}"`;
-  const transfer = `transfer the table to "${relation.currentUser}" (ALTER TABLE … OWNER TO), then deploy again.`;
+  // ALTER TABLE ... OWNER TO the app's role fails on Lakebase ("must be able to SET ROLE").
+  const transfer = `have Lakebase move the table to "${relation.currentUser}", since no Postgres role can hand it over. Then deploy again.`;
   switch (refusal) {
     case "kind": {
       const kind =
@@ -367,6 +428,24 @@ export function migrationLockKey(schemaName: string): string {
 
 type QueryClient = Pick<PoolClient, "query">;
 
+/** drizzle-kit's separator; drizzle-orm's reader splits the file on it, so joining on it gives the file back. */
+const STATEMENT_BREAKPOINT = "--> statement-breakpoint";
+
+function sha256(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
+}
+
+/**
+ * The hashes any checkout of this file records. drizzle hashes the bytes as
+ * read, and git's autocrlf checks the same committed file out with CRLF on
+ * Windows, so one file can be recorded under either line ending.
+ */
+function lineEndingHashes(content: string, hash: string): string[] {
+  const lf = content.replace(/\r\n/g, "\n");
+  const crlf = lf.replace(/\n/g, "\r\n");
+  return [...new Set([hash, sha256(lf), sha256(crlf)])];
+}
+
 /** Every committed migration, in journal order. Fails on a missing file before connecting. */
 function readMigrations(folder: string, journal: Journal): MigrationFile[] {
   for (const entry of journal.entries) {
@@ -391,9 +470,44 @@ function readMigrations(folder: string, journal: Journal): MigrationFile[] {
       idx: entry.idx,
       when: entry.when,
       hash: file.hash,
+      hashes: lineEndingHashes(file.sql.join(STATEMENT_BREAKPOINT), file.hash),
       statements: file.sql,
     };
   });
+}
+
+/** Why the committed history cannot be applied over the recorded one; undefined when it can. */
+function historyRefusal(
+  history: MigrationHistory,
+  files: readonly MigrationFile[],
+  onDrift: DriftPolicy,
+): HistoryRefusal | undefined {
+  const ambiguous = history.ambiguous[0];
+  if (ambiguous) return { ambiguous };
+  // Next to rows this checkout lacks, a stranded entry means a branch deployed
+  // first, so the way back is the diverged runbook, not regenerating it.
+  const diverged = onDrift === "refuse" && history.unknown.length > 0;
+  if (history.stranded.length > 0) {
+    if (diverged) return divergence(history);
+    const last =
+      files.find((file) => file.when === history.lastRecorded)?.tag ??
+      `the migration recorded at ${new Date(history.lastRecorded ?? 0).toISOString()}`;
+    return { stranded: tags(history.stranded), last };
+  }
+  if (onDrift === "warn") return undefined;
+  if (history.edited.length > 0) return { edited: tags(history.edited) };
+  if (history.pending.length > 0 && diverged) return divergence(history);
+  return undefined;
+}
+
+/** Every committed migration the database never recorded, oldest first, next to the rows it has that this checkout lacks. */
+function divergence(history: MigrationHistory): HistoryRefusal {
+  return {
+    diverged: {
+      unrecorded: tags([...history.stranded, ...history.pending]),
+      unknown: history.unknown,
+    },
+  };
 }
 
 /**
@@ -776,7 +890,8 @@ function duration(ms: number): string {
  * Fails closed, changing nothing, when a committed migration is older than the
  * last recorded one but was never applied, or when the files and rows at one
  * timestamp cannot be paired. An applied migration whose file changed, and
- * recorded migrations that are not committed, are logged.
+ * recorded migrations that are not committed, are logged, or refused too with
+ * `onDrift: "refuse"` (see DriftPolicy).
  *
  * Baseline adoption: when nothing is recorded yet and `0000_baseline` comes
  * first, the baseline's tables are looked up in pg_catalog. None present → it
@@ -796,6 +911,7 @@ export async function applyPendingMigrations(
   const { schemaName } = options;
   const lockWaitMs = options.lockWaitMs ?? LOCK_WAIT_MS;
   const lockTimeoutMs = options.lockTimeoutMs ?? LOCK_TIMEOUT_MS;
+  const onDrift = options.onDrift ?? "warn";
 
   let client: PoolClient;
   try {
@@ -819,12 +935,9 @@ export async function applyPendingMigrations(
       files,
       await readRecordedMigrations(client, schemaName),
     );
+    let refusal = historyRefusal(history, files, onDrift);
     let waitedMs = 0;
-    if (
-      history.pending.length > 0 &&
-      history.stranded.length === 0 &&
-      history.ambiguous.length === 0
-    ) {
+    if (history.pending.length > 0 && !refusal) {
       pending = tags(history.pending);
       step = "Waiting for the migration lock";
       await prepareMigrationSession(client, reset);
@@ -838,19 +951,10 @@ export async function applyPendingMigrations(
         files,
         await readRecordedMigrations(client, schemaName),
       );
+      refusal = historyRefusal(history, files, onDrift);
     }
 
-    const ambiguous = history.ambiguous[0];
-    if (ambiguous) throw new MigrationHistoryError(schemaName, { ambiguous });
-    if (history.stranded.length > 0) {
-      const last =
-        files.find((file) => file.when === history.lastRecorded)?.tag ??
-        `the migration recorded at ${new Date(history.lastRecorded ?? 0).toISOString()}`;
-      throw new MigrationHistoryError(schemaName, {
-        stranded: tags(history.stranded),
-        last,
-      });
-    }
+    if (refusal) throw new MigrationHistoryError(schemaName, refusal);
     if (history.edited.length > 0) {
       logger.warn(
         "Migrations %s changed after schema %s applied them; the changes never run. Restore the files and put the change in a new migration.",
