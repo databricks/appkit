@@ -395,6 +395,11 @@ describe("runVerify", () => {
       recorded: recordedAs(ctx, two),
       schemaOwner: "deployed-sp",
     });
+    resolveEnvBranch.mockResolvedValueOnce({
+      branch: { name: session },
+      boundary: RESOLVED,
+      kind: "session",
+    });
 
     expect(await runVerify(ctx)).toMatchObject({
       branch: session,
@@ -415,11 +420,18 @@ describe("runVerify", () => {
       recorded: recordedAs(ctx, two),
       schemaOwner: "deployed-sp",
     });
+    resolveEnvBranch.mockResolvedValueOnce({
+      branch: { name: PRODUCTION },
+      boundary: RESOLVED,
+      kind: "deploy-target",
+      reason: "databricks.yml deploys to it",
+    });
 
     expect(await runVerify(ctx)).toEqual({
       kind: "local",
       branch: PRODUCTION,
       ...clean,
+      notYours: "databricks.yml deploys to it",
       ok: true,
     });
   });
@@ -435,11 +447,18 @@ describe("runVerify", () => {
       recorded: recordedAs(ctx, two.slice(0, 1)),
       schemaOwner: "bob",
     });
+    resolveEnvBranch.mockResolvedValueOnce({
+      branch: { name: other },
+      boundary: RESOLVED,
+      kind: "other",
+      reason: "it is another user's dev branch",
+    });
 
     expect(await runVerify(ctx)).toEqual({
       kind: "local",
       branch: other,
       ...clean,
+      notYours: "it is another user's dev branch",
       pendingMigrations: ["0001_migration"],
       ok: false,
     });

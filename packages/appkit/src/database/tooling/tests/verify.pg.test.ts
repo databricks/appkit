@@ -135,10 +135,18 @@ describe.skipIf(!url)("runVerify against Postgres", () => {
       ...ctx,
       env: { ...ctx.env, LAKEBASE_ENDPOINT: `${PRODUCTION}/endpoints/primary` },
     };
+    resolveEnvBranch.mockResolvedValueOnce({
+      branch: { name: PRODUCTION },
+      boundary: { branches: new Set<string>(), unresolved: [] },
+      kind: "deploy-target",
+      reason: "databricks.yml deploys to it",
+    });
 
     expect(await runVerify(deploy)).toEqual({
       kind: "local",
       branch: PRODUCTION,
+      notYours: "databricks.yml deploys to it",
+      refusesEveryBranch: null,
       schemaProblems: [],
       schemaAdvice: null,
       pendingMigrations: [],
