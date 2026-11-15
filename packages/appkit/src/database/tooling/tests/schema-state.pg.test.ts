@@ -12,7 +12,7 @@ import {
 } from "../schema-state";
 
 // The tag and the state read against a real server, with Lakebase's roles
-// modelled: the app's service principal owns the fork's copy, and you connect
+// modelled. The app's service principal owns the fork's copy, and you connect
 // as a role that inherits pg_read_all_data and pg_write_all_data, as a member
 // of DATABRICKS_SUPERUSER does. APPKIT_TEST_PG_URL is a superuser URL, e.g.
 // postgres://localhost:5432/postgres
@@ -103,7 +103,7 @@ describe.skipIf(!url)("the fork-copy tag against Postgres", () => {
       { hash: "abc", created_at: "1700000000000" },
       { hash: FORK_COPY_TAG, created_at: "0" },
     ]);
-    // The tag changes nothing else: the copy still reads as the other role's.
+    // The tag changes nothing else. The copy still reads as the other role's.
     await expect(readSchemaState(me, app)).resolves.toEqual({
       kind: "copy",
       owner: sp,

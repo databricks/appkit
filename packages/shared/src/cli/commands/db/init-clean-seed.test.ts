@@ -64,7 +64,7 @@ const report = {
   start: { kind: "migrate", migrate },
 };
 
-/** The tooling on your working branch: it asks the confirmation and stops on a no. */
+/** The tooling on your working branch. It asks the confirmation and stops on a no. */
 function toolingThatAsks(): void {
   tooling.runInit.mockImplementation(async (_ctx, options) => {
     const confirmed = await options.confirmClean?.({

@@ -20,9 +20,9 @@ export const FORK_COPY_TAG = "appkit:fork-copy";
 export type SchemaState =
   /** Nothing copied and nothing built yet. */
   | { readonly kind: "absent" }
-  /** The fork's untouched copy: another role, the app's service principal, owns it. */
+  /** The fork's untouched copy. Another role, the app's service principal, owns it. */
   | { readonly kind: "copy"; readonly owner: string }
-  /** Handed to you and still tagged: a rebuild stopped before its clean. */
+  /** Handed to you and still tagged, so a rebuild stopped before its clean. */
   | { readonly kind: "handed-off-copy" }
   /** Your working branch. */
   | { readonly kind: "yours" }
@@ -39,7 +39,7 @@ const journalTable = (schemaName: string) =>
 
 /**
  * Whether an ordinary table stands at the journal's name. Anything else there
- * is left alone: the migrator refuses it with its own message.
+ * is left alone. The migrator refuses it with its own message.
  */
 async function hasJournalTable(
   client: QueryClient,
@@ -122,7 +122,7 @@ export interface StartPlan {
   readonly tag: boolean;
   /** Delete the copy's owner on this branch, with its objects reassigned to you. */
   readonly handOff: boolean;
-  /** You asked to keep a copy's rows: the tag goes and the rows stay. */
+  /** You asked to keep a copy's rows. The tag goes and the rows stay. */
   readonly keepsCopy: boolean;
   /** An explicit clean of what may be your work asks first. */
   readonly confirm: boolean;
@@ -139,7 +139,7 @@ const NOTHING_ELSE = {
 /**
  * Without a request, a copy is rebuilt and your working branch is migrated,
  * each with schema.ts, else introspected. A copy's rows stay only on request.
- * A rebuild of a copy needs no confirmation: `appkit db migrate` refuses a
+ * A rebuild of a copy needs no confirmation, because `appkit db migrate` refuses a
  * tagged branch, so none of your work can be on it.
  */
 export function planStart(

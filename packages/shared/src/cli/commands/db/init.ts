@@ -28,7 +28,7 @@ interface InitFlags {
 }
 
 /**
- * --schema clean on your working branch drops your data: a human confirms it,
+ * --schema clean on your working branch drops your data. A human confirms it,
  * a script passes --yes. init asks only once it has read from the branch that
  * the schema is yours, so a fork's copy is rebuilt without a question.
  */

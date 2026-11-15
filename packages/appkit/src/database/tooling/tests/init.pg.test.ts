@@ -42,8 +42,8 @@ import {
   tempApp,
 } from "./fakes";
 
-// init end to end: the Lakebase API is the fake, every SQL step is real. The
-// test database models a fork of the deploy branch: the app's service
+// init end to end. The Lakebase API is the fake, every SQL step is real. The
+// test database models a fork of the deploy branch. The app's service
 // principal owns the app schema, and you connect as a role that inherits
 // pg_read_all_data and pg_write_all_data, as a member of DATABRICKS_SUPERUSER
 // does. APPKIT_TEST_PG_URL is a superuser URL that may create databases and
@@ -117,7 +117,7 @@ describe.skipIf(!url)("runInit against Postgres", () => {
     );
   }
 
-  /** The deploy branch as its service principal left it: migrated, with a row. */
+  /** The deploy branch as its service principal left it, migrated and with a row. */
   async function deployed(appRoot: string, schema: string, table: string) {
     await applyPendingMigrations(asSp, {
       migrationsFolder: folder(appRoot),

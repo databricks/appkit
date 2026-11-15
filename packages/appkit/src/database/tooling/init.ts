@@ -84,7 +84,7 @@ export interface InitOptions {
   readonly schema?: SchemaStart;
   /**
    * Asked before an explicit --schema clean drops a schema that may hold your
-   * work: your working branch, or public. A copy's rebuild never asks. Absent,
+   * work, your working branch or public. A copy's rebuild never asks. Absent,
    * the clean proceeds.
    */
   readonly confirmClean?: (target: {
@@ -760,10 +760,10 @@ async function initHolding(
       record,
     });
   };
-  // A rebuild without schema.ts introspects first, while the copy is untouched:
-  // introspect only writes files then, so a refusal leaves the branch as the
-  // fork made it. Introspect reads the journal as history, so a tag an earlier
-  // run left on the copy goes first and comes back right before the hand-off.
+  // A rebuild without schema.ts introspects first, while the copy is untouched.
+  // Introspect only writes files then, so a refusal leaves the branch as the
+  // fork made it. It reads the journal as history, so a tag an earlier run left
+  // on the copy goes first and comes back right before the hand-off.
   let introspected: IntrospectReport | null = null;
   if (plan.kind === "introspect" && plan.rebuild) {
     if (plan.tag) await onBranch((client) => untagForkCopy(client, schemaName));

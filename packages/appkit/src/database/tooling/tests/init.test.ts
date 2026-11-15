@@ -1246,7 +1246,7 @@ describe("runInit — the start follows the branch's own state", () => {
     await init(appOn(project()), { schema: "clean", confirmClean });
     expect(asked).toEqual([]);
 
-    // Your working branch: the schema is yours and its journal carries no tag.
+    // Your working branch, where the schema is yours and its journal carries no tag.
     schemaOwner = USER;
     tagged = false;
     await init(appOn(existingDev()), { schema: "clean", confirmClean });
@@ -1394,7 +1394,7 @@ describe("runInit — .env", () => {
       `Database analytics, which databricks.yml binds, is not on ${devBranchId(USER)}. Create it there (databricks postgres create-database ${DEV} --database-id analytics), or bind a database the project's branches have, then rerun \`appkit db init\`.`,
     );
     expect(lakebase.calls).toContain(`getDatabase ${DEV}/databases/analytics`);
-    // The fork happened, and nothing was written: the next init finds the branch by its name.
+    // The fork happened, and nothing was written. The next init finds the branch by its name.
     expect(fs.existsSync(path.join(root, ".env"))).toBe(false);
   });
 
