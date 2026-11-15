@@ -36,7 +36,7 @@ describe("ownership: one owner per branch", () => {
       `No Postgres role can hand them back to "new-app-sp"; only Lakebase can move them.`,
     );
     expect(hint).toContain(
-      "That moves every object the role owns on the branch, in every database, and deletes the role, so first check what it owns.",
+      "That moves every object the role owns on the branch and deletes the role, so first check what it owns in each database.",
     );
     expect(hint).not.toContain("ALTER");
     expect(hint).toContain(

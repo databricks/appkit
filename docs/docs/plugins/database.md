@@ -508,8 +508,8 @@ who removed the resource. No Postgres role can hand them back. `ALTER ... OWNER
 TO` the new service principal fails with `must be able to SET ROLE`, because
 nobody holds that role. Only Lakebase moves them, by deleting the owning role
 and reassigning what it owns. That moves every object the role owns on the
-branch, in every database, and deletes the role, so first list what it owns, in
-each database of the branch:
+branch and deletes the role, so first list what it owns, in each database of the
+branch:
 
 ```sql
 select n.nspname, c.relname, c.relkind
