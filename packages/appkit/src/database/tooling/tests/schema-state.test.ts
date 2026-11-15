@@ -72,6 +72,43 @@ describe("planStart", () => {
     },
   );
 
+  test("on a branch this run forked, a schema you already owned is a copy too: tagged and rebuilt, with no hand-off and no question", () => {
+    const rebuilt = { rebuild: true, tag: true };
+    expect(planStart(yours, undefined, true, true)).toEqual(
+      only({ kind: "clean", ...rebuilt }),
+    );
+    expect(planStart(yours, undefined, false, true)).toEqual(
+      only({ kind: "introspect", ...rebuilt }),
+    );
+    expect(planStart(yours, "clean", true, true)).toEqual(
+      only({ kind: "clean", ...rebuilt }),
+    );
+  });
+
+  test.each(["migrate", "introspect"] as const)(
+    "--schema %s on a schema you owned before the fork keeps its rows, with no hand-off",
+    (requested) => {
+      expect(planStart(yours, requested, true, true)).toEqual(
+        only({ kind: requested, keepsCopy: true }),
+      );
+    },
+  );
+
+  test("the fork changes nothing where no schema exists, on public, or for a copy", () => {
+    expect(planStart(absent, undefined, true, true)).toEqual(
+      only({ kind: "migrate" }),
+    );
+    expect(planStart(pub, undefined, true, true)).toEqual(
+      only({ kind: "migrate" }),
+    );
+    expect(planStart(copy, undefined, true, true)).toEqual(
+      planStart(copy, undefined, true),
+    );
+    expect(planStart(handedOff, undefined, true, true)).toEqual(
+      planStart(handedOff, undefined, true),
+    );
+  });
+
   test("an explicit clean asks first on your working branch and on public, not where nothing exists or on a copy", () => {
     expect(planStart(yours, "clean", true)).toEqual(
       only({ kind: "clean", rebuild: true, confirm: true }),

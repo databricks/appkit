@@ -730,7 +730,7 @@ async function initHolding(
   const state = await withBranchPool(branchCtx, (pool) =>
     readSchemaState(pool, schemaName),
   );
-  const plan = planStart(state, requested, hasSchema);
+  const plan = planStart(state, requested, hasSchema, found.created);
   const on = `on ${resourceId(branch.name)}`;
   if (
     plan.confirm &&

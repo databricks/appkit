@@ -1167,6 +1167,47 @@ describe("runInit — the start follows the branch's own state", () => {
     expect(tagWrites()).toEqual([]);
   });
 
+  test("a fork this run created is a copy even when you already owned the source schema: tagged and rebuilt, with no hand-off and no question", async () => {
+    schemaOwner = USER;
+    const asked: unknown[] = [];
+    const confirmClean = async (target: unknown) => {
+      asked.push(target);
+      return true;
+    };
+
+    const lakebase = project();
+    const { report, steps } = await init(appOn(lakebase));
+    expect(report).toMatchObject({
+      created: true,
+      handedOff: null,
+      keptCopy: null,
+      start: { kind: "clean" },
+    });
+    expect(steps).toContain(dropping());
+    expect(tagWrites()).toEqual(["insert"]);
+    expect(lakebase.calls.some((call) => call.startsWith("deleteRole"))).toBe(
+      false,
+    );
+
+    queries.length = 0;
+    const explicit = await init(appOn(project()), {
+      schema: "clean",
+      confirmClean,
+    });
+    expect(explicit.report.start.kind).toBe("clean");
+    expect(asked).toEqual([]);
+
+    queries.length = 0;
+    const kept = await init(appOn(project()), { schema: "migrate" });
+    expect(kept.report).toMatchObject({
+      created: true,
+      handedOff: null,
+      keptCopy: { reason: "requested", from: PRODUCTION },
+      start: { kind: "migrate" },
+    });
+    expect(tagWrites()).toEqual(["delete"]);
+  });
+
   test("a copy the service principal owns on an existing branch is rebuilt, from a run that forked nothing", async () => {
     const lakebase = existingDev();
     lakebase.addRole(DEV, `dbrx-apps-${SP}`, SP);

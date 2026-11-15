@@ -146,51 +146,54 @@ const NOTHING_ELSE = {
 /**
  * Without a request, a copy is rebuilt and your working branch is migrated,
  * each with schema.ts, else introspected. A copy's rows stay only on request.
- * A rebuild of a copy needs no confirmation, because `appkit db migrate` refuses a
- * tagged branch, so none of your work can be on it.
+ * A schema on a branch this run forked came from the source whoever owns it,
+ * so one you already owned there is a copy too, tagged and rebuilt with no
+ * hand-off to make. A rebuild of a copy needs no confirmation, because
+ * `appkit db migrate` refuses a copy and a fresh fork holds only what it
+ * copied, so none of your work can be on it.
  */
 export function planStart(
   state: SchemaState,
   requested: Exclude<SchemaStart, "none"> | undefined,
   hasSchema: boolean,
+  /** This run forked the branch. */
+  created = false,
 ): StartPlan {
-  switch (state.kind) {
-    case "copy":
-    case "handed-off-copy": {
-      const untouched = state.kind === "copy";
-      if (requested === "migrate" || requested === "introspect") {
-        return {
-          ...NOTHING_ELSE,
-          kind: requested,
-          handOff: untouched,
-          keepsCopy: true,
-        };
-      }
-      if (!untouched && !hasSchema && requested === undefined) {
-        throw new Error(
-          "The rebuild of the app schema on your branch stopped before it finished, and this checkout has no config/database/schema.ts to rebuild from. Restore schema.ts, then rerun `appkit db init`. `appkit db init --schema introspect` writes schema.ts from the branch and keeps the rows the fork copied.",
-        );
-      }
-      return {
-        ...NOTHING_ELSE,
-        kind: requested ?? (hasSchema ? "clean" : "introspect"),
-        rebuild: true,
-        tag: untouched,
-        handOff: untouched,
-      };
-    }
-    case "absent":
-    case "yours":
-    case "public": {
-      const kind = requested ?? (hasSchema ? "migrate" : "introspect");
-      return {
-        ...NOTHING_ELSE,
-        kind,
-        rebuild: kind === "clean",
-        confirm: kind === "clean" && state.kind !== "absent",
-      };
-    }
+  const copied =
+    state.kind === "copy" ||
+    state.kind === "handed-off-copy" ||
+    (state.kind === "yours" && created);
+  if (!copied) {
+    const kind = requested ?? (hasSchema ? "migrate" : "introspect");
+    return {
+      ...NOTHING_ELSE,
+      kind,
+      rebuild: kind === "clean",
+      confirm: kind === "clean" && state.kind !== "absent",
+    };
   }
+  const untouched = state.kind === "copy";
+  const tagged = state.kind === "handed-off-copy";
+  if (requested === "migrate" || requested === "introspect") {
+    return {
+      ...NOTHING_ELSE,
+      kind: requested,
+      handOff: untouched,
+      keepsCopy: true,
+    };
+  }
+  if (tagged && !hasSchema && requested === undefined) {
+    throw new Error(
+      "The rebuild of the app schema on your branch stopped before it finished, and this checkout has no config/database/schema.ts to rebuild from. Restore schema.ts, then rerun `appkit db init`. `appkit db init --schema introspect` writes schema.ts from the branch and keeps the rows the fork copied.",
+    );
+  }
+  return {
+    ...NOTHING_ELSE,
+    kind: requested ?? (hasSchema ? "clean" : "introspect"),
+    rebuild: true,
+    tag: !tagged,
+    handOff: untouched,
+  };
 }
 
 /**
