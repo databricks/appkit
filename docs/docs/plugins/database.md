@@ -161,16 +161,20 @@ you picked in its prompts, usually the branch the app deploys to, and
    drops it, and rebuilds it from the committed migrations, so the tables start
    without the copied rows. Without `schema.ts`, it first writes `schema.ts`
    and a `0000_baseline` migration from the fork's tables (`introspect`), then
-   rebuilds from that baseline. In schema `public`, which no app owns, a rebuild
-   drops only the tables you own, and lists the tables that keep their copied
-   rows. When the app schema is already yours, `init` keeps the rows. With
-   `schema.ts` it runs `migrate`, which writes a migration when `schema.ts`
-   changed since the last one, then applies the committed migrations. Without
-   `schema.ts`, it runs `introspect`. To keep the copied rows on a new branch,
-   pass `--schema migrate`, or `--schema introspect` without `schema.ts`, and
-   `init` says that they stay. `--schema clean` drops the app schema first.
-   Without a terminal, `--schema clean` needs `--yes`. `--schema none` only
-   sets up the branch and `.env`. It reads no `schema.ts`, hands over no
+   rebuilds from that baseline. A branch this run created is rebuilt the same
+   way even when its app schema is already yours, because every row on it is
+   the fork's copy. In schema `public`, which no app owns, a rebuild drops only
+   the tables you own, and lists the tables that keep their copied rows. When
+   the app schema was already yours on a branch that existed before this run,
+   `init` keeps the rows. With `schema.ts` it runs `migrate`, which writes a
+   migration when `schema.ts` changed since the last one, then applies the
+   committed migrations. Without `schema.ts`, it runs `introspect`. To keep
+   the copied rows on a new branch, pass `--schema migrate`, or
+   `--schema introspect` without `schema.ts`, and `init` says that they stay.
+   The rows are yours from then on, so a later plain `init` keeps them, and
+   `--schema clean` removes them. `--schema clean` drops the app schema first,
+   after a confirmation. Without a terminal, it needs `--yes`. `--schema none`
+   only sets up the branch and `.env`. It reads no `schema.ts`, hands over no
    schema, and leaves the schema and its owner as the fork copied them, so the
    next plain `init` still rebuilds it.
 4. Unless `--schema none`, it installs the drizzle-kit version AppKit pins as a
@@ -247,37 +251,53 @@ before you deploy, for example a session branch created with
 ### Your branch's data
 
 `npx appkit db init` creates your dev branch, or this checkout's session branch
-with `--session`, as a fork of the branch the app deploys to, and points `.env`
-at it. A fork copies every row of its source, production data included, and
-every object with its owner, so on a new fork the app schema still belongs to
-the fork's copy of the app's service principal. That owner is how `init` tells
-an untouched copy from a branch of yours. It keeps no record of it in `.env`.
+with `--session`, as a fork of the branch `databricks.yml` deploys to, else of
+the project's default branch, and points `.env` at it. A fork copies every row
+of its source, production data included. `init` reads from the branch what its
+app schema is. While the app's service principal still owns the schema, it is
+the fork's untouched copy. `init` hands it to you, drops it and recreates it
+from the committed migrations, so the branch starts without the copied rows.
+A branch `init` forked in this run holds only what the fork copied, whoever
+owns its schema. So a schema you already owned on the source is rebuilt too,
+with no hand-off to make. Without `config/database/schema.ts`, `init` first
+writes it and `0000_baseline.sql` from the fork's schema, then rebuilds the
+schema from that baseline.
 
-On an untouched copy, `init` tags the copied migration journal with one row,
-hands you the schema, then drops the schema and rebuilds it from the committed
-migrations. Without `config/database/schema.ts`, `init` first writes it and
-`0000_baseline.sql` from the fork's schema, then rebuilds the schema from that
-baseline. Dropping the schema removes the tag. A run that stops after tagging
-and before the rebuild leaves the tag in place, and the next `init`, from any
-checkout, reads it and finishes the rebuild. `npx appkit db migrate`,
-`introspect` and `seed` refuse a branch that still carries the tag, and
-`npx appkit db verify` reports it. Run `init` to finish the rebuild.
+Before the hand-off, `init` inserts one row with the hash `appkit:fork-copy`
+into the copied `__drizzle_migrations` journal. It writes the row only where
+the migrator would record. That is a journal owned by your role, by a role it
+inherits, or by the schema's owner, which is what a fork's copy has. A journal
+another role owns could run that role's code as you through a trigger, a rule,
+a default or a policy, so `init` leaves it alone. It then warns that it could
+not mark the copy and rebuilds anyway. A copy with no journal gets the same
+warning. If such a run stops before the rebuild finishes, the next `init` sees
+a schema that looks like your working branch and keeps the copied rows. Run
+`npx appkit db init --schema clean` then. Dropping the schema removes the row. A
+run that stops between the hand-off and the drop leaves a schema you own whose
+journal still carries that row, and the next `init`, from any checkout,
+finishes the rebuild.
 
-To keep the copied rows on a new branch, pass `--schema migrate`, or
-`--schema introspect` without `schema.ts`, and `init` says that it kept them. A
-branch whose app schema is already yours keeps its data. `init` migrates it, or
-introspects it without `schema.ts`. `--schema clean` rebuilds such a branch
-too, after a confirmation or with `--yes`. `--schema none` leaves the schema
-and its owner as the fork copied them, so the next plain `init` still rebuilds.
+`npx appkit db migrate`, `npx appkit db introspect` and `npx appkit db seed` refuse a
+schema that is still a copy. That is one the service principal still owns, with
+no row yet, or one handed to you whose journal still carries the row. The message
+says to run `npx appkit db init` to rebuild it, or `npx appkit db init --schema
+migrate` (`introspect` for introspect) to keep the copied rows. Schema `public`
+is never refused.
+`npx appkit db verify` reports both kinds of copy with the same advice.
 
 To keep the copied rows, pass `--schema migrate`, or `--schema introspect`.
 `init` then hands the schema to you, removes the row, keeps the data, and says
-where it came from. A schema you own with no such row is your working branch.
-`init` migrates it, or introspects it without `schema.ts`. `--schema clean`
-rebuilds your working branch too, after a confirmation or with `--yes`. A
-copy's rebuild asks nothing, because `migrate` refuses a copy, so none of your
-work can be on it. `--schema none` touches nothing, and the next plain `init`
-still rebuilds the copy.
+where it came from. From then on the schema is your working branch. A plain
+`init` migrates it and keeps the rows. `npx appkit db init --schema clean` drops
+the app schema with everything in it and rebuilds it from the committed
+migrations, after a confirmation or with `--yes`. On a branch an earlier run
+created, a schema you own with no such row is your working branch. `init`
+migrates it, or introspects it without `schema.ts`. A copy's rebuild asks
+nothing, because `migrate` refuses a copy and a fresh fork holds only what it
+copied, so none of your work can be on it. `--schema none` touches nothing.
+The next plain `init` still rebuilds a copy the service principal owns. A fresh
+fork of a schema you already owned looks like your working branch to that
+later run, so run `npx appkit db init --schema clean` then.
 
 In schema `public`, `init` and `clean` remove only the objects your role owns,
 and `init` never hands `public` off or tags it. On a fork of the deploy branch
@@ -363,12 +383,14 @@ env:
     value: "true"
 ```
 
-The flag alone does not migrate. A start migrates only when the process
-connects as the deployed app's own service principal, which is when `PGUSER`
-equals `DATABRICKS_CLIENT_ID`. Databricks Apps sets both for a bound database.
-A local start (`npm run dev`, `npm start`) connects as you, so it does not
-migrate, and `databricks apps run-local` does not migrate either, even with
-exported M2M credentials. Both log why. Use `npx appkit db migrate` on your
+The flag alone does not migrate. A start migrates only when `PGUSER` is set
+and equals `DATABRICKS_CLIENT_ID`, so that the process connects as the deployed
+app's own service principal. Databricks Apps sets both for an app with a bound
+database. `npx appkit db init` writes your user name to `PGUSER` in `.env`, so
+a local start (`npm run dev`, `npm start`, `databricks apps run-local`)
+connects as you and never migrates, with or without exported M2M credentials.
+Before `db init` writes `.env`, `PGUSER` is unset, and the start skips for that
+reason. A start that skips logs why. Use `npx appkit db migrate` on your
 branch instead. A deployed app bound to a branch with the exact shape of a dev
 branch, `dev-<slug>-<6 hex>`, or of a session branch refuses to start, because
 `appkit db` owns those branches.
@@ -541,17 +563,39 @@ app no longer has, the old service principal's role or the role of the person
 who removed the resource. No Postgres role can hand them back. `ALTER ... OWNER
 TO` the new service principal fails with `must be able to SET ROLE`, because
 nobody holds that role. Only Lakebase moves them, by deleting the owning role
-and reassigning what it owns. That moves every object the role owns on the
-branch and deletes the role, so first list what it owns, in each database of the
-branch:
+and reassigning what it owns. The delete reassigns every object the role owns
+in every database of the branch, drops the role's memberships and grants, and
+removes the role. So first take the inventory `db init` takes before it hands a
+schema over. In each database of the branch, list what the role owns there:
 
 ```sql
-select n.nspname, c.relname, c.relkind
-  from pg_class c
-  join pg_namespace n on n.oid = c.relnamespace
- where pg_get_userbyid(c.relowner) = '<role>';
+select o.type, o.identity
+  from pg_shdepend s
+  cross join lateral pg_identify_object(s.classid, s.objid, s.objsubid) o
+ where s.refclassid = 'pg_authid'::regclass
+   and s.refobjid = (select oid from pg_roles where rolname = '<role>')
+   and s.deptype = 'o'
+   and s.dbid = (select oid from pg_database where datname = current_database())
+ order by 1, 2;
 ```
 
+Then count what else depends on the role, grants included, in the other
+databases and in shared objects such as a database it owns. Run the first query
+in each database this one names:
+
+```sql
+select coalesce(d.datname, 'shared objects') as database, count(*)
+  from pg_shdepend s
+  left join pg_database d on d.oid = s.dbid
+ where s.refclassid = 'pg_authid'::regclass
+   and s.refobjid = (select oid from pg_roles where rolname = '<role>')
+   and not (s.deptype = 'o'
+            and s.dbid = (select oid from pg_database where datname = current_database()))
+ group by 1
+ order by 1;
+```
+
+Reassign or drop anything unrelated to the app before you delete the role.
 Then someone with CAN MANAGE on the Lakebase project moves the objects:
 
 ```bash

@@ -118,6 +118,7 @@ function branch(state: {
   recorded: Array<{ hash: string; created_at: string }> | "absent";
   /** Declared tables that exist in schema public instead. */
   inPublic?: string[];
+  schemaOwner?: string;
   failOn?: RegExp;
 }) {
   const statements: string[] = [];
@@ -146,6 +147,17 @@ function branch(state: {
           ),
         };
       }
+      if (/has_schema_privilege/.test(text)) {
+        return {
+          rows: [
+            {
+              owner: state.schemaOwner ?? "app-sp",
+              can_create: true,
+              current_user: "app-sp",
+            },
+          ],
+        };
+      }
       if (/from pg_catalog\.pg_class c\s+join/.test(text)) {
         // The app's own journal: an ordinary table its role owns.
         const journalTable = {
@@ -161,7 +173,6 @@ function branch(state: {
       if (/select hash, created_at from/.test(text)) {
         return { rows: state.recorded === "absent" ? [] : state.recorded };
       }
-      // isForkCopy: whether the journal has the row init writes into a fork's copy.
       if (/where hash = \$1 limit 1/.test(text)) {
         const rows = state.recorded === "absent" ? [] : state.recorded;
         return { rows: rows.filter((row) => row.hash === values?.[0]) };
@@ -184,7 +195,7 @@ function branch(state: {
   return { statements, client, pool };
 }
 
-const WRITES = /\b(insert|update|delete|create|drop|alter|grant|truncate)\b/i;
+const WRITES = /^\s*(insert|update|delete|create|drop|alter|grant|truncate)\b/i;
 
 const RESOLVED = { branches: new Set<string>(), unresolved: [] };
 
@@ -217,7 +228,7 @@ describe("runVerify", () => {
     strandedMigrations: [],
     editedMigrations: [],
     unknownMigrations: 0,
-    forkCopy: false,
+    forkCopy: null,
   };
 
   test("a branch that matches schema.ts and has every migration is ok", async () => {
@@ -316,6 +327,24 @@ describe("runVerify", () => {
     });
   });
 
+  test("the fork's untouched copy, which another role still owns, is reported with the init advice", async () => {
+    const ctx = app(two);
+    branch({
+      columns: { notes: ["id", "body"] },
+      recorded: recordedAs(ctx, two),
+      schemaOwner: "deployed-sp",
+    });
+
+    expect(await runVerify(ctx)).toEqual({
+      kind: "local",
+      branch: BRANCH,
+      ...clean,
+      forkCopy:
+        'dev-alice-3f9a2c still holds the rows the fork copied into schema "app", which "deployed-sp" still owns. Run `appkit db init` to rebuild it from the committed migrations, or `appkit db init --schema migrate` to keep them.',
+      ok: false,
+    });
+  });
+
   test("a fork's copy whose rebuild did not finish is reported as one, and its tag is not an unknown migration", async () => {
     const ctx = app(two);
     branch({
@@ -330,7 +359,8 @@ describe("runVerify", () => {
       kind: "local",
       branch: BRANCH,
       ...clean,
-      forkCopy: true,
+      forkCopy:
+        'dev-alice-3f9a2c still holds the rows the fork copied into schema "app", and its rebuild did not finish. Run `appkit db init` to rebuild it from the committed migrations, or `appkit db init --schema migrate` to keep them.',
       ok: false,
     });
   });
@@ -347,7 +377,7 @@ describe("runVerify", () => {
     });
 
     expect(await runVerify(ctx)).toMatchObject({
-      forkCopy: true,
+      forkCopy: expect.stringContaining("Run `appkit db init`"),
       unknownMigrations: 1,
       ok: false,
     });

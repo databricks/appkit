@@ -72,10 +72,6 @@ export function writeMigrations(
   return folder;
 }
 
-/**
- * The hash drizzle-orm's migrator records for a migration file: as written,
- * or as a checkout with the given line endings reads it.
- */
 export function hashOf(
   folder: string,
   tag: string,
