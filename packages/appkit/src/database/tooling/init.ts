@@ -204,6 +204,8 @@ interface BranchRequest {
   readonly ttl: { readonly api: string; readonly label: string };
   readonly boundary: DeployBoundary;
   readonly envFile: string;
+  /** The branch of this project the default databricks.yml target deploys to, which a new fork comes from. */
+  readonly deployBranch: string | null;
   /** The branch .env marks as forked but not started; see LocalTarget.newBranch. */
   readonly newBranch: string | null;
   readonly onStep: (message: string) => void;
@@ -245,9 +247,11 @@ function branchLimitError(
 
 /**
  * Your dev branch or this checkout's session branch: found with one GET, or
- * forked from the project's default branch. The branch id is resolved and
- * checked against databricks.yml before any API call or .env write. An expired
- * session branch gets a new session id; an expired dev branch is an error.
+ * forked from the branch databricks.yml deploys to, which holds the deployed
+ * migrations, else from the project's default branch. The branch id is
+ * resolved and checked against databricks.yml before any API call or .env
+ * write. An expired session branch gets a new session id; an expired dev
+ * branch is an error.
  */
 async function findOrCreateBranch(
   ctx: DbContext,
@@ -315,7 +319,10 @@ async function findOrCreateBranch(
     }
 
     const branches = await api.listBranches(project);
-    const parent = branches.find((b) => b.status?.default);
+    const deployed = branches.find(
+      (b) => b.name === request.deployBranch && !isGone(b),
+    );
+    const parent = deployed ?? branches.find((b) => b.status?.default);
     if (!parent) {
       throw new Error(`Project ${project} has no default branch to fork from.`);
     }
@@ -329,7 +336,7 @@ async function findOrCreateBranch(
       APPKIT_DB_NEW_BRANCH: name,
     });
     onStep(
-      `Creating ${resourceId(name)} from ${resourceId(parent.name)}${session === null ? "" : `, expiring after ${request.ttl.label}`}`,
+      `Creating ${resourceId(name)} from ${resourceId(parent.name)} (${deployed ? "the branch databricks.yml deploys to" : "the project's default branch"})${session === null ? "" : `, expiring after ${request.ttl.label}`}`,
     );
     try {
       const branch = await api.createBranch(project, resourceId(name), {
@@ -630,6 +637,7 @@ async function initHolding(
     ttl,
     boundary: readDeployBoundary(ctx.root),
     envFile,
+    deployBranch: deploy?.branch ?? null,
     newBranch: local.newBranch,
     onStep,
   });
