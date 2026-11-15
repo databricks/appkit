@@ -116,10 +116,10 @@ describe("renderSchemaSource", () => {
   test("a skipped NOT NULL column without a default is a loud warning", () => {
     const { warnings } = firstRender(richTables, "app");
     expect(warnings).toContain(
-      'app.authors.score is NOT NULL with no default but is not in schema.ts (type "numeric(10,2)" is not supported). Inserts through the API will fail until it gets a default, becomes nullable, or is dropped.',
+      'app.authors.score is NOT NULL with no default but is not in schema.ts (type "numeric(10,2)" is not supported). Inserts through app.database.authors will fail until it gets a default, becomes nullable, or is dropped.',
     );
     expect(warnings).toContain(
-      "app.posts.views: its default 0 is not in schema.ts, so the API requires a value for it on insert.",
+      "app.posts.views: its default 0 is not in schema.ts, so app.database.posts requires a value for it on insert.",
     );
     expect(
       warnings.filter((warning) => !warning.startsWith("Constraint names")),
@@ -760,7 +760,7 @@ describe("renderSchemaSource", () => {
       },
     ]);
     expect(warnings).toEqual([
-      "app.t.u_id: its default gen_random_uuid() is not in schema.ts, so the API requires a value for it on insert.",
+      "app.t.u_id: its default gen_random_uuid() is not in schema.ts, so app.database.t requires a value for it on insert.",
     ]);
   });
 
@@ -813,7 +813,11 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
       foreignKeys,
     );
 
-  test("a declared column keeps its privacy; a new column and every column of a new table render private", () => {
+  /** Warnings other than the constraint-name one the fixture's `<column>_fkey` names raise. */
+  const otherWarnings = (warnings: readonly string[]) =>
+    warnings.filter((warning) => !warning.startsWith("Constraint names"));
+
+  test("a declared column keeps its .private(); a new column and a new table render as the catalog has them", () => {
     const out = renderSchemaSource(
       [
         boards,
@@ -837,12 +841,12 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
         "    board_id: fk(() => boards.id).notNull(),",
         "    author_email: text().private(),",
         "    body: text().notNull(),",
-        "    summary: text().private(),",
+        "    summary: text(),",
         "  });",
         "",
         '  const tags = table("tags", {',
-        "    id: id().private(),",
-        "    label: text().private(),",
+        "    id: id(),",
+        "    label: text(),",
         "  });",
         "",
         "  return { boards, notes, tags };",
@@ -850,25 +854,20 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
         "",
       ].join("\n"),
     );
-    expect(out.warnings).toContain(
-      "app.notes.summary, app.tags.id, app.tags.label are new to schema.ts, so they are private: the API does not return or accept them until you remove .private().",
-    );
-    expect(out.newRelations).toEqual([]);
+    expect(otherWarnings(out.warnings)).toEqual([]);
   });
 
   test("a foreign key it declares stays, and one the catalog dropped needs nothing", () => {
     const kept = renderSchemaSource([boards, notes()], "app", { previous });
     expect(kept.source).toContain("board_id: fk(() => boards.id).notNull(),");
-    expect(kept.newRelations).toEqual([]);
 
     const dropped = renderSchemaSource([boards, notes([], [])], "app", {
       previous,
     });
     expect(dropped.source).toContain("board_id: integer().notNull(),");
-    expect(dropped.newRelations).toEqual([]);
   });
 
-  test("a foreign key it does not declare is listed with the tables it does not declare either", () => {
+  test("a foreign key it does not declare renders with fk(), like a declared one", () => {
     const plain = defineSchema(({ table }) => ({
       boards: table("boards", { id: id(), title: text().notNull() }),
       notes: table("notes", {
@@ -893,17 +892,12 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
       { previous: plain },
     );
 
-    expect(out.newRelations).toEqual([
-      { edge: "app.notes.board_id → app.boards.id", undeclaredTables: [] },
-      {
-        edge: "app.notes.reviewer_id → app.users.id",
-        undeclaredTables: ["app.users"],
-      },
-      {
-        edge: "app.tags.note_id → app.notes.id",
-        undeclaredTables: ["app.tags"],
-      },
-    ]);
+    expect(out.source).toContain("board_id: fk(() => boards.id).notNull(),");
+    expect(out.source).toContain("reviewer_id: fk(() => users.id),");
+    expect(out.source).toContain("note_id: fk(() => notes.id),");
+    expect(out.source).toContain("author_email: text().private(),");
+    expect(out.skipped).toEqual([]);
+    expect(otherWarnings(out.warnings)).toEqual([]);
   });
 
   test("a declared foreign key keeps its relation when an undeclared one targets the same table", () => {
@@ -935,7 +929,6 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
     expect(out.skipped.map((skip) => skip.reason)).toContain(
       'foreign key to users(id) is not kept: a second foreign key to "users" would make the relation ambiguous',
     );
-    expect(out.newRelations).toEqual([]);
   });
 
   test("of two foreign keys on one column, the one it declares is kept", () => {
@@ -969,10 +962,9 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
     expect(out.skipped.map((skip) => skip.reason)).toEqual([
       "foreign key to users(id) is not kept: its column already keeps the foreign key to people(id)",
     ]);
-    expect(out.newRelations).toEqual([]);
   });
 
-  test("a declaration of another schema keeps nothing: every column renders private and every foreign key is new", () => {
+  test("a declaration of another schema keeps nothing: its .private() does not carry over", () => {
     const out = renderSchemaSource(
       [
         keyed("boards", [col("title", "text", { notNull: true })]),
@@ -982,21 +974,15 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
       { previous },
     );
 
-    expect(out.warnings).toContain(
-      'sales.boards.id, sales.boards.title, sales.notes.id, sales.notes.board_id, sales.notes.author_email, sales.notes.body are new to schema.ts, so they are private: the API does not return or accept them until you remove .private(). schema.ts declares schema "app", so it declares nothing in "sales". `--schema-name app` refreshes it.',
-    );
-    expect(out.newRelations).toEqual([
-      {
-        edge: "sales.notes.board_id → sales.boards.id",
-        undeclaredTables: ["sales.notes", "sales.boards"],
-      },
-    ]);
+    expect(out.source).toContain("author_email: text(),");
+    expect(out.source).toContain("board_id: fk(() => boards.id).notNull(),");
+    expect(out.source).not.toContain(".private()");
+    expect(otherWarnings(out.warnings)).toEqual([]);
   });
 
-  test("without a schema.ts to replace, nothing is private and no foreign key is new", () => {
+  test("without a schema.ts to replace, nothing is private", () => {
     const out = firstRender([boards, notes()]);
 
     expect(out.source).not.toContain(".private()");
-    expect(out.newRelations).toEqual([]);
   });
 });

@@ -5,7 +5,6 @@ import path from "node:path";
 import { getTableConfig, type PgTable } from "drizzle-orm/pg-core";
 import { afterEach, describe, expect, test } from "vitest";
 
-import { columnHttpCapabilities } from "../../../../plugins/database/crud/capabilities";
 import { loadDefaultDatabaseSchema } from "../../../../plugins/database/load-schema";
 import type { Schema } from "../../../schema-builder/types";
 import { drizzleKitImports } from "../../drizzle-exports";
@@ -45,21 +44,6 @@ const load = (tables: IntrospectedTable[]) =>
       .source,
   );
 
-/** What the generated API lets a caller do with a schema: per column, and per include. */
-const granted = (schema: Schema) =>
-  Object.values(schema.$tables).flatMap((table) => [
-    ...Object.values(table.$columns).flatMap((meta) =>
-      Object.entries(columnHttpCapabilities(meta))
-        .filter(([, allowed]) => allowed)
-        .map(
-          ([capability]) => `${table.$name}.${meta.columnName} ${capability}`,
-        ),
-    ),
-    ...table.$relations.map(
-      (relation) => `${table.$name} includes ${relation.name}`,
-    ),
-  ]);
-
 interface KitColumn {
   name: string;
   type: string;
@@ -80,6 +64,50 @@ interface KitTable {
       onDelete?: string;
     }
   >;
+  uniqueConstraints: Record<string, { columns: string[] }>;
+}
+
+interface TableShape {
+  /** Column name to "type[ not null][ pk][ default <expr>]". */
+  columns: Record<string, string>;
+  unique: string[][];
+  /** "<column> -> <table>(<column>)[ on delete <action>]". */
+  foreignKeys: string[];
+  private: string[];
+}
+
+/** What the schema declares per table, as drizzle-kit sees it, plus which columns are private. */
+async function shape(schema: Schema): Promise<Record<string, TableShape>> {
+  const { generateDrizzleJson } = await import("drizzle-kit/api");
+  const snapshot = generateDrizzleJson(drizzleKitImports(schema), undefined, [
+    schema.$schemaName,
+  ]) as unknown as { tables: Record<string, KitTable> };
+  return Object.fromEntries(
+    Object.values(schema.$tables).map((table): [string, TableShape] => {
+      const kit = snapshot.tables[
+        `${schema.$schemaName}.${table.$name}`
+      ] as KitTable;
+      return [
+        table.$name,
+        {
+          columns: Object.fromEntries(
+            Object.values(kit.columns).map((c) => [
+              c.name,
+              `${c.type}${c.notNull ? " not null" : ""}${c.primaryKey ? " pk" : ""}${c.default === undefined ? "" : ` default ${String(c.default)}`}`,
+            ]),
+          ),
+          unique: Object.values(kit.uniqueConstraints).map((u) => u.columns),
+          foreignKeys: Object.values(kit.foreignKeys).map(
+            (fk) =>
+              `${fk.columnsFrom.join(", ")} -> ${fk.tableTo}(${fk.columnsTo.join(", ")})${fk.onDelete && fk.onDelete !== "no action" ? ` on delete ${fk.onDelete}` : ""}`,
+          ),
+          private: Object.values(table.$columns)
+            .filter((c) => c.isPrivate)
+            .map((c) => c.columnName),
+        },
+      ];
+    }),
+  );
 }
 
 describe("introspect round trip", () => {
@@ -390,16 +418,21 @@ describe("introspect round trip", () => {
     ).toEqual([[quote]]);
   });
 
-  test("a refresh over the schema.ts it replaces keeps exactly what the API could read, write or include", async () => {
+  test("a refresh over the schema.ts it replaces keeps what it declares, and adds the rest as the catalog has it", async () => {
     const before =
-      await loadSource(`import { defineSchema, fk, id, text } from ${JSON.stringify(BUILDER)};
+      await loadSource(`import { defineSchema, fk, id, text, timestamp } from ${JSON.stringify(BUILDER)};
 export const schema = defineSchema(({ table }) => {
-  const boards = table("boards", { id: id(), title: text().notNull() });
+  const boards = table("boards", {
+    id: id(),
+    title: text().notNull(),
+    created_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  });
   const notes = table("notes", {
     id: id(),
-    board_id: fk(() => boards.id).notNull(),
+    board_id: fk(() => boards.id).notNull().onDelete("cascade"),
+    slug: text().unique(),
     author_email: text().private(),
-    body: text().notNull(),
+    body: text().notNull().default("-"),
   });
   return { boards, notes };
 });
@@ -409,17 +442,36 @@ export const schema = defineSchema(({ table }) => {
       tableOf({
         name: "boards",
         primaryKey: ["id"],
-        columns: [key, col("title", "text", { notNull: true })],
+        columns: [
+          key,
+          col("title", "text", { notNull: true }),
+          col("created_at", "timestamp with time zone", {
+            notNull: true,
+            defaultExpr: "now()",
+          }),
+        ],
       }),
       tableOf({
         name: "notes",
         primaryKey: ["id"],
+        unique: [
+          { name: "notes_slug_unique", columns: ["slug"], deferrable: false },
+        ],
         foreignKeys: [
           foreignKey({
             name: "notes_board_id_boards_id_fk",
             columns: ["board_id"],
             schema: "app",
             table: "boards",
+            refColumns: ["id"],
+            onDelete: "cascade",
+            onUpdate: "no action",
+          }),
+          foreignKey({
+            name: "notes_reviewer_id_reviewers_id_fk",
+            columns: ["reviewer_id"],
+            schema: "app",
+            table: "reviewers",
             refColumns: ["id"],
             onDelete: "no action",
             onUpdate: "no action",
@@ -428,13 +480,15 @@ export const schema = defineSchema(({ table }) => {
         columns: [
           key,
           col("board_id", "integer", { notNull: true }),
+          col("slug", "text"),
           col("author_email", "text"),
-          col("body", "text", { notNull: true }),
+          col("body", "text", { notNull: true, defaultExpr: "'-'::text" }),
           col("summary", "text"),
+          col("reviewer_id", "integer"),
         ],
       }),
       tableOf({
-        name: "tags",
+        name: "reviewers",
         primaryKey: ["id"],
         columns: [key, col("label", "text")],
       }),
@@ -445,11 +499,54 @@ export const schema = defineSchema(({ table }) => {
       previous: before.schema,
     });
     const after = await loadSource(rendered.source);
+    const was = await shape(before.schema);
+    const is = await shape(after.schema);
 
-    expect(rendered.newRelations).toEqual([]);
-    // The new column and the new table arrive private, so they grant nothing.
-    expect(after.schema.$tables.notes?.$columns.summary?.isPrivate).toBe(true);
-    expect(after.schema.$tables.tags?.$columns.label?.isPrivate).toBe(true);
-    expect(granted(after.schema)).toEqual(granted(before.schema));
+    expect(was).toEqual({
+      boards: {
+        columns: {
+          id: "integer not null pk",
+          title: "text not null",
+          created_at: "timestamp with time zone not null default now()",
+        },
+        unique: [],
+        foreignKeys: [],
+        private: [],
+      },
+      notes: {
+        columns: {
+          id: "integer not null pk",
+          board_id: "integer not null",
+          slug: "text",
+          author_email: "text",
+          body: "text not null default '-'",
+        },
+        unique: [["slug"]],
+        foreignKeys: ["board_id -> boards(id) on delete cascade"],
+        private: ["author_email"],
+      },
+    });
+    for (const [table, declared] of Object.entries(was)) {
+      const kept = is[table] as TableShape;
+      expect(kept.columns).toMatchObject(declared.columns);
+      expect(kept.unique).toEqual(expect.arrayContaining(declared.unique));
+      expect(kept.foreignKeys).toEqual(
+        expect.arrayContaining(declared.foreignKeys),
+      );
+      expect(kept.private).toEqual(declared.private);
+    }
+    expect(is.notes).toMatchObject({
+      columns: { summary: "text", reviewer_id: "integer" },
+      foreignKeys: [
+        "board_id -> boards(id) on delete cascade",
+        "reviewer_id -> reviewers(id)",
+      ],
+    });
+    expect(is.reviewers).toEqual({
+      columns: { id: "integer not null pk", label: "text" },
+      unique: [],
+      foreignKeys: [],
+      private: [],
+    });
   });
 });
