@@ -1019,7 +1019,7 @@ describe("runInit — schema start", () => {
       return { branch: DEV, schemaName: "app", dependents: [], kept: [] };
     });
 
-    await init(ctx, { schema: "clean" });
+    await init(ctx, { schema: "clean", runCommand: vi.fn() });
 
     expect(migrateHolding.mock.calls[0]?.[1]).toBe(
       cleanHolding.mock.calls[0]?.[1],
