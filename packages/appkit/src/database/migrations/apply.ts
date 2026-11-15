@@ -916,12 +916,16 @@ function committedMigrations(folder: string): MigrationFile[] {
 /** Read without the lock; markMigrationsApplied checks again under it. */
 export async function readMigrationDrift(
   client: QueryClient,
-  options: ApplyMigrationsOptions,
+  options: ApplyMigrationsOptions & {
+    readonly ignoreHashes?: readonly string[];
+  },
 ): Promise<MigrationDrift> {
+  const ignored = new Set(options.ignoreHashes);
+  const recorded = await readRecordedMigrations(client, options.schemaName);
   return driftOf(
     reconcileMigrations(
       committedMigrations(options.migrationsFolder),
-      await readRecordedMigrations(client, options.schemaName),
+      recorded.filter((row) => !ignored.has(row.hash)),
     ),
   );
 }

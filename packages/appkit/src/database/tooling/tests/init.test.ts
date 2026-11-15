@@ -984,6 +984,7 @@ describe("runInit — schema start", () => {
       schemaName: "app",
       record: false,
     });
+    expect(tagWrites()).toEqual(["insert"]);
     expect(introspectHolding.mock.invocationCallOrder[0]).toBeLessThan(
       cleanHolding.mock.invocationCallOrder[0] ?? 0,
     );

@@ -25,7 +25,11 @@ import {
   type GeneratedMigration,
   generateMigrationFiles,
 } from "../migrations";
-import { forkCopyRefusal, readSchemaState } from "../schema-state";
+import {
+  FORK_COPY_TAG,
+  forkCopyRefusal,
+  readSchemaState,
+} from "../schema-state";
 import { resourceId } from "../targets";
 import { readCatalog, readUnreadObjects } from "./catalog";
 import {
@@ -233,7 +237,10 @@ export async function introspectHolding(
     // record exactly the committed migrations: one it lacks would come out
     // reversed, one the checkout lacks would come out again, and one whose
     // file changed after it ran left the branch where the snapshot is not.
-    const drift = await readMigrationDrift(pool, migrationOptions);
+    const drift = await readMigrationDrift(pool, {
+      ...migrationOptions,
+      ignoreHashes: [FORK_COPY_TAG],
+    });
     const refuse = (reason: string, advice: string) =>
       new IntrospectRefusedError(
         `Refusing to introspect ${branchId}: ${reason} in schema "${schemaName}". ${advice}`,

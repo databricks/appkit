@@ -723,7 +723,6 @@ async function initHolding(
   };
   let introspected: IntrospectReport | null = null;
   if (plan.kind === "introspect" && plan.rebuild) {
-    if (plan.tag) await onBranch((client) => untagForkCopy(client, schemaName));
     introspected = await introspect(false);
   }
 

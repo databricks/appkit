@@ -35,6 +35,7 @@ import { readJournal } from "../../../migrations/paths";
 import { hashOf } from "../../../migrations/tests/fixtures";
 import { withHistoryLock } from "../../history-lock";
 import { generateMigrationFiles } from "../../migrations";
+import { FORK_COPY_TAG } from "../../schema-state";
 import { cleanupTempApps, fakeContext, tempApp } from "../../tests/fakes";
 import type { ColumnRow, ConstraintRow, TableRow } from "../catalog";
 import { IntrospectRefusedError, runIntrospect } from "../index";
@@ -384,6 +385,20 @@ describe("runIntrospect", () => {
   test("record: false reads a copy for init's rebuild, since it writes nothing on the branch", async () => {
     const root = tempApp({ [SCHEMA]: declaredSchema });
     schemaOwner = "other-sp";
+
+    const report = await runIntrospect(fakeContext({ root }), {
+      interactive: false,
+      record: false,
+    });
+
+    expect(report.migration).toMatchObject({ tag: "0000_baseline" });
+    expect(markMigrationsApplied).not.toHaveBeenCalled();
+  });
+
+  test("record: false reads a copy an earlier init tagged: the tag row in the journal is not a migration", async () => {
+    const root = tempApp({ [SCHEMA]: declaredSchema });
+    schemaOwner = "other-sp";
+    recorded = [{ when: 0, hash: FORK_COPY_TAG }];
 
     const report = await runIntrospect(fakeContext({ root }), {
       interactive: false,
