@@ -600,7 +600,6 @@ describe("applyPendingMigrations", () => {
       expect(state.recorded).toHaveLength(2);
     });
 
-    /** Main's new migration is older than the one a branch deployed first, so it is stranded, not pending. */
     const strandedBehindABranch = () => {
       const folder = migrations([
         { tag: "0000_a", when: 1000, sql: [`SELECT 1;`] },
