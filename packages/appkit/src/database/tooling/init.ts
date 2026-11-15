@@ -698,10 +698,12 @@ async function initHolding(
           onStep,
         });
 
+  // Every start leaves the branch for `appkit db migrate` and `appkit db check`,
+  // which diff schema.ts with drizzle-kit, so every start except none installs it.
   const installed =
-    startKind === "migrate" || startKind === "introspect"
-      ? ensureDrizzleKit(ctx.root, options.runCommand ?? runCommand, onStep)
-      : null;
+    startKind === "none"
+      ? null
+      : ensureDrizzleKit(ctx.root, options.runCommand ?? runCommand, onStep);
 
   // Without a lock (--schema none) the schema stays as the fork has it.
   let start: InitStart = { kind: "none" };
