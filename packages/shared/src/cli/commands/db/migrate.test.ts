@@ -133,6 +133,33 @@ describe("appkit db migrate", () => {
     expect(output(log)).toContain(
       `0002_migration breaks instances still running the previous release, which keep serving while the new one migrates on start: ${drop} Deploy code that works with both the old and the new schema first, then this change in a later deploy.`,
     );
+    expect(output(log)).not.toContain("may fail on rows");
+  });
+
+  test("warns when the migration may fail on rows the deploy branch has", async () => {
+    const unique =
+      'ALTER TABLE "app"."notes" ADD CONSTRAINT "notes_body_unique" UNIQUE("body");';
+    runMigrate.mockResolvedValue({
+      generated: {
+        tag: "0002_migration",
+        file: path.join(
+          process.cwd(),
+          "config/database/migrations/0002_migration.sql",
+        ),
+        statements: [unique],
+      },
+      dataDependent: [unique],
+      applied: ["0002_migration"],
+      typesFile,
+    });
+
+    await dbCommand.parseAsync(["migrate"], { from: "user" });
+
+    expect(output(log)).toContain(
+      `0002_migration may fail on rows the deploy branch has and a new branch does not: ${unique} Test the migration on a branch that has a copy of the deploy branch's data before you deploy.`,
+    );
+    expect(output(log)).not.toContain("breaks instances");
+    expect(process.exitCode).toBeUndefined();
   });
 
   test("says why nothing was applied", async () => {
@@ -151,8 +178,9 @@ describe("appkit db migrate", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  test("when applying fails after a migration was written, it still warns about what that migration breaks", async () => {
-    const drop = 'ALTER TABLE "app"."notes" DROP COLUMN "body";';
+  test("when applying fails after a migration was written, it still warns about that migration", async () => {
+    const setNotNull =
+      'ALTER TABLE "app"."notes" ALTER COLUMN "body" SET NOT NULL;';
     runMigrate.mockRejectedValue(
       Object.assign(
         new Error(
@@ -165,9 +193,10 @@ describe("appkit db migrate", () => {
               process.cwd(),
               "config/database/migrations/0002_migration.sql",
             ),
-            statements: [drop],
+            statements: [setNotNull],
           },
-          breaking: [drop],
+          breaking: [setNotNull],
+          dataDependent: [setNotNull],
         },
       ),
     );
@@ -178,7 +207,10 @@ describe("appkit db migrate", () => {
       "Wrote config/database/migrations/0002_migration.sql, but did not apply it: 403 Forbidden",
     );
     expect(output(log)).toContain(
-      `0002_migration breaks instances still running the previous release, which keep serving while the new one migrates on start: ${drop} Deploy code that works with both the old and the new schema first, then this change in a later deploy.`,
+      `0002_migration breaks instances still running the previous release, which keep serving while the new one migrates on start: ${setNotNull} Deploy code that works with both the old and the new schema first, then this change in a later deploy.`,
+    );
+    expect(output(log)).toContain(
+      `0002_migration may fail on rows the deploy branch has and a new branch does not: ${setNotNull} Test the migration on a branch that has a copy of the deploy branch's data before you deploy.`,
     );
     expect(process.exitCode).toBe(1);
   });
