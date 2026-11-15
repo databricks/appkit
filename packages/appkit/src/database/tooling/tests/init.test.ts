@@ -982,7 +982,7 @@ describe("runInit — schema start", () => {
     expect(introspectHolding.mock.calls[0]?.[2]).toEqual({
       interactive: false,
       schemaName: "app",
-      record: false,
+      recordAsApplied: false,
     });
     expect(tagWrites()).toEqual(["insert"]);
     expect(introspectHolding.mock.invocationCallOrder[0]).toBeLessThan(
@@ -1164,7 +1164,7 @@ describe("runInit — the start follows the branch's own state", () => {
       rebuilt: null,
     });
     expect(introspectHolding.mock.calls[0]?.[2]).toMatchObject({
-      record: true,
+      recordAsApplied: true,
     });
     expect(cleanHolding).not.toHaveBeenCalled();
     expect(tagWrites()).toEqual([]);
@@ -1320,7 +1320,7 @@ describe("runInit — the start follows the branch's own state", () => {
       },
     });
     expect(introspectHolding.mock.calls[0]?.[2]).toMatchObject({
-      record: true,
+      recordAsApplied: true,
     });
     expect(cleanHolding).not.toHaveBeenCalled();
   });
@@ -1415,7 +1415,7 @@ describe("runInit — the start follows the branch's own state", () => {
     expect(introspectHolding.mock.calls[0]?.[2]).toEqual({
       interactive: false,
       schemaName: "sales",
-      record: true,
+      recordAsApplied: true,
     });
     expect(steps).toContain(
       `Writing schema.ts from schema sales on ${devBranchId(USER)}`,

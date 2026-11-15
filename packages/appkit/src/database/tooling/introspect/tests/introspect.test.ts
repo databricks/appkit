@@ -382,39 +382,39 @@ describe("runIntrospect", () => {
     expect(markMigrationsApplied).not.toHaveBeenCalled();
   });
 
-  test("record: false reads a copy for init's rebuild, since it writes nothing on the branch", async () => {
+  test("recordAsApplied: false reads a copy for init's rebuild, since it writes nothing on the branch", async () => {
     const root = tempApp({ [SCHEMA]: declaredSchema });
     schemaOwner = "other-sp";
 
     const report = await runIntrospect(fakeContext({ root }), {
       interactive: false,
-      record: false,
+      recordAsApplied: false,
     });
 
     expect(report.migration).toMatchObject({ tag: "0000_baseline" });
     expect(markMigrationsApplied).not.toHaveBeenCalled();
   });
 
-  test("record: false reads a copy an earlier init tagged: the tag row in the journal is not a migration", async () => {
+  test("recordAsApplied: false reads a copy an earlier init tagged: the tag row in the journal is not a migration", async () => {
     const root = tempApp({ [SCHEMA]: declaredSchema });
     schemaOwner = "other-sp";
     recorded = [{ when: 0, hash: FORK_COPY_TAG }];
 
     const report = await runIntrospect(fakeContext({ root }), {
       interactive: false,
-      record: false,
+      recordAsApplied: false,
     });
 
     expect(report.migration).toMatchObject({ tag: "0000_baseline" });
     expect(markMigrationsApplied).not.toHaveBeenCalled();
   });
 
-  test("record: false writes schema.ts and the migration, and records nothing on the branch", async () => {
+  test("recordAsApplied: false writes schema.ts and the migration, and records nothing on the branch", async () => {
     const root = tempApp({ [SCHEMA]: declaredSchema });
 
     const report = await runIntrospect(fakeContext({ root }), {
       interactive: false,
-      record: false,
+      recordAsApplied: false,
     });
 
     expect(report.migration).toMatchObject({ tag: "0000_baseline" });

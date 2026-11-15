@@ -723,12 +723,12 @@ async function initHolding(
     work: (client: Pick<PoolClient, "query">) => Promise<T>,
   ) => withBranchPool(branchCtx, work);
 
-  const introspect = (record: boolean) => {
+  const introspect = (recordAsApplied: boolean) => {
     onStep(`Writing schema.ts from schema ${schemaName} ${on}`);
     return introspectForInit(branchCtx, lock, {
       interactive,
       schemaName,
-      record,
+      recordAsApplied,
     });
   };
   let introspected: IntrospectReport | null = null;

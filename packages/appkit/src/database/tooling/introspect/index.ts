@@ -47,7 +47,7 @@ export interface IntrospectOptions {
   readonly schemaName?: string;
   /** Module the written schema.ts imports the builder from. Default "@databricks/appkit/beta". */
   readonly importSource?: string;
-  readonly record?: boolean;
+  readonly recordAsApplied?: boolean;
 }
 
 export interface IntrospectReport {
@@ -219,10 +219,10 @@ export async function introspectHolding(
     );
   }
   const branchId = resourceId(env.branch.name);
-  const record = options.record ?? true;
+  const recordAsApplied = options.recordAsApplied ?? true;
 
   return withBranchPool(ctx, async (pool) => {
-    if (record) {
+    if (recordAsApplied) {
       const refusal = forkCopyRefusal(
         env.branch.name,
         schemaName,
@@ -368,7 +368,7 @@ export async function introspectHolding(
       }
       await writeDatabaseTypes(schema, typesFile);
       // The database already holds what the migrations describe; recording is the last step.
-      recorded = record
+      recorded = recordAsApplied
         ? [...unrecorded, ...(migration ? [migration.tag] : [])]
         : [];
       if (recorded.length > 0) {
