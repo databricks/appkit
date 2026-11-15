@@ -18,7 +18,7 @@ import { DatabasePluginError } from "../../../database/errors";
 import * as apply from "../../../database/migrations/apply";
 import { MigrationFilesError } from "../../../database/migrations/paths";
 import { defineSchema, id } from "../../../database/schema-builder";
-import { migrateOnStart, shouldMigrateOnStart } from "../migrate-on-start";
+import { decideMigrateOnStart, migrateOnStart } from "../migrate-on-start";
 
 const schema = defineSchema(
   ({ table }) => ({ notes: table("notes", { id: id() }) }),
@@ -73,7 +73,7 @@ afterEach(() => {
   }
 });
 
-describe("shouldMigrateOnStart", () => {
+describe("decideMigrateOnStart", () => {
   const credentials = {
     DATABRICKS_CLIENT_ID: "sp-client-id",
     DATABRICKS_CLIENT_SECRET: "secret",
@@ -81,31 +81,52 @@ describe("shouldMigrateOnStart", () => {
   const optIn = { APPKIT_DB_MIGRATE_ON_START: "true" };
 
   test.each([
-    ["a deployed app that opts in", { ...optIn, ...credentials }, true],
+    ["a deployed app that opts in", { ...optIn, ...credentials }],
+    [
+      "a deployed app with a bound database: Apps sets PGUSER to its client id",
+      { ...optIn, ...credentials, PGUSER: "sp-client-id" },
+    ],
+  ] as const)("%s migrates", (_label, env) => {
+    expect(decideMigrateOnStart(env)).toEqual({ kind: "migrate" });
+  });
+
+  test.each([
     [
       "a deployed app without the flag",
       { DATABRICKS_APP_NAME: "my-app", ...credentials },
-      false,
     ],
     [
       "a flag other than true",
       { APPKIT_DB_MIGRATE_ON_START: "1", ...credentials },
-      false,
     ],
+    ["nothing set", {}],
+  ] as const)("%s: off, with nothing to say", (_label, env) => {
+    expect(decideMigrateOnStart(env)).toEqual({ kind: "off" });
+  });
+
+  test.each([
     [
       "`databricks apps run-local`: the flag from app.yaml, no credentials",
-      { ...optIn, DATABRICKS_APP_NAME: "my-app" },
-      false,
+      { ...optIn, DATABRICKS_APP_NAME: "app" },
+      "DATABRICKS_CLIENT_ID is not set.",
     ],
     [
       "no client secret (a developer's own credentials)",
       { ...optIn, DATABRICKS_CLIENT_ID: "x" },
-      false,
+      "DATABRICKS_CLIENT_SECRET is not set.",
     ],
-    ["no client id", { ...optIn, DATABRICKS_CLIENT_SECRET: "x" }, false],
-    ["nothing set", {}, false],
-  ] as const)("%s → %s", (_label, env, expected) => {
-    expect(shouldMigrateOnStart(env)).toBe(expected);
+    [
+      "no client id",
+      { ...optIn, DATABRICKS_CLIENT_SECRET: "x" },
+      "DATABRICKS_CLIENT_ID is not set.",
+    ],
+    [
+      "run-local with exported M2M credentials and the developer's .env",
+      { ...optIn, ...credentials, PGUSER: "jane@example.com" },
+      `PGUSER is "jane@example.com", not the app's client id in DATABRICKS_CLIENT_ID.`,
+    ],
+  ] as const)("%s: skipped, naming the reason", (_label, env, reason) => {
+    expect(decideMigrateOnStart(env)).toEqual({ kind: "skipped", reason });
   });
 });
 
@@ -149,29 +170,48 @@ describe("migrateOnStart", () => {
   });
 
   test.each([
-    ["a developer branch", "dev-jane-a1b2c3"],
-    ["an agent session branch", "session-k3x9q2m7"],
+    ["a developer branch", "dev-jane-a1b2c3", "a developer"],
+    [
+      "a developer branch with a dashed slug",
+      "dev-jane-doe-2-a1b2c3",
+      "a developer",
+    ],
+    ["an agent session branch", "session-a1b2c3-k3x9q2m7", "an agent session"],
   ])(
-    "%s is never migrated on start, even with committed migrations",
-    async (_label, branch) => {
-      const warn = vi
-        .spyOn(console, "warn")
-        .mockImplementation(() => undefined);
+    "a deployed app bound to %s refuses to start, naming the branch and the fix",
+    async (_label, branch, kind) => {
+      const error = await migrateOnStart(
+        pool,
+        schema,
+        appRootWithMigrations(),
+        {
+          ...deployEnv,
+          LAKEBASE_ENDPOINT: `projects/p/branches/${branch}/endpoints/primary`,
+        },
+      ).catch((caught: unknown) => caught);
 
-      await migrateOnStart(pool, schema, appRootWithMigrations(), {
-        ...deployEnv,
-        LAKEBASE_ENDPOINT: `projects/p/branches/${branch}/endpoints/primary`,
-      });
-
-      expect(applyPendingMigrations).not.toHaveBeenCalled();
-      expect(warn.mock.calls.flat().map(String).join(" ")).toContain(
-        `Not migrating branch ${branch} on start`,
+      expect(error).toBeInstanceOf(DatabasePluginError);
+      expect(error).toMatchObject({ category: "SETUP_FAILED", phase: "setup" });
+      expect((error as Error).message).toContain(
+        `LAKEBASE_ENDPOINT points at branch "${branch}", whose name has the shape of ${kind} branch, and a deployed app migrates only its deploy branch. ` +
+          "Bind the app to its deploy branch. If this is the deploy branch, rename it so it does not look like a dev or session branch.",
       );
+      expect(applyPendingMigrations).not.toHaveBeenCalled();
     },
   );
 
   test.each([
     ["a branch that only starts with dev-", "dev-environment"],
+    ["a dev- branch without the six hex characters", "dev-jane-a1b2c"],
+    [
+      "a dev- shape longer than a branch id can be",
+      `dev-${"a".repeat(54)}-a1b2c3`,
+    ],
+    ["a session- branch that is not an agent session", "session-store"],
+    [
+      "a session- branch whose id is not six hex characters",
+      "session-k3x9q2m7",
+    ],
     ["the production branch", "production"],
   ])("%s is migrated", async (_label, branch) => {
     vi.spyOn(console, "log").mockImplementation(() => undefined);

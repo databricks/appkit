@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   createDrizzleDb: vi.fn(),
   createDrizzleDataPath: vi.fn(),
   assertSchemaMatchesDatabase: vi.fn(),
-  shouldMigrateOnStart: vi.fn(() => false),
+  decideMigrateOnStart: vi.fn(() => ({ kind: "off" })),
   migrateOnStart: vi.fn(async () => undefined),
 }));
 vi.mock("../../../connectors/lakebase", () => ({
@@ -25,7 +25,7 @@ vi.mock("../schema-check", () => ({
 }));
 // The migrator has its own suite; here only its place in setup matters.
 vi.mock("../migrate-on-start", () => ({
-  shouldMigrateOnStart: mocks.shouldMigrateOnStart,
+  decideMigrateOnStart: mocks.decideMigrateOnStart,
   migrateOnStart: mocks.migrateOnStart,
 }));
 
@@ -104,7 +104,7 @@ function arrange(path = fakePath()) {
 beforeEach(() => {
   vi.clearAllMocks();
   // clearAllMocks keeps implementations; a test that turns migration on must not leak it.
-  mocks.shouldMigrateOnStart.mockReturnValue(false);
+  mocks.decideMigrateOnStart.mockReturnValue({ kind: "off" });
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -240,7 +240,7 @@ describe("createDatabaseState", () => {
       order.push("pool");
       return pool;
     });
-    mocks.shouldMigrateOnStart.mockReturnValue(true);
+    mocks.decideMigrateOnStart.mockReturnValue({ kind: "migrate" });
     mocks.migrateOnStart.mockImplementationOnce(async () => {
       order.push("migrate");
     });
@@ -252,15 +252,53 @@ describe("createDatabaseState", () => {
 
     expect(order).toEqual(["pool", "migrate", "select 1", "catalog"]);
     expect(mocks.migrateOnStart).toHaveBeenCalledWith(pool, schema);
+    // The catalog check words its advice by whether this start migrated.
+    expect(mocks.assertSchemaMatchesDatabase).toHaveBeenCalledWith(
+      path,
+      schema,
+      { kind: "migrate" },
+    );
   });
 
-  test("local runs never call the migrator", async () => {
-    const { execute } = arrange();
-    mocks.shouldMigrateOnStart.mockReturnValue(false);
+  test("local runs never call the migrator, and say nothing", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { path, execute } = arrange();
+    mocks.decideMigrateOnStart.mockReturnValue({ kind: "off" });
 
     await createDatabaseState(schema, execute);
 
     expect(mocks.migrateOnStart).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+    expect(mocks.assertSchemaMatchesDatabase).toHaveBeenCalledWith(
+      path,
+      schema,
+      { kind: "off" },
+    );
+  });
+
+  test("a start the flag asks to migrate but that is not the deployed app warns once with the reason, and migrates nothing", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { path, execute } = arrange();
+    const decision = {
+      kind: "skipped",
+      reason: `PGUSER is "jane@example.com", not the app's client id in DATABRICKS_CLIENT_ID.`,
+    } as const;
+    mocks.decideMigrateOnStart.mockReturnValue(decision);
+
+    await createDatabaseState(schema, execute);
+
+    expect(mocks.migrateOnStart).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls.flat().map(String).join(" ")).toContain(
+      "APPKIT_DB_MIGRATE_ON_START is true, but this process is not the deployed app, so it did not migrate. " +
+        `PGUSER is "jane@example.com", not the app's client id in DATABRICKS_CLIENT_ID. ` +
+        "Databricks Apps sets DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET and PGUSER for the deployed app.",
+    );
+    expect(mocks.assertSchemaMatchesDatabase).toHaveBeenCalledWith(
+      path,
+      schema,
+      decision,
+    );
   });
 
   test("a migration failure keeps its reason, ends the pool and publishes nothing", async () => {
@@ -268,7 +306,7 @@ describe("createDatabaseState", () => {
     const errorLog = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
-    mocks.shouldMigrateOnStart.mockReturnValue(true);
+    mocks.decideMigrateOnStart.mockReturnValue({ kind: "migrate" });
     const failure = new DatabasePluginError(
       "SETUP_FAILED",
       "setup",
@@ -294,7 +332,7 @@ describe("createDatabaseState", () => {
     const errorLog = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
-    mocks.shouldMigrateOnStart.mockReturnValue(true);
+    mocks.decideMigrateOnStart.mockReturnValue({ kind: "migrate" });
     mocks.migrateOnStart.mockRejectedValueOnce(
       new Error("secret connection string"),
     );

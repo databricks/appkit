@@ -21,6 +21,9 @@ type CatalogRow = {
   relation_kind: string;
 };
 
+/** A local start: APPKIT_DB_MIGRATE_ON_START is not set. */
+const OFF = { kind: "off" } as const;
+
 /** Answer the catalog query with the given tables and columns. */
 function catalog(
   tables: Record<string, string[]>,
@@ -53,7 +56,7 @@ describe("assertSchemaMatchesDatabase", () => {
       notes: ["id", "board_id", "author_email", "body"],
     });
     await expect(
-      assertSchemaMatchesDatabase(path, schema),
+      assertSchemaMatchesDatabase(path, schema, OFF),
     ).resolves.toBeUndefined();
   });
 
@@ -61,7 +64,7 @@ describe("assertSchemaMatchesDatabase", () => {
     // The shape a same-named table from another app leaves behind.
     const { path } = catalog({ notes: ["id", "case_id", "author", "content"] });
 
-    const error = await assertSchemaMatchesDatabase(path, schema).catch(
+    const error = await assertSchemaMatchesDatabase(path, schema, OFF).catch(
       (caught) => caught,
     );
 
@@ -79,9 +82,9 @@ describe("assertSchemaMatchesDatabase", () => {
       boards: ["id", "title"],
       notes: ["id", "board_id", "body"],
     });
-    await expect(assertSchemaMatchesDatabase(path, schema)).rejects.toThrow(
-      "table public.notes is missing column author_email",
-    );
+    await expect(
+      assertSchemaMatchesDatabase(path, schema, OFF),
+    ).rejects.toThrow("table public.notes is missing column author_email");
   });
 
   test("reports a table with no readable columns as missing them all", async () => {
@@ -89,9 +92,9 @@ describe("assertSchemaMatchesDatabase", () => {
       boards: [],
       notes: ["id", "board_id", "author_email", "body"],
     });
-    await expect(assertSchemaMatchesDatabase(path, schema)).rejects.toThrow(
-      "table public.boards is missing columns id, title",
-    );
+    await expect(
+      assertSchemaMatchesDatabase(path, schema, OFF),
+    ).rejects.toThrow("table public.boards is missing columns id, title");
   });
 
   test.each([
@@ -109,9 +112,9 @@ describe("assertSchemaMatchesDatabase", () => {
         { boards: kind },
       );
 
-      await expect(assertSchemaMatchesDatabase(path, schema)).rejects.toThrow(
-        `public.boards is a ${description}, not a table`,
-      );
+      await expect(
+        assertSchemaMatchesDatabase(path, schema, OFF),
+      ).rejects.toThrow(`public.boards is a ${description}, not a table`);
     },
   );
 
@@ -122,7 +125,7 @@ describe("assertSchemaMatchesDatabase", () => {
     );
     const { raw, path } = catalog({ tags: ["id"] });
 
-    await assertSchemaMatchesDatabase(path, scoped);
+    await assertSchemaMatchesDatabase(path, scoped, OFF);
 
     expect(raw).toHaveBeenCalledTimes(1);
     const [strings, ...values] = raw.mock.calls[0] as unknown as [
@@ -139,7 +142,45 @@ describe("assertSchemaMatchesDatabase", () => {
     await assertSchemaMatchesDatabase(
       path,
       defineSchema(() => ({})),
+      OFF,
     );
     expect(raw).not.toHaveBeenCalled();
+  });
+
+  describe("the advice says how the missing objects get created", () => {
+    const missingColumn = () =>
+      catalog({ boards: ["id", "title"], notes: ["id", "board_id", "body"] })
+        .path;
+
+    test("without the flag: create them, or commit migrations and set the flag", async () => {
+      await expect(
+        assertSchemaMatchesDatabase(missingColumn(), schema, OFF),
+      ).rejects.toThrow(
+        "Create them, or commit migrations under config/database/migrations and set APPKIT_DB_MIGRATE_ON_START=true in app.yaml so the deployed app applies them on start.",
+      );
+    });
+
+    test("with the flag, on a start that did not migrate: point at the startup warning, never at the flag", async () => {
+      const error = await assertSchemaMatchesDatabase(missingColumn(), schema, {
+        kind: "skipped",
+        reason: "DATABRICKS_CLIENT_ID is not set.",
+      }).catch((caught) => caught);
+
+      expect(error.message).toContain(
+        "APPKIT_DB_MIGRATE_ON_START is true, but this process did not migrate on start. The warning logged before this error says why.",
+      );
+      expect(error.message).not.toContain("set APPKIT_DB_MIGRATE_ON_START");
+    });
+
+    test("after the start migrated: the committed migrations leave them missing", async () => {
+      const error = await assertSchemaMatchesDatabase(missingColumn(), schema, {
+        kind: "migrate",
+      }).catch((caught) => caught);
+
+      expect(error.message).toContain(
+        "The committed migrations under config/database/migrations were applied on start and leave them missing. Commit a migration that creates them and deploy again.",
+      );
+      expect(error.message).not.toContain("set APPKIT_DB_MIGRATE_ON_START");
+    });
   });
 });
