@@ -7,6 +7,8 @@ export type GenieStreamEvent =
       spaceId: string;
     }
   | { type: "status"; status: string }
+  /** Agent mode only: one step of the agent's reasoning, sent as it happens. */
+  | { type: "reasoning"; content: string }
   | { type: "message_result"; message: GenieMessageResponse }
   | {
       type: "query_result";
@@ -57,6 +59,8 @@ export interface GenieMessageResponse {
   content: string;
   attachments?: GenieAttachmentResponse[];
   error?: string;
+  /** Agent mode only: the agent's reasoning steps, in order. */
+  reasoning?: string[];
 }
 
 export interface GenieAttachmentResponse {
@@ -69,4 +73,13 @@ export interface GenieAttachmentResponse {
   };
   text?: { content?: string };
   suggestedQuestions?: string[];
+  /**
+   * A chart Genie rendered for a query. Fetch it as a PNG from the plugin's
+   * `visualization` route with this attachment's `attachmentId`.
+   */
+  viz?: {
+    title?: string;
+    /** The query attachment the chart was generated from. */
+    queryAttachmentId?: string;
+  };
 }

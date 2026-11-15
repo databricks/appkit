@@ -67,6 +67,8 @@ createApp({
     analytics({}),
     genie({
       spaces: { demo: process.env.DATABRICKS_GENIE_SPACE_ID ?? "placeholder" },
+      // Any Genie space also works as an agent.
+      agents: { agent: process.env.DATABRICKS_GENIE_SPACE_ID ?? "placeholder" },
     }),
     ...(process.env.LAKEBASE_ENDPOINT ? [lakebase()] : []),
     lakebaseExamples(),
