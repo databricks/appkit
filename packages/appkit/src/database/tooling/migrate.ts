@@ -29,7 +29,7 @@ import {
   type GeneratedMigration,
   generateMigrationFiles,
 } from "./migrations";
-import { forkCopyRefusal, isForkCopy } from "./schema-state";
+import { forkCopyRefusal, readSchemaState } from "./schema-state";
 
 /** Whether the checkout has a config/database/schema.ts yet. */
 export function hasSchemaFile(root: string): boolean {
@@ -147,12 +147,13 @@ async function applyToEnvBranch(
     );
   }
   return withBranchPool(ctx, async (pool) => {
-    // A migration on top of the fork's copy would make its rows yours to keep.
-    if (await isForkCopy(pool, schema.$schemaName)) {
-      throw new Error(
-        `Did not apply: ${forkCopyRefusal(env.branch.name, schema.$schemaName, "migrate")}`,
-      );
-    }
+    const refusal = forkCopyRefusal(
+      env.branch.name,
+      schema.$schemaName,
+      await readSchemaState(pool, schema.$schemaName),
+      "migrate",
+    );
+    if (refusal) throw new Error(`Did not apply: ${refusal}`);
     // The deployed app refuses this case on start; refuse it here first.
     const leftInPublic = await detectTablesLeftInPublic(
       catalogSqlOf(pool),

@@ -25,7 +25,7 @@ import {
   type GeneratedMigration,
   generateMigrationFiles,
 } from "../migrations";
-import { forkCopyRefusal, isForkCopy } from "../schema-state";
+import { forkCopyRefusal, readSchemaState } from "../schema-state";
 import { resourceId } from "../targets";
 import { readCatalog, readUnreadObjects } from "./catalog";
 import {
@@ -45,8 +45,9 @@ export interface IntrospectOptions {
   readonly importSource?: string;
   /**
    * false: write schema.ts and its migration without recording the migration
-   * on the branch, for init's rebuild, which drops the schema right after.
-   * Default true.
+   * on the branch, for init's rebuild, which drops the schema right after. It
+   * is the one read of a fork's copy that is not refused, since it writes
+   * nothing on the branch. Default true.
    */
   readonly record?: boolean;
 }
@@ -223,10 +224,17 @@ export async function introspectHolding(
   const record = options.record ?? true;
 
   return withBranchPool(ctx, async (pool) => {
-    if (await isForkCopy(pool, schemaName)) {
-      throw new IntrospectRefusedError(
-        `Refusing to introspect: ${forkCopyRefusal(env.branch.name, schemaName, "introspect")}`,
+    // init's rebuild reads the copy without recording, then drops it.
+    if (record) {
+      const refusal = forkCopyRefusal(
+        env.branch.name,
+        schemaName,
+        await readSchemaState(pool, schemaName),
+        "introspect",
       );
+      if (refusal) {
+        throw new IntrospectRefusedError(`Refusing to introspect: ${refusal}`);
+      }
     }
     // The diff starts from the latest committed snapshot, so the branch must
     // record exactly the committed migrations: one it lacks would come out

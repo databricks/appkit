@@ -76,8 +76,10 @@ const devBranch = {
   kind: "dev",
 };
 
-/** A branch whose journal is not an ordinary table, so it is no fork's copy. */
-const pool = { query: vi.fn(async () => ({ rows: [] })) };
+/** A branch without the app schema yet, so it is no fork's copy. */
+const pool = {
+  query: vi.fn(async (_text: string) => ({ rows: [] as unknown[] })),
+};
 
 beforeEach(() => {
   applyPendingMigrations.mockReset();
@@ -123,6 +125,28 @@ describe("runMigrate", () => {
       path.join(ctx.root, "shared/appkit-types/database.d.ts"),
     );
     expect(fs.existsSync(report.typesFile)).toBe(true);
+  });
+
+  test("does not apply on top of the fork's untouched copy, which another role still owns", async () => {
+    const ctx = app(`notes: table("notes", { id: id(), body: text() })`);
+    pool.query.mockImplementationOnce(async () => ({
+      rows: [
+        {
+          owner: "app-sp",
+          can_create: true,
+          current_user: "alice@example.com",
+        },
+      ],
+    }));
+
+    const error = await runMigrate(ctx, { interactive: false }).catch(
+      (caught: unknown) => caught,
+    );
+
+    expect((error as Error).message).toContain(
+      'Did not apply: dev-alice-3f9a2c still holds the rows the fork copied into schema "app", which "app-sp" still owns. Run `appkit db init` to rebuild it from the committed migrations, or `appkit db init --schema migrate` to keep them.',
+    );
+    expect(applyPendingMigrations).not.toHaveBeenCalled();
   });
 
   test("does not apply when the implicit app schema would shadow tables left in public", async () => {

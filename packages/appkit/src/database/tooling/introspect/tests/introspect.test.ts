@@ -80,6 +80,8 @@ let catalog: ReturnType<typeof catalogResponder>;
 let recorded: Array<{ when: number; hash: string }>;
 /** The journal carries init's fork-copy tag. */
 let tagged: boolean;
+/** Who owns the app schema; the connected role unless a test says otherwise. */
+let schemaOwner: string;
 /** The row the branch records for the last committed migration. */
 const lastCommitted = (root: string) => {
   const folder = path.join(root, MIGRATIONS);
@@ -103,6 +105,13 @@ const pool = {
       return { rows: recorded.length > 0 ? [journal] : [] };
     }
     if (text.includes("where hash = $1")) return { rows: tagged ? [{}] : [] };
+    if (text.includes("has_schema_privilege")) {
+      return {
+        rows: [
+          { owner: schemaOwner, can_create: true, current_user: "app-sp" },
+        ],
+      };
+    }
     if (text.includes("select hash, created_at")) {
       return {
         rows: recorded.map(({ when, hash }) => ({
@@ -120,6 +129,7 @@ beforeEach(() => {
   catalog = catalogResponder();
   recorded = [];
   tagged = false;
+  schemaOwner = "app-sp";
   resolveEnvBranch.mockReset().mockResolvedValue(onDevBranch);
   withBranchPool
     .mockReset()
@@ -353,6 +363,36 @@ describe("runIntrospect", () => {
       'Refusing to introspect: dev-alice-3f9a2c still holds the rows the fork copied into schema "app", and its rebuild did not finish. Run `appkit db init` to rebuild it from the committed migrations, or `appkit db init --schema introspect` to keep them.',
     );
     expect(fs.readFileSync(path.join(root, SCHEMA), "utf-8")).toBe(written);
+    expect(markMigrationsApplied).not.toHaveBeenCalled();
+  });
+
+  test("an untouched copy another role owns is refused before anything is written", async () => {
+    const root = tempApp({ [SCHEMA]: declaredSchema });
+    schemaOwner = "other-sp";
+
+    const refused = introspect(root);
+
+    await expect(refused).rejects.toBeInstanceOf(IntrospectRefusedError);
+    await expect(refused).rejects.toThrow(
+      'Refusing to introspect: dev-alice-3f9a2c still holds the rows the fork copied into schema "app", which "other-sp" still owns. Run `appkit db init` to rebuild it from the committed migrations, or `appkit db init --schema introspect` to keep them.',
+    );
+    expect(fs.readFileSync(path.join(root, SCHEMA), "utf-8")).toBe(
+      declaredSchema,
+    );
+    expect(fs.existsSync(path.join(root, MIGRATIONS))).toBe(false);
+    expect(markMigrationsApplied).not.toHaveBeenCalled();
+  });
+
+  test("record: false reads a copy for init's rebuild, since it writes nothing on the branch", async () => {
+    const root = tempApp({ [SCHEMA]: declaredSchema });
+    schemaOwner = "other-sp";
+
+    const report = await runIntrospect(fakeContext({ root }), {
+      interactive: false,
+      record: false,
+    });
+
+    expect(report.migration).toMatchObject({ tag: "0000_baseline" });
     expect(markMigrationsApplied).not.toHaveBeenCalled();
   });
 

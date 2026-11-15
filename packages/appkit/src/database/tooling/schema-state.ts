@@ -186,11 +186,23 @@ export function planStart(
   }
 }
 
-/** Why a command that writes on the branch refuses one that still holds a fork's copy. */
+/**
+ * Why a command that writes on the branch refuses a schema that still holds a
+ * fork's copy, untouched or handed off; undefined for any other state. A write
+ * on top of the copy would make its rows yours to keep.
+ */
 export function forkCopyRefusal(
   branch: string,
   schemaName: string,
+  state: SchemaState,
   keep: "migrate" | "introspect",
-): string {
-  return `${resourceId(branch)} still holds the rows the fork copied into schema "${schemaName}", and its rebuild did not finish. Run \`appkit db init\` to rebuild it from the committed migrations, or \`appkit db init --schema ${keep}\` to keep them.`;
+): string | undefined {
+  if (state.kind !== "copy" && state.kind !== "handed-off-copy") {
+    return undefined;
+  }
+  const holds =
+    state.kind === "copy"
+      ? `which "${state.owner}" still owns`
+      : "and its rebuild did not finish";
+  return `${resourceId(branch)} still holds the rows the fork copied into schema "${schemaName}", ${holds}. Run \`appkit db init\` to rebuild it from the committed migrations, or \`appkit db init --schema ${keep}\` to keep them.`;
 }
