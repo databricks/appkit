@@ -134,9 +134,11 @@ describe("migrateOnStart", () => {
 
     await migrateOnStart(pool, schema, root, deployEnv);
 
+    // A deploy start refuses an edited or diverged history instead of warning.
     expect(applyPendingMigrations).toHaveBeenCalledWith(pool, {
       migrationsFolder: path.join(root, "config/database/migrations"),
       schemaName: "app",
+      onDrift: "refuse",
     });
     const logged = log.mock.calls.map((call) => call.map(String).join(" "));
     expect(logged).toEqual([
@@ -214,6 +216,11 @@ describe("migrateOnStart", () => {
         last: "0002_b",
       }),
       "Migration 0001_parallel is older than 0002_b",
+    ],
+    [
+      "an edited migration",
+      new apply.MigrationHistoryError("app", { edited: ["0001_migration"] }),
+      'Migration 0001_migration changed after schema "app" applied it',
     ],
     [
       "a view at the journal's name",
