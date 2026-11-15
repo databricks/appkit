@@ -171,6 +171,13 @@ function printLocalVerifyReport(report: LocalVerifyReport): void {
       `Not committed: the branch ran ${report.unknownMigrations} migration${one ? "" : "s"} this checkout does not have, for example from another git branch`,
     );
   }
+  // A copy may match schema.ts and the journal; its rows are still not yours, and migrate refuses it.
+  if (report.forkCopy) {
+    console.error(
+      `${pc.red("✖")} ${branch} still holds the rows the fork copied into the app schema, and its rebuild did not finish. Run \`appkit db init\` to rebuild it from the committed migrations, or \`appkit db init --schema migrate\` to keep them.`,
+    );
+    return;
+  }
   console.error(
     `${pc.red("✖")} ${branch} does not match config/database/schema.ts and the committed migrations. ${localVerifyHint(report)}`,
   );
