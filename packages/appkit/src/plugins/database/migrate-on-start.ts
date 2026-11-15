@@ -24,17 +24,19 @@ const logger = createLogger("database");
 export type MigrateOnStartDecision =
   /** APPKIT_DB_MIGRATE_ON_START is not "true": a local start, or an app that never opted in. */
   | { readonly kind: "off" }
-  /** The flag is on, but this process does not run as the app's own service principal. */
+  /** The flag is on, but the environment is not the one Apps gives a deployed app with a bound database. */
   | { readonly kind: "skipped"; readonly reason: string }
   | { readonly kind: "migrate" };
 
 /**
  * Migrate on start only when the app opted in with APPKIT_DB_MIGRATE_ON_START=true
- * (app.yaml) and the process runs as the app's own service principal. Databricks
- * Apps sets DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET and, for a bound
- * database, PGUSER (the client id) for the deployed app. A local start, or
- * `databricks apps run-local` with exported M2M credentials, has the developer's
- * PGUSER from `.env`, and must not migrate as them.
+ * (app.yaml) and the process has the identity Databricks Apps gives a deployed
+ * app with a bound database. That is DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET
+ * and PGUSER set to the client id. A local start, or `databricks apps run-local`
+ * with exported M2M credentials, has the developer's PGUSER from `.env` or none
+ * at all, and must not migrate. An unset PGUSER skips because the Lakebase pool
+ * then falls back to the client id, and a developer's process would migrate as
+ * the service principal.
  */
 export function decideMigrateOnStart(
   env: NodeJS.ProcessEnv = process.env,
@@ -43,7 +45,14 @@ export function decideMigrateOnStart(
   for (const name of ["DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"]) {
     if (!env[name]) return { kind: "skipped", reason: `${name} is not set.` };
   }
-  if (env.PGUSER && env.PGUSER !== env.DATABRICKS_CLIENT_ID) {
+  if (!env.PGUSER) {
+    return {
+      kind: "skipped",
+      reason:
+        "PGUSER is not set. The deployed app gets it from its database resource.",
+    };
+  }
+  if (env.PGUSER !== env.DATABRICKS_CLIENT_ID) {
     return {
       kind: "skipped",
       reason: `PGUSER is "${env.PGUSER}", not the app's client id in DATABRICKS_CLIENT_ID.`,
