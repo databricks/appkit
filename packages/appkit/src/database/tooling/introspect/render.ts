@@ -34,31 +34,16 @@ export interface Unexpressed {
   readonly reason: string;
 }
 
-/** A foreign key schema.ts gets that the schema.ts it replaces does not declare. */
-interface NewRelation {
-  /** e.g. "app.notes.author_id → app.users.id". */
-  readonly edge: string;
-  /** Its tables the replaced schema.ts does not declare, e.g. "app.users". */
-  readonly undeclaredTables: readonly string[];
-}
-
 interface SchemaSource {
   readonly source: string;
   /** Tables written to schema.ts. */
   readonly tables: readonly string[];
   readonly skipped: readonly Skip[];
   readonly unexpressed: readonly Unexpressed[];
-  /** Omissions that change behavior, e.g. a NOT NULL column the API can no longer fill. */
+  /** Omissions that change behavior, e.g. a NOT NULL column app.database.<table> can no longer fill. */
   readonly warnings: readonly string[];
   /** What schema.ts declares differently from the database, which keeps it as it is. */
   readonly approximated: readonly string[];
-  /** Kept foreign keys `previous` does not declare. Each one is an API include. */
-  readonly newRelations: readonly NewRelation[];
-}
-
-/** Why a schema.ts of another schema keeps nothing in this one, and what refreshes it. */
-export function otherSchemaHint(declared: string, read: string): string {
-  return `schema.ts declares schema "${declared}", so it declares nothing in "${read}". \`--schema-name ${declared}\` refreshes it.`;
 }
 
 interface RenderOptions {
@@ -66,8 +51,8 @@ interface RenderOptions {
   readonly importSource?: string;
   /**
    * The schema.ts this render replaces; null when there is none. A column it
-   * declares (same schema, table and column name) keeps its privacy; every
-   * other column renders `.private()`. Null renders nothing private.
+   * declares (same schema, table and column name) keeps its `.private()`, and
+   * of two foreign keys on one column, the one it declares is kept.
    */
   readonly previous: Schema | null;
 }
@@ -168,6 +153,8 @@ function pgName(name: string): string {
 const key = (name: string) => (IDENTIFIER.test(name) ? name : q(name));
 const access = (variable: string, name: string) =>
   IDENTIFIER.test(name) ? `${variable}.${name}` : `${variable}[${q(name)}]`;
+/** The server entity client of a table, which inserts through schema.ts. */
+const client = (table: string) => access("app.database", table);
 const list = (names: readonly string[]) => names.join(", ");
 
 function baseType(
@@ -377,9 +364,8 @@ function mirrored(target: BaseType): string {
  * Render pg_catalog tables as a `defineSchema` source the builder accepts.
  * What the builder cannot express is left out with an `// appkit: skipped …`
  * comment; what it declares differently (a timestamp without its precision,
- * say) is listed in `approximated`. Columns `previous` does not declare render
- * private, and the foreign keys it does not declare are listed in
- * `newRelations`, which introspect refuses.
+ * say) is listed in `approximated`. A column `previous` declares keeps its
+ * `.private()`.
  */
 export function renderSchemaSource(
   tables: readonly IntrospectedTable[],
@@ -393,9 +379,6 @@ export function renderSchemaSource(
   /** Constraints whose database name is not the one migrations use: "db (migrations)". */
   const renamed: string[] = [];
   const tableComments: string[] = [];
-  /** Columns rendered private because `previous` does not declare them. */
-  const privatized: string[] = [];
-  const newRelations: NewRelation[] = [];
   const qualified = (table: string, column?: string) =>
     `${schemaName}.${table}${column ? `.${column}` : ""}`;
   const skipTable = (table: string, reason: string) => {
@@ -406,12 +389,8 @@ export function renderSchemaSource(
   };
   const { previous } = options;
   // A declaration of another schema declares nothing in this one.
-  const otherSchema =
-    previous && previous.$schemaName !== schemaName
-      ? previous.$schemaName
-      : null;
   const previousTables = new Map<string, AppKitTable>(
-    previous && !otherSchema
+    previous && previous.$schemaName === schemaName
       ? Object.values(previous.$tables).map((table): [string, AppKitTable] => [
           table.$name,
           table,
@@ -434,15 +413,11 @@ export function renderSchemaSource(
           relation.targetColumn === foreignKey.refColumns[0],
       ) ??
       false);
-  const isPrivate = (table: string, column: string): boolean => {
-    if (!previous) return false;
-    const declared = Object.values(
-      previousTables.get(table)?.$columns ?? {},
-    ).find((meta) => meta.columnName === column);
-    if (declared) return declared.isPrivate;
-    privatized.push(qualified(table, column));
-    return true;
-  };
+  /** Whether `previous` declares this column private. */
+  const isPrivate = (table: string, column: string): boolean =>
+    Object.values(previousTables.get(table)?.$columns ?? {}).find(
+      (meta) => meta.columnName === column,
+    )?.isPrivate ?? false;
 
   // 1. Tables the builder can key: one primary-key column, a usable name.
   const names = new Set(tables.map((table) => table.name));
@@ -521,7 +496,7 @@ export function renderSchemaSource(
           column.identity !== "" || column.generated || !!column.defaultExpr;
         if (column.notNull && !generatesValue) {
           tableWarnings.push(
-            `${qualified(table.name, column.name)} is NOT NULL with no default but is not in schema.ts (${reason}). Inserts through the API will fail until it gets a default, becomes nullable, or is dropped.`,
+            `${qualified(table.name, column.name)} is NOT NULL with no default but is not in schema.ts (${reason}). Inserts through ${client(table.name)} will fail until it gets a default, becomes nullable, or is dropped.`,
           );
         }
       };
@@ -614,7 +589,7 @@ export function renderSchemaSource(
           columnPlan.comments.push(`// appkit: skipped ${skip.reason}`);
           if (column.notNull) {
             tableWarnings.push(
-              `${qualified(table.name, column.name)}: its ${parsed.skip.replace(/ is not supported$/, "")} is not in schema.ts, so the API requires a value for it on insert.`,
+              `${qualified(table.name, column.name)}: its ${parsed.skip.replace(/ is not supported$/, "")} is not in schema.ts, so ${client(table.name)} requires a value for it on insert.`,
             );
           }
         }
@@ -806,7 +781,7 @@ export function renderSchemaSource(
         delete sourceColumn.defaultCall;
         if (sourceColumn.column.notNull) {
           warnings.push(
-            `${qualified(plan.table.name, sourceColumn.column.name)}: its default ${sourceColumn.column.defaultExpr} is not in schema.ts, so the API requires a value for it on insert.`,
+            `${qualified(plan.table.name, sourceColumn.column.name)}: its default ${sourceColumn.column.defaultExpr} is not in schema.ts, so ${client(plan.table.name)} requires a value for it on insert.`,
           );
         }
       }
@@ -842,16 +817,6 @@ export function renderSchemaSource(
       const out = edges.get(plan.table.name) ?? new Set<string>();
       out.add(foreignKey.table);
       edges.set(plan.table.name, out);
-      if (previous && !declaresForeignKey(plan.table.name, foreignKey)) {
-        newRelations.push({
-          edge: shown(
-            `${qualified(plan.table.name, sourceColumn.column.name)} → ${qualified(foreignKey.table, targetColumn.column.name)}`,
-          ),
-          undeclaredTables: [plan.table.name, foreignKey.table]
-            .filter((table) => !previousTables.has(table))
-            .map((table) => shown(qualified(table))),
-        });
-      }
     }
   }
 
@@ -945,7 +910,6 @@ export function renderSchemaSource(
     unexpressed,
     warnings: warnings.map(shown),
     approximated: approximated.map(shown),
-    newRelations,
   });
   if (ordered.length === 0) {
     lines.push(...tableComments);
@@ -986,12 +950,6 @@ export function renderSchemaSource(
       body.push(`    ${key(column.column.name)}: ${head}${chain.join("")},`);
     }
     body.push("  });", "");
-  }
-  if (privatized.length > 0) {
-    const one = privatized.length === 1;
-    warnings.push(
-      `${list(privatized)} ${one ? "is" : "are"} new to schema.ts, so ${one ? "it is" : "they are"} private: the API does not return or accept ${one ? "it" : "them"} until you remove .private().${otherSchema ? ` ${otherSchemaHint(otherSchema, schemaName)}` : ""}`,
-    );
   }
   for (const comment of tableComments) body.push(`  ${comment}`);
   if (tableComments.length > 0) body.push("");
