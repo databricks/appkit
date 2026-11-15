@@ -28,9 +28,9 @@ The previous schema.ts is kept as schema.ts.bak. What the schema builder cannot
 express (composite keys, unsupported types or defaults, some foreign keys) is left
 out with an "// appkit: skipped …" comment.
 
-Columns the previous schema.ts declares keep their .private(); columns it does
-not declare are written private. A foreign key it does not declare, or a
-schema.ts that does not load, stops introspect before it writes anything.
+Columns the previous schema.ts marks .private() stay private. Every other column
+and every foreign key is written as the database has it. A schema.ts that does
+not load stops introspect before it writes anything.
 
 Without migration history this writes 0000_baseline; with history, the next
 NNNN_introspect, once the branch has applied every committed migration. The
