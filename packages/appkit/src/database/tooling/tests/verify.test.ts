@@ -189,7 +189,7 @@ function branch(state: {
   return { statements, client, pool };
 }
 
-const WRITES = /\b(insert|update|delete|create|drop|alter|grant|truncate)\b/i;
+const WRITES = /^\s*(insert|update|delete|create|drop|alter|grant|truncate)\b/i;
 
 beforeEach(() => {
   withBranchPool.mockReset();

@@ -23,7 +23,11 @@ import {
   withBranchPool,
 } from "./context";
 import { requireSchemaFile } from "./migrate";
-import { isForkCopy } from "./schema-state";
+import {
+  FORK_COPY_TAG,
+  forkCopyRefusal,
+  readSchemaState,
+} from "./schema-state";
 import {
   type BundleTarget,
   defaultBundleTarget,
@@ -55,12 +59,7 @@ interface LocalVerifyReport {
   readonly editedMigrations: readonly string[];
   /** Migrations the branch ran that this checkout does not commit, e.g. from another git branch. */
   readonly unknownMigrations: number;
-  /**
-   * The branch still holds the rows a fork copied into the app schema, tagged
-   * by `appkit db init`, and its rebuild did not finish. `appkit db migrate`
-   * refuses such a branch, so nothing on it is this checkout's work.
-   */
-  readonly forkCopy: boolean;
+  readonly forkCopy: string | null;
   readonly ok: boolean;
 }
 
@@ -137,13 +136,18 @@ async function verifyLocal(ctx: DbContext): Promise<LocalVerifyReport> {
       await client.query("begin transaction read only");
       const { problems: schemaProblems, advice: schemaAdvice } =
         await diagnoseSchema(rawOn(client), schema);
-      const forkCopy = await isForkCopy(client, schema.$schemaName);
+      const forkCopy =
+        forkCopyRefusal(
+          branch,
+          schema.$schemaName,
+          await readSchemaState(client, schema.$schemaName),
+          "migrate",
+        ) ?? null;
       const drift = await readMigrationDrift(client, {
         migrationsFolder: migrationsFolder(ctx.root),
         schemaName: schema.$schemaName,
+        ignoreHashes: [FORK_COPY_TAG],
       });
-      // The tag is one journal row no committed migration matches, so the drift counts it once.
-      const unknownMigrations = drift.unknown - (forkCopy ? 1 : 0);
       return {
         kind: "local",
         branch,
@@ -152,15 +156,15 @@ async function verifyLocal(ctx: DbContext): Promise<LocalVerifyReport> {
         pendingMigrations: drift.pending,
         strandedMigrations: drift.stranded,
         editedMigrations: drift.edited,
-        unknownMigrations,
+        unknownMigrations: drift.unknown,
         forkCopy,
         ok:
-          !forkCopy &&
+          forkCopy === null &&
           schemaProblems.length === 0 &&
           drift.pending.length === 0 &&
           drift.stranded.length === 0 &&
           drift.edited.length === 0 &&
-          unknownMigrations === 0,
+          drift.unknown === 0,
       };
     } finally {
       await client.query("rollback").catch(() => undefined);

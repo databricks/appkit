@@ -102,8 +102,7 @@ export interface LocalVerifyReport {
   readonly strandedMigrations: readonly string[];
   readonly editedMigrations: readonly string[];
   readonly unknownMigrations: number;
-  /** The branch still holds a fork's copy, tagged by `appkit db init`, and its rebuild did not finish. */
-  readonly forkCopy: boolean;
+  readonly forkCopy: string | null;
   readonly ok: boolean;
 }
 
