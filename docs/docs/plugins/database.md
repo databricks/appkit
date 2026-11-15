@@ -564,9 +564,10 @@ app no longer has, the old service principal's role or the role of the person
 who removed the resource. No Postgres role can hand them back. `ALTER ... OWNER
 TO` the new service principal fails with `must be able to SET ROLE`, because
 nobody holds that role. Only Lakebase moves them, by deleting the owning role
-and reassigning what it owns. The delete reassigns every object the role owns
-in every database of the branch, drops the role's memberships and grants, and
-removes the role. So first take the inventory `db init` takes before it hands a
+and reassigning what it owns. The delete reassigns the objects the role owns
+on the branch, drops the role's memberships and grants, and removes the role. If
+the role still owns objects in another database of the branch, the delete can
+fail. So first take the inventory `db init` takes before it hands a
 schema over. In each database of the branch, list what the role owns there:
 
 ```sql
