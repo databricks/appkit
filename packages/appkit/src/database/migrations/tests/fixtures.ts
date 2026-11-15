@@ -72,11 +72,21 @@ export function writeMigrations(
   return folder;
 }
 
-/** The hash drizzle-orm's migrator records for a migration file. */
-export function hashOf(folder: string, tag: string): string {
-  return createHash("sha256")
-    .update(fs.readFileSync(path.join(folder, `${tag}.sql`), "utf-8"))
-    .digest("hex");
+/**
+ * The hash drizzle-orm's migrator records for a migration file: as written,
+ * or as a checkout with the given line endings reads it.
+ */
+export function hashOf(
+  folder: string,
+  tag: string,
+  lineEndings?: "lf" | "crlf",
+): string {
+  let content = fs.readFileSync(path.join(folder, `${tag}.sql`), "utf-8");
+  if (lineEndings) {
+    content = content.replace(/\r\n/g, "\n");
+    if (lineEndings === "crlf") content = content.replace(/\n/g, "\r\n");
+  }
+  return createHash("sha256").update(content).digest("hex");
 }
 
 export function removeMigrationFolders(): void {

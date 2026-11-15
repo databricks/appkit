@@ -234,7 +234,7 @@ describe.skipIf(!url)("applyPendingMigrations against Postgres", () => {
     );
 
     expect(error).toBeInstanceOf(MigrationHistoryError);
-    expect(error).toMatchObject({ stranded: ["0001_b"] });
+    expect(error).toMatchObject({ refusal: { stranded: ["0001_b"] } });
     expect(await recorded()).toHaveLength(2);
     expect(await columns("d")).toEqual([]);
   });
@@ -474,6 +474,47 @@ describe.skipIf(!url)("applyPendingMigrations against Postgres", () => {
       `"${schema}"."__drizzle_migrations" is a view owned by "${role}". The migrator reads and records applied migrations only in an ordinary table`,
     );
     expect(await columns("notes")).toEqual([]);
+  });
+
+  test("a deploy start refuses an applied migration whose file changed, and changes nothing", async () => {
+    const folder = notes();
+    const pool = newPool();
+    await applyPendingMigrations(pool, options(folder));
+    const file = path.join(folder, "0001_body.sql");
+    fs.appendFileSync(file, `\nALTER TABLE ${q("notes")} DROP COLUMN "title";`);
+    const before = await recorded();
+
+    const error = await applyPendingMigrations(pool, {
+      ...options(folder),
+      onDrift: "refuse",
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(MigrationHistoryError);
+    expect(error).toMatchObject({ refusal: { edited: ["0001_body"] } });
+    expect(await columns("notes")).toEqual(["id", "body", "title"]);
+    expect(await recorded()).toEqual(before);
+  });
+
+  test("a file read back with CRLF after it was applied is still that migration, and the as-is hash stays recorded", async () => {
+    const folder = notes();
+    const pool = newPool();
+    await applyPendingMigrations(pool, options(folder));
+    const file = path.join(folder, "0001_body.sql");
+    fs.writeFileSync(
+      file,
+      fs.readFileSync(file, "utf-8").replace(/\n/g, "\r\n"),
+    );
+
+    const again = await applyPendingMigrations(pool, {
+      ...options(folder),
+      onDrift: "refuse",
+    });
+
+    expect(again).toMatchObject({ applied: [], edited: [], unknown: 0 });
+    expect(await recorded()).toEqual([
+      { hash: hashOf(folder, "0000_notes"), createdAt: 1000 },
+      { hash: hashOf(folder, "0001_body", "lf"), createdAt: 2000 },
+    ]);
   });
 
   test("a baseline whose tables already exist is adopted, and later migrations apply", async () => {

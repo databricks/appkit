@@ -15,6 +15,7 @@ export interface MigrateReport {
   readonly applied: readonly string[];
   readonly adopted?: readonly string[];
   readonly breaking?: readonly string[];
+  readonly dataDependent?: readonly string[];
   readonly notApplied?: string;
   readonly typesFile: string;
 }
@@ -121,6 +122,7 @@ export interface InitReport {
 export interface UnappliedMigration {
   readonly generated: GeneratedMigration;
   readonly breaking: readonly string[];
+  readonly dataDependent: readonly string[];
 }
 
 /**

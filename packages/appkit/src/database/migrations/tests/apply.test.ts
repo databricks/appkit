@@ -389,7 +389,7 @@ describe("applyPendingMigrations", () => {
     );
 
     expect(error).toBeInstanceOf(MigrationHistoryError);
-    expect(error).toMatchObject({ stranded: ["0001_parallel"] });
+    expect(error).toMatchObject({ refusal: { stranded: ["0001_parallel"] } });
     expect((error as Error).message).toMatch(
       /^Migration 0001_parallel is older than 0002_b, which schema "app" already recorded, and was never applied/,
     );
@@ -431,8 +431,16 @@ describe("applyPendingMigrations", () => {
 
     expect(error).toBeInstanceOf(MigrationHistoryError);
     expect(error).toMatchObject({
-      ambiguous: ["0000_a", "0001_b"],
-      stranded: [],
+      refusal: {
+        ambiguous: {
+          when: 1000,
+          files: [
+            expect.objectContaining({ tag: "0000_a" }),
+            expect.objectContaining({ tag: "0001_b" }),
+          ],
+          recorded: 1,
+        },
+      },
     });
     expect((error as Error).message).toMatch(
       /^Schema "app" recorded 1 migration at 1970-01-01T00:00:01\.000Z, and 2 are committed with that timestamp \(0000_a, 0001_b\), none with a recorded hash\./,
@@ -475,6 +483,224 @@ describe("applyPendingMigrations", () => {
     expect(warn.mock.calls.flat().map(String).join(" ")).toContain(
       "Schema app recorded 1 migration(s) that are not committed here",
     );
+  });
+
+  describe("onDrift: refuse (a deploy start)", () => {
+    const refusing = (folder: string) => ({
+      ...options(folder),
+      onDrift: "refuse" as const,
+    });
+
+    test("an applied migration whose file changed refuses before taking the lock, and names the fix", async () => {
+      const folder = twoMigrations();
+      const { pool, client, state } = fakePool({
+        recorded: [{ hash: "the-hash-before-the-edit", created_at: 1000 }],
+      });
+
+      const error = await applyPendingMigrations(pool, refusing(folder)).catch(
+        (caught: unknown) => caught,
+      );
+
+      expect(error).toBeInstanceOf(MigrationHistoryError);
+      expect(error).toMatchObject({ refusal: { edited: ["0000_migration"] } });
+      expect((error as Error).message).toBe(
+        'Migration 0000_migration changed after schema "app" applied it, so its file is not what this branch ran. ' +
+          "Restore the file to the version this branch applied and put the change in a new migration. " +
+          "If the migration failed on deploy because of data, repair the rows on the deploy branch and deploy the unchanged file again. " +
+          "No migration was applied.",
+      );
+      expect(steps(client.statements)).toEqual(["journal table?", "recorded?"]);
+      expect(state.recorded).toHaveLength(1);
+    });
+
+    test("two edited migrations are both named", async () => {
+      const folder = twoMigrations();
+      const { pool } = fakePool({
+        recorded: [
+          { hash: "before-the-first-edit", created_at: 1000 },
+          { hash: "before-the-second-edit", created_at: 2000 },
+        ],
+      });
+
+      const error = await applyPendingMigrations(pool, refusing(folder)).catch(
+        (caught: unknown) => caught,
+      );
+
+      expect(error).toMatchObject({
+        refusal: { edited: ["0000_migration", "0001_migration"] },
+      });
+      expect((error as Error).message).toMatch(
+        /^Migrations 0000_migration, 0001_migration changed after schema "app" applied them, so their files are not what this branch ran\. Restore each file/,
+      );
+    });
+
+    test.each([
+      ["LF", "\n", "crlf"],
+      ["CRLF", "\r\n", "lf"],
+    ] as const)(
+      "a file checked out with %s, recorded by a checkout with the other line endings, is applied, not edited",
+      async (_label, eol, recordedBy) => {
+        const folder = migrations([
+          {
+            tag: "0000_notes",
+            when: 1000,
+            sql: [`CREATE TABLE "app"."notes" (${eol}  "id" integer${eol});`],
+          },
+        ]);
+        const { pool, client } = fakePool({
+          recorded: [
+            {
+              hash: hashOf(folder, "0000_notes", recordedBy),
+              created_at: 1000,
+            },
+          ],
+        });
+
+        const result = await applyPendingMigrations(pool, refusing(folder));
+
+        expect(result).toMatchObject({ applied: [], edited: [], unknown: 0 });
+        expect(steps(client.statements)).toEqual([
+          "journal table?",
+          "recorded?",
+        ]);
+      },
+    );
+
+    test("pending migrations next to recorded ones this checkout lacks refuse: the histories diverged", async () => {
+      const folder = twoMigrations();
+      const { pool, client, state } = fakePool({
+        recorded: [
+          { hash: hashOf(folder, "0000_migration"), created_at: 1000 },
+          { hash: "from-a-branch-deployed-early", created_at: 1500 },
+        ],
+      });
+
+      const error = await applyPendingMigrations(pool, refusing(folder)).catch(
+        (caught: unknown) => caught,
+      );
+
+      expect(error).toBeInstanceOf(MigrationHistoryError);
+      expect(error).toMatchObject({
+        refusal: {
+          diverged: {
+            unrecorded: ["0001_migration"],
+            unknown: [
+              { hash: "from-a-branch-deployed-early", createdAt: 1500 },
+            ],
+          },
+        },
+      });
+      expect((error as Error).message).toBe(
+        'Schema "app" recorded 1 migration this checkout does not have (created 1970-01-01T00:00:01.500Z), and 0001_migration is committed here but not applied. ' +
+          "The deploy branch ran migrations from a commit this one lacks. " +
+          "Deploy a commit whose journal contains the recorded migrations, or merge them into main unchanged, before main's own migrations. " +
+          "No migration was applied.",
+      );
+      expect(steps(client.statements)).toEqual(["journal table?", "recorded?"]);
+      expect(state.recorded).toHaveLength(2);
+    });
+
+    /** Main's new migration is older than the one a branch deployed first, so it is stranded, not pending. */
+    const strandedBehindABranch = () => {
+      const folder = migrations([
+        { tag: "0000_a", when: 1000, sql: [`SELECT 1;`] },
+        { tag: "0001_main", when: 1200, sql: [`SELECT 2;`] },
+      ]);
+      return {
+        folder,
+        recorded: [
+          { hash: hashOf(folder, "0000_a"), created_at: 1000 },
+          { hash: "from-a-branch-deployed-early", created_at: 1500 },
+        ],
+      };
+    };
+
+    test("a stranded migration next to recorded ones this checkout lacks refuses as diverged, with the same runbook", async () => {
+      const { folder, recorded } = strandedBehindABranch();
+      const { pool, client, state } = fakePool({ recorded });
+
+      const error = await applyPendingMigrations(pool, refusing(folder)).catch(
+        (caught: unknown) => caught,
+      );
+
+      expect(error).toBeInstanceOf(MigrationHistoryError);
+      expect(error).toMatchObject({
+        refusal: {
+          diverged: {
+            unrecorded: ["0001_main"],
+            unknown: [
+              { hash: "from-a-branch-deployed-early", createdAt: 1500 },
+            ],
+          },
+        },
+      });
+      expect((error as Error).message).toBe(
+        'Schema "app" recorded 1 migration this checkout does not have (created 1970-01-01T00:00:01.500Z), and 0001_main is committed here but not applied. ' +
+          "The deploy branch ran migrations from a commit this one lacks. " +
+          "Deploy a commit whose journal contains the recorded migrations, or merge them into main unchanged, before main's own migrations. " +
+          "No migration was applied.",
+      );
+      expect(steps(client.statements)).toEqual(["journal table?", "recorded?"]);
+      expect(state.recorded).toHaveLength(2);
+    });
+
+    test("the same history without the option refuses as stranded, with the regenerate runbook", async () => {
+      const { folder, recorded } = strandedBehindABranch();
+      const { pool } = fakePool({ recorded });
+
+      const error = await applyPendingMigrations(pool, options(folder)).catch(
+        (caught: unknown) => caught,
+      );
+
+      expect(error).toBeInstanceOf(MigrationHistoryError);
+      expect(error).toMatchObject({ refusal: { stranded: ["0001_main"] } });
+      expect((error as Error).message).toMatch(
+        /^Migration 0001_main is older than the migration recorded at 1970-01-01T00:00:01\.500Z, which schema "app" already recorded, and was never applied, so it would never run\. .*Delete its \.sql file, snapshot and journal entry, generate the migration again from schema\.ts/,
+      );
+    });
+
+    test("recorded migrations this checkout lacks with nothing pending (a code rollback) only warn", async () => {
+      const folder = twoMigrations();
+      const warn = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => undefined);
+      const { pool } = fakePool({
+        recorded: [
+          { hash: hashOf(folder, "0000_migration"), created_at: 1000 },
+          { hash: hashOf(folder, "0001_migration"), created_at: 2000 },
+          { hash: "from-a-newer-release", created_at: 3000 },
+        ],
+      });
+
+      const result = await applyPendingMigrations(pool, refusing(folder));
+
+      expect(result).toMatchObject({ applied: [], unknown: 1 });
+      expect(warn.mock.calls.flat().map(String).join(" ")).toContain(
+        "Schema app recorded 1 migration(s) that are not committed here",
+      );
+    });
+
+    test("without the option, an edited migration and a divergence still only warn", async () => {
+      const folder = twoMigrations();
+      const warn = vi
+        .spyOn(console, "warn")
+        .mockImplementation(() => undefined);
+      const { pool } = fakePool({
+        recorded: [
+          { hash: "the-hash-before-the-edit", created_at: 1000 },
+          { hash: "from-a-branch-deployed-early", created_at: 1500 },
+        ],
+      });
+
+      const result = await applyPendingMigrations(pool, options(folder));
+
+      expect(result).toMatchObject({
+        applied: ["0001_migration"],
+        edited: ["0000_migration"],
+        unknown: 1,
+      });
+      expect(warn).toHaveBeenCalledTimes(2);
+    });
   });
 
   test("a table lock not granted in time is retried, then fails with the hint", async () => {
@@ -656,7 +882,7 @@ describe("applyPendingMigrations", () => {
       `"app"."__drizzle_migrations" is a table owned by "mallory". The migrator connects as "app-sp", which neither owns it nor inherits "mallory"`,
     );
     expect((error as Error).message).toContain(
-      `Have "mallory" run the migration, or transfer the table to "app-sp" (ALTER TABLE … OWNER TO), then deploy again. No migration was applied.`,
+      `Have "mallory" run the migration, or have Lakebase move the table to "app-sp", since no Postgres role can hand it over. Then deploy again. No migration was applied.`,
     );
     expect(steps(client.statements)).toEqual([
       "journal table?",
@@ -691,6 +917,9 @@ describe("applyPendingMigrations", () => {
     expect(error).toBeInstanceOf(MigrationJournalError);
     expect((error as Error).message).toContain(
       `"app"."__drizzle_migrations" is a table owned by "mallory" with row-level security enabled. The migrator connects as "app-sp", which neither owns it nor inherits "mallory"`,
+    );
+    expect((error as Error).message).toContain(
+      `Have "mallory" disable row-level security on it, or have Lakebase move the table to "app-sp", since no Postgres role can hand it over. Then deploy again.`,
     );
     expect(steps(client.statements)).toEqual(["journal table?"]);
   });
