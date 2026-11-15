@@ -18,7 +18,7 @@ export const FORK_COPY_TAG = "appkit:fork-copy";
 export type SchemaState =
   | { readonly kind: "absent" }
   | { readonly kind: "copy"; readonly owner: string }
-  | { readonly kind: "handed-off-copy" }
+  | { readonly kind: "interrupted-rebuild" }
   | { readonly kind: "yours" }
   | { readonly kind: "public"; readonly kept: readonly string[] };
 
@@ -90,7 +90,7 @@ export async function readSchemaState(
   if (owner === null) return { kind: "absent" };
   if (owner !== currentUser) return { kind: "copy", owner };
   return (await isForkCopy(client, schemaName))
-    ? { kind: "handed-off-copy" }
+    ? { kind: "interrupted-rebuild" }
     : { kind: "yours" };
 }
 
@@ -108,39 +108,47 @@ const NOTHING_ELSE = {
   tag: false,
   handOff: false,
   keepsCopy: false,
-  confirm: false,
 } as const;
+
+function holdsForkCopy(state: SchemaState, forkedThisRun: boolean): boolean {
+  return (
+    state.kind === "copy" ||
+    state.kind === "interrupted-rebuild" ||
+    (state.kind === "yours" && forkedThisRun)
+  );
+}
+
+function mayHoldYourWork(state: SchemaState, forkedThisRun: boolean): boolean {
+  return state.kind !== "absent" && !holdsForkCopy(state, forkedThisRun);
+}
 
 export function planStart(
   state: SchemaState,
   requested: Exclude<SchemaStart, "none"> | undefined,
   hasSchema: boolean,
-  created = false,
+  forkedThisRun = false,
 ): StartPlan {
-  const copied =
-    state.kind === "copy" ||
-    state.kind === "handed-off-copy" ||
-    (state.kind === "yours" && created);
-  if (!copied) {
+  if (!holdsForkCopy(state, forkedThisRun)) {
     const kind = requested ?? (hasSchema ? "migrate" : "introspect");
     return {
       ...NOTHING_ELSE,
       kind,
       rebuild: kind === "clean",
-      confirm: kind === "clean" && state.kind !== "absent",
+      confirm: kind === "clean" && mayHoldYourWork(state, forkedThisRun),
     };
   }
   const untouched = state.kind === "copy";
-  const tagged = state.kind === "handed-off-copy";
+  const interrupted = state.kind === "interrupted-rebuild";
   if (requested === "migrate" || requested === "introspect") {
     return {
       ...NOTHING_ELSE,
       kind: requested,
       handOff: untouched,
       keepsCopy: true,
+      confirm: false,
     };
   }
-  if (tagged && !hasSchema && requested === undefined) {
+  if (interrupted && !hasSchema && requested === undefined) {
     throw new Error(
       "The rebuild of the app schema on your branch stopped before it finished, and this checkout has no config/database/schema.ts to rebuild from. Restore schema.ts, then rerun `appkit db init`. `appkit db init --schema introspect` writes schema.ts from the branch and keeps the rows the fork copied.",
     );
@@ -149,8 +157,9 @@ export function planStart(
     ...NOTHING_ELSE,
     kind: requested ?? (hasSchema ? "clean" : "introspect"),
     rebuild: true,
-    tag: !tagged,
+    tag: !interrupted,
     handOff: untouched,
+    confirm: false,
   };
 }
 
@@ -160,7 +169,7 @@ export function forkCopyRefusal(
   state: SchemaState,
   keep: "migrate" | "introspect",
 ): string | undefined {
-  if (state.kind !== "copy" && state.kind !== "handed-off-copy") {
+  if (state.kind !== "copy" && state.kind !== "interrupted-rebuild") {
     return undefined;
   }
   const holds =

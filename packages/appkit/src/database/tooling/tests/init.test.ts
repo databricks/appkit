@@ -1245,7 +1245,7 @@ describe("runInit — the start follows the branch's own state", () => {
     expect(tagWrites()).toEqual([]);
   });
 
-  test("a handed-off copy without schema.ts says how to continue instead of guessing", async () => {
+  test("an interrupted rebuild without schema.ts says how to continue instead of guessing", async () => {
     schemaOwner = USER;
     tagged = true;
 

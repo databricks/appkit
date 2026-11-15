@@ -119,7 +119,7 @@ describe.skipIf(!url)("the fork-copy tag against Postgres", () => {
     });
   });
 
-  test("once handed to you, a tagged schema reads as a handed-off copy, and untagging makes it yours", async () => {
+  test("once handed to you, a tagged schema reads as an interrupted rebuild, and untagging makes it yours", async () => {
     await admin.query(`
       alter schema "${app}" owner to "${dev}";
       alter table "${app}".notes owner to "${dev}";
@@ -127,7 +127,7 @@ describe.skipIf(!url)("the fork-copy tag against Postgres", () => {
     `);
 
     await expect(readSchemaState(me, app)).resolves.toEqual({
-      kind: "handed-off-copy",
+      kind: "interrupted-rebuild",
     });
 
     await untagForkCopy(me, app);
