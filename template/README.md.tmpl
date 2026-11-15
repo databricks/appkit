@@ -60,15 +60,17 @@ Run `npx appkit db init` once after scaffolding, and again after cloning. It ask
 nothing: it points `.env` at your branch and sets up its schema.
 
 ```bash
-npx appkit db init             # your dev branch, forked from the project's default branch
+npx appkit db init             # your dev branch, a fork of the branch the app deploys to
 npx appkit db init --session   # a branch for this checkout that expires after 7 days
 npx appkit db init --dev       # back to your dev branch
 ```
 
-A new branch is a copy of the default branch, production data included. When
-`db init` creates the branch, it rebuilds the app schema from the committed
-migrations, so its tables start empty. Other schemas keep the copied rows.
-To keep the copied rows in the app schema too, create the branch with
+A new branch is a copy of its source, production data included. When the app
+schema on the branch still belongs to the copied service principal, `db init`
+hands it to you and rebuilds it from the committed migrations, so its tables
+start empty. Other schemas keep the copied rows. A branch whose app schema is
+already yours keeps its rows, and `db init` migrates it. To keep the copied
+rows in the app schema on a new branch too, run
 `npx appkit db init --schema migrate`.
 
 To change the schema, edit `config/database/schema.ts`, then:
@@ -79,7 +81,11 @@ npx appkit db verify    # read-only check of your branch against schema.ts and t
 ```
 
 Commit the migrations. The deployed app applies them on start, because `app.yaml`
-sets `APPKIT_DB_MIGRATE_ON_START=true`. To adopt tables that already exist, run
+sets `APPKIT_DB_MIGRATE_ON_START=true`, and only when it connects as its own
+service principal, so a local start or `databricks apps run-local` never
+migrates. The deploy waits for `/health`, which the app serves only after its
+migrations, for up to 300 seconds, so a failed migration fails the deploy.
+To adopt tables that already exist, run
 `npx appkit db init --schema introspect`. It writes `schema.ts` from the branch's
 tables, and a `0000_baseline` migration (or `NNNN_introspect` when migrations
 already exist).
