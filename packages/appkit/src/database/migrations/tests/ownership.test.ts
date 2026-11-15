@@ -13,23 +13,32 @@ describe("ownership: one owner per branch", () => {
     );
   });
 
-  test("a schema owned by another role names both roles and how that happens", () => {
+  test("a schema owned by another role: two apps first, then the Lakebase-only recovery", () => {
     const hint = ownershipHint("42501", {
       schemaName: "app",
       owner: "old-app-sp",
       currentUser: "new-app-sp",
       canCreate: false,
-    });
+    }) as string;
     expect(hint).toContain(
       `Schema "app" is owned by "old-app-sp", but the app connects as "new-app-sp".`,
     );
+    const twoApps =
+      "If two apps share this database, give each its own schemaName in schema.ts.";
+    const recovery = `If "old-app-sp" belonged to a deleted app, or is the role of the person who removed the resource, someone with CAN MANAGE on the Lakebase project moves its objects with \`databricks postgres delete-role <its role> --reassign-owned-to <the role of "new-app-sp">\``;
+    expect(hint).toContain(twoApps);
+    expect(hint).toContain(recovery);
+    expect(hint.indexOf(twoApps)).toBeLessThan(hint.indexOf(recovery));
     expect(hint).toContain(
-      "the app's database resource was removed and added again, or the app was recreated",
+      `the app was recreated with a new service principal, or its database resource was removed and added again, and Lakebase handed the objects to "old-app-sp"`,
     );
     expect(hint).toContain(
-      `If "old-app-sp" belonged to a deleted app, someone with CAN MANAGE on the Lakebase project moves its objects with \`databricks postgres delete-role <its role> --reassign-owned-to <the role of "new-app-sp">\``,
+      `No Postgres role can hand them back to "new-app-sp"; only Lakebase can move them.`,
     );
-    expect(hint).toContain("set another schemaName in schema.ts");
+    expect(hint).toContain(
+      "That moves every object the role owns on the branch, in every database, and deletes the role, so first check what it owns.",
+    );
+    expect(hint).not.toContain("ALTER");
     expect(hint).toContain(
       "On your dev or session branch, rerun `appkit db init`, which hands you the schema.",
     );
