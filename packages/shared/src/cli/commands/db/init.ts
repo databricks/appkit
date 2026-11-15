@@ -103,8 +103,9 @@ function printInitReport(
   else info("Left the schema as it is");
 
   if (keptCopy?.reason === "requested") {
+    // The tag is gone and the schema is yours, so only an explicit clean removes the rows.
     warn(
-      `Kept the rows the fork copied${keptCopy.from ? ` from ${shortName(keptCopy.from)}` : ""}, as --schema ${schemaFlag} asks. A plain \`appkit db init\` rebuilds the app schema from the committed migrations without them.`,
+      `Kept the rows the fork copied${keptCopy.from ? ` from ${shortName(keptCopy.from)}` : ""}, as --schema ${schemaFlag} asks. The app schema is yours now, so a plain \`appkit db init\` keeps them. \`appkit db init --schema clean\` drops the app schema with everything in it and rebuilds it from the committed migrations, after a confirmation or with --yes.`,
     );
   } else if (keptCopy?.reason === "public") {
     warn(
