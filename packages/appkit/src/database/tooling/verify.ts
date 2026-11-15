@@ -23,6 +23,7 @@ import {
   withBranchPool,
 } from "./context";
 import { requireSchemaFile } from "./migrate";
+import { isUsersBranchId } from "./naming";
 import {
   FORK_COPY_TAG,
   forkCopyRefusal,
@@ -59,6 +60,7 @@ interface LocalVerifyReport {
   readonly editedMigrations: readonly string[];
   /** Migrations the branch ran that this checkout does not commit, e.g. from another git branch. */
   readonly unknownMigrations: number;
+  /** On your own dev or session branch, the fork's copy init has not rebuilt yet, with its advice; null elsewhere. */
   readonly forkCopy: string | null;
   readonly ok: boolean;
 }
@@ -136,13 +138,19 @@ async function verifyLocal(ctx: DbContext): Promise<LocalVerifyReport> {
       await client.query("begin transaction read only");
       const { problems: schemaProblems, advice: schemaAdvice } =
         await diagnoseSchema(rawOn(client), schema);
+      // Only init forks a copy, onto the developer's own branch. Elsewhere,
+      // e.g. production, another owner is the normal state. init writes the
+      // user name it hashed into that branch id to PGUSER, so .env decides.
+      const user = ctx.env.PGUSER;
       const forkCopy =
-        forkCopyRefusal(
-          branch,
-          schema.$schemaName,
-          await readSchemaState(client, schema.$schemaName),
-          "migrate",
-        ) ?? null;
+        user && isUsersBranchId(user, resourceId(branch))
+          ? (forkCopyRefusal(
+              branch,
+              schema.$schemaName,
+              await readSchemaState(client, schema.$schemaName),
+              "migrate",
+            ) ?? null)
+          : null;
       const drift = await readMigrationDrift(client, {
         migrationsFolder: migrationsFolder(ctx.root),
         schemaName: schema.$schemaName,
