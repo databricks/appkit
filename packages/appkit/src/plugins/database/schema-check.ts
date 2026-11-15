@@ -1,11 +1,24 @@
 import { databaseSetupFailed } from "../../database/errors";
 import type { DataPath } from "../../database/runtime";
 import type { Schema } from "../../database/schema-builder";
+import type { MigrateOnStartDecision } from "./migrate-on-start";
 
 interface CatalogColumn {
   readonly table_name: string;
   readonly column_name: string | null;
   readonly relation_kind: string;
+}
+
+/** How the missing tables and columns get created, given what this start did about migrations. */
+function migrationAdvice(migration: MigrateOnStartDecision): string {
+  switch (migration.kind) {
+    case "off":
+      return "Create them, or commit migrations under config/database/migrations and set APPKIT_DB_MIGRATE_ON_START=true in app.yaml so the deployed app applies them on start.";
+    case "skipped":
+      return "APPKIT_DB_MIGRATE_ON_START is true, but this process did not migrate on start. The warning logged before this error says why.";
+    case "migrate":
+      return "The committed migrations under config/database/migrations were applied on start and leave them missing. Commit a migration that creates them and deploy again.";
+  }
 }
 
 /**
@@ -14,10 +27,12 @@ interface CatalogColumn {
  * request as an undefined-table or undefined-column failure, so check up front.
  * pg_catalog is read rather than information_schema, which hides objects the
  * role cannot access and would report a privilege gap as a missing column.
+ * `migration` says what this start did about migrations, so the advice fits.
  */
 export async function assertSchemaMatchesDatabase(
   dataPath: DataPath,
   schema: Schema,
+  migration: MigrateOnStartDecision,
 ): Promise<void> {
   const tables = Object.values(schema.$tables);
   if (tables.length === 0) return;
@@ -76,7 +91,7 @@ export async function assertSchemaMatchesDatabase(
   }
   if (problems.length > 0) {
     throw databaseSetupFailed(
-      `the declared schema does not match the database: ${problems.join("; ")}. Create them, or commit migrations under config/database/migrations and set APPKIT_DB_MIGRATE_ON_START=true in app.yaml so the deployed app applies them on start.`,
+      `the declared schema does not match the database: ${problems.join("; ")}. ${migrationAdvice(migration)}`,
     );
   }
 }

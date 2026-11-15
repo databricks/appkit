@@ -221,6 +221,7 @@ describe("createDatabaseState", () => {
     expect(mocks.assertSchemaMatchesDatabase).toHaveBeenCalledWith(
       path,
       schema,
+      { kind: "off" },
     );
     expect(error).toBe(drift);
     expect(error.message).toContain("table public.tags does not exist");
