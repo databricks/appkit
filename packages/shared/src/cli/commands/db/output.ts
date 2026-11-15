@@ -42,13 +42,23 @@ export function fail(error: unknown): void {
   process.exitCode = 1;
 }
 
-/** Statements of a written migration that break instances still running the previous release. */
-export function warnBreaking(tag: string, breaking: readonly string[]): void {
-  if (breaking.length === 0) return;
-  warn(
-    `${tag} breaks instances still running the previous release, which keep serving while the new one migrates on start: ${breaking.join(" ")} ` +
-      "Deploy code that works with both the old and the new schema first, then this change in a later deploy.",
-  );
+/** What a written migration's statements warn about; an absent list means none. */
+type MigrationWarnings = Pick<MigrateReport, "breaking" | "dataDependent">;
+
+/** One warning per class of statement in a written migration. */
+export function warnMigration(tag: string, warnings: MigrationWarnings): void {
+  if (warnings.breaking?.length) {
+    warn(
+      `${tag} breaks instances still running the previous release, which keep serving while the new one migrates on start: ${warnings.breaking.join(" ")} ` +
+        "Deploy code that works with both the old and the new schema first, then this change in a later deploy.",
+    );
+  }
+  if (warnings.dataDependent?.length) {
+    warn(
+      `${tag} may fail on rows the deploy branch has and a new branch does not: ${warnings.dataDependent.join(" ")} ` +
+        "Test the migration on a branch that has a copy of the deploy branch's data before you deploy.",
+    );
+  }
 }
 
 export function printMigrateReport(report: MigrateReport): void {
@@ -57,7 +67,7 @@ export function printMigrateReport(report: MigrateReport): void {
     ok(
       `Generated ${relative(report.generated.file)} (${count} statement${count === 1 ? "" : "s"})`,
     );
-    warnBreaking(report.generated.tag, report.breaking ?? []);
+    warnMigration(report.generated.tag, report);
   } else {
     info("No schema changes since the last migration");
   }

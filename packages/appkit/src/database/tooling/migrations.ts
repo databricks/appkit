@@ -254,8 +254,12 @@ async function loadDrizzleKit(): Promise<typeof import("drizzle-kit/api")> {
   }
 }
 
-const matches = (pattern: RegExp) => (statement: string) =>
-  pattern.test(statement);
+type StatementPredicate = (statement: string) => boolean;
+
+const matches =
+  (pattern: RegExp): StatementPredicate =>
+  (statement) =>
+    pattern.test(statement);
 
 /** A new column nothing fills: old instances insert without it, and existing rows have no value for it. */
 function addsRequiredColumn(statement: string): boolean {
@@ -266,7 +270,16 @@ function addsRequiredColumn(statement: string): boolean {
   );
 }
 
-const BREAKS_PREVIOUS_RELEASE: ReadonlyArray<(statement: string) => boolean> = [
+/** A constraint declared on the new column itself. An identity fills every row with a distinct value, so its key holds. */
+function addsConstrainedColumn(statement: string): boolean {
+  return (
+    /\bADD COLUMN\b/i.test(statement) &&
+    /\b(UNIQUE|PRIMARY KEY|CHECK|REFERENCES)\b/i.test(statement) &&
+    !/\bAS IDENTITY\b/i.test(statement)
+  );
+}
+
+const BREAKS_PREVIOUS_RELEASE: readonly StatementPredicate[] = [
   matches(/^DROP (TABLE|VIEW|MATERIALIZED VIEW|TYPE|SEQUENCE|SCHEMA)\b/i),
   matches(/\bDROP COLUMN\b/i),
   matches(/\bRENAME\b/i),
@@ -275,15 +288,43 @@ const BREAKS_PREVIOUS_RELEASE: ReadonlyArray<(statement: string) => boolean> = [
   addsRequiredColumn,
 ];
 
+/** Postgres checks each of these against the rows already in the table, so a table with no rows never fails them. */
+const MAY_FAIL_ON_EXISTING_ROWS: readonly StatementPredicate[] = [
+  matches(/\bSET NOT NULL\b/i),
+  matches(/\bSET DATA TYPE\b/i),
+  addsRequiredColumn,
+  matches(/\bADD CONSTRAINT\b/i),
+  addsConstrainedColumn,
+  matches(/^CREATE UNIQUE INDEX\b/i),
+];
+
+function statementsWhere(
+  predicates: readonly StatementPredicate[],
+  statements: readonly string[],
+): string[] {
+  return statements.filter((statement) =>
+    predicates.some((applies) => applies(statement.trimStart())),
+  );
+}
+
 /**
  * Statements that break instances still running the previous release. Apps
  * keeps them serving while the new instance migrates on start, and a code
  * rollback cannot undo a migration.
  */
 export function breakingStatements(statements: readonly string[]): string[] {
-  return statements.filter((statement) =>
-    BREAKS_PREVIOUS_RELEASE.some((breaks) => breaks(statement.trimStart())),
-  );
+  return statementsWhere(BREAKS_PREVIOUS_RELEASE, statements);
+}
+
+/**
+ * Statements whose success depends on the rows already in the table. A new
+ * dev branch has none, so they pass there and can fail on the deploy branch.
+ * A statement can be in this class and in breakingStatements.
+ */
+export function dataDependentStatements(
+  statements: readonly string[],
+): string[] {
+  return statementsWhere(MAY_FAIL_ON_EXISTING_ROWS, statements);
 }
 
 /** Replace a file through a rename, so a crash never leaves it half written. */
