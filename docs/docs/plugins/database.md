@@ -161,16 +161,20 @@ you picked in its prompts, usually the branch the app deploys to, and
    drops it, and rebuilds it from the committed migrations, so the tables start
    without the copied rows. Without `schema.ts`, it first writes `schema.ts`
    and a `0000_baseline` migration from the fork's tables (`introspect`), then
-   rebuilds from that baseline. In schema `public`, which no app owns, a rebuild
-   drops only the tables you own, and lists the tables that keep their copied
-   rows. When the app schema is already yours, `init` keeps the rows. With
-   `schema.ts` it runs `migrate`, which writes a migration when `schema.ts`
-   changed since the last one, then applies the committed migrations. Without
-   `schema.ts`, it runs `introspect`. To keep the copied rows on a new branch,
-   pass `--schema migrate`, or `--schema introspect` without `schema.ts`, and
-   `init` says that they stay. `--schema clean` drops the app schema first.
-   Without a terminal, `--schema clean` needs `--yes`. `--schema none` only
-   sets up the branch and `.env`. It reads no `schema.ts`, hands over no
+   rebuilds from that baseline. A branch this run created is rebuilt the same
+   way even when its app schema is already yours, because every row on it is
+   the fork's copy. In schema `public`, which no app owns, a rebuild drops only
+   the tables you own, and lists the tables that keep their copied rows. When
+   the app schema was already yours on a branch that existed before this run,
+   `init` keeps the rows. With `schema.ts` it runs `migrate`, which writes a
+   migration when `schema.ts` changed since the last one, then applies the
+   committed migrations. Without `schema.ts`, it runs `introspect`. To keep
+   the copied rows on a new branch, pass `--schema migrate`, or
+   `--schema introspect` without `schema.ts`, and `init` says that they stay.
+   The rows are yours from then on, so a later plain `init` keeps them, and
+   `--schema clean` removes them. `--schema clean` drops the app schema first,
+   after a confirmation. Without a terminal, it needs `--yes`. `--schema none`
+   only sets up the branch and `.env`. It reads no `schema.ts`, hands over no
    schema, and leaves the schema and its owner as the fork copied them, so the
    next plain `init` still rebuilds it.
 4. Unless `--schema none`, it installs the drizzle-kit version AppKit pins as a
@@ -256,27 +260,26 @@ On an untouched copy, `init` tags the copied migration journal with one row,
 hands you the schema, then drops the schema and rebuilds it from the committed
 migrations. Without `config/database/schema.ts`, `init` first writes it and
 `0000_baseline.sql` from the fork's schema, then rebuilds the schema from that
-baseline. Dropping the schema removes the tag. A run that stops after tagging
-and before the rebuild leaves the tag in place, and the next `init`, from any
-checkout, reads it and finishes the rebuild. `npx appkit db migrate`,
-`introspect` and `seed` refuse a branch that still carries the tag, and
-`npx appkit db verify` reports it. Run `init` to finish the rebuild.
+baseline. A branch this `init` run created is rebuilt the same way even when
+its app schema was already yours, because every row on it is the fork's copy.
+A rebuild asks nothing, because none of your work can be on a copy. Dropping
+the schema removes the tag. A run that stops after tagging and before the
+rebuild leaves the tag in place, and the next `init`, from any checkout, reads
+it and finishes the rebuild. `npx appkit db migrate`, `introspect` and `seed`
+refuse an untouched copy and a branch that still carries the tag, and tell you
+to run `init`. `npx appkit db verify` reports a branch that still carries the
+tag.
 
 To keep the copied rows on a new branch, pass `--schema migrate`, or
-`--schema introspect` without `schema.ts`, and `init` says that it kept them. A
-branch whose app schema is already yours keeps its data. `init` migrates it, or
-introspects it without `schema.ts`. `--schema clean` rebuilds such a branch
-too, after a confirmation or with `--yes`. `--schema none` leaves the schema
-and its owner as the fork copied them, so the next plain `init` still rebuilds.
-
-To keep the copied rows, pass `--schema migrate`, or `--schema introspect`.
-`init` then hands the schema to you, removes the row, keeps the data, and says
-where it came from. A schema you own with no such row is your working branch.
-`init` migrates it, or introspects it without `schema.ts`. `--schema clean`
-rebuilds your working branch too, after a confirmation or with `--yes`. A
-copy's rebuild asks nothing, because `migrate` refuses a copy, so none of your
-work can be on it. `--schema none` touches nothing, and the next plain `init`
-still rebuilds the copy.
+`--schema introspect` without `schema.ts`. `init` then hands the schema to you,
+keeps the rows, removes any tag, and says where the rows came from. The schema
+is yours from then on. A later plain `init` migrates it and keeps the rows, and
+`npx appkit db init --schema clean` removes them. It asks for a confirmation, or
+needs `--yes`, and drops the app schema with everything in it. A branch whose
+app schema was already yours before this run keeps its data the same way.
+`init` migrates it, or introspects it without `schema.ts`. `--schema none`
+leaves the schema and its owner as the fork copied them, so the next plain
+`init` still rebuilds.
 
 In schema `public`, `init` and `clean` remove only the objects your role owns,
 and `init` never hands `public` off or tags it. On a fork of the deploy branch
