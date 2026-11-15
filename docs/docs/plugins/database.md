@@ -542,17 +542,39 @@ app no longer has, the old service principal's role or the role of the person
 who removed the resource. No Postgres role can hand them back. `ALTER ... OWNER
 TO` the new service principal fails with `must be able to SET ROLE`, because
 nobody holds that role. Only Lakebase moves them, by deleting the owning role
-and reassigning what it owns. That moves every object the role owns on the
-branch and deletes the role, so first list what it owns, in each database of the
-branch:
+and reassigning what it owns. The delete reassigns every object the role owns
+in every database of the branch, drops the role's memberships and grants, and
+removes the role. So first take the inventory `db init` takes before it hands a
+schema over. In each database of the branch, list what the role owns there:
 
 ```sql
-select n.nspname, c.relname, c.relkind
-  from pg_class c
-  join pg_namespace n on n.oid = c.relnamespace
- where pg_get_userbyid(c.relowner) = '<role>';
+select o.type, o.identity
+  from pg_shdepend s
+  cross join lateral pg_identify_object(s.classid, s.objid, s.objsubid) o
+ where s.refclassid = 'pg_authid'::regclass
+   and s.refobjid = (select oid from pg_roles where rolname = '<role>')
+   and s.deptype = 'o'
+   and s.dbid = (select oid from pg_database where datname = current_database())
+ order by 1, 2;
 ```
 
+Then count what else depends on the role, grants included, in the other
+databases and in shared objects such as a database it owns. Run the first query
+in each database this one names:
+
+```sql
+select coalesce(d.datname, 'shared objects') as database, count(*)
+  from pg_shdepend s
+  left join pg_database d on d.oid = s.dbid
+ where s.refclassid = 'pg_authid'::regclass
+   and s.refobjid = (select oid from pg_roles where rolname = '<role>')
+   and not (s.deptype = 'o'
+            and s.dbid = (select oid from pg_database where datname = current_database()))
+ group by 1
+ order by 1;
+```
+
+Reassign or drop anything unrelated to the app before you delete the role.
 Then someone with CAN MANAGE on the Lakebase project moves the objects:
 
 ```bash
