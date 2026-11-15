@@ -24,9 +24,6 @@ import type { DbContext } from "../context";
 import { FORK_COPY_TAG } from "../schema-state";
 import { runVerify } from "../verify";
 
-// Local verify against a real server: the Lakebase pool is replaced, nothing
-// else. APPKIT_TEST_PG_URL points at a scratch database, e.g.
-// postgres://localhost:5432/postgres
 const url = process.env.APPKIT_TEST_PG_URL;
 const builder = path.resolve(
   import.meta.dirname,
@@ -36,7 +33,9 @@ const BRANCH = "projects/p/branches/dev-alice-3f9a2c";
 const MIGRATION = { tag: "0000_migration", when: 1700000000000 };
 
 describe.skipIf(!url)("runVerify against Postgres", () => {
-  const schema = `verify_${randomUUID().slice(0, 8)}`;
+  const suffix = randomUUID().slice(0, 8);
+  const schema = `verify_${suffix}`;
+  const sp = `verify_sp_${suffix}`;
   const journal = `"${schema}".__drizzle_migrations`;
   let admin: Pool;
   let ctx: DbContext;
@@ -74,11 +73,13 @@ describe.skipIf(!url)("runVerify against Postgres", () => {
         ],
       }),
     );
-    // The branch as a fork copied it: the migration ran there and its journal records it.
     await admin.query(`
-      create schema "${schema}";
+      create role "${sp}" nologin;
+      create schema "${schema}" authorization "${sp}";
+      set role "${sp}";
       ${sql}
       create table ${journal} (id serial primary key, hash text not null, created_at bigint);
+      reset role;
     `);
     await admin.query(
       `insert into ${journal} (hash, created_at) values ($1, $2)`,
@@ -116,12 +117,34 @@ describe.skipIf(!url)("runVerify against Postgres", () => {
   });
 
   afterAll(async () => {
-    await admin.query(`drop schema if exists "${schema}" cascade`);
+    await admin.query(`
+      drop schema if exists "${schema}" cascade;
+      drop owned by "${sp}";
+      drop role if exists "${sp}";
+    `);
     await admin.end();
     fs.rmSync(ctx.root, { recursive: true, force: true });
   });
 
-  test("tagged by init, the copy is reported as awaiting its rebuild, and the tag is not an unknown migration", async () => {
+  test("the fork's untouched copy, which the service principal still owns, is reported with the init advice", async () => {
+    expect(await runVerify(ctx)).toEqual({
+      kind: "local",
+      branch: BRANCH,
+      notYours: null,
+      refusesEveryBranch: null,
+      schemaProblems: [],
+      schemaAdvice: null,
+      pendingMigrations: [],
+      strandedMigrations: [],
+      editedMigrations: [],
+      unknownMigrations: 0,
+      forkCopy: `dev-alice-3f9a2c still holds the rows the fork copied into schema "${schema}", which "${sp}" still owns. Run \`appkit db init\` to rebuild it from the committed migrations, or \`appkit db init --schema migrate\` to keep them.`,
+      ok: false,
+    });
+  });
+
+  test("handed to you and tagged by init, the copy is reported as awaiting its rebuild, and the tag is not an unknown migration", async () => {
+    await admin.query(`reassign owned by "${sp}" to current_user`);
     await admin.query(
       `insert into ${journal} (hash, created_at) values ($1, 0)`,
       [FORK_COPY_TAG],
@@ -138,7 +161,7 @@ describe.skipIf(!url)("runVerify against Postgres", () => {
       strandedMigrations: [],
       editedMigrations: [],
       unknownMigrations: 0,
-      forkCopy: true,
+      forkCopy: `dev-alice-3f9a2c still holds the rows the fork copied into schema "${schema}", and its rebuild did not finish. Run \`appkit db init\` to rebuild it from the committed migrations, or \`appkit db init --schema migrate\` to keep them.`,
       ok: false,
     });
   });
@@ -150,7 +173,7 @@ describe.skipIf(!url)("runVerify against Postgres", () => {
 
     expect(await runVerify(ctx)).toMatchObject({
       unknownMigrations: 0,
-      forkCopy: false,
+      forkCopy: null,
       ok: true,
     });
   });

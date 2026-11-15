@@ -8,7 +8,7 @@ import { runInTransaction } from "./branch-sql";
 import type { DbContext } from "./context";
 import { writableEnvBranch } from "./guard";
 import { hasSchemaFile } from "./migrate";
-import { forkCopyRefusal, isForkCopy } from "./schema-state";
+import { forkCopyRefusal, readSchemaState } from "./schema-state";
 
 export const SEED_FILE = "config/database/seed.sql";
 
@@ -40,11 +40,13 @@ export async function runSeed(ctx: DbContext): Promise<SeedReport> {
       : `${quoteIdentifier(schemaName)}, public`;
   const sql = fs.readFileSync(file, "utf-8");
   await runInTransaction(ctx, async (client) => {
-    if (await isForkCopy(client, schemaName)) {
-      throw new Error(
-        `Refusing to seed: ${forkCopyRefusal(branch.name, schemaName, "migrate")}`,
-      );
-    }
+    const refusal = forkCopyRefusal(
+      branch.name,
+      schemaName,
+      await readSchemaState(client, schemaName),
+      "migrate",
+    );
+    if (refusal) throw new Error(`Refusing to seed: ${refusal}`);
     await client.query(`SET LOCAL search_path TO ${searchPath}`);
     // One simple-protocol query: the file may hold several statements.
     await client.query(sql);

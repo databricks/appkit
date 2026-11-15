@@ -25,7 +25,11 @@ import {
   type GeneratedMigration,
   generateMigrationFiles,
 } from "../migrations";
-import { forkCopyRefusal, isForkCopy } from "../schema-state";
+import {
+  FORK_COPY_TAG,
+  forkCopyRefusal,
+  readSchemaState,
+} from "../schema-state";
 import { resourceId } from "../targets";
 import { readCatalog, readUnreadObjects } from "./catalog";
 import {
@@ -43,12 +47,7 @@ export interface IntrospectOptions {
   readonly schemaName?: string;
   /** Module the written schema.ts imports the builder from. Default "@databricks/appkit/beta". */
   readonly importSource?: string;
-  /**
-   * false: write schema.ts and its migration without recording the migration
-   * on the branch, for init's rebuild, which drops the schema right after.
-   * Default true.
-   */
-  readonly record?: boolean;
+  readonly recordAsApplied?: boolean;
 }
 
 export interface IntrospectReport {
@@ -223,19 +222,28 @@ export async function introspectHolding(
     );
   }
   const branchId = resourceId(env.branch.name);
-  const record = options.record ?? true;
+  const recordAsApplied = options.recordAsApplied ?? true;
 
   return withBranchPool(ctx, async (pool) => {
-    if (await isForkCopy(pool, schemaName)) {
-      throw new IntrospectRefusedError(
-        `Refusing to introspect: ${forkCopyRefusal(env.branch.name, schemaName, "introspect")}`,
+    if (recordAsApplied) {
+      const refusal = forkCopyRefusal(
+        env.branch.name,
+        schemaName,
+        await readSchemaState(pool, schemaName),
+        "introspect",
       );
+      if (refusal) {
+        throw new IntrospectRefusedError(`Refusing to introspect: ${refusal}`);
+      }
     }
     // The diff starts from the latest committed snapshot, so the branch must
     // record exactly the committed migrations: one it lacks would come out
     // reversed, one the checkout lacks would come out again, and one whose
     // file changed after it ran left the branch where the snapshot is not.
-    const drift = await readMigrationDrift(pool, migrationOptions);
+    const drift = await readMigrationDrift(pool, {
+      ...migrationOptions,
+      ignoreHashes: [FORK_COPY_TAG],
+    });
     const refuse = (reason: string, advice: string) =>
       new IntrospectRefusedError(
         `Refusing to introspect ${branchId}: ${reason} in schema "${schemaName}". ${advice}`,
@@ -363,7 +371,7 @@ export async function introspectHolding(
       }
       await writeDatabaseTypes(schema, typesFile);
       // The database already holds what the migrations describe; recording is the last step.
-      recorded = record
+      recorded = recordAsApplied
         ? [...unrecorded, ...(migration ? [migration.tag] : [])]
         : [];
       if (recorded.length > 0) {

@@ -40,9 +40,12 @@ const local = {
   strandedMigrations: [],
   editedMigrations: [],
   unknownMigrations: 0,
-  forkCopy: false,
+  forkCopy: null,
   ok: true,
 };
+
+const FORK_COPY =
+  'dev-alice-3f9a2c still holds the rows the fork copied into schema "app", which "app-sp" still owns. Run `appkit db init` to rebuild it from the committed migrations, or `appkit db init --schema migrate` to keep them.';
 
 /** Commander keeps parsed option values on the command; each test parses afresh. */
 function resetOptionValues() {
@@ -252,14 +255,12 @@ describe("appkit db verify", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  test("a fork's copy whose rebuild did not finish is told to rebuild with init, as migrate refuses it", async () => {
-    runVerify.mockResolvedValue({ ...local, forkCopy: true, ok: false });
+  test("a fork's copy is told to rebuild with init, as the tooling reports it and migrate refuses it", async () => {
+    runVerify.mockResolvedValue({ ...local, forkCopy: FORK_COPY, ok: false });
 
     await dbCommand.parseAsync(["verify"], { from: "user" });
 
-    expect(output(error)).toContain(
-      "dev-alice-3f9a2c still holds the rows the fork copied into the app schema, and its rebuild did not finish. Run `appkit db init` to rebuild it from the committed migrations, or `appkit db init --schema migrate` to keep them.",
-    );
+    expect(output(error)).toContain(FORK_COPY);
     expect(output(error)).not.toContain("does not match");
     expect(process.exitCode).toBe(1);
   });
@@ -268,7 +269,7 @@ describe("appkit db verify", () => {
     runVerify.mockResolvedValue({
       ...local,
       pendingMigrations: ["0002_migration"],
-      forkCopy: true,
+      forkCopy: FORK_COPY,
       ok: false,
     });
 

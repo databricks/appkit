@@ -35,6 +35,7 @@ import { readJournal } from "../../../migrations/paths";
 import { hashOf } from "../../../migrations/tests/fixtures";
 import { withHistoryLock } from "../../history-lock";
 import { generateMigrationFiles } from "../../migrations";
+import { FORK_COPY_TAG } from "../../schema-state";
 import { cleanupTempApps, fakeContext, tempApp } from "../../tests/fakes";
 import type { ColumnRow, ConstraintRow, TableRow } from "../catalog";
 import { IntrospectRefusedError, runIntrospect } from "../index";
@@ -80,8 +81,8 @@ const onProduction = {
 let catalog: ReturnType<typeof catalogResponder>;
 /** The journal rows of the branch, as drizzle-orm records them; empty: no journal table. */
 let recorded: Array<{ when: number; hash: string }>;
-/** The journal carries init's fork-copy tag. */
 let tagged: boolean;
+let schemaOwner: string;
 /** The row the branch records for the last committed migration. */
 const lastCommitted = (root: string) => {
   const folder = path.join(root, MIGRATIONS);
@@ -105,6 +106,13 @@ const pool = {
       return { rows: recorded.length > 0 ? [journal] : [] };
     }
     if (text.includes("where hash = $1")) return { rows: tagged ? [{}] : [] };
+    if (text.includes("has_schema_privilege")) {
+      return {
+        rows: [
+          { owner: schemaOwner, can_create: true, current_user: "app-sp" },
+        ],
+      };
+    }
     if (text.includes("select hash, created_at")) {
       return {
         rows: recorded.map(({ when, hash }) => ({
@@ -122,6 +130,7 @@ beforeEach(() => {
   catalog = catalogResponder();
   recorded = [];
   tagged = false;
+  schemaOwner = "app-sp";
   resolveEnvBranch.mockReset().mockResolvedValue(onDevBranch);
   withBranchPool
     .mockReset()
@@ -389,12 +398,56 @@ describe("runIntrospect", () => {
     expect(markMigrationsApplied).not.toHaveBeenCalled();
   });
 
-  test("record: false writes schema.ts and the migration, and records nothing on the branch", async () => {
+  test("an untouched copy another role owns is refused before anything is written", async () => {
+    const root = tempApp({ [SCHEMA]: declaredSchema });
+    schemaOwner = "other-sp";
+
+    const refused = introspect(root);
+
+    await expect(refused).rejects.toBeInstanceOf(IntrospectRefusedError);
+    await expect(refused).rejects.toThrow(
+      'Refusing to introspect: dev-alice-3f9a2c still holds the rows the fork copied into schema "app", which "other-sp" still owns. Run `appkit db init` to rebuild it from the committed migrations, or `appkit db init --schema introspect` to keep them.',
+    );
+    expect(fs.readFileSync(path.join(root, SCHEMA), "utf-8")).toBe(
+      declaredSchema,
+    );
+    expect(fs.existsSync(path.join(root, MIGRATIONS))).toBe(false);
+    expect(markMigrationsApplied).not.toHaveBeenCalled();
+  });
+
+  test("recordAsApplied: false reads a copy for init's rebuild, since it writes nothing on the branch", async () => {
+    const root = tempApp({ [SCHEMA]: declaredSchema });
+    schemaOwner = "other-sp";
+
+    const report = await runIntrospect(fakeContext({ root }), {
+      interactive: false,
+      recordAsApplied: false,
+    });
+
+    expect(report.migration).toMatchObject({ tag: "0000_baseline" });
+    expect(markMigrationsApplied).not.toHaveBeenCalled();
+  });
+
+  test("recordAsApplied: false reads a copy an earlier init tagged: the tag row in the journal is not a migration", async () => {
+    const root = tempApp({ [SCHEMA]: declaredSchema });
+    schemaOwner = "other-sp";
+    recorded = [{ when: 0, hash: FORK_COPY_TAG }];
+
+    const report = await runIntrospect(fakeContext({ root }), {
+      interactive: false,
+      recordAsApplied: false,
+    });
+
+    expect(report.migration).toMatchObject({ tag: "0000_baseline" });
+    expect(markMigrationsApplied).not.toHaveBeenCalled();
+  });
+
+  test("recordAsApplied: false writes schema.ts and the migration, and records nothing on the branch", async () => {
     const root = tempApp({ [SCHEMA]: declaredSchema });
 
     const report = await runIntrospect(fakeContext({ root }), {
       interactive: false,
-      record: false,
+      recordAsApplied: false,
     });
 
     expect(report.migration).toMatchObject({ tag: "0000_baseline" });

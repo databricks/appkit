@@ -309,7 +309,6 @@ const BREAKS_PREVIOUS_RELEASE: readonly StatementPredicate[] = [
   addsRequiredColumn,
 ];
 
-/** Postgres checks each of these against the rows already in the table, so a table with no rows never fails them. */
 const MAY_FAIL_ON_EXISTING_ROWS: readonly StatementPredicate[] = [
   matches(/\bSET NOT NULL\b/i),
   matches(/\bSET DATA TYPE\b/i),
@@ -337,11 +336,6 @@ export function breakingStatements(statements: readonly string[]): string[] {
   return statementsWhere(BREAKS_PREVIOUS_RELEASE, statements);
 }
 
-/**
- * Statements whose success depends on the rows already in the table. A new
- * dev branch has none, so they pass there and can fail on the deploy branch.
- * A statement can be in this class and in breakingStatements.
- */
 export function dataDependentStatements(
   statements: readonly string[],
 ): string[] {

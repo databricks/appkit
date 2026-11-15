@@ -64,7 +64,6 @@ const report = {
   start: { kind: "migrate", migrate },
 };
 
-/** The tooling on your working branch. It asks the confirmation and stops on a no. */
 function toolingThatAsks(): void {
   tooling.runInit.mockImplementation(async (_ctx, options) => {
     const confirmed = await options.confirmClean?.({
@@ -72,12 +71,7 @@ function toolingThatAsks(): void {
       schemaName: "app",
     });
     if (confirmed === false) {
-      throw Object.assign(
-        new Error(
-          "Cancelled. Schema app on dev-alice-3f9a2c is as it was, and .env points at the branch.",
-        ),
-        { name: "InitCancelledError" },
-      );
+      return { ...report, start: { kind: "cancelled", schemaName: "app" } };
     }
     return report;
   });
@@ -156,7 +150,11 @@ describe("appkit db init", () => {
     expect(prompts.confirm).not.toHaveBeenCalled();
     expect(tooling.runInit).toHaveBeenCalledWith(
       { root: "/app", env: {} },
-      { interactive: true, onStep: expect.any(Function) },
+      {
+        interactive: true,
+        onStep: expect.any(Function),
+        onWarning: expect.any(Function),
+      },
     );
   });
 
@@ -169,6 +167,7 @@ describe("appkit db init", () => {
       ttl: "1h",
       interactive: false,
       onStep: expect.any(Function),
+      onWarning: expect.any(Function),
     });
 
     resetOptionValues();
@@ -250,6 +249,7 @@ describe("appkit db init", () => {
           kept: [],
         },
         migrate,
+        reason: "requested",
       },
     });
     await init("--schema", "clean", "--yes");
@@ -263,7 +263,7 @@ describe("appkit db init", () => {
   });
 
   test("a rebuild without --schema says the copied rows went and how to keep them; with --schema clean it does not", async () => {
-    const rebuilt = {
+    const rebuilt = (reason: "fork-copy" | "requested") => ({
       ...report,
       start: {
         kind: "clean",
@@ -274,9 +274,10 @@ describe("appkit db init", () => {
           kept: [],
         },
         migrate,
+        reason,
       },
-    };
-    tooling.runInit.mockResolvedValue(rebuilt);
+    });
+    tooling.runInit.mockResolvedValue(rebuilt("fork-copy"));
     await init();
     expect(output(log)).toContain(
       "The branch still held the rows the fork copied: the app schema was rebuilt from the committed migrations. `appkit db init --schema migrate` keeps them.",
@@ -284,12 +285,13 @@ describe("appkit db init", () => {
 
     log.mockClear();
     resetOptionValues();
+    tooling.runInit.mockResolvedValue(rebuilt("requested"));
     await init("--schema", "clean", "--yes");
     expect(output(log)).toContain("Dropped schema app on dev-alice-3f9a2c");
     expect(output(log)).not.toContain("The branch still held the rows");
   });
 
-  test("copied rows kept on request are a warning that names their source and the flag", async () => {
+  test("copied rows kept on request are a warning that names their source, the flag, and the clean that removes them", async () => {
     tooling.runInit.mockResolvedValue({
       ...report,
       keptCopy: {
@@ -300,7 +302,21 @@ describe("appkit db init", () => {
     await init("--schema", "migrate");
 
     expect(output(log)).toContain(
-      "Kept the rows the fork copied from production, as --schema migrate asks. A plain `appkit db init` rebuilds the app schema from the committed migrations without them.",
+      "Kept the rows the fork copied from production, as --schema migrate asks. The app schema is yours now, so a plain `appkit db init` keeps them. `appkit db init --schema clean` drops the app schema with everything in it and rebuilds it from the committed migrations, after a confirmation or with --yes.",
+    );
+  });
+
+  test("a warning from init prints as a warning while init runs", async () => {
+    tooling.runInit.mockImplementation(async (_ctx, options) => {
+      options.onWarning?.(
+        "Could not mark schema app on dev-alice-3f9a2c as the fork's copy.",
+      );
+      return report;
+    });
+    await init();
+
+    expect(output(log)).toContain(
+      "! Could not mark schema app on dev-alice-3f9a2c as the fork's copy.",
     );
   });
 
@@ -347,6 +363,7 @@ describe("appkit db init", () => {
             kept: [],
           },
           migrate: { ...migrate, applied: ["0000_baseline"] },
+          reason: "fork-copy",
         },
       },
     });

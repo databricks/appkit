@@ -4,7 +4,7 @@ import { planStart, type SchemaState, type StartPlan } from "../schema-state";
 
 const absent: SchemaState = { kind: "absent" };
 const copy: SchemaState = { kind: "copy", owner: "app-sp" };
-const handedOff: SchemaState = { kind: "handed-off-copy" };
+const interrupted: SchemaState = { kind: "interrupted-rebuild" };
 const yours: SchemaState = { kind: "yours" };
 const pub: SchemaState = { kind: "public", kept: ["table notes"] };
 
@@ -45,17 +45,17 @@ describe("planStart", () => {
     );
   });
 
-  test("a handed-off copy is rebuilt without another hand-off or tag", () => {
-    expect(planStart(handedOff, undefined, true)).toEqual(
+  test("an interrupted rebuild is finished without another hand-off or tag", () => {
+    expect(planStart(interrupted, undefined, true)).toEqual(
       only({ kind: "clean", rebuild: true }),
     );
-    expect(planStart(handedOff, "clean", true)).toEqual(
+    expect(planStart(interrupted, "clean", true)).toEqual(
       only({ kind: "clean", rebuild: true }),
     );
   });
 
-  test("a handed-off copy without schema.ts cannot be rebuilt by default: the message says how to continue", () => {
-    expect(() => planStart(handedOff, undefined, false)).toThrow(
+  test("an interrupted rebuild without schema.ts cannot be finished by default: the message says how to continue", () => {
+    expect(() => planStart(interrupted, undefined, false)).toThrow(
       "Restore schema.ts, then rerun `appkit db init`. `appkit db init --schema introspect` writes schema.ts from the branch and keeps the rows the fork copied.",
     );
   });
@@ -66,11 +66,48 @@ describe("planStart", () => {
       expect(planStart(copy, requested, true)).toEqual(
         only({ kind: requested, handOff: true, keepsCopy: true }),
       );
-      expect(planStart(handedOff, requested, true)).toEqual(
+      expect(planStart(interrupted, requested, true)).toEqual(
         only({ kind: requested, keepsCopy: true }),
       );
     },
   );
+
+  test("on a branch this run forked, a schema you already owned is a copy too: tagged and rebuilt, with no hand-off and no question", () => {
+    const rebuilt = { rebuild: true, tag: true };
+    expect(planStart(yours, undefined, true, true)).toEqual(
+      only({ kind: "clean", ...rebuilt }),
+    );
+    expect(planStart(yours, undefined, false, true)).toEqual(
+      only({ kind: "introspect", ...rebuilt }),
+    );
+    expect(planStart(yours, "clean", true, true)).toEqual(
+      only({ kind: "clean", ...rebuilt }),
+    );
+  });
+
+  test.each(["migrate", "introspect"] as const)(
+    "--schema %s on a schema you owned before the fork keeps its rows, with no hand-off",
+    (requested) => {
+      expect(planStart(yours, requested, true, true)).toEqual(
+        only({ kind: requested, keepsCopy: true }),
+      );
+    },
+  );
+
+  test("the fork changes nothing where no schema exists, on public, or for a copy", () => {
+    expect(planStart(absent, undefined, true, true)).toEqual(
+      only({ kind: "migrate" }),
+    );
+    expect(planStart(pub, undefined, true, true)).toEqual(
+      only({ kind: "migrate" }),
+    );
+    expect(planStart(copy, undefined, true, true)).toEqual(
+      planStart(copy, undefined, true),
+    );
+    expect(planStart(interrupted, undefined, true, true)).toEqual(
+      planStart(interrupted, undefined, true),
+    );
+  });
 
   test("an explicit clean asks first on your working branch and on public, not where nothing exists or on a copy", () => {
     expect(planStart(yours, "clean", true)).toEqual(
@@ -83,7 +120,7 @@ describe("planStart", () => {
       only({ kind: "clean", rebuild: true }),
     );
     expect(planStart(copy, "clean", true).confirm).toBe(false);
-    expect(planStart(handedOff, "clean", true).confirm).toBe(false);
+    expect(planStart(interrupted, "clean", true).confirm).toBe(false);
   });
 
   test.each([absent, yours, pub] as const)(

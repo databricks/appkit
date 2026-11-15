@@ -250,36 +250,53 @@ before you deploy, for example a session branch created with
 ### Your branch's data
 
 `npx appkit db init` creates your dev branch, or this checkout's session branch
-with `--session`, as a fork of the branch the app deploys to, and points `.env`
-at it. A fork copies every row of its source, production data included, and
-every object with its owner, so on a new fork the app schema still belongs to
-the fork's copy of the app's service principal. That owner is how `init` tells
-an untouched copy from a branch of yours. It keeps no record of it in `.env`.
+with `--session`, as a fork of the branch `databricks.yml` deploys to, else of
+the project's default branch, and points `.env` at it. A fork copies every row
+of its source, production data included. `init` reads from the branch what its
+app schema is. While the app's service principal still owns the schema, it is
+the fork's untouched copy. `init` hands it to you, drops it and recreates it
+from the committed migrations, so the branch starts without the copied rows.
+A branch `init` forked in this run holds only what the fork copied, whoever
+owns its schema. So a schema you already owned on the source is rebuilt too,
+with no hand-off to make. Without `config/database/schema.ts`, `init` first
+writes it and `0000_baseline.sql` from the fork's schema, then rebuilds the
+schema from that baseline.
 
-On an untouched copy, `init` tags the copied migration journal with one row,
-hands you the schema, then drops the schema and rebuilds it from the committed
-migrations. Without `config/database/schema.ts`, `init` first writes it and
-`0000_baseline.sql` from the fork's schema, then rebuilds the schema from that
-baseline. A branch this `init` run created is rebuilt the same way even when
-its app schema was already yours, because every row on it is the fork's copy.
-A rebuild asks nothing, because none of your work can be on a copy. Dropping
-the schema removes the tag. A run that stops after tagging and before the
-rebuild leaves the tag in place, and the next `init`, from any checkout, reads
-it and finishes the rebuild. `npx appkit db migrate`, `introspect` and `seed`
-refuse an untouched copy and a branch that still carries the tag, and tell you
-to run `init`. `npx appkit db verify` reports a branch that still carries the
-tag.
+Before the hand-off, `init` inserts one row with the hash `appkit:fork-copy`
+into the copied `__drizzle_migrations` journal. It writes the row only where
+the migrator would record. That is a journal owned by your role, by a role it
+inherits, or by the schema's owner, which is what a fork's copy has. A journal
+another role owns could run that role's code as you through a trigger, a rule,
+a default or a policy, so `init` leaves it alone. It then warns that it could
+not mark the copy and rebuilds anyway. A copy with no journal gets the same
+warning. If such a run stops before the rebuild finishes, the next `init` sees
+a schema that looks like your working branch and keeps the copied rows. Run
+`npx appkit db init --schema clean` then. Dropping the schema removes the row. A
+run that stops between the hand-off and the drop leaves a schema you own whose
+journal still carries that row, and the next `init`, from any checkout,
+finishes the rebuild.
 
-To keep the copied rows on a new branch, pass `--schema migrate`, or
-`--schema introspect` without `schema.ts`. `init` then hands the schema to you,
-keeps the rows, removes any tag, and says where the rows came from. The schema
-is yours from then on. A later plain `init` migrates it and keeps the rows, and
-`npx appkit db init --schema clean` removes them. It asks for a confirmation, or
-needs `--yes`, and drops the app schema with everything in it. A branch whose
-app schema was already yours before this run keeps its data the same way.
-`init` migrates it, or introspects it without `schema.ts`. `--schema none`
-leaves the schema and its owner as the fork copied them, so the next plain
-`init` still rebuilds.
+`npx appkit db migrate`, `npx appkit db introspect` and `npx appkit db seed` refuse a
+schema that is still a copy. That is one the service principal still owns, with
+no row yet, or one handed to you whose journal still carries the row. The message
+says to run `npx appkit db init` to rebuild it, or `npx appkit db init --schema
+migrate` (`introspect` for introspect) to keep the copied rows. Schema `public`
+is never refused.
+`npx appkit db verify` reports both kinds of copy with the same advice.
+
+To keep the copied rows, pass `--schema migrate`, or `--schema introspect`.
+`init` then hands the schema to you, removes the row, keeps the data, and says
+where it came from. From then on the schema is your working branch. A plain
+`init` migrates it and keeps the rows. `npx appkit db init --schema clean` drops
+the app schema with everything in it and rebuilds it from the committed
+migrations, after a confirmation or with `--yes`. On a branch an earlier run
+created, a schema you own with no such row is your working branch. `init`
+migrates it, or introspects it without `schema.ts`. A copy's rebuild asks
+nothing, because `migrate` refuses a copy and a fresh fork holds only what it
+copied, so none of your work can be on it. `--schema none` touches nothing.
+The next plain `init` still rebuilds a copy the service principal owns. A fresh
+fork of a schema you already owned looks like your working branch to that
+later run, so run `npx appkit db init --schema clean` then.
 
 In schema `public`, `init` and `clean` remove only the objects your role owns,
 and `init` never hands `public` off or tags it. On a fork of the deploy branch

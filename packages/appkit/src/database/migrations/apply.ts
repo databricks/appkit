@@ -31,15 +31,6 @@ import {
 
 const logger = createLogger("database");
 
-/**
- * What to do when the recorded history drifted from the committed one: a
- * recorded migration whose file changed since, or committed migrations the
- * database never recorded next to rows this checkout lacks. "warn" logs and
- * applies what is pending, so a developer can rework their own unapplied
- * migration. "refuse" throws MigrationHistoryError before applying anything,
- * as a deploy start must, since the deploy branch only ever runs merged files
- * as they were merged.
- */
 type DriftPolicy = "warn" | "refuse";
 
 interface ApplyMigrationsOptions {
@@ -51,7 +42,6 @@ interface ApplyMigrationsOptions {
   readonly lockWaitMs?: number;
   /** Longest wait for each table lock a migration takes, in milliseconds. */
   readonly lockTimeoutMs?: number;
-  /** Defaults to "warn". */
   readonly onDrift?: DriftPolicy;
 }
 
@@ -175,13 +165,7 @@ type HistoryRefusal =
   | { readonly stranded: readonly string[]; readonly last: string }
   /** Files and rows at one timestamp that cannot be told apart. */
   | { readonly ambiguous: AmbiguousTimestamp }
-  /** Recorded migrations whose committed file changed since (onDrift "refuse"). */
   | { readonly edited: readonly string[] }
-  /**
-   * Committed migrations never recorded, pending or stranded, while the
-   * database recorded migrations this checkout lacks (onDrift "refuse"): the
-   * two histories diverged.
-   */
   | {
       readonly diverged: {
         readonly unrecorded: readonly string[];
@@ -290,7 +274,7 @@ interface JournalRelation {
 }
 
 /** What the migrator is about to do with the journal. */
-type JournalUse = "read" | "record";
+export type JournalUse = "read" | "record";
 
 /** Why the relation at the journal's name is refused for a use. */
 type JournalRefusal =
@@ -308,7 +292,7 @@ type JournalRefusal =
  * an ordinary table is used, and one of an untrusted owner's only for a read
  * without row-level security.
  */
-function journalRefusal(
+export function journalRefusal(
   relation: JournalRelation,
   use: JournalUse,
 ): JournalRefusal | undefined {
@@ -477,7 +461,6 @@ function readMigrations(folder: string, journal: Journal): MigrationFile[] {
   });
 }
 
-/** Why the committed history cannot be applied over the recorded one; undefined when it can. */
 function historyRefusal(
   history: MigrationHistory,
   files: readonly MigrationFile[],
@@ -485,9 +468,7 @@ function historyRefusal(
 ): HistoryRefusal | undefined {
   const ambiguous = history.ambiguous[0];
   if (ambiguous) return { ambiguous };
-  // Next to rows this checkout lacks, a stranded entry means a branch deployed
-  // first, so the way back is the diverged runbook, not regenerating it.
-  const diverged = onDrift === "refuse" && history.unknown.length > 0;
+  const diverged = onDrift === "refuse" && branchDeployedFirst(history);
   if (history.stranded.length > 0) {
     if (diverged) return divergence(history);
     const last =
@@ -497,11 +478,15 @@ function historyRefusal(
   }
   if (onDrift === "warn") return undefined;
   if (history.edited.length > 0) return { edited: tags(history.edited) };
-  if (history.pending.length > 0 && diverged) return divergence(history);
+  if (diverged) return divergence(history);
   return undefined;
 }
 
-/** Every committed migration the database never recorded, oldest first, next to the rows it has that this checkout lacks. */
+function branchDeployedFirst(history: MigrationHistory): boolean {
+  const unrecorded = history.stranded.length + history.pending.length;
+  return unrecorded > 0 && history.unknown.length > 0;
+}
+
 function divergence(history: MigrationHistory): HistoryRefusal {
   return {
     diverged: {
@@ -511,16 +496,11 @@ function divergence(history: MigrationHistory): HistoryRefusal {
   };
 }
 
-/**
- * Whether the journal table exists. Every read of the journal and every
- * record into it starts here, so a relation at its name that is unfit for
- * that use is refused (see journalRefusal).
- */
-async function journalTableExists(
+/** The relation at the journal's name, as pg_catalog describes it; null when there is none. */
+export async function readJournalRelation(
   client: QueryClient,
   schemaName: string,
-  use: JournalUse,
-): Promise<boolean> {
+): Promise<JournalRelation | null> {
   // pg_catalog needs no privileges, so a missing grant is not mistaken for a missing table.
   const { rows } = await client.query<{
     relkind: string;
@@ -542,8 +522,8 @@ async function journalTableExists(
     [schemaName, MIGRATIONS_TABLE],
   );
   const found = rows[0];
-  if (!found) return false;
-  const relation: JournalRelation = {
+  if (!found) return null;
+  return {
     relkind: found.relkind,
     owner: found.owner,
     schemaOwner: found.schema_owner,
@@ -551,6 +531,20 @@ async function journalTableExists(
     rowSecurity: found.row_security,
     trusted: found.trusted,
   };
+}
+
+/**
+ * Whether the journal table exists. Every read of the journal and every
+ * record into it starts here, so a relation at its name that is unfit for
+ * that use is refused (see journalRefusal).
+ */
+async function journalTableExists(
+  client: QueryClient,
+  schemaName: string,
+  use: JournalUse,
+): Promise<boolean> {
+  const relation = await readJournalRelation(client, schemaName);
+  if (!relation) return false;
   const refusal = journalRefusal(relation, use);
   if (refusal) throw new MigrationJournalError(schemaName, relation, refusal);
   return true;
@@ -907,12 +901,16 @@ function committedMigrations(folder: string): MigrationFile[] {
 /** Read without the lock; markMigrationsApplied checks again under it. */
 export async function readMigrationDrift(
   client: QueryClient,
-  options: ApplyMigrationsOptions,
+  options: ApplyMigrationsOptions & {
+    readonly ignoreHashes?: readonly string[];
+  },
 ): Promise<MigrationDrift> {
+  const ignored = new Set(options.ignoreHashes);
+  const recorded = await readRecordedMigrations(client, options.schemaName);
   return driftOf(
     reconcileMigrations(
       committedMigrations(options.migrationsFolder),
-      await readRecordedMigrations(client, options.schemaName),
+      recorded.filter((row) => !ignored.has(row.hash)),
     ),
   );
 }
@@ -1014,9 +1012,7 @@ export async function markMigrationsApplied(
  *
  * Fails closed, changing nothing, when a committed migration is older than the
  * last recorded one but was never applied, or when the files and rows at one
- * timestamp cannot be paired. An applied migration whose file changed, and
- * recorded migrations that are not committed, are logged, or refused too with
- * `onDrift: "refuse"` (see DriftPolicy).
+ * timestamp cannot be paired.
  *
  * Baseline adoption: when nothing is recorded yet and `0000_baseline` comes
  * first, the baseline's tables are looked up in pg_catalog. None present → it

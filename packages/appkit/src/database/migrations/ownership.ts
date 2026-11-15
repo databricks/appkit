@@ -72,8 +72,6 @@ export function ownershipHint(
       "Drop schemaName from defineSchema() to use the default schema app, which the app creates and owns."
     );
   }
-  // ALTER ... OWNER TO the service principal's role fails on Lakebase with
-  // "must be able to SET ROLE": nobody holds ADMIN or SET on that role.
   if (ownership && ownership.owner !== ownership.currentUser) {
     // ALTER ... OWNER TO the app's role fails with "must be able to SET ROLE":
     // nobody holds ADMIN or SET on an Apps service principal role, so only the

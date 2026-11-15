@@ -33,13 +33,15 @@ describe.skipIf(!url)("the fork-copy tag against Postgres", () => {
   const app = `app_${suffix}`;
   const bare = `bare_${suffix}`;
   const shared = `shared_${suffix}`;
+  const other = `appkit_other_${suffix}`;
+  const foreign = `foreign_${suffix}`;
   let admin: Pool;
   let me: Pool;
 
-  const journalRows = async () =>
+  const journalRows = async (schema = app) =>
     (
       await admin.query<{ hash: string; created_at: string }>(
-        `select hash, created_at::text from "${app}".__drizzle_migrations order by id`,
+        `select hash, created_at::text from "${schema}".__drizzle_migrations order by id`,
       )
     ).rows;
 
@@ -47,6 +49,7 @@ describe.skipIf(!url)("the fork-copy tag against Postgres", () => {
     admin = new Pool({ connectionString: url, max: 1 });
     await admin.query(`
       create role "${sp}" nologin;
+      create role "${other}" nologin;
       create role "${superuser}" nologin;
       grant pg_read_all_data, pg_write_all_data to "${superuser}";
       create role "${dev}" login password 'appkit';
@@ -54,6 +57,10 @@ describe.skipIf(!url)("the fork-copy tag against Postgres", () => {
       grant create on database ${(await admin.query("select current_database() as db")).rows[0]?.db} to "${sp}";
       create schema "${app}" authorization "${sp}";
       create schema "${bare}" authorization "${sp}";
+      create schema "${foreign}" authorization "${sp}";
+      create table "${foreign}".__drizzle_migrations (id serial primary key, hash text not null, created_at bigint);
+      insert into "${foreign}".__drizzle_migrations (hash, created_at) values ('abc', 1700000000000);
+      alter table "${foreign}".__drizzle_migrations owner to "${other}";
       set role "${sp}";
       create table "${app}".notes (id integer primary key, body text);
       insert into "${app}".notes values (1, 'copied');
@@ -71,13 +78,16 @@ describe.skipIf(!url)("the fork-copy tag against Postgres", () => {
     await admin.query(`
       drop schema if exists "${app}" cascade;
       drop schema if exists "${bare}" cascade;
+      drop schema if exists "${foreign}" cascade;
       drop table if exists public."${shared}";
       reassign owned by "${sp}" to current_user;
       drop owned by "${sp}";
+      drop owned by "${other}";
       drop owned by "${dev}";
       drop role if exists "${dev}";
       drop role if exists "${superuser}";
       drop role if exists "${sp}";
+      drop role if exists "${other}";
     `);
     await admin.end();
   });
@@ -103,14 +113,13 @@ describe.skipIf(!url)("the fork-copy tag against Postgres", () => {
       { hash: "abc", created_at: "1700000000000" },
       { hash: FORK_COPY_TAG, created_at: "0" },
     ]);
-    // The tag changes nothing else. The copy still reads as the other role's.
     await expect(readSchemaState(me, app)).resolves.toEqual({
       kind: "copy",
       owner: sp,
     });
   });
 
-  test("once handed to you, a tagged schema reads as a handed-off copy, and untagging makes it yours", async () => {
+  test("once handed to you, a tagged schema reads as an interrupted rebuild, and untagging makes it yours", async () => {
     await admin.query(`
       alter schema "${app}" owner to "${dev}";
       alter table "${app}".notes owner to "${dev}";
@@ -118,7 +127,7 @@ describe.skipIf(!url)("the fork-copy tag against Postgres", () => {
     `);
 
     await expect(readSchemaState(me, app)).resolves.toEqual({
-      kind: "handed-off-copy",
+      kind: "interrupted-rebuild",
     });
 
     await untagForkCopy(me, app);
@@ -137,6 +146,32 @@ describe.skipIf(!url)("the fork-copy tag against Postgres", () => {
       kind: "copy",
       owner: sp,
     });
+  });
+
+  test("a journal owned by a role you neither are nor inherit, and that does not own the schema, is never written", async () => {
+    // pg_write_all_data lets you insert there, so only the trust rule stops the write.
+    const before = await journalRows(foreign);
+    await expect(tagForkCopy(me, foreign)).resolves.toBe(false);
+    expect(await journalRows(foreign)).toEqual(before);
+
+    await admin.query(
+      `insert into "${foreign}".__drizzle_migrations (hash, created_at) values ($1, 0)`,
+      [FORK_COPY_TAG],
+    );
+    await untagForkCopy(me, foreign);
+    expect(await journalRows(foreign)).toEqual([
+      ...before,
+      { hash: FORK_COPY_TAG, created_at: "0" },
+    ]);
+    // Without row-level security a read runs no code of the owner's, so the tag is read.
+    await expect(isForkCopy(me, foreign)).resolves.toBe(true);
+
+    // With it, a policy of the owner's would run on the read, so the journal is not read.
+    await admin.query(`
+      alter table "${foreign}".__drizzle_migrations enable row level security;
+      create policy everything on "${foreign}".__drizzle_migrations using (true);
+    `);
+    await expect(isForkCopy(me, foreign)).resolves.toBe(false);
   });
 
   test("public is never a copy: it lists what other roles own there", async () => {
