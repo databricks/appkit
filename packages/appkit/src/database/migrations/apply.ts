@@ -32,11 +32,12 @@ const logger = createLogger("database");
 
 /**
  * What to do when the recorded history drifted from the committed one: a
- * recorded migration whose file changed since, or pending migrations next to
- * recorded ones this checkout lacks. "warn" logs and applies what is pending,
- * so a developer can rework their own unapplied migration. "refuse" throws
- * MigrationHistoryError before applying anything, as a deploy start must,
- * since the deploy branch only ever runs merged files as they were merged.
+ * recorded migration whose file changed since, or committed migrations the
+ * database never recorded next to rows this checkout lacks. "warn" logs and
+ * applies what is pending, so a developer can rework their own unapplied
+ * migration. "refuse" throws MigrationHistoryError before applying anything,
+ * as a deploy start must, since the deploy branch only ever runs merged files
+ * as they were merged.
  */
 type DriftPolicy = "warn" | "refuse";
 
@@ -176,12 +177,13 @@ type HistoryRefusal =
   /** Recorded migrations whose committed file changed since (onDrift "refuse"). */
   | { readonly edited: readonly string[] }
   /**
-   * Committed migrations still pending while the database recorded migrations
-   * this checkout lacks (onDrift "refuse"): the two histories diverged.
+   * Committed migrations never recorded, pending or stranded, while the
+   * database recorded migrations this checkout lacks (onDrift "refuse"): the
+   * two histories diverged.
    */
   | {
       readonly diverged: {
-        readonly pending: readonly string[];
+        readonly unrecorded: readonly string[];
         readonly unknown: readonly RecordedMigration[];
       };
     };
@@ -253,9 +255,9 @@ function editedMessage(schemaName: string, edited: readonly string[]): string {
 function divergedMessage(
   schemaName: string,
   {
-    pending,
+    unrecorded,
     unknown,
-  }: { pending: readonly string[]; unknown: readonly RecordedMigration[] },
+  }: { unrecorded: readonly string[]; unknown: readonly RecordedMigration[] },
 ): string {
   const created = unknown
     .map((row) =>
@@ -266,7 +268,7 @@ function divergedMessage(
     .join(", ");
   return (
     `Schema "${schemaName}" recorded ${unknown.length} migration${unknown.length === 1 ? "" : "s"} this checkout does not have (created ${created}), ` +
-    `and ${pending.join(", ")} ${pending.length === 1 ? "is" : "are"} committed here but not applied. ` +
+    `and ${unrecorded.join(", ")} ${unrecorded.length === 1 ? "is" : "are"} committed here but not applied. ` +
     "The deploy branch ran migrations from a commit this one lacks. " +
     "Deploy a commit whose journal contains the recorded migrations, or merge them into main unchanged, before main's own migrations. " +
     "No migration was applied."
@@ -482,7 +484,11 @@ function historyRefusal(
 ): HistoryRefusal | undefined {
   const ambiguous = history.ambiguous[0];
   if (ambiguous) return { ambiguous };
+  // Next to rows this checkout lacks, a stranded entry means a branch deployed
+  // first, so the way back is the diverged runbook, not regenerating it.
+  const diverged = onDrift === "refuse" && history.unknown.length > 0;
   if (history.stranded.length > 0) {
+    if (diverged) return divergence(history);
     const last =
       files.find((file) => file.when === history.lastRecorded)?.tag ??
       `the migration recorded at ${new Date(history.lastRecorded ?? 0).toISOString()}`;
@@ -490,12 +496,18 @@ function historyRefusal(
   }
   if (onDrift === "warn") return undefined;
   if (history.edited.length > 0) return { edited: tags(history.edited) };
-  if (history.pending.length > 0 && history.unknown.length > 0) {
-    return {
-      diverged: { pending: tags(history.pending), unknown: history.unknown },
-    };
-  }
+  if (history.pending.length > 0 && diverged) return divergence(history);
   return undefined;
+}
+
+/** Every committed migration the database never recorded, oldest first, next to the rows it has that this checkout lacks. */
+function divergence(history: MigrationHistory): HistoryRefusal {
+  return {
+    diverged: {
+      unrecorded: tags([...history.stranded, ...history.pending]),
+      unknown: history.unknown,
+    },
+  };
 }
 
 /**

@@ -583,7 +583,7 @@ describe("applyPendingMigrations", () => {
       expect(error).toMatchObject({
         refusal: {
           diverged: {
-            pending: ["0001_migration"],
+            unrecorded: ["0001_migration"],
             unknown: [
               { hash: "from-a-branch-deployed-early", createdAt: 1500 },
             ],
