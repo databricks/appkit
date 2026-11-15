@@ -136,6 +136,27 @@ committed snapshot. When they differ, it writes
 `shared/appkit-types/database.d.ts`, then applies pending migrations to the
 branch `.env` names. Commit the migrations with `schema.ts`.
 
+### Warnings about a generated migration
+
+`migrate` prints a warning for each of two classes of statement in the
+migration it wrote, and names the statements. One statement can be in both
+classes.
+
+Statements that break instances still running the previous release. Drops,
+renames, type changes, `SET NOT NULL` and a new `NOT NULL` column without a
+default are in this class. Those instances keep serving while the new one
+migrates on start, and a code rollback does not undo a migration. Deploy code
+that works with both the old and the new schema first, then this change in a
+later deploy.
+
+Statements that may fail on existing rows. `SET NOT NULL`, a new `NOT NULL`
+column without a default, a type change, a new constraint (`UNIQUE`,
+`PRIMARY KEY`, `CHECK`, `FOREIGN KEY` or `EXCLUDE`) and a unique index are in
+this class. Postgres checks them against the rows already in the table. A new
+dev branch has no rows, so they pass there and can fail on the deploy branch.
+Test the migration on a branch that has a copy of the deploy branch's data
+before you deploy.
+
 `migrate` applies migrations only to your dev branch or to this checkout's
 session branch. A session branch name includes a hash of the user who created
 it, so a `.env` copied from another developer does not make their session branch
