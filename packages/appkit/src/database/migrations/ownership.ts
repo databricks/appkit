@@ -50,8 +50,6 @@ export function ownershipHint(
       "On the deploy branch that role is the app's service principal: bind the database to the app with CAN_CONNECT_AND_CREATE."
     );
   }
-  // ALTER ... OWNER TO the service principal's role fails on Lakebase with
-  // "must be able to SET ROLE": nobody holds ADMIN or SET on that role.
   if (ownership && ownership.owner !== ownership.currentUser) {
     return (
       `Schema "${ownership.schemaName}" is owned by "${ownership.owner}", but the app connects as "${ownership.currentUser}". ` +

@@ -253,7 +253,6 @@ describe("createDatabaseState", () => {
 
     expect(order).toEqual(["pool", "migrate", "select 1", "catalog"]);
     expect(mocks.migrateOnStart).toHaveBeenCalledWith(pool, schema);
-    // The catalog check words its advice by whether this start migrated.
     expect(mocks.assertSchemaMatchesDatabase).toHaveBeenCalledWith(
       path,
       schema,

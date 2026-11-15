@@ -21,7 +21,6 @@ type CatalogRow = {
   relation_kind: string;
 };
 
-/** A local start: APPKIT_DB_MIGRATE_ON_START is not set. */
 const OFF = { kind: "off" } as const;
 
 /** Answer the catalog query with the given tables and columns. */

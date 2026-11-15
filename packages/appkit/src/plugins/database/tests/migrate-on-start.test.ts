@@ -160,7 +160,6 @@ describe("migrateOnStart", () => {
 
     await migrateOnStart(pool, schema, root, deployEnv);
 
-    // A deploy start refuses an edited or diverged history instead of warning.
     expect(applyPendingMigrations).toHaveBeenCalledWith(pool, {
       migrationsFolder: path.join(root, "config/database/migrations"),
       schemaName: "app",

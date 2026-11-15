@@ -9,7 +9,6 @@ interface CatalogColumn {
   readonly relation_kind: string;
 }
 
-/** How the missing tables and columns get created, given what this start did about migrations. */
 function migrationAdvice(migration: MigrateOnStartDecision): string {
   switch (migration.kind) {
     case "off":
@@ -27,7 +26,6 @@ function migrationAdvice(migration: MigrateOnStartDecision): string {
  * request as an undefined-table or undefined-column failure, so check up front.
  * pg_catalog is read rather than information_schema, which hides objects the
  * role cannot access and would report a privilege gap as a missing column.
- * `migration` says what this start did about migrations, so the advice fits.
  */
 export async function assertSchemaMatchesDatabase(
   dataPath: DataPath,

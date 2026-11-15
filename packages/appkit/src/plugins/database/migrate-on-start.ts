@@ -20,11 +20,8 @@ import { createLogger } from "../../logging/logger";
 
 const logger = createLogger("database");
 
-/** Whether this process applies the committed migrations when it starts. */
 export type MigrateOnStartDecision =
-  /** APPKIT_DB_MIGRATE_ON_START is not "true": a local start, or an app that never opted in. */
   | { readonly kind: "off" }
-  /** The flag is on, but the environment is not the one Apps gives a deployed app with a bound database. */
   | { readonly kind: "skipped"; readonly reason: string }
   | { readonly kind: "migrate" };
 
@@ -66,20 +63,13 @@ function endpointBranch(endpoint: string | undefined): string | undefined {
   return endpoint?.match(/\/branches\/([^/]+)\//)?.[1];
 }
 
-/** Lakebase branch ids are at most 63 characters. */
 const BRANCH_ID_MAX_LENGTH = 63;
 
-/**
- * The exact shapes AppKit gives the branches of one developer
- * (dev-<slug>-<6 hex>) and of one agent session (session-<6 hex>-<id>). Only
- * they migrate those branches, so a deployed app bound to one is misconfigured.
- */
 const DEVELOPMENT_BRANCH_SHAPES = {
   "a developer": /^dev-[a-z0-9]+(?:-[a-z0-9]+)*-[0-9a-f]{6}$/,
   "an agent session": /^session-[0-9a-f]{6}-[a-z0-9]{1,48}$/,
 };
 
-/** Whose branch the id names, by its exact shape; undefined for any other id. */
 function developmentBranchOwner(branch: string): string | undefined {
   if (branch.length > BRANCH_ID_MAX_LENGTH) return undefined;
   return Object.entries(DEVELOPMENT_BRANCH_SHAPES).find(([, shape]) =>
@@ -125,7 +115,6 @@ export async function migrateOnStart(
     result = await applyPendingMigrations(pool, {
       migrationsFolder: folder,
       schemaName: schema.$schemaName,
-      // The deploy branch only ever runs merged files as they were merged.
       onDrift: "refuse",
     });
   } catch (error) {
