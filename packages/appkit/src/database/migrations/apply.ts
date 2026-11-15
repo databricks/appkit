@@ -467,9 +467,7 @@ function historyRefusal(
 ): HistoryRefusal | undefined {
   const ambiguous = history.ambiguous[0];
   if (ambiguous) return { ambiguous };
-  // Next to rows this checkout lacks, a stranded entry means a branch deployed
-  // first, so the way back is the diverged runbook, not regenerating it.
-  const diverged = onDrift === "refuse" && history.unknown.length > 0;
+  const diverged = onDrift === "refuse" && branchDeployedFirst(history);
   if (history.stranded.length > 0) {
     if (diverged) return divergence(history);
     const last =
@@ -479,8 +477,13 @@ function historyRefusal(
   }
   if (onDrift === "warn") return undefined;
   if (history.edited.length > 0) return { edited: tags(history.edited) };
-  if (history.pending.length > 0 && diverged) return divergence(history);
+  if (diverged) return divergence(history);
   return undefined;
+}
+
+function branchDeployedFirst(history: MigrationHistory): boolean {
+  const unrecorded = history.stranded.length + history.pending.length;
+  return unrecorded > 0 && history.unknown.length > 0;
 }
 
 function divergence(history: MigrationHistory): HistoryRefusal {
