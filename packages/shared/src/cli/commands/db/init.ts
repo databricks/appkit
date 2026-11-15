@@ -10,6 +10,7 @@ import {
   printIntrospectReport,
   printMigrateReport,
   shortName,
+  warn,
 } from "./output";
 import type {
   InitOptions,
@@ -26,22 +27,31 @@ interface InitFlags {
   readonly yes?: boolean;
 }
 
-/** --schema clean drops data: a human confirms it, a script passes --yes. */
-async function confirmClean(flags: InitFlags): Promise<boolean> {
-  if (flags.schema !== "clean" || flags.yes) return true;
+/**
+ * --schema clean on your working branch drops your data: a human confirms it,
+ * a script passes --yes. init asks only once it has read from the branch that
+ * the schema is yours, so a fork's copy is rebuilt without a question.
+ */
+const confirmClean: NonNullable<InitOptions["confirmClean"]> = async ({
+  branch,
+  schemaName,
+}) => {
+  const where = `schema ${schemaName} on ${shortName(branch)}`;
   if (!isInteractive()) {
     throw new Error(
-      "Refusing to run `--schema clean` without confirmation in a non-interactive shell. Pass --yes.",
+      `Refusing to drop ${where}, your working branch's, without confirmation in a non-interactive shell. Pass --yes. .env already points at the branch.`,
     );
   }
   const { confirm, isCancel } = await import("@clack/prompts");
   const answer = await confirm({
     message:
-      "Drop the app schema on your dev or session branch, with every table and row in it, then apply the committed migrations?",
+      schemaName === "public"
+        ? `Remove your objects in ${where}, with their rows, then apply the committed migrations?`
+        : `Drop ${where}, with every table and row in it, then apply the committed migrations?`,
     initialValue: false,
   });
   return !isCancel(answer) && answer;
-}
+};
 
 function printRebuild(rebuild: Rebuild): void {
   printCleanReport(rebuild.clean);
@@ -74,13 +84,13 @@ function printInitReport(
   ok(`Pointed .env at ${branch} (database ${report.database})`);
   if (report.installed) ok(`Installed drizzle-kit (${report.installed})`);
 
-  const { start } = report;
-  // Without --schema, only a branch init forked gets a rebuild.
+  const { start, keptCopy } = report;
+  // Without --schema, only a schema that still held the fork's copy gets a rebuild.
   const rebuilt =
     start.kind === "clean" || (start.kind === "introspect" && start.rebuilt);
   if (rebuilt && schemaFlag === undefined) {
     info(
-      `A branch init forked starts without the rows it copied: the app schema was rebuilt from the committed migrations. \`appkit db init --schema ${start.kind === "introspect" ? "introspect" : "migrate"}\` keeps them.`,
+      `The branch still held the rows the fork copied: the app schema was rebuilt from the committed migrations. \`appkit db init --schema ${start.kind === "introspect" ? "introspect" : "migrate"}\` keeps them.`,
     );
   }
   if (start.kind === "introspect") {
@@ -91,21 +101,27 @@ function printInitReport(
   } else if (start.kind === "migrate") printMigrateReport(start.migrate);
   else if (start.kind === "clean") printRebuild(start);
   else info("Left the schema as it is");
+
+  if (keptCopy?.reason === "requested") {
+    warn(
+      `Kept the rows the fork copied${keptCopy.from ? ` from ${shortName(keptCopy.from)}` : ""}, as --schema ${schemaFlag} asks. A plain \`appkit db init\` rebuilds the app schema from the committed migrations without them.`,
+    );
+  } else if (keptCopy?.reason === "public") {
+    warn(
+      `Kept in schema public, with their rows, because other roles own them: ${keptCopy.objects.join(", ")}`,
+    );
+  }
 }
 
 async function runDbInit(flags: InitFlags): Promise<void> {
   try {
-    if (!(await confirmClean(flags))) {
-      info("Cancelled");
-      process.exitCode = 1;
-      return;
-    }
     const tooling = await loadDatabaseTooling();
     const mode = flags.session ? "session" : flags.dev ? "dev" : undefined;
     const options: InitOptions = {
       ...(mode ? { mode } : {}),
       ...(flags.schema ? { schema: flags.schema } : {}),
       ...(flags.ttl !== undefined ? { ttl: flags.ttl } : {}),
+      ...(flags.schema === "clean" && !flags.yes ? { confirmClean } : {}),
       interactive: !flags.yes && isInteractive(),
       onStep: info,
     };
@@ -114,6 +130,11 @@ async function runDbInit(flags: InitFlags): Promise<void> {
       flags.schema,
     );
   } catch (error) {
+    if (error instanceof Error && error.name === "InitCancelledError") {
+      info(error.message);
+      process.exitCode = 1;
+      return;
+    }
     fail(error);
   }
 }
@@ -141,7 +162,7 @@ export const dbInitCommand = new Command("init")
   .addOption(
     new Option(
       "--schema <start>",
-      "how the schema starts (default: a new branch is rebuilt from the migrations, a reused one is migrated; introspect without schema.ts)",
+      "how the schema starts (default: a schema that still holds the fork's copy is rebuilt from the migrations, your working branch is migrated; introspect without schema.ts)",
     ).choices(["migrate", "introspect", "clean", "none"]),
   )
   .option(
@@ -153,19 +174,24 @@ export const dbInitCommand = new Command("init")
     `
 init asks nothing. It keeps this checkout's session branch when .env points at
 one, and otherwise uses your dev branch (dev-<you>-<hash>). A new branch forks
-the project's default branch, which copies its rows, production data included.
-init then rebuilds the app schema from the committed migrations (written first
-by introspect when there is no schema.ts), so the new branch starts without
-them; a run that stops before that finishes rebuilds on its rerun. --schema
-migrate, or --schema introspect without schema.ts, keeps the copied rows. A
-reused branch keeps its data: init migrates it. In schema public only your own
-objects go; what other roles own stays with its rows, and init lists it. init
-never changes the default branch, a protected branch or a branch databricks.yml
-deploys to, and never edits databricks.yml.
+the branch databricks.yml deploys to, else the project's default branch, which
+copies its rows, production data included. init reads from the branch whether
+the app schema is still that copy. If it is, init takes the schema over and
+rebuilds it from the committed migrations (written first by introspect when
+there is no schema.ts), so the branch starts without the copied rows. A run
+that stops before the rebuild finishes is finished by the next init, from any
+checkout. --schema migrate, or --schema introspect, keeps the copied rows and
+says so. Your working branch keeps its data: init migrates it. --schema clean
+rebuilds your working branch too, after a confirmation or with --yes; a copy's
+rebuild asks nothing. In schema public only your own objects go; what other
+roles own stays with its rows, and init lists it. init never changes the
+default branch, a protected branch or a branch databricks.yml deploys to, and
+never edits databricks.yml.
 
 With --schema none, init only sets up the branch and .env: the schema and its
-owner stay as the fork copied them. init never hands off schema public, which
-belongs to the database rather than to an app.
+owner stay as the fork copied them, and the next plain init still rebuilds it.
+init never hands off schema public, which belongs to the database rather than
+to an app.
 
 The project comes from LAKEBASE_PROJECT in .env (projects/<id> or <id>), else
 from LAKEBASE_ENDPOINT, else from the bundle's postgres_branch variable. When
