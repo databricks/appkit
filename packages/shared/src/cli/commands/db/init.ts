@@ -195,7 +195,9 @@ default branch, a protected branch or a branch databricks.yml deploys to, and
 never edits databricks.yml.
 
 With --schema none, init only sets up the branch and .env: the schema and its
-owner stay as the fork copied them, and the next plain init still rebuilds it.
+owner stay as the fork copied them. The next plain init still rebuilds a copy
+the service principal owns. A fresh fork of a schema you already owned looks
+like your working branch to that later run, so run --schema clean then.
 init never hands off schema public, which belongs to the database rather than
 to an app.
 

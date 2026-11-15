@@ -171,25 +171,46 @@ of its source, production data included. `init` reads from the branch what its
 app schema is. While the app's service principal still owns the schema, it is
 the fork's untouched copy. `init` hands it to you, drops it and recreates it
 from the committed migrations, so the branch starts without the copied rows.
-Without `config/database/schema.ts`, `init` first writes it and
-`0000_baseline.sql` from the fork's schema, then rebuilds the schema from that
-baseline.
+A branch `init` forked in this run holds only what the fork copied, whoever
+owns its schema. So a schema you already owned on the source is rebuilt too,
+with no hand-off to make. Without `config/database/schema.ts`, `init` first
+writes it and `0000_baseline.sql` from the fork's schema, then rebuilds the
+schema from that baseline.
 
 Before the hand-off, `init` inserts one row with the hash `appkit:fork-copy`
-into the copied `__drizzle_migrations` journal. Dropping the schema removes it.
-A run that stops between the hand-off and the drop leaves a schema you own
-whose journal still carries that row, and the next `init`, from any checkout,
-finishes the rebuild. `appkit db migrate`, `appkit db introspect` and
-`appkit db seed` refuse a branch whose journal carries it.
+into the copied `__drizzle_migrations` journal. It writes the row only where
+the migrator would record. That is a journal owned by your role, by a role it
+inherits, or by the schema's owner, which is what a fork's copy has. A journal
+another role owns could run that role's code as you through a trigger, a rule,
+a default or a policy, so `init` leaves it alone. It then warns that it could
+not mark the copy and rebuilds anyway. A copy with no journal gets the same
+warning. If such a run stops before the rebuild finishes, the next `init` sees
+a schema that looks like your working branch and keeps the copied rows. Run
+`appkit db init --schema clean` then. Dropping the schema removes the row. A
+run that stops between the hand-off and the drop leaves a schema you own whose
+journal still carries that row, and the next `init`, from any checkout,
+finishes the rebuild.
+
+`appkit db migrate`, `appkit db introspect` and `appkit db seed` refuse a
+schema that is still a copy. That is one the service principal still owns, with
+no row yet, or one handed to you whose journal still carries the row. The message
+says to run `appkit db init` to rebuild it, or `appkit db init --schema
+migrate` (`introspect` for introspect) to keep the copied rows. Schema `public`
+is never refused.
 
 To keep the copied rows, pass `--schema migrate`, or `--schema introspect`.
 `init` then hands the schema to you, removes the row, keeps the data, and says
-where it came from. A schema you own with no such row is your working branch.
-`init` migrates it, or introspects it without `schema.ts`. `--schema clean`
-rebuilds your working branch too, after a confirmation or with `--yes`. A
-copy's rebuild asks nothing, because `migrate` refuses a copy, so none of your
-work can be on it. `--schema none` touches nothing, and the next plain `init`
-still rebuilds the copy.
+where it came from. From then on the schema is your working branch. A plain
+`init` migrates it and keeps the rows. `appkit db init --schema clean` drops
+the app schema with everything in it and rebuilds it from the committed
+migrations, after a confirmation or with `--yes`. On a branch an earlier run
+created, a schema you own with no such row is your working branch. `init`
+migrates it, or introspects it without `schema.ts`. A copy's rebuild asks
+nothing, because `migrate` refuses a copy and a fresh fork holds only what it
+copied, so none of your work can be on it. `--schema none` touches nothing.
+The next plain `init` still rebuilds a copy the service principal owns. A fresh
+fork of a schema you already owned looks like your working branch to that
+later run, so run `appkit db init --schema clean` then.
 
 In schema `public`, `init` and `clean` remove only the objects your role owns,
 and `init` never hands `public` off or tags it. On a fork of the deploy branch
