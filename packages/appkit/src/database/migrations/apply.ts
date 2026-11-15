@@ -346,7 +346,8 @@ function journalRefusalMessage(
 ): string {
   const table = journalTable(schemaName);
   const untrusted = `The migrator connects as "${relation.currentUser}", which neither owns it nor inherits "${relation.owner}"`;
-  const transfer = `transfer the table to "${relation.currentUser}" (ALTER TABLE … OWNER TO), then deploy again.`;
+  // ALTER TABLE ... OWNER TO the app's role fails on Lakebase ("must be able to SET ROLE").
+  const transfer = `have Lakebase move the table to "${relation.currentUser}", since no Postgres role can hand it over. Then deploy again.`;
   switch (refusal) {
     case "kind": {
       const kind =
