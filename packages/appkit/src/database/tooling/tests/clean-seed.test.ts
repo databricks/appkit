@@ -35,21 +35,31 @@ const schemaFile = (schemaName: string) =>
    export const schema = defineSchema(({ table }) => ({ notes: table("notes", { id: id() }) }), { schemaName: ${JSON.stringify(schemaName)} });`;
 
 const DEPENDENTS = /pg_catalog\.pg_depend/;
+/** The journal check and the tag read of isForkCopy. */
+const FORK_COPY = /c\.relkind = 'r'|where hash = \$1/;
 
 /** A pool whose one client records statements, can fail on one, and answers the dependents query. */
 function recordingPool(
-  options: { failOn?: RegExp; dependents?: string[] } = {},
+  options: { failOn?: RegExp; dependents?: string[]; forkCopy?: boolean } = {},
 ) {
   const statements: string[] = [];
   const client = {
     released: undefined as { error: unknown } | undefined,
     async query(text: string) {
-      statements.push(DEPENDENTS.test(text) ? "<dependents>" : text);
+      statements.push(
+        DEPENDENTS.test(text)
+          ? "<dependents>"
+          : FORK_COPY.test(text)
+            ? "<fork-copy>"
+            : text,
+      );
       if (options.failOn?.test(text)) throw new Error("boom");
       return {
         rows: DEPENDENTS.test(text)
           ? (options.dependents ?? []).map((label) => ({ label }))
-          : [],
+          : FORK_COPY.test(text) && options.forkCopy
+            ? [{}]
+            : [],
       };
     },
     release(error?: unknown) {
@@ -234,9 +244,26 @@ describe("runSeed", () => {
     expect(writableEnvBranch).toHaveBeenCalledWith(expect.anything(), "seed");
     expect(statements).toEqual([
       "begin",
+      "<fork-copy>",
       'SET LOCAL search_path TO "app", public',
       sql,
       "commit",
+    ]);
+  });
+
+  test("refuses a branch that still holds a fork's copy, before running the file", async () => {
+    const root = tempApp({ [SEED_FILE]: "insert into notes default values;" });
+    writableEnvBranch.mockResolvedValue(devBranch);
+    const { statements } = recordingPool({ forkCopy: true });
+
+    await expect(runSeed(fakeContext({ root }))).rejects.toThrow(
+      'Refusing to seed: dev-alice-3f9a2c still holds the rows the fork copied into schema "app", and its rebuild did not finish. Run `appkit db init` to rebuild it from the committed migrations, or `appkit db init --schema migrate` to keep them.',
+    );
+    expect(statements).toEqual([
+      "begin",
+      "<fork-copy>",
+      "<fork-copy>",
+      "rollback",
     ]);
   });
 
@@ -255,7 +282,11 @@ describe("runSeed", () => {
 
       await runSeed(fakeContext({ root }));
 
-      expect(statements.slice(0, 2)).toEqual(["begin", searchPath]);
+      expect(statements.slice(0, 3)).toEqual([
+        "begin",
+        "<fork-copy>",
+        searchPath,
+      ]);
     },
   );
 

@@ -161,14 +161,14 @@ describe("updateEnvFile", () => {
     const root = tempApp({
       ".env": [
         "KEEP=1",
-        "APPKIT_DB_NEW_BRANCH=projects/p/branches/dev-a",
+        "APPKIT_DB_SESSION=k2x9q0ab",
         "PGHOST=h",
-        "APPKIT_DB_NEW_BRANCH=stale",
+        "APPKIT_DB_SESSION=stale",
       ].join("\n"),
     });
     const file = path.join(root, ".env");
 
-    updateEnvFile(file, { APPKIT_DB_NEW_BRANCH: null, MISSING: null });
+    updateEnvFile(file, { APPKIT_DB_SESSION: null, MISSING: null });
 
     expect(fs.readFileSync(file, "utf-8")).toBe("KEEP=1\nPGHOST=h\n");
   });

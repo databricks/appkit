@@ -2,11 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 
 import dotenv from "dotenv";
+import type { PoolClient } from "pg";
 
 import { loadDefaultDatabaseSchema } from "../../plugins/database/load-schema";
 import { DEFAULT_SCHEMA_NAME } from "../schema-builder/define-schema";
 import { type CleanReport, cleanHolding } from "./clean";
-import type { DbContext } from "./context";
+import { type DbContext, withBranchPool } from "./context";
 import {
   ensureDrizzleKit,
   type RunCommand,
@@ -49,6 +50,15 @@ import {
   sessionBranchId,
 } from "./naming";
 import {
+  planStart,
+  readSchemaState,
+  type SchemaStart,
+  type SchemaState,
+  type StartPlan,
+  tagForkCopy,
+  untagForkCopy,
+} from "./schema-state";
+import {
   type BranchMode,
   type DeployBoundary,
   type DeployTarget,
@@ -60,18 +70,27 @@ import {
   resourceId,
 } from "./targets";
 
-/** How init leaves the schema; "none" leaves it as the fork has it. */
-export type SchemaStart = "migrate" | "introspect" | "clean" | "none";
+export type { SchemaStart } from "./schema-state";
 
 export interface InitOptions {
   /** Default: this checkout's session branch when .env points at it, else your dev branch. */
   readonly mode?: BranchMode;
   /**
-   * Default: on a branch init forked, clean with schema.ts, else introspect
-   * followed by a rebuild from the migrations it wrote; on a reused branch,
-   * migrate with schema.ts, else introspect.
+   * Default, read from the branch: a schema that still holds the fork's copy
+   * is rebuilt from the committed migrations (introspect writes schema.ts
+   * first when there is none); your working branch is migrated with
+   * schema.ts, else introspected.
    */
   readonly schema?: SchemaStart;
+  /**
+   * Asked before an explicit --schema clean drops a schema that may hold your
+   * work: your working branch, or public. A copy's rebuild never asks. Absent,
+   * the clean proceeds.
+   */
+  readonly confirmClean?: (target: {
+    readonly branch: string;
+    readonly schemaName: string;
+  }) => Promise<boolean>;
   /** A new session branch's TTL as `--ttl` takes it (30m, 1h, 7d); default seven days. */
   readonly ttl?: string;
   /** Passed to migrate and introspect: false makes an ambiguous rename fail instead of prompting. */
@@ -96,10 +115,25 @@ export type InitStart =
   | {
       readonly kind: "introspect";
       readonly introspect: IntrospectReport;
-      /** On a branch init forked: the schema introspect read, rebuilt from the migrations it wrote. */
+      /** On a fork's copy: the schema introspect read, rebuilt from the migrations it wrote. */
       readonly rebuilt: Rebuild | null;
     }
   | ({ readonly kind: "clean" } & Rebuild);
+
+/** Rows the fork copied into the app schema that this run left in place, and why. */
+export type KeptCopy =
+  /** You asked for --schema migrate or --schema introspect on a copy. */
+  | { readonly reason: "requested"; readonly from: string | null }
+  /** In schema public, what other roles own stays with its rows; init never removes it. */
+  | { readonly reason: "public"; readonly objects: readonly string[] };
+
+/** You answered no to the confirmation an explicit clean asks for. */
+export class InitCancelledError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InitCancelledError";
+  }
+}
 
 export interface InitReport {
   readonly mode: BranchMode;
@@ -120,6 +154,7 @@ export interface InitReport {
    * you owned it, the schema is public, or `--schema none` left it alone.
    */
   readonly handedOff: string | null;
+  readonly keptCopy: KeptCopy | null;
   readonly envFile: string;
   /** The drizzle-kit install init ran; null when it was installed. */
   readonly installed: string | null;
@@ -206,8 +241,6 @@ interface BranchRequest {
   readonly envFile: string;
   /** The branch of this project the default databricks.yml target deploys to, which a new fork comes from. */
   readonly deployBranch: string | null;
-  /** The branch .env marks as forked but not started; see LocalTarget.newBranch. */
-  readonly newBranch: string | null;
   readonly onStep: (message: string) => void;
 }
 
@@ -215,11 +248,6 @@ interface FoundBranch {
   readonly branch: LakebaseBranch;
   /** Forked by this run. */
   readonly created: boolean;
-  /**
-   * Forked by init, in this run or in one that stopped before the schema
-   * start, so it still holds every row the fork copied.
-   */
-  readonly fresh: boolean;
   readonly sourceBranch?: string;
   readonly session: string | null;
 }
@@ -281,12 +309,7 @@ async function findOrCreateBranch(
       );
     }
     onStep(`Using ${resourceId(branch.name)}`);
-    return {
-      branch,
-      created: false,
-      fresh: branch.name === request.newBranch,
-      session,
-    };
+    return { branch, created: false, session };
   };
   const replaceGone = (name: string): void => {
     if (session === null) {
@@ -327,14 +350,10 @@ async function findOrCreateBranch(
       throw new Error(`Project ${project} has no default branch to fork from.`);
     }
     // Written before the fork, so a run that stops during or after it leaves
-    // its rerun what it needs: the session id, to reuse instead of forking
-    // again, and the branch name, to still give the fork its first start.
-    updateEnvFile(request.envFile, {
-      ...(session !== null && session !== request.session
-        ? { APPKIT_DB_SESSION: session }
-        : {}),
-      APPKIT_DB_NEW_BRANCH: name,
-    });
+    // its rerun the session id, to reuse instead of forking again.
+    if (session !== null && session !== request.session) {
+      updateEnvFile(request.envFile, { APPKIT_DB_SESSION: session });
+    }
     onStep(
       `Creating ${resourceId(name)} from ${resourceId(parent.name)} (${deployed ? "the branch databricks.yml deploys to" : "the project's default branch"})${session === null ? "" : `, expiring after ${request.ttl.label}`}`,
     );
@@ -348,15 +367,10 @@ async function findOrCreateBranch(
       return {
         branch: branch?.name ? branch : { name },
         created: true,
-        fresh: true,
         sourceBranch: parent.name,
         session,
       };
     } catch (error) {
-      // These refusals mean no fork happened; any other error may have left one.
-      if (isPermissionDenied(error) || isBranchLimit(error)) {
-        updateEnvFile(request.envFile, { APPKIT_DB_NEW_BRANCH: null });
-      }
       if (isPermissionDenied(error)) {
         throw new Error(
           `Creating ${resourceId(name)} needs CAN MANAGE on ${project}. Ask a project owner for it, then rerun \`appkit db init\`.`,
@@ -565,11 +579,13 @@ function readEnvValues(file: string): Record<string, string> {
 /**
  * `appkit db init`: find or create your dev branch or this checkout's session
  * branch, ensure a read-write endpoint and your DATABRICKS_SUPERUSER role,
- * point `.env` at the branch, hand the app schema the fork copied to you
- * (except with `--schema none`), then start the schema. No prompts: every
- * choice has a default. It refuses the project's default branch, protected
- * branches and branches databricks.yml deploys to before changing anything,
- * and never touches the deploy bundle.
+ * point `.env` at the branch, then start the schema as its state on the branch
+ * calls for (see planStart): a fork's copy is handed to you and rebuilt, your
+ * working branch is migrated, and `--schema none` touches neither. It asks
+ * nothing but the confirmation an explicit clean of your work needs. It
+ * refuses the project's default branch, protected branches and branches
+ * databricks.yml deploys to before changing anything, and never touches the
+ * deploy bundle.
  * One lock on the checkout's history covers the whole run, so no other
  * `appkit db` command runs between its clean and migrate; `--schema none`
  * changes no history and takes none.
@@ -578,19 +594,26 @@ export async function runInit(
   ctx: DbContext,
   options: InitOptions = {},
 ): Promise<InitReport> {
-  if (options.schema === "none") return initHolding(ctx, null, options);
+  const requested = options.schema;
+  if (requested === "none") return initHolding(ctx, null, options);
   // Before the lock, which creates config/database.
-  if (options.schema === "migrate" || options.schema === "clean") {
-    requireSchemaFile(ctx.root, options.schema);
+  if (requested === "migrate" || requested === "clean") {
+    requireSchemaFile(ctx.root, requested);
   }
   return withHistoryLock(ctx.root, "init", (lock) =>
-    initHolding(ctx, lock, options),
+    initHolding(ctx, { lock, requested }, options),
   );
+}
+
+/** A start under the checkout's history lock; null for `--schema none`, which takes none and starts nothing. */
+interface LockedStart {
+  readonly lock: HistoryLock;
+  readonly requested: Exclude<SchemaStart, "none"> | undefined;
 }
 
 async function initHolding(
   ctx: DbContext,
-  lock: HistoryLock | null,
+  locked: LockedStart | null,
   options: InitOptions,
 ): Promise<InitReport> {
   const onStep = options.onStep ?? (() => undefined);
@@ -607,7 +630,7 @@ async function initHolding(
   refuseSymlink(envFile);
   const hasSchema = hasSchemaFile(ctx.root);
   const schemaName =
-    hasSchema && options.schema !== "none"
+    hasSchema && locked
       ? (await loadDefaultDatabaseSchema(ctx.root, { showImportError: true }))
           .$schemaName
       : DEFAULT_SCHEMA_NAME;
@@ -638,17 +661,9 @@ async function initHolding(
     boundary: readDeployBoundary(ctx.root),
     envFile,
     deployBranch: deploy?.branch ?? null,
-    newBranch: local.newBranch,
     onStep,
   });
   const { branch } = found;
-  // A branch init forked holds every row the fork copied until its first
-  // start. Without --schema, that start rebuilds the app schema from the
-  // migrations, so none of them stay; a reused branch keeps its data.
-  const rebuild = found.fresh && options.schema === undefined;
-  const startKind: SchemaStart =
-    options.schema ??
-    (hasSchema ? (rebuild ? "clean" : "migrate") : "introspect");
 
   const {
     endpoint,
@@ -685,74 +700,7 @@ async function initHolding(
   updateEnvFile(envFile, values);
   const branchCtx: DbContext = { ...ctx, env: { ...ctx.env, ...values } };
 
-  // --schema none leaves the schema as the fork has it, owner included.
-  const handedOff =
-    startKind === "none"
-      ? null
-      : await handOffAppSchema(branchCtx, {
-          branch: branch.name,
-          database,
-          schemaName,
-          developer: role,
-          roles,
-          onStep,
-        });
-
-  // Every start leaves the branch for `appkit db migrate` and `appkit db check`,
-  // which diff schema.ts with drizzle-kit, so every start except none installs it.
-  const installed =
-    startKind === "none"
-      ? null
-      : ensureDrizzleKit(ctx.root, options.runCommand ?? runCommand, onStep);
-
-  // Without a lock (--schema none) the schema stays as the fork has it.
-  let start: InitStart = { kind: "none" };
-  if (lock) {
-    const on = `on ${resourceId(branch.name)}`;
-    const rebuildSchema = async (): Promise<Rebuild> => {
-      const why = rebuild
-        ? schemaName === "public"
-          ? ": a branch init forked starts without the rows it copied, as far as you own them; other roles' objects stay with theirs"
-          : ": a branch init forked starts without the rows it copied, and the committed migrations recreate its tables"
-        : "";
-      onStep(
-        schemaName === "public"
-          ? `Removing your objects in schema public ${on}${why}`
-          : `Dropping schema ${schemaName} ${on}${why}`,
-      );
-      const clean = await cleanHolding(branchCtx, lock);
-      // Recreated from the committed migrations, so the startup check passes.
-      const migrate = await migrateHolding(branchCtx, lock, {
-        interactive,
-        generate: false,
-      });
-      return { clean, migrate };
-    };
-    if (startKind === "migrate") {
-      onStep(`Migrating schema ${schemaName} ${on}`);
-      start = {
-        kind: "migrate",
-        migrate: await migrateHolding(branchCtx, lock, { interactive }),
-      };
-    } else if (startKind === "introspect") {
-      onStep(`Writing schema.ts from schema ${schemaName} ${on}`);
-      const introspect = await introspectForInit(branchCtx, lock, {
-        interactive,
-        schemaName,
-      });
-      start = {
-        kind: "introspect",
-        introspect,
-        rebuilt: rebuild ? await rebuildSchema() : null,
-      };
-    } else if (startKind === "clean") {
-      start = { kind: "clean", ...(await rebuildSchema()) };
-    }
-  }
-  // Its start done, the branch no longer awaits one.
-  if (found.fresh) updateEnvFile(envFile, { APPKIT_DB_NEW_BRANCH: null });
-
-  return {
+  const base = {
     mode,
     branch: branch.name,
     created: found.created,
@@ -764,9 +712,136 @@ async function initHolding(
     database,
     user: identity.userName,
     role: { name: role.name, action },
-    handedOff,
     envFile,
+  };
+  // --schema none reads nothing from the branch and leaves the schema as the
+  // fork has it, owner included.
+  if (!locked) {
+    return {
+      ...base,
+      handedOff: null,
+      keptCopy: null,
+      installed: null,
+      start: { kind: "none" },
+    };
+  }
+  const { lock, requested } = locked;
+
+  const state = await withBranchPool(branchCtx, (pool) =>
+    readSchemaState(pool, schemaName),
+  );
+  const plan = planStart(state, requested, hasSchema);
+  const on = `on ${resourceId(branch.name)}`;
+  if (
+    plan.confirm &&
+    options.confirmClean &&
+    !(await options.confirmClean({ branch: branch.name, schemaName }))
+  ) {
+    throw new InitCancelledError(
+      `Cancelled. Schema ${schemaName} ${on} is as it was, and .env points at the branch.`,
+    );
+  }
+  // Every start leaves the branch for `appkit db migrate` and `appkit db check`,
+  // which diff schema.ts with drizzle-kit, so every start installs it.
+  const installed = ensureDrizzleKit(
+    ctx.root,
+    options.runCommand ?? runCommand,
+    onStep,
+  );
+  const onBranch = <T>(
+    work: (client: Pick<PoolClient, "query">) => Promise<T>,
+  ) => withBranchPool(branchCtx, work);
+
+  const introspect = (record: boolean) => {
+    onStep(`Writing schema.ts from schema ${schemaName} ${on}`);
+    return introspectForInit(branchCtx, lock, {
+      interactive,
+      schemaName,
+      record,
+    });
+  };
+  // A rebuild without schema.ts introspects first, while the copy is untouched:
+  // introspect only writes files then, so a refusal leaves the branch as the
+  // fork made it. Introspect reads the journal as history, so a tag an earlier
+  // run left on the copy goes first and comes back right before the hand-off.
+  let introspected: IntrospectReport | null = null;
+  if (plan.kind === "introspect" && plan.rebuild) {
+    if (plan.tag) await onBranch((client) => untagForkCopy(client, schemaName));
+    introspected = await introspect(false);
+  }
+
+  if (plan.tag) await onBranch((client) => tagForkCopy(client, schemaName));
+  const handedOff = plan.handOff
+    ? await handOffAppSchema(branchCtx, {
+        branch: branch.name,
+        database,
+        schemaName,
+        developer: role,
+        roles,
+        onStep,
+      })
+    : null;
+  if (plan.keepsCopy) {
+    await onBranch((client) => untagForkCopy(client, schemaName));
+  }
+
+  const rebuildSchema = async (): Promise<Rebuild> => {
+    const why =
+      requested === undefined
+        ? ": the branch still holds the rows the fork copied, and the committed migrations recreate its tables"
+        : "";
+    onStep(
+      schemaName === "public"
+        ? `Removing your objects in schema public ${on}${why}`
+        : `Dropping schema ${schemaName} ${on}${why}`,
+    );
+    const clean = await cleanHolding(branchCtx, lock);
+    // Recreated from the committed migrations, so the startup check passes.
+    const migrate = await migrateHolding(branchCtx, lock, {
+      interactive,
+      generate: false,
+    });
+    return { clean, migrate };
+  };
+  let start: InitStart;
+  if (plan.kind === "migrate") {
+    onStep(`Migrating schema ${schemaName} ${on}`);
+    start = {
+      kind: "migrate",
+      migrate: await migrateHolding(branchCtx, lock, { interactive }),
+    };
+  } else if (plan.kind === "introspect") {
+    start = {
+      kind: "introspect",
+      introspect: introspected ?? (await introspect(true)),
+      rebuilt: plan.rebuild ? await rebuildSchema() : null,
+    };
+  } else {
+    start = { kind: "clean", ...(await rebuildSchema()) };
+  }
+
+  return {
+    ...base,
+    handedOff,
+    keptCopy: keptCopyOf(
+      state,
+      plan,
+      found.sourceBranch ?? branch.status?.source_branch ?? null,
+    ),
     installed,
     start,
   };
+}
+
+/** What of the fork's copy this run left in place. */
+function keptCopyOf(
+  state: SchemaState,
+  plan: StartPlan,
+  source: string | null,
+): KeptCopy | null {
+  if (plan.keepsCopy) return { reason: "requested", from: source };
+  if (state.kind === "public" && !plan.rebuild && state.kept.length > 0) {
+    return { reason: "public", objects: state.kept };
+  }
+  return null;
 }

@@ -25,6 +25,7 @@ import {
   type GeneratedMigration,
   generateMigrationFiles,
 } from "../migrations";
+import { forkCopyRefusal, isForkCopy } from "../schema-state";
 import { resourceId } from "../targets";
 import { readCatalog, readUnreadObjects } from "./catalog";
 import {
@@ -42,6 +43,12 @@ export interface IntrospectOptions {
   readonly schemaName?: string;
   /** Module the written schema.ts imports the builder from. Default "@databricks/appkit/beta". */
   readonly importSource?: string;
+  /**
+   * false: write schema.ts and its migration without recording the migration
+   * on the branch, for init's rebuild, which drops the schema right after.
+   * Default true.
+   */
+  readonly record?: boolean;
 }
 
 export interface IntrospectReport {
@@ -213,8 +220,14 @@ export async function introspectHolding(
     );
   }
   const branchId = resourceId(env.branch.name);
+  const record = options.record ?? true;
 
   return withBranchPool(ctx, async (pool) => {
+    if (await isForkCopy(pool, schemaName)) {
+      throw new IntrospectRefusedError(
+        `Refusing to introspect: ${forkCopyRefusal(env.branch.name, schemaName, "introspect")}`,
+      );
+    }
     // The diff starts from the latest committed snapshot, so the branch must
     // record exactly the committed migrations: one it lacks would come out
     // reversed, one the checkout lacks would come out again, and one whose
@@ -347,7 +360,9 @@ export async function introspectHolding(
       }
       await writeDatabaseTypes(schema, typesFile);
       // The database already holds what the migrations describe; recording is the last step.
-      recorded = [...unrecorded, ...(migration ? [migration.tag] : [])];
+      recorded = record
+        ? [...unrecorded, ...(migration ? [migration.tag] : [])]
+        : [];
       if (recorded.length > 0) {
         await markMigrationsApplied(pool, migrationOptions, recorded);
       }

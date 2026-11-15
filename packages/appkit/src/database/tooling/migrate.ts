@@ -28,6 +28,7 @@ import {
   type GeneratedMigration,
   generateMigrationFiles,
 } from "./migrations";
+import { forkCopyRefusal, isForkCopy } from "./schema-state";
 
 /** Whether the checkout has a config/database/schema.ts yet. */
 export function hasSchemaFile(root: string): boolean {
@@ -104,25 +105,35 @@ class UnappliedMigrationError extends Error {
   }
 }
 
-/** Why migrations must not be applied to the `.env` branch; undefined when they may. */
-async function applyBlocker(ctx: DbContext): Promise<string | undefined> {
-  const env = await resolveEnvBranch(ctx);
-  if (!env) return NO_ENV_BRANCH;
-  if (takesWrites(env.kind)) return undefined;
-  return `${notYourBranch(env)}. Migrations are applied only to branches \`appkit db init\` created for you; the deployed app applies committed migrations to its own branch`;
-}
-
 /** Apply pending migrations to the `.env` branch, or say why they were not. */
 async function applyToEnvBranch(
   ctx: DbContext,
   folder: string,
   schema: Schema,
 ): Promise<ApplyOutcome> {
-  const blocker = readJournal(folder)
-    ? await applyBlocker(ctx)
-    : "no migrations to apply — schema.ts declares no tables yet";
-  if (blocker) return { applied: [], notApplied: blocker };
+  const notApplied = (reason: string): ApplyOutcome => ({
+    applied: [],
+    notApplied: reason,
+  });
+  if (!readJournal(folder)) {
+    return notApplied(
+      "no migrations to apply — schema.ts declares no tables yet",
+    );
+  }
+  const env = await resolveEnvBranch(ctx);
+  if (!env) return notApplied(NO_ENV_BRANCH);
+  if (!takesWrites(env.kind)) {
+    return notApplied(
+      `${notYourBranch(env)}. Migrations are applied only to branches \`appkit db init\` created for you; the deployed app applies committed migrations to its own branch`,
+    );
+  }
   return withBranchPool(ctx, async (pool) => {
+    // A migration on top of the fork's copy would make its rows yours to keep.
+    if (await isForkCopy(pool, schema.$schemaName)) {
+      throw new Error(
+        `Did not apply: ${forkCopyRefusal(env.branch.name, schema.$schemaName, "migrate")}`,
+      );
+    }
     // The deployed app refuses this case on start; refuse it here first.
     const leftInPublic = await detectTablesLeftInPublic(
       catalogSqlOf(pool),

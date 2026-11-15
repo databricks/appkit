@@ -76,7 +76,8 @@ const devBranch = {
   kind: "dev",
 };
 
-const pool = {};
+/** A branch whose journal is not an ordinary table, so it is no fork's copy. */
+const pool = { query: vi.fn(async () => ({ rows: [] })) };
 
 beforeEach(() => {
   applyPendingMigrations.mockReset();
