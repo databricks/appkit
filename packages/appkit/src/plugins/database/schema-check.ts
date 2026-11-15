@@ -5,11 +5,24 @@ import {
 } from "../../database/migrations/tables-left-in-public";
 import type { DataPath } from "../../database/runtime";
 import type { Schema } from "../../database/schema-builder";
+import type { MigrateOnStartDecision } from "./migrate-on-start";
 
 interface CatalogColumn {
   readonly table_name: string;
   readonly column_name: string | null;
   readonly relation_kind: string;
+}
+
+/** How the missing tables and columns get created, given what this start did about migrations. */
+function migrationAdvice(migration: MigrateOnStartDecision): string {
+  switch (migration.kind) {
+    case "off":
+      return "Run `npx appkit db migrate` locally, or commit migrations under config/database/migrations and set APPKIT_DB_MIGRATE_ON_START=true in app.yaml so the deployed app applies them on start.";
+    case "skipped":
+      return "APPKIT_DB_MIGRATE_ON_START is true, but this process did not migrate on start. The warning logged before this error says why.";
+    case "migrate":
+      return "The committed migrations under config/database/migrations were applied on start and leave them missing. Commit a migration that creates them and deploy again.";
+  }
 }
 
 interface SchemaCheck {
@@ -120,17 +133,18 @@ async function checkSchema(
  * Confirm every declared table and column exists before routes are published.
  * Even after a deployed app applies its migrations, drift would surface on each
  * request as an undefined-table or undefined-column failure, so check up front.
+ * `migration` says what this start did about migrations, so the advice fits.
  */
 export async function assertSchemaMatchesDatabase(
   dataPath: DataPath,
   schema: Schema,
+  migration: MigrateOnStartDecision,
 ): Promise<void> {
   const { problems, advice } = await diagnoseSchema(dataPath, schema);
   if (problems.length > 0) {
     throw databaseSetupFailed(
       `the declared schema does not match the database: ${problems.join("; ")}. ${
-        advice ??
-        "Run `npx appkit db migrate` locally, or commit migrations under config/database/migrations and set APPKIT_DB_MIGRATE_ON_START=true in app.yaml so the deployed app applies them on start."
+        advice ?? migrationAdvice(migration)
       }`,
     );
   }

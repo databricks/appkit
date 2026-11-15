@@ -24,28 +24,62 @@ import { createLogger } from "../../logging/logger";
 
 const logger = createLogger("database");
 
-/** Branches `appkit db` creates for one developer or one agent session; only they migrate them. */
-const DEVELOPER_BRANCH = /^(dev-[a-z0-9-]+-[0-9a-f]{6}|session-[a-z0-9-]+)$/;
+/** Whether this process applies the committed migrations when it starts. */
+export type MigrateOnStartDecision =
+  /** APPKIT_DB_MIGRATE_ON_START is not "true": a local start, or an app that never opted in. */
+  | { readonly kind: "off" }
+  /** The flag is on, but this process does not run as the app's own service principal. */
+  | { readonly kind: "skipped"; readonly reason: string }
+  | { readonly kind: "migrate" };
 
 /**
- * True when the app opts in with APPKIT_DB_MIGRATE_ON_START=true (app.yaml)
- * and runs with service principal credentials, as Databricks Apps sets for
- * every app. `.env` never carries the flag, so a local start does not migrate;
- * `databricks apps run-local` reads app.yaml but sets no credentials.
+ * Migrate on start only when the app opted in with APPKIT_DB_MIGRATE_ON_START=true
+ * (app.yaml) and the process runs as the app's own service principal. Databricks
+ * Apps sets DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET and, for a bound
+ * database, PGUSER (the client id) for the deployed app. A local start, or
+ * `databricks apps run-local` with exported M2M credentials, has the developer's
+ * PGUSER from `.env`, and must not migrate as them.
  */
-export function shouldMigrateOnStart(
+export function decideMigrateOnStart(
   env: NodeJS.ProcessEnv = process.env,
-): boolean {
-  return (
-    env.APPKIT_DB_MIGRATE_ON_START === "true" &&
-    Boolean(env.DATABRICKS_CLIENT_ID) &&
-    Boolean(env.DATABRICKS_CLIENT_SECRET)
-  );
+): MigrateOnStartDecision {
+  if (env.APPKIT_DB_MIGRATE_ON_START !== "true") return { kind: "off" };
+  for (const name of ["DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"]) {
+    if (!env[name]) return { kind: "skipped", reason: `${name} is not set.` };
+  }
+  if (env.PGUSER && env.PGUSER !== env.DATABRICKS_CLIENT_ID) {
+    return {
+      kind: "skipped",
+      reason: `PGUSER is "${env.PGUSER}", not the app's client id in DATABRICKS_CLIENT_ID.`,
+    };
+  }
+  return { kind: "migrate" };
 }
 
 /** The branch id in LAKEBASE_ENDPOINT (projects/<p>/branches/<b>/endpoints/<e>). */
 function endpointBranch(endpoint: string | undefined): string | undefined {
   return endpoint?.match(/\/branches\/([^/]+)\//)?.[1];
+}
+
+/** Lakebase branch ids are at most 63 characters. */
+const BRANCH_ID_MAX_LENGTH = 63;
+
+/**
+ * The exact shapes AppKit gives the branches of one developer
+ * (dev-<slug>-<6 hex>) and of one agent session (session-<6 hex>-<id>). Only
+ * they migrate those branches, so a deployed app bound to one is misconfigured.
+ */
+const DEVELOPMENT_BRANCH_SHAPES = {
+  "a developer": /^dev-[a-z0-9]+(?:-[a-z0-9]+)*-[0-9a-f]{6}$/,
+  "an agent session": /^session-[0-9a-f]{6}-[a-z0-9]{1,48}$/,
+};
+
+/** Whose branch the id names, by its exact shape; undefined for any other id. */
+function developmentBranchOwner(branch: string): string | undefined {
+  if (branch.length > BRANCH_ID_MAX_LENGTH) return undefined;
+  return Object.entries(DEVELOPMENT_BRANCH_SHAPES).find(([, shape]) =>
+    shape.test(branch),
+  )?.[0];
 }
 
 /**
@@ -61,12 +95,12 @@ export async function migrateOnStart(
 ): Promise<void> {
   const folder = migrationsFolder(root);
   const branch = endpointBranch(env.LAKEBASE_ENDPOINT);
-  if (branch && DEVELOPER_BRANCH.test(branch)) {
-    logger.warn(
-      "Not migrating branch %s on start: it belongs to a developer or agent session, which migrates it with `appkit db migrate`.",
-      branch,
+  const owner = branch && developmentBranchOwner(branch);
+  if (owner) {
+    throw databaseSetupFailed(
+      `LAKEBASE_ENDPOINT points at branch "${branch}", whose name has the shape of ${owner} branch, and a deployed app migrates only its deploy branch. ` +
+        "Bind the app to its deploy branch. If this is the deploy branch, rename it so it does not look like a dev or session branch.",
     );
-    return;
   }
   if (!fs.existsSync(journalFile(folder))) {
     logger.info("No committed migrations at %s; nothing to apply", folder);
@@ -93,6 +127,8 @@ export async function migrateOnStart(
     result = await applyPendingMigrations(pool, {
       migrationsFolder: folder,
       schemaName: schema.$schemaName,
+      // The deploy branch only ever runs merged files as they were merged.
+      onDrift: "refuse",
     });
   } catch (error) {
     if (

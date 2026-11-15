@@ -68,22 +68,24 @@ export function ownershipHint(
       );
     }
     return (
-      `Role "${ownership.currentUser}" can create in schema public, so an object this migration changes belongs to another role. ` +
-      `Have that role transfer it with ALTER TABLE public.<table> OWNER TO "${ownership.currentUser}", or drop schemaName from defineSchema() to use the default schema app, which the app creates and owns.`
+      `Role "${ownership.currentUser}" can create in schema public, so an object this migration changes belongs to another role, and no Postgres role can hand it to "${ownership.currentUser}". ` +
+      "Drop schemaName from defineSchema() to use the default schema app, which the app creates and owns."
     );
   }
+  // ALTER ... OWNER TO the service principal's role fails on Lakebase with
+  // "must be able to SET ROLE": nobody holds ADMIN or SET on that role.
   if (ownership && ownership.owner !== ownership.currentUser) {
     return (
       `Schema "${ownership.schemaName}" is owned by "${ownership.owner}", but the app connects as "${ownership.currentUser}". ` +
-      "This happens when the app's database resource was removed and added again, or the app was recreated with a new service principal: " +
-      `Lakebase hands the objects to another role. Have "${ownership.owner}" transfer the schema and its tables to "${ownership.currentUser}" ` +
-      "(ALTER … OWNER TO), or set another schemaName in schema.ts. " +
+      "If two apps share this database, give each its own schemaName in schema.ts. " +
+      "Otherwise the app was recreated with a new service principal, or its database resource was removed and added again, " +
+      `and Lakebase handed the objects to "${ownership.owner}". No Postgres role can hand them back to "${ownership.currentUser}"; only Lakebase can move them. ` +
       "On your dev or session branch, rerun `appkit db init`, which hands you the schema."
     );
   }
   return (
     "The connecting role lacks a privilege this migration needs: CREATE on the database, or ownership of the app schema and its tables. " +
-    "On the deploy branch that role is the app's service principal: bind the database to the app with CAN_CONNECT_AND_CREATE, " +
-    "and if another role created an object the migration changes, have that role transfer it to the app's service principal."
+    "On the deploy branch that role is the app's service principal: bind the database to the app with CAN_CONNECT_AND_CREATE. " +
+    "If another role owns an object the migration changes, no Postgres role can hand it to the service principal; only Lakebase can move it."
   );
 }

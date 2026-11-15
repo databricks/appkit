@@ -136,6 +136,27 @@ committed snapshot. When they differ, it writes
 `shared/appkit-types/database.d.ts`, then applies pending migrations to the
 branch `.env` names. Commit the migrations with `schema.ts`.
 
+### Warnings about a generated migration
+
+`migrate` prints a warning for each of two classes of statement in the
+migration it wrote, and names the statements. One statement can be in both
+classes.
+
+Statements that break instances still running the previous release. Drops,
+renames, type changes, `SET NOT NULL` and a new `NOT NULL` column without a
+default are in this class. Those instances can still serve while the new one
+migrates on start, and a code rollback does not undo a migration. Deploy code
+that works with both the old and the new schema first, then this change in a
+later deploy.
+
+Statements that may fail on existing rows. `SET NOT NULL`, a new `NOT NULL`
+column without a default, a type change, a new constraint (`UNIQUE`,
+`PRIMARY KEY`, `CHECK`, `FOREIGN KEY` or `EXCLUDE`) and a unique index are in
+this class. Postgres checks them against the rows already in the table. A new
+dev branch has no rows, so they pass there and can fail on the deploy branch.
+Test the migration on a branch that has a copy of the deploy branch's data
+before you deploy.
+
 `migrate` applies migrations only to your dev branch or to this checkout's
 session branch. A session branch name includes a hash of the user who created
 it, so a `.env` copied from another developer does not make their session branch
@@ -144,24 +165,36 @@ yours.
 ### Your branch's data
 
 `npx appkit db init` creates your dev branch, or this checkout's session branch
-with `--session`, as a fork of the project's default branch, and points `.env`
-at it. A fork copies every row of its source, production data included. A
-branch `init` forked starts without them: `init` drops the app schema and
-recreates it from the committed migrations. Without
-`config/database/schema.ts`, `init` first writes it and `0000_baseline.sql`
-from the fork's schema, then rebuilds the schema from that baseline. Until the
-rebuild has run, `.env` names the branch in `APPKIT_DB_NEW_BRANCH`, so a run
-that stops early is finished by the next `init`.
+with `--session`, as a fork of the branch `databricks.yml` deploys to, else of
+the project's default branch, and points `.env` at it. A fork copies every row
+of its source, production data included. `init` reads from the branch what its
+app schema is. While the app's service principal still owns the schema, it is
+the fork's untouched copy. `init` hands it to you, drops it and recreates it
+from the committed migrations, so the branch starts without the copied rows.
+Without `config/database/schema.ts`, `init` first writes it and
+`0000_baseline.sql` from the fork's schema, then rebuilds the schema from that
+baseline.
 
-To keep the copied rows on a new branch, pass `--schema migrate`, or
-`--schema introspect` without `schema.ts`. A branch `init` reuses keeps its
-data: `init` migrates it, or introspects it without `schema.ts`.
-`--schema clean` rebuilds a reused branch too, after a confirmation or with
-`--yes`.
+Before the hand-off, `init` inserts one row with the hash `appkit:fork-copy`
+into the copied `__drizzle_migrations` journal. Dropping the schema removes it.
+A run that stops between the hand-off and the drop leaves a schema you own
+whose journal still carries that row, and the next `init`, from any checkout,
+finishes the rebuild. `appkit db migrate`, `appkit db introspect` and
+`appkit db seed` refuse a branch whose journal carries it.
 
-In schema `public`, `init` and `clean` remove only the objects your role owns.
-On a fork of the deploy branch the app's service principal owns the tables, so
-they stay with their rows, and the report lists them as kept.
+To keep the copied rows, pass `--schema migrate`, or `--schema introspect`.
+`init` then hands the schema to you, removes the row, keeps the data, and says
+where it came from. A schema you own with no such row is your working branch.
+`init` migrates it, or introspects it without `schema.ts`. `--schema clean`
+rebuilds your working branch too, after a confirmation or with `--yes`. A
+copy's rebuild asks nothing, because `migrate` refuses a copy, so none of your
+work can be on it. `--schema none` touches nothing, and the next plain `init`
+still rebuilds the copy.
+
+In schema `public`, `init` and `clean` remove only the objects your role owns,
+and `init` never hands `public` off or tags it. On a fork of the deploy branch
+the app's service principal owns the tables, so `init` migrates the schema, the
+tables stay with their rows, and the report lists them as kept.
 
 ### Branches `databricks.yml` deploys to
 

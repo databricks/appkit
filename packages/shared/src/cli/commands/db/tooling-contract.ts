@@ -15,6 +15,7 @@ export interface MigrateReport {
   readonly applied: readonly string[];
   readonly adopted?: readonly string[];
   readonly breaking?: readonly string[];
+  readonly dataDependent?: readonly string[];
   readonly notApplied?: string;
   readonly typesFile: string;
 }
@@ -49,6 +50,15 @@ export interface InitOptions {
   readonly ttl?: string;
   readonly interactive?: boolean;
   readonly onStep?: (message: string) => void;
+  /**
+   * Asked before an explicit --schema clean drops a schema that may hold your
+   * work. init reads from the branch whether it does, and asks nothing for a
+   * fork's copy. A no makes init throw an error named InitCancelledError.
+   */
+  readonly confirmClean?: (target: {
+    readonly branch: string;
+    readonly schemaName: string;
+  }) => Promise<boolean>;
 }
 
 export interface CleanReport {
@@ -64,6 +74,13 @@ export interface Rebuild {
   readonly clean: CleanReport;
   readonly migrate: MigrateReport;
 }
+
+/** Rows the fork copied into the app schema that init left in place, and why. */
+export type KeptCopy =
+  /** You asked for --schema migrate or --schema introspect on a copy. */
+  | { readonly reason: "requested"; readonly from: string | null }
+  /** In schema public, what other roles own stays with its rows; init never removes it. */
+  | { readonly reason: "public"; readonly objects: readonly string[] };
 
 export type InitStart =
   | { readonly kind: "none" }
@@ -131,6 +148,7 @@ export interface InitReport {
     readonly action: "kept" | "created" | "updated";
   };
   readonly handedOff: string | null;
+  readonly keptCopy: KeptCopy | null;
   readonly envFile: string;
   readonly installed: string | null;
   readonly start: InitStart;
@@ -143,6 +161,7 @@ export interface InitReport {
 export interface UnappliedMigration {
   readonly generated: GeneratedMigration;
   readonly breaking: readonly string[];
+  readonly dataDependent: readonly string[];
 }
 
 /**
