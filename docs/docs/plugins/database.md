@@ -175,8 +175,10 @@ you picked in its prompts, usually the branch the app deploys to, and
    `--schema clean` removes them. `--schema clean` drops the app schema first,
    after a confirmation. Without a terminal, it needs `--yes`. `--schema none`
    only sets up the branch and `.env`. It reads no `schema.ts`, hands over no
-   schema, and leaves the schema and its owner as the fork copied them, so the
-   next plain `init` still rebuilds it.
+   schema, and leaves the schema and its owner as the fork copied them. The
+   next plain `init` still rebuilds a copy the app's service principal owns.
+   If you already owned the schema on the source, that later run sees your
+   working branch, so run `--schema clean` then.
 4. Unless `--schema none`, it installs the drizzle-kit version AppKit pins as a
    dev dependency when the app does not have it. `migrate` and `introspect`
    generate migrations with it.
