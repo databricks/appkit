@@ -539,13 +539,10 @@ U+2028, U+2029, `*/`, backtick and `${`, loaded without running code.
 Introspect records its migration as applied only if the branch's last recorded migration is the one just before it,
 checked under the schema's advisory lock. A branch ahead of the checkout would otherwise record DDL it never ran.
 
-Introspect keeps what an existing `schema.ts` marks private, because the server entity client omits private columns
-from its reads by default. A column the old file declares keeps its `.private()`, or stays without one. Introspect
-writes a column the old file does not declare with `.private()`, and a warning names it. When the catalog has a
-foreign key the old file does not declare, introspect refuses before it changes any file. Each foreign key adds a
-relation that the server entity client can `include`, which widens what server code reads, so the developer declares
-it with `fk()`. When `schema.ts` does not load, introspect refuses before it reads the branch, because it could not keep
-the private columns. Without a `schema.ts`, introspect writes no column private.
+Introspect keeps the `.private()` an existing `schema.ts` declares, because the server entity client omits private
+columns from its reads by default. Every other column, and every foreign key in the catalog, is written as the catalog
+has it, foreign keys with `fk()`. When `schema.ts` does not load, introspect refuses before it reads the branch,
+because it could not keep the columns the file marks private.
 
 ### Flag Strategy
 
@@ -788,8 +785,7 @@ start and the schema check passes. Keep the expand and contract migration checks
    warning class for statements that may fail on existing rows, and a checked tooling contract.
    When Postgres rejects the migration the run wrote, migrate removes it, so the next run writes it again.
 5. [#670](https://github.com/databricks/appkit/pull/670) `appkit db introspect`: compare-and-set recording, only on
-   your own branch, private columns and a refusal of foreign keys that the old `schema.ts` does not declare, and
-   catalog tests that run SQL.
+   your own branch, the old `schema.ts`'s private columns kept, and catalog tests that run SQL.
 6. [#672](https://github.com/databricks/appkit/pull/672) `appkit db init`, `clean`, `seed`: dev and session branches
    with no prompts, forked from the branch the default `databricks.yml` target binds or else the project default, an
    untouched copy rebuilt without its app rows by default, decided from the schema owner and a fork-copy tag in the
