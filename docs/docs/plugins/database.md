@@ -175,8 +175,10 @@ you picked in its prompts, usually the branch the app deploys to, and
    `--schema clean` removes them. `--schema clean` drops the app schema first,
    after a confirmation. Without a terminal, it needs `--yes`. `--schema none`
    only sets up the branch and `.env`. It reads no `schema.ts`, hands over no
-   schema, and leaves the schema and its owner as the fork copied them, so the
-   next plain `init` still rebuilds it.
+   schema, and leaves the schema and its owner as the fork copied them. The
+   next plain `init` still rebuilds a copy the app's service principal owns.
+   If you already owned the schema on the source, that later run sees your
+   working branch, so run `--schema clean` then.
 4. Unless `--schema none`, it installs the drizzle-kit version AppKit pins as a
    dev dependency when the app does not have it. `migrate` and `introspect`
    generate migrations with it.
@@ -563,9 +565,10 @@ app no longer has, the old service principal's role or the role of the person
 who removed the resource. No Postgres role can hand them back. `ALTER ... OWNER
 TO` the new service principal fails with `must be able to SET ROLE`, because
 nobody holds that role. Only Lakebase moves them, by deleting the owning role
-and reassigning what it owns. The delete reassigns every object the role owns
-in every database of the branch, drops the role's memberships and grants, and
-removes the role. So first take the inventory `db init` takes before it hands a
+and reassigning what it owns. The delete reassigns the objects the role owns
+on the branch, drops the role's memberships and grants, and removes the role. If
+the role still owns objects in another database of the branch, the delete can
+fail. So first take the inventory `db init` takes before it hands a
 schema over. In each database of the branch, list what the role owns there:
 
 ```sql
