@@ -30,7 +30,7 @@ vi.mock("../introspect", async (importOriginal) => ({
 
 import type { DbContext } from "../context";
 import type { HistoryLock } from "../history-lock";
-import { InitCancelledError, type InitOptions, runInit } from "../init";
+import { type InitOptions, runInit } from "../init";
 import { IntrospectRefusedError } from "../introspect";
 import { LakebaseApiError } from "../lakebase-api";
 import { runMigrate } from "../migrate";
@@ -57,13 +57,9 @@ const migrateReport = {
   typesFile: "/app/shared/appkit-types/database.d.ts",
 };
 
-/**
- * The branch as init reads it over SQL: the app schema's owner, whether its
- * journal exists and carries the fork-copy tag, what other roles own in
- * public, and what the hand-off reads about the owner.
- */
 let schemaOwner: string | null;
 let journal: boolean;
+let journalTrusted: boolean;
 let tagged: boolean;
 let keptInPublic: string[];
 let ownedOutside: string[];
@@ -72,10 +68,25 @@ const queries: string[] = [];
 const pool = {
   query: vi.fn(async (text: string) => {
     queries.push(text);
+    if (text.includes("c.relname = $2")) {
+      return {
+        rows: journal
+          ? [
+              {
+                relkind: "r",
+                owner: journalTrusted ? schemaOwner : "someone-else",
+                schema_owner: schemaOwner,
+                current_user: USER,
+                row_security: false,
+                trusted: journalTrusted,
+              },
+            ]
+          : [],
+      };
+    }
     if (text.includes("nspowner")) {
       return { rows: [{ owner: schemaOwner, current_user: USER }] };
     }
-    if (text.includes("c.relkind = 'r'")) return { rows: journal ? [{}] : [] };
     if (text.includes("__drizzle_migrations")) {
       if (text.startsWith("insert")) tagged = true;
       else if (text.startsWith("delete")) tagged = false;
@@ -91,7 +102,6 @@ const pool = {
     throw new Error(`unexpected query ${text}`);
   }),
 };
-/** The writes to the journal's tag row, in order: "insert" tags, "delete" untags. */
 const tagWrites = () =>
   queries
     .filter(
@@ -173,15 +183,26 @@ function envFile(root: string): Record<string, string> {
   );
 }
 
-/** Run init, collecting its progress lines. */
 async function init(ctx: DbContext, options: InitOptions = {}) {
   const steps: string[] = [];
+  const warnings: string[] = [];
+  const events: string[] = [];
   const report = await runInit(ctx, {
     ...options,
-    onStep: (step) => steps.push(step),
+    onStep: (step) => {
+      steps.push(step);
+      events.push(step);
+    },
+    onWarning: (warning) => {
+      warnings.push(warning);
+      events.push(warning);
+    },
   });
-  return { report, steps };
+  return { report, steps, warnings, events };
 }
+
+const UNTAGGED =
+  /^Could not mark schema app on .* as the fork's copy\. It has no journal table, or one owned by a role init does not trust\. If this run stops before the rebuild finishes, the next `appkit db init` will see a schema that looks like your working branch and keep the copied rows\. Run `appkit db init --schema clean` then\.$/;
 
 function conflict(name: string): LakebaseApiError {
   return new LakebaseApiError(`create branch ${name}`, "ALREADY_EXISTS", {
@@ -193,6 +214,7 @@ function conflict(name: string): LakebaseApiError {
 beforeEach(() => {
   schemaOwner = SP;
   journal = true;
+  journalTrusted = true;
   tagged = false;
   keptInPublic = [];
   ownedOutside = [];
@@ -245,6 +267,7 @@ describe("runInit — dev branch", () => {
         kind: "clean",
         clean: { branch: DEV, schemaName: "app", dependents: [], kept: [] },
         migrate: migrateReport,
+        reason: "fork-copy",
       },
     });
     expect(steps).toEqual([
@@ -253,7 +276,6 @@ describe("runInit — dev branch", () => {
       `Handing schema app in database databricks_postgres on ${devBranchId(USER)} to you: deleting this branch's copy of role ${SP}, which owns it, with its objects reassigned to you`,
       `Dropping schema app on ${devBranchId(USER)}: the branch still holds the rows the fork copied, and the committed migrations recreate its tables`,
     ]);
-    // The copied journal is tagged before the hand-off, so a rerun from any checkout finishes the rebuild.
     expect(tagWrites()).toEqual(["insert"]);
     expect(
       queries.indexOf(queries.find((text) => text.startsWith("insert")) ?? ""),
@@ -958,14 +980,15 @@ describe("runInit — schema start", () => {
       rebuilt: {
         clean: { branch: DEV, schemaName: "app", dependents: [], kept: [] },
         migrate: migrateReport,
+        reason: "fork-copy",
       },
     });
-    // Introspect writes the files while the copy is untouched and records nothing on it; the rebuild follows.
     expect(introspectHolding.mock.calls[0]?.[2]).toEqual({
       interactive: false,
       schemaName: "app",
-      record: false,
+      recordAsApplied: false,
     });
+    expect(tagWrites()).toEqual(["insert"]);
     expect(introspectHolding.mock.invocationCallOrder[0]).toBeLessThan(
       cleanHolding.mock.invocationCallOrder[0] ?? 0,
     );
@@ -1035,6 +1058,7 @@ describe("runInit — schema start", () => {
       kind: "clean",
       clean: { branch: DEV, schemaName: "app", dependents: [], kept: [] },
       migrate: migrateReport,
+      reason: "requested",
     });
   });
 
@@ -1145,10 +1169,51 @@ describe("runInit — the start follows the branch's own state", () => {
       rebuilt: null,
     });
     expect(introspectHolding.mock.calls[0]?.[2]).toMatchObject({
-      record: true,
+      recordAsApplied: true,
     });
     expect(cleanHolding).not.toHaveBeenCalled();
     expect(tagWrites()).toEqual([]);
+  });
+
+  test("a fork this run created is a copy even when you already owned the source schema: tagged and rebuilt, with no hand-off and no question", async () => {
+    schemaOwner = USER;
+    const asked: unknown[] = [];
+    const confirmClean = async (target: unknown) => {
+      asked.push(target);
+      return true;
+    };
+
+    const lakebase = project();
+    const { report, steps } = await init(appOn(lakebase));
+    expect(report).toMatchObject({
+      created: true,
+      handedOff: null,
+      keptCopy: null,
+      start: { kind: "clean" },
+    });
+    expect(steps).toContain(dropping());
+    expect(tagWrites()).toEqual(["insert"]);
+    expect(lakebase.calls.some((call) => call.startsWith("deleteRole"))).toBe(
+      false,
+    );
+
+    queries.length = 0;
+    const explicit = await init(appOn(project()), {
+      schema: "clean",
+      confirmClean,
+    });
+    expect(explicit.report.start.kind).toBe("clean");
+    expect(asked).toEqual([]);
+
+    queries.length = 0;
+    const kept = await init(appOn(project()), { schema: "migrate" });
+    expect(kept.report).toMatchObject({
+      created: true,
+      handedOff: null,
+      keptCopy: { reason: "requested", from: PRODUCTION },
+      start: { kind: "migrate" },
+    });
+    expect(tagWrites()).toEqual(["delete"]);
   });
 
   test("a copy the service principal owns on an existing branch is rebuilt, from a run that forked nothing", async () => {
@@ -1185,7 +1250,7 @@ describe("runInit — the start follows the branch's own state", () => {
     expect(tagWrites()).toEqual([]);
   });
 
-  test("a handed-off copy without schema.ts says how to continue instead of guessing", async () => {
+  test("an interrupted rebuild without schema.ts says how to continue instead of guessing", async () => {
     schemaOwner = USER;
     tagged = true;
 
@@ -1198,13 +1263,43 @@ describe("runInit — the start follows the branch's own state", () => {
     expect(cleanHolding).not.toHaveBeenCalled();
   });
 
-  test("a copy without a journal is rebuilt without a tag", async () => {
+  test("a copy without a journal is rebuilt without a tag, with a warning before the hand-off that says what to do after a stop", async () => {
     journal = false;
 
-    const { report } = await init(appOn(project()));
+    const { report, warnings, events } = await init(appOn(project()));
 
     expect(report.start.kind).toBe("clean");
     expect(tagWrites()).toEqual([]);
+    expect(warnings).toEqual([expect.stringMatching(UNTAGGED)]);
+    expect(events.findIndex((event) => UNTAGGED.test(event))).toBeLessThan(
+      events.findIndex((event) => event.startsWith("Handing schema app")),
+    );
+  });
+
+  test("a copy whose journal a role you do not trust owns is rebuilt without a tag, with the same warning: a write there could run that role's code as you", async () => {
+    journalTrusted = false;
+
+    const { report, warnings } = await init(appOn(project()));
+
+    expect(report.start.kind).toBe("clean");
+    expect(tagWrites()).toEqual([]);
+    expect(warnings).toEqual([expect.stringMatching(UNTAGGED)]);
+  });
+
+  test("without an onWarning, the warning goes to onStep", async () => {
+    journal = false;
+    const steps: string[] = [];
+
+    await runInit(appOn(project()), { onStep: (step) => steps.push(step) });
+
+    expect(steps).toContainEqual(expect.stringMatching(UNTAGGED));
+  });
+
+  test("a tagged copy gets no warning", async () => {
+    const { warnings } = await init(appOn(project()));
+
+    expect(tagWrites()).toEqual(["insert"]);
+    expect(warnings).toEqual([]);
   });
 
   test("--schema migrate or --schema introspect on a copy keeps the copied rows: handed off, untagged, and reported", async () => {
@@ -1230,7 +1325,7 @@ describe("runInit — the start follows the branch's own state", () => {
       },
     });
     expect(introspectHolding.mock.calls[0]?.[2]).toMatchObject({
-      record: true,
+      recordAsApplied: true,
     });
     expect(cleanHolding).not.toHaveBeenCalled();
   });
@@ -1245,28 +1340,43 @@ describe("runInit — the start follows the branch's own state", () => {
       return true;
     };
 
-    await init(appOn(project()), { schema: "clean", confirmClean });
+    const onCopy = await init(appOn(project()), {
+      schema: "clean",
+      confirmClean,
+    });
     expect(asked).toEqual([]);
+    expect(onCopy.report.start).toMatchObject({
+      kind: "clean",
+      reason: "requested",
+    });
 
-    // Your working branch, where the schema is yours and its journal carries no tag.
     schemaOwner = USER;
     tagged = false;
-    await init(appOn(existingDev()), { schema: "clean", confirmClean });
+    const onYours = await init(appOn(existingDev()), {
+      schema: "clean",
+      confirmClean,
+    });
     expect(asked).toEqual([{ branch: DEV, schemaName: "app" }]);
+    expect(onYours.report.start).toMatchObject({
+      kind: "clean",
+      reason: "requested",
+    });
   });
 
   test("a no to the confirmation stops before the drop, with .env already pointing at the branch", async () => {
     schemaOwner = USER;
     const ctx = appOn(existingDev());
 
-    const refused = init(ctx, {
+    const { report } = await init(ctx, {
       schema: "clean",
       confirmClean: async () => false,
     });
-    await expect(refused).rejects.toBeInstanceOf(InitCancelledError);
-    await expect(refused).rejects.toThrow(
-      `Cancelled. Schema app on ${devBranchId(USER)} is as it was, and .env points at the branch.`,
-    );
+    expect(report).toMatchObject({
+      branch: DEV,
+      handedOff: null,
+      installed: null,
+      start: { kind: "cancelled", schemaName: "app" },
+    });
     expect(cleanHolding).not.toHaveBeenCalled();
     expect(envFile(ctx.root).LAKEBASE_ENDPOINT).toBe(
       `${DEV}/endpoints/primary`,
@@ -1326,7 +1436,7 @@ describe("runInit — the start follows the branch's own state", () => {
     expect(introspectHolding.mock.calls[0]?.[2]).toEqual({
       interactive: false,
       schemaName: "sales",
-      record: true,
+      recordAsApplied: true,
     });
     expect(steps).toContain(
       `Writing schema.ts from schema sales on ${devBranchId(USER)}`,
@@ -1396,7 +1506,6 @@ describe("runInit — .env", () => {
       `Database analytics, which databricks.yml binds, is not on ${devBranchId(USER)}. Create it there (databricks postgres create-database ${DEV} --database-id analytics), or bind a database the project's branches have, then rerun \`appkit db init\`.`,
     );
     expect(lakebase.calls).toContain(`getDatabase ${DEV}/databases/analytics`);
-    // The fork happened, and nothing was written. The next init finds the branch by its name.
     expect(fs.existsSync(path.join(root, ".env"))).toBe(false);
   });
 

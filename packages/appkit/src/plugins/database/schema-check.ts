@@ -13,7 +13,6 @@ interface CatalogColumn {
   readonly relation_kind: string;
 }
 
-/** How the missing tables and columns get created, given what this start did about migrations. */
 function migrationAdvice(migration: MigrateOnStartDecision): string {
   switch (migration.kind) {
     case "off":
