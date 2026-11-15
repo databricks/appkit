@@ -94,7 +94,7 @@ function printInitReport(
     if (start.rebuilt) printRebuild(start.rebuilt);
   } else if (start.kind === "migrate") printMigrateReport(start.migrate);
   else if (start.kind === "clean") printRebuild(start);
-  else info("Left the schema as it is");
+  else if (start.kind === "none") info("Left the schema as it is");
 
   if (keptCopy?.reason === "requested") {
     warn(
@@ -120,16 +120,16 @@ async function runDbInit(flags: InitFlags): Promise<void> {
       onStep: info,
       onWarning: warn,
     };
-    printInitReport(
-      await tooling.runInit(tooling.createDbContext(), options),
-      flags.schema,
-    );
-  } catch (error) {
-    if (error instanceof Error && error.name === "InitCancelledError") {
-      info(error.message);
+    const report = await tooling.runInit(tooling.createDbContext(), options);
+    if (report.start.kind === "cancelled") {
+      info(
+        `Cancelled. Schema ${report.start.schemaName} on ${shortName(report.branch)} is as it was, and .env points at the branch.`,
+      );
       process.exitCode = 1;
       return;
     }
+    printInitReport(report, flags.schema);
+  } catch (error) {
     fail(error);
   }
 }

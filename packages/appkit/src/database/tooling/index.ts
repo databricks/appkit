@@ -14,7 +14,6 @@ export {
 } from "./clean";
 export { createDbContext, type DbContext } from "./context";
 export {
-  InitCancelledError,
   type InitOptions,
   type InitReport,
   type InitStart,

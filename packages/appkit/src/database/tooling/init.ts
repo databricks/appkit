@@ -101,6 +101,7 @@ interface Rebuild {
 
 export type InitStart =
   | { readonly kind: "none" }
+  | { readonly kind: "cancelled"; readonly schemaName: string }
   | { readonly kind: "migrate"; readonly migrate: MigrateReport }
   | {
       readonly kind: "introspect";
@@ -112,13 +113,6 @@ export type InitStart =
 export type KeptCopy =
   | { readonly reason: "requested"; readonly from: string | null }
   | { readonly reason: "public"; readonly objects: readonly string[] };
-
-export class InitCancelledError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "InitCancelledError";
-  }
-}
 
 export interface InitReport {
   readonly mode: BranchMode;
@@ -710,9 +704,13 @@ async function initHolding(
     options.confirmClean &&
     !(await options.confirmClean({ branch: branch.name, schemaName }))
   ) {
-    throw new InitCancelledError(
-      `Cancelled. Schema ${schemaName} ${on} is as it was, and .env points at the branch.`,
-    );
+    return {
+      ...base,
+      handedOff: null,
+      keptCopy: null,
+      installed: null,
+      start: { kind: "cancelled", schemaName },
+    };
   }
   const installed = ensureDrizzleKit(
     ctx.root,

@@ -77,6 +77,7 @@ export type KeptCopy =
 
 export type InitStart =
   | { readonly kind: "none" }
+  | { readonly kind: "cancelled"; readonly schemaName: string }
   | { readonly kind: "migrate"; readonly migrate: MigrateReport }
   | {
       readonly kind: "introspect";

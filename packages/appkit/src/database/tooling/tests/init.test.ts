@@ -30,7 +30,7 @@ vi.mock("../introspect", async (importOriginal) => ({
 
 import type { DbContext } from "../context";
 import type { HistoryLock } from "../history-lock";
-import { InitCancelledError, type InitOptions, runInit } from "../init";
+import { type InitOptions, runInit } from "../init";
 import { IntrospectRefusedError } from "../introspect";
 import { LakebaseApiError } from "../lakebase-api";
 import { runMigrate } from "../migrate";
@@ -1348,14 +1348,16 @@ describe("runInit — the start follows the branch's own state", () => {
     schemaOwner = USER;
     const ctx = appOn(existingDev());
 
-    const refused = init(ctx, {
+    const { report } = await init(ctx, {
       schema: "clean",
       confirmClean: async () => false,
     });
-    await expect(refused).rejects.toBeInstanceOf(InitCancelledError);
-    await expect(refused).rejects.toThrow(
-      `Cancelled. Schema app on ${devBranchId(USER)} is as it was, and .env points at the branch.`,
-    );
+    expect(report).toMatchObject({
+      branch: DEV,
+      handedOff: null,
+      installed: null,
+      start: { kind: "cancelled", schemaName: "app" },
+    });
     expect(cleanHolding).not.toHaveBeenCalled();
     expect(envFile(ctx.root).LAKEBASE_ENDPOINT).toBe(
       `${DEV}/endpoints/primary`,

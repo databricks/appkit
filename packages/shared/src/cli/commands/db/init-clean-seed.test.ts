@@ -71,12 +71,7 @@ function toolingThatAsks(): void {
       schemaName: "app",
     });
     if (confirmed === false) {
-      throw Object.assign(
-        new Error(
-          "Cancelled. Schema app on dev-alice-3f9a2c is as it was, and .env points at the branch.",
-        ),
-        { name: "InitCancelledError" },
-      );
+      return { ...report, start: { kind: "cancelled", schemaName: "app" } };
     }
     return report;
   });
