@@ -76,7 +76,6 @@ const devBranch = {
   kind: "dev",
 };
 
-/** A branch without the app schema yet, so it is no fork's copy. */
 const pool = {
   query: vi.fn(async (_text: string) => ({ rows: [] as unknown[] })),
 };

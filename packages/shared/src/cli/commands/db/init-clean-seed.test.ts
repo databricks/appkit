@@ -64,7 +64,6 @@ const report = {
   start: { kind: "migrate", migrate },
 };
 
-/** The tooling on your working branch. It asks the confirmation and stops on a no. */
 function toolingThatAsks(): void {
   tooling.runInit.mockImplementation(async (_ctx, options) => {
     const confirmed = await options.confirmClean?.({
@@ -303,7 +302,6 @@ describe("appkit db init", () => {
     });
     await init("--schema", "migrate");
 
-    // The schema is yours after a keep, so a plain init migrates it and keeps the rows.
     expect(output(log)).toContain(
       "Kept the rows the fork copied from production, as --schema migrate asks. The app schema is yours now, so a plain `appkit db init` keeps them. `appkit db init --schema clean` drops the app schema with everything in it and rebuilds it from the committed migrations, after a confirmation or with --yes.",
     );

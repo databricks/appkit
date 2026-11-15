@@ -50,13 +50,7 @@ export interface InitOptions {
   readonly ttl?: string;
   readonly interactive?: boolean;
   readonly onStep?: (message: string) => void;
-  /** A copy's rebuild that cannot be marked on the branch, which a stop would leave looking like your working branch. */
   readonly onWarning?: (message: string) => void;
-  /**
-   * Asked before an explicit --schema clean drops a schema that may hold your
-   * work. init reads from the branch whether it does, and asks nothing for a
-   * fork's copy. A no makes init throw an error named InitCancelledError.
-   */
   readonly confirmClean?: (target: {
     readonly branch: string;
     readonly schemaName: string;
@@ -77,11 +71,8 @@ export interface Rebuild {
   readonly migrate: MigrateReport;
 }
 
-/** Rows the fork copied into the app schema that init left in place, and why. */
 export type KeptCopy =
-  /** You asked for --schema migrate or --schema introspect on a copy. */
   | { readonly reason: "requested"; readonly from: string | null }
-  /** In schema public, what other roles own stays with its rows; init never removes it. */
   | { readonly reason: "public"; readonly objects: readonly string[] };
 
 export type InitStart =

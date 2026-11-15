@@ -11,30 +11,15 @@ import { MIGRATIONS_TABLE } from "../migrations/paths";
 import { readKeptObjects } from "./clean";
 import { resourceId } from "./targets";
 
-/** How init leaves the schema; "none" leaves it as the fork has it. */
 export type SchemaStart = "migrate" | "introspect" | "clean" | "none";
 
-/**
- * The journal row init writes into a fork's copy of the app schema before it
- * takes the schema over. The clean drops it with the schema, so a rerun from
- * any checkout reads from the branch itself whether a rebuild is still due.
- */
 export const FORK_COPY_TAG = "appkit:fork-copy";
 
-/** What the app schema on the branch is, read from the branch itself. */
 export type SchemaState =
-  /** Nothing copied and nothing built yet. */
   | { readonly kind: "absent" }
-  /** The fork's untouched copy. Another role, the app's service principal, owns it. */
   | { readonly kind: "copy"; readonly owner: string }
-  /** Handed to you and still tagged, so a rebuild stopped before its clean. */
   | { readonly kind: "handed-off-copy" }
-  /** Your working branch. */
   | { readonly kind: "yours" }
-  /**
-   * Schema public belongs to the database, never to an app, so it is never
-   * handed off or tagged. What other roles own in it stays with its rows.
-   */
   | { readonly kind: "public"; readonly kept: readonly string[] };
 
 type QueryClient = Pick<PoolClient, "query">;
@@ -42,15 +27,6 @@ type QueryClient = Pick<PoolClient, "query">;
 const journalTable = (schemaName: string) =>
   `${quoteIdentifier(schemaName)}.${quoteIdentifier(MIGRATIONS_TABLE)}`;
 
-/**
- * Whether the journal is an ordinary table the migrator's trust rule lets your
- * role use this way (journalRefusal in migrations/apply). A table another role
- * owns could run that role's code as you through a trigger, rule, default or
- * policy, so the tag is written and deleted only where the migrator would
- * record, and read only where it would read. A fork's untouched copy keeps the
- * schema owner's journal, which the rule trusts. Anything else at the
- * journal's name is left alone; the migrator refuses it with its own message.
- */
 async function journalUsable(
   client: QueryClient,
   schemaName: string,
@@ -60,7 +36,6 @@ async function journalUsable(
   return relation !== null && journalRefusal(relation, use) === undefined;
 }
 
-/** Whether the branch's journal carries the fork-copy tag. */
 export async function isForkCopy(
   client: QueryClient,
   schemaName: string,
@@ -104,7 +79,6 @@ export async function untagForkCopy(
   );
 }
 
-/** Read the app schema's state as the connected developer. */
 export async function readSchemaState(
   client: QueryClient,
   schemaName: string,
@@ -120,18 +94,12 @@ export async function readSchemaState(
     : { kind: "yours" };
 }
 
-/** What init does with the schema, decided once from its state and the request. */
 export interface StartPlan {
   readonly kind: Exclude<SchemaStart, "none">;
-  /** Drop the app schema, then apply the committed migrations, so a copy's rows go. */
   readonly rebuild: boolean;
-  /** Tag the copied journal before the hand-off, so a rerun from any checkout finishes the rebuild. */
   readonly tag: boolean;
-  /** Delete the copy's owner on this branch, with its objects reassigned to you. */
   readonly handOff: boolean;
-  /** You asked to keep a copy's rows. The tag goes and the rows stay. */
   readonly keepsCopy: boolean;
-  /** An explicit clean of what may be your work asks first. */
   readonly confirm: boolean;
 }
 
@@ -143,20 +111,10 @@ const NOTHING_ELSE = {
   confirm: false,
 } as const;
 
-/**
- * Without a request, a copy is rebuilt and your working branch is migrated,
- * each with schema.ts, else introspected. A copy's rows stay only on request.
- * A schema on a branch this run forked came from the source whoever owns it,
- * so one you already owned there is a copy too, tagged and rebuilt with no
- * hand-off to make. A rebuild of a copy needs no confirmation, because
- * `appkit db migrate` refuses a copy and a fresh fork holds only what it
- * copied, so none of your work can be on it.
- */
 export function planStart(
   state: SchemaState,
   requested: Exclude<SchemaStart, "none"> | undefined,
   hasSchema: boolean,
-  /** This run forked the branch. */
   created = false,
 ): StartPlan {
   const copied =
@@ -196,11 +154,6 @@ export function planStart(
   };
 }
 
-/**
- * Why a command that writes on the branch refuses a schema that still holds a
- * fork's copy, untouched or handed off; undefined for any other state. A write
- * on top of the copy would make its rows yours to keep.
- */
 export function forkCopyRefusal(
   branch: string,
   schemaName: string,

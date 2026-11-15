@@ -43,12 +43,6 @@ export interface IntrospectOptions {
   readonly schemaName?: string;
   /** Module the written schema.ts imports the builder from. Default "@databricks/appkit/beta". */
   readonly importSource?: string;
-  /**
-   * false: write schema.ts and its migration without recording the migration
-   * on the branch, for init's rebuild, which drops the schema right after. It
-   * is the one read of a fork's copy that is not refused, since it writes
-   * nothing on the branch. Default true.
-   */
   readonly record?: boolean;
 }
 
@@ -224,7 +218,6 @@ export async function introspectHolding(
   const record = options.record ?? true;
 
   return withBranchPool(ctx, async (pool) => {
-    // init's rebuild reads the copy without recording, then drops it.
     if (record) {
       const refusal = forkCopyRefusal(
         env.branch.name,

@@ -78,9 +78,7 @@ const onProduction = {
 let catalog: ReturnType<typeof catalogResponder>;
 /** The journal rows of the branch, as drizzle-orm records them; empty: no journal table. */
 let recorded: Array<{ when: number; hash: string }>;
-/** The journal carries init's fork-copy tag. */
 let tagged: boolean;
-/** Who owns the app schema; the connected role unless a test says otherwise. */
 let schemaOwner: string;
 /** The row the branch records for the last committed migration. */
 const lastCommitted = (root: string) => {

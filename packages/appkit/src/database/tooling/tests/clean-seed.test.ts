@@ -36,7 +36,6 @@ const schemaFile = (schemaName: string) =>
 
 const DEPENDENTS = /pg_catalog\.pg_depend/;
 const ME = "alice@example.com";
-/** The reads of readSchemaState: the schema's owner, the journal, its tag, and what public keeps. */
 const SCHEMA_OWNER = /has_schema_privilege/;
 const JOURNAL = /c\.relname = \$2/;
 const TAG = /where hash = \$1/;

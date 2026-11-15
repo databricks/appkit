@@ -57,14 +57,8 @@ const migrateReport = {
   typesFile: "/app/shared/appkit-types/database.d.ts",
 };
 
-/**
- * The branch as init reads it over SQL: the app schema's owner, whether its
- * journal exists and carries the fork-copy tag, what other roles own in
- * public, and what the hand-off reads about the owner.
- */
 let schemaOwner: string | null;
 let journal: boolean;
-/** The journal's owner is you, a role you inherit, or the schema's owner. */
 let journalTrusted: boolean;
 let tagged: boolean;
 let keptInPublic: string[];
@@ -108,7 +102,6 @@ const pool = {
     throw new Error(`unexpected query ${text}`);
   }),
 };
-/** The writes to the journal's tag row, in order: "insert" tags, "delete" untags. */
 const tagWrites = () =>
   queries
     .filter(
@@ -190,7 +183,6 @@ function envFile(root: string): Record<string, string> {
   );
 }
 
-/** Run init, collecting its progress lines and warnings, and both in the order they came. */
 async function init(ctx: DbContext, options: InitOptions = {}) {
   const steps: string[] = [];
   const warnings: string[] = [];
@@ -283,7 +275,6 @@ describe("runInit — dev branch", () => {
       `Handing schema app in database databricks_postgres on ${devBranchId(USER)} to you: deleting this branch's copy of role ${SP}, which owns it, with its objects reassigned to you`,
       `Dropping schema app on ${devBranchId(USER)}: the branch still holds the rows the fork copied, and the committed migrations recreate its tables`,
     ]);
-    // The copied journal is tagged before the hand-off, so a rerun from any checkout finishes the rebuild.
     expect(tagWrites()).toEqual(["insert"]);
     expect(
       queries.indexOf(queries.find((text) => text.startsWith("insert")) ?? ""),
@@ -988,7 +979,6 @@ describe("runInit — schema start", () => {
         migrate: migrateReport,
       },
     });
-    // Introspect writes the files while the copy is untouched and records nothing on it; the rebuild follows.
     expect(introspectHolding.mock.calls[0]?.[2]).toEqual({
       interactive: false,
       schemaName: "app",
@@ -1347,7 +1337,6 @@ describe("runInit — the start follows the branch's own state", () => {
     await init(appOn(project()), { schema: "clean", confirmClean });
     expect(asked).toEqual([]);
 
-    // Your working branch, where the schema is yours and its journal carries no tag.
     schemaOwner = USER;
     tagged = false;
     await init(appOn(existingDev()), { schema: "clean", confirmClean });
@@ -1495,7 +1484,6 @@ describe("runInit — .env", () => {
       `Database analytics, which databricks.yml binds, is not on ${devBranchId(USER)}. Create it there (databricks postgres create-database ${DEV} --database-id analytics), or bind a database the project's branches have, then rerun \`appkit db init\`.`,
     );
     expect(lakebase.calls).toContain(`getDatabase ${DEV}/databases/analytics`);
-    // The fork happened, and nothing was written. The next init finds the branch by its name.
     expect(fs.existsSync(path.join(root, ".env"))).toBe(false);
   });
 

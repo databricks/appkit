@@ -68,7 +68,6 @@ export const schema = defineSchema(({ table }) => ({ ${table}: table(${JSON.stri
 describe.skipIf(!url)("runInit against Postgres", () => {
   const suffix = randomUUID().slice(0, 8);
   const database = `appkit_init_${suffix}`;
-  /** The app's service principal, as the Postgres role a fork copies. */
   const sp = `appkit_sp_${suffix}`;
   const superuser = `appkit_dbx_${suffix}`;
   const dev = `appkit_dev_${suffix}`;
@@ -77,9 +76,7 @@ describe.skipIf(!url)("runInit against Postgres", () => {
   let admin: Pool;
   let asSp: Pool;
   let asDev: Pool;
-  /** An app whose schema.ts declares `app`, with its migration generated. */
   let root: string;
-  /** An app whose schema.ts declares public. */
   let publicRoot: string;
   let lakebase: FakeLakebase;
   let api: LakebaseApi;
@@ -117,7 +114,6 @@ describe.skipIf(!url)("runInit against Postgres", () => {
     );
   }
 
-  /** The deploy branch as its service principal left it, migrated and with a row. */
   async function deployed(appRoot: string, schema: string, table: string) {
     await applyPendingMigrations(asSp, {
       migrationsFolder: folder(appRoot),
@@ -126,7 +122,6 @@ describe.skipIf(!url)("runInit against Postgres", () => {
     await asSp.query(`insert into ${table} (body) values ('copied')`);
   }
 
-  /** A project whose default branch is production; the fork copies its roles. */
   function project(): FakeLakebase {
     const fake = new FakeLakebase();
     fake.addBranch(PRODUCTION, { default: true });
@@ -136,7 +131,6 @@ describe.skipIf(!url)("runInit against Postgres", () => {
     return fake;
   }
 
-  /** Lakebase's delete-role with reassign, as Postgres does it. */
   function apiWithRealHandOff(fake: FakeLakebase): LakebaseApi {
     const real = fake.api();
     const deleteRole = real.deleteRole.bind(real);
@@ -147,7 +141,6 @@ describe.skipIf(!url)("runInit against Postgres", () => {
     return real;
   }
 
-  /** Your dev branch exists, with your role on it and the service principal's copy gone. */
   function existingDev(fake: FakeLakebase) {
     fake.addBranch(DEV, { source_branch: PRODUCTION });
     fake.addRole(DEV, "alice", USER, ["DATABRICKS_SUPERUSER"]);
@@ -170,7 +163,6 @@ describe.skipIf(!url)("runInit against Postgres", () => {
     return fakeContext({ root: appRoot, env: dotenv, userName: USER, api });
   }
 
-  /** A context on your dev branch, as init leaves .env. */
   const onDev = (appRoot: string) =>
     context(appRoot, {
       PGHOST: `primary.${devBranchId(USER)}.example.com`,
@@ -279,7 +271,6 @@ describe.skipIf(!url)("runInit against Postgres", () => {
 
   test("a run that stopped after the hand-off is finished by the next init, which forks nothing", async () => {
     await deployed(root, app, `"${app}".notes`);
-    // The earlier run tagged the journal and deleted the owner's role, then stopped.
     await asDev.query(
       `insert into "${app}".__drizzle_migrations (hash, created_at) values ($1, 0)`,
       [FORK_COPY_TAG],
@@ -392,7 +383,6 @@ describe.skipIf(!url)("runInit against Postgres", () => {
       hashOf(folder(root), "0000_migration"),
     ]);
 
-    // The schema is yours now. A plain init keeps the rows; only --schema clean removes them, after asking.
     const kept = await init(onDev(root));
     expect(kept.report.start.kind).toBe("migrate");
     expect(await rows(`"${app}".notes`)).toEqual([{ body: "copied" }]);

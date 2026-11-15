@@ -33,9 +33,7 @@ describe.skipIf(!url)("the fork-copy tag against Postgres", () => {
   const app = `app_${suffix}`;
   const bare = `bare_${suffix}`;
   const shared = `shared_${suffix}`;
-  /** A role that is neither you, a role you inherit, nor the schema's owner. */
   const other = `appkit_other_${suffix}`;
-  /** The service principal's schema with a journal `other` owns. */
   const foreign = `foreign_${suffix}`;
   let admin: Pool;
   let me: Pool;
@@ -115,7 +113,6 @@ describe.skipIf(!url)("the fork-copy tag against Postgres", () => {
       { hash: "abc", created_at: "1700000000000" },
       { hash: FORK_COPY_TAG, created_at: "0" },
     ]);
-    // The tag changes nothing else. The copy still reads as the other role's.
     await expect(readSchemaState(me, app)).resolves.toEqual({
       kind: "copy",
       owner: sp,

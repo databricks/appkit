@@ -27,11 +27,6 @@ interface InitFlags {
   readonly yes?: boolean;
 }
 
-/**
- * --schema clean on your working branch drops your data. A human confirms it,
- * a script passes --yes. init asks only once it has read from the branch that
- * the schema is yours, so a fork's copy is rebuilt without a question.
- */
 const confirmClean: NonNullable<InitOptions["confirmClean"]> = async ({
   branch,
   schemaName,
@@ -85,7 +80,6 @@ function printInitReport(
   if (report.installed) ok(`Installed drizzle-kit (${report.installed})`);
 
   const { start, keptCopy } = report;
-  // Without --schema, only a schema that still held the fork's copy gets a rebuild.
   const rebuilt =
     start.kind === "clean" || (start.kind === "introspect" && start.rebuilt);
   if (rebuilt && schemaFlag === undefined) {
@@ -103,7 +97,6 @@ function printInitReport(
   else info("Left the schema as it is");
 
   if (keptCopy?.reason === "requested") {
-    // The tag is gone and the schema is yours, so only an explicit clean removes the rows.
     warn(
       `Kept the rows the fork copied${keptCopy.from ? ` from ${shortName(keptCopy.from)}` : ""}, as --schema ${schemaFlag} asks. The app schema is yours now, so a plain \`appkit db init\` keeps them. \`appkit db init --schema clean\` drops the app schema with everything in it and rebuilds it from the committed migrations, after a confirmation or with --yes.`,
     );
