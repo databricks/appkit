@@ -567,24 +567,27 @@ export async function runInit(
   options: InitOptions = {},
 ): Promise<InitReport> {
   const requested = options.schema;
-  if (requested === "none") return initHolding(ctx, null, options);
+  if (requested === "none") return initHolding(ctx, { kind: "none" }, options);
   // Before the lock, which creates config/database.
   if (requested === "migrate" || requested === "clean") {
     requireSchemaFile(ctx.root, requested);
   }
   return withHistoryLock(ctx.root, "init", (lock) =>
-    initHolding(ctx, { lock, requested }, options),
+    initHolding(ctx, { kind: "locked", lock, requested }, options),
   );
 }
 
-interface LockedStart {
-  readonly lock: HistoryLock;
-  readonly requested: Exclude<SchemaStart, "none"> | undefined;
-}
+type StartRequest =
+  | { readonly kind: "none" }
+  | {
+      readonly kind: "locked";
+      readonly lock: HistoryLock;
+      readonly requested: Exclude<SchemaStart, "none"> | undefined;
+    };
 
 async function initHolding(
   ctx: DbContext,
-  locked: LockedStart | null,
+  request: StartRequest,
   options: InitOptions,
 ): Promise<InitReport> {
   const onStep = options.onStep ?? (() => undefined);
@@ -602,7 +605,7 @@ async function initHolding(
   refuseSymlink(envFile);
   const hasSchema = hasSchemaFile(ctx.root);
   const schemaName =
-    hasSchema && locked
+    hasSchema && request.kind === "locked"
       ? (await loadDefaultDatabaseSchema(ctx.root, { showImportError: true }))
           .$schemaName
       : DEFAULT_SCHEMA_NAME;
@@ -686,7 +689,7 @@ async function initHolding(
     role: { name: role.name, action },
     envFile,
   };
-  if (!locked) {
+  if (request.kind === "none") {
     return {
       ...base,
       handedOff: null,
@@ -695,7 +698,7 @@ async function initHolding(
       start: { kind: "none" },
     };
   }
-  const { lock, requested } = locked;
+  const { lock, requested } = request;
 
   const state = await withBranchPool(branchCtx, (pool) =>
     readSchemaState(pool, schemaName),
