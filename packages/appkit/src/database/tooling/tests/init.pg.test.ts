@@ -223,7 +223,17 @@ describe.skipIf(!url)("runInit against Postgres", () => {
     await asDev?.end();
     await asSp?.end();
     await admin?.end();
-    await cluster.query(`drop database if exists "${database}" with (force)`);
+    // pool.end() resolves before the server sees the clients leave; a forced
+    // drop then kills them mid-close and pg raises it as an uncaught error.
+    for (let tries = 0; tries < 50; tries++) {
+      const { rows } = await cluster.query<{ open: number }>(
+        "select count(*)::int as open from pg_stat_activity where datname = $1",
+        [database],
+      );
+      if (rows[0]?.open === 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    await cluster.query(`drop database if exists "${database}"`);
     await cluster.query(`
       drop owned by "${sp}", "${dev}", "${superuser}";
       drop role if exists "${dev}";
