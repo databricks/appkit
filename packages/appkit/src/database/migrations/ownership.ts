@@ -73,12 +73,17 @@ export function ownershipHint(
     );
   }
   if (ownership && ownership.owner !== ownership.currentUser) {
+    // ALTER ... OWNER TO the app's role fails with "must be able to SET ROLE":
+    // nobody holds ADMIN or SET on an Apps service principal role, so only the
+    // platform's delete-role --reassign-owned-to can move the objects.
     return (
       `Schema "${ownership.schemaName}" is owned by "${ownership.owner}", but the app connects as "${ownership.currentUser}". ` +
-      "This happens when the app's database resource was removed and added again, or the app was recreated with a new service principal: " +
-      `Lakebase hands the objects to another role. If "${ownership.owner}" belonged to a deleted app, someone with CAN MANAGE on the Lakebase project moves its objects with ` +
-      `\`databricks postgres delete-role <its role> --reassign-owned-to <the role of "${ownership.currentUser}">\` (\`databricks postgres list-roles <branch>\` names both), which also deletes its role. ` +
-      `Otherwise have "${ownership.owner}" transfer the schema and its tables to "${ownership.currentUser}" (ALTER … OWNER TO), or set another schemaName in schema.ts. ` +
+      "If two apps share this database, give each its own schemaName in schema.ts. " +
+      "Otherwise the app was recreated with a new service principal, or its database resource was removed and added again, " +
+      `and Lakebase handed the objects to "${ownership.owner}". No Postgres role can hand them back to "${ownership.currentUser}"; only Lakebase can move them. ` +
+      `If "${ownership.owner}" belonged to a deleted app, or is the role of the person who removed the resource, someone with CAN MANAGE on the Lakebase project moves its objects with ` +
+      `\`databricks postgres delete-role <its role> --reassign-owned-to <the role of "${ownership.currentUser}">\` (\`databricks postgres list-roles <branch>\` names both). ` +
+      "That moves every object the role owns on the branch, in every database, and deletes the role, so first check what it owns. " +
       "On your dev or session branch, rerun `appkit db init`, which hands you the schema."
     );
   }
