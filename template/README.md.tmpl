@@ -81,10 +81,12 @@ npx appkit db verify    # read-only check of your branch against schema.ts and t
 ```
 
 Commit the migrations. The deployed app applies them on start, because `app.yaml`
-sets `APPKIT_DB_MIGRATE_ON_START=true`, and only when it connects as its own
-service principal, so a local start or `databricks apps run-local` never
-migrates. The deploy waits for `/health`, which the app serves only after its
-migrations, for up to 300 seconds, so a failed migration fails the deploy.
+sets `APPKIT_DB_MIGRATE_ON_START=true`, and only when `PGUSER` is set and equals
+`DATABRICKS_CLIENT_ID`, which Databricks Apps sets for the deployed app. `db init`
+writes your user name to `PGUSER` in `.env`, so a local start, `databricks apps
+run-local` included, connects as you and never migrates. The deploy waits for
+`/health`, which the app serves only after its migrations, for up to 300 seconds,
+so a failed migration fails the deploy.
 To adopt tables that already exist, run
 `npx appkit db init --schema introspect`. It writes `schema.ts` from the branch's
 tables, and a `0000_baseline` migration (or `NNNN_introspect` when migrations

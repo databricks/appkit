@@ -362,12 +362,14 @@ env:
     value: "true"
 ```
 
-The flag alone does not migrate. A start migrates only when the process
-connects as the deployed app's own service principal, which is when `PGUSER`
-equals `DATABRICKS_CLIENT_ID`. Databricks Apps sets both for a bound database.
-A local start (`npm run dev`, `npm start`) connects as you, so it does not
-migrate, and `databricks apps run-local` does not migrate either, even with
-exported M2M credentials. Both log why. Use `npx appkit db migrate` on your
+The flag alone does not migrate. A start migrates only when `PGUSER` is set
+and equals `DATABRICKS_CLIENT_ID`, so that the process connects as the deployed
+app's own service principal. Databricks Apps sets both for an app with a bound
+database. `npx appkit db init` writes your user name to `PGUSER` in `.env`, so
+a local start (`npm run dev`, `npm start`, `databricks apps run-local`)
+connects as you and never migrates, with or without exported M2M credentials.
+Before `db init` writes `.env`, `PGUSER` is unset, and the start skips for that
+reason. A start that skips logs why. Use `npx appkit db migrate` on your
 branch instead. A deployed app bound to a branch with the exact shape of a dev
 branch, `dev-<slug>-<6 hex>`, or of a session branch refuses to start, because
 `appkit db` owns those branches.
