@@ -68,8 +68,8 @@ export function ownershipHint(
       );
     }
     return (
-      `Role "${ownership.currentUser}" can create in schema public, so an object this migration changes belongs to another role. ` +
-      `Have that role transfer it with ALTER TABLE public.<table> OWNER TO "${ownership.currentUser}", or drop schemaName from defineSchema() to use the default schema app, which the app creates and owns.`
+      `Role "${ownership.currentUser}" can create in schema public, so an object this migration changes belongs to another role, and no Postgres role can hand it to "${ownership.currentUser}". ` +
+      "Drop schemaName from defineSchema() to use the default schema app, which the app creates and owns."
     );
   }
   if (ownership && ownership.owner !== ownership.currentUser) {
