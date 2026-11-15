@@ -82,6 +82,8 @@ export async function migrateOnStart(
     result = await applyPendingMigrations(pool, {
       migrationsFolder: folder,
       schemaName: schema.$schemaName,
+      // The deploy branch only ever runs merged files as they were merged.
+      onDrift: "refuse",
     });
   } catch (error) {
     if (
