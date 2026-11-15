@@ -14,6 +14,7 @@ vi.mock("../context", async (importOriginal) => ({
 
 import type { WorkspaceRequest } from "../../../workspace-client";
 import type { DbContext } from "../context";
+import { devBranchId, sessionBranchId } from "../naming";
 import { FORK_COPY_TAG } from "../schema-state";
 import { runVerify, type VerifyOptions } from "../verify";
 import { databricksYml, FakeLakebase } from "./fakes";
@@ -22,11 +23,13 @@ const builder = path.resolve(
   import.meta.dirname,
   "../../schema-builder/index.ts",
 );
-const BRANCH = "projects/p/branches/dev-alice-3f9a2c";
+const USER = "alice@example.com";
+const BRANCH = `projects/p/branches/${devBranchId(USER)}`;
 const ENV = {
   PGHOST: "ep-1.example.com",
   PGDATABASE: "databricks_postgres",
   LAKEBASE_ENDPOINT: `${BRANCH}/endpoints/primary`,
+  PGUSER: USER,
 };
 const MIGRATIONS = "config/database/migrations";
 const roots: string[] = [];
@@ -323,8 +326,7 @@ describe("runVerify", () => {
       kind: "local",
       branch: BRANCH,
       ...clean,
-      forkCopy:
-        'dev-alice-3f9a2c still holds the rows the fork copied into schema "app", which "deployed-sp" still owns. Run `appkit db init` to rebuild it from the committed migrations, or `appkit db init --schema migrate` to keep them.',
+      forkCopy: `${devBranchId(USER)} still holds the rows the fork copied into schema "app", which "deployed-sp" still owns. Run \`appkit db init\` to rebuild it from the committed migrations, or \`appkit db init --schema migrate\` to keep them.`,
       ok: false,
     });
   });
@@ -343,8 +345,7 @@ describe("runVerify", () => {
       kind: "local",
       branch: BRANCH,
       ...clean,
-      forkCopy:
-        'dev-alice-3f9a2c still holds the rows the fork copied into schema "app", and its rebuild did not finish. Run `appkit db init` to rebuild it from the committed migrations, or `appkit db init --schema migrate` to keep them.',
+      forkCopy: `${devBranchId(USER)} still holds the rows the fork copied into schema "app", and its rebuild did not finish. Run \`appkit db init\` to rebuild it from the committed migrations, or \`appkit db init --schema migrate\` to keep them.`,
       ok: false,
     });
   });
@@ -363,6 +364,67 @@ describe("runVerify", () => {
     expect(await runVerify(ctx)).toMatchObject({
       forkCopy: expect.stringContaining("Run `appkit db init`"),
       unknownMigrations: 1,
+      ok: false,
+    });
+  });
+
+  test("on your session branch, the fork's copy is reported as on your dev branch", async () => {
+    const session = `projects/p/branches/${sessionBranchId(USER, "abc12345")}`;
+    const ctx = app(two, {
+      ...ENV,
+      LAKEBASE_ENDPOINT: `${session}/endpoints/primary`,
+    });
+    branch({
+      columns: { notes: ["id", "body"] },
+      recorded: recordedAs(ctx, two),
+      schemaOwner: "deployed-sp",
+    });
+
+    expect(await runVerify(ctx)).toMatchObject({
+      branch: session,
+      forkCopy: expect.stringContaining(
+        `${sessionBranchId(USER, "abc12345")} still holds the rows the fork copied`,
+      ),
+      ok: false,
+    });
+  });
+
+  test("on a deploy branch, the app schema its service principal owns is not a fork copy", async () => {
+    const ctx = app(two, {
+      ...ENV,
+      LAKEBASE_ENDPOINT: `${PRODUCTION}/endpoints/primary`,
+    });
+    branch({
+      columns: { notes: ["id", "body"] },
+      recorded: recordedAs(ctx, two),
+      schemaOwner: "deployed-sp",
+    });
+
+    expect(await runVerify(ctx)).toEqual({
+      kind: "local",
+      branch: PRODUCTION,
+      ...clean,
+      ok: true,
+    });
+  });
+
+  test("on another user's dev branch, the schema they own is not a fork copy, and the other checks still decide", async () => {
+    const other = `projects/p/branches/${devBranchId("bob@example.com")}`;
+    const ctx = app(two, {
+      ...ENV,
+      LAKEBASE_ENDPOINT: `${other}/endpoints/primary`,
+    });
+    branch({
+      columns: { notes: ["id", "body"] },
+      recorded: recordedAs(ctx, two.slice(0, 1)),
+      schemaOwner: "bob",
+    });
+
+    expect(await runVerify(ctx)).toEqual({
+      kind: "local",
+      branch: other,
+      ...clean,
+      pendingMigrations: ["0001_migration"],
       ok: false,
     });
   });
