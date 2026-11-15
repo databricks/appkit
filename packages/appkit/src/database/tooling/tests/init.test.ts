@@ -218,7 +218,7 @@ describe("runInit — dev branch", () => {
       },
     });
     expect(steps).toEqual([
-      `Creating ${devBranchId(USER)} from production`,
+      `Creating ${devBranchId(USER)} from production (the branch databricks.yml deploys to)`,
       `Pointing .env at ${devBranchId(USER)}, database databricks_postgres`,
       `Handing schema app in database databricks_postgres on ${devBranchId(USER)} to you: deleting this branch's copy of role ${SP}, which owns it, with its objects reassigned to you`,
       `Dropping schema app on ${devBranchId(USER)}: a branch init forked starts without the rows it copied, and the committed migrations recreate its tables`,
@@ -408,6 +408,59 @@ describe("runInit — dev branch", () => {
   });
 });
 
+describe("runInit — the fork's parent", () => {
+  const STAGING = `${P}/branches/staging`;
+
+  test("forks the branch databricks.yml deploys to when the project has it, and says so", async () => {
+    const lakebase = project();
+    lakebase.addBranch(STAGING);
+    lakebase.addDatabase(STAGING, "databricks-postgres", "databricks_postgres");
+    lakebase.addRole(STAGING, "alice", USER, ["DATABRICKS_SUPERUSER"]);
+    const ctx = appOn(lakebase, {}, { deploy: STAGING });
+
+    const { report, steps } = await init(ctx, { schema: "none" });
+
+    expect(lakebase.calls).toContain(
+      `createBranch ${devBranchId(USER)} ${JSON.stringify({ source_branch: STAGING, no_expiry: true })}`,
+    );
+    expect(report).toMatchObject({ created: true, sourceBranch: STAGING });
+    expect(steps).toContain(
+      `Creating ${devBranchId(USER)} from staging (the branch databricks.yml deploys to)`,
+    );
+  });
+
+  test.each([
+    ["a branch the project does not have", `${P}/branches/missing`],
+    ["a branch of another project", "projects/q/branches/main"],
+  ])(
+    "falls back to the project's default branch when databricks.yml binds %s",
+    async (_case, deploy) => {
+      const lakebase = project();
+      const ctx = appOn(lakebase, {}, { deploy });
+
+      const { report, steps } = await init(ctx, { schema: "none" });
+
+      expect(lakebase.calls).toContain(
+        `createBranch ${devBranchId(USER)} ${JSON.stringify({ source_branch: PRODUCTION, no_expiry: true })}`,
+      );
+      expect(report).toMatchObject({ created: true, sourceBranch: PRODUCTION });
+      expect(steps).toContain(
+        `Creating ${devBranchId(USER)} from production (the project's default branch)`,
+      );
+    },
+  );
+
+  test("a deleted branch databricks.yml deploys to is not forked", async () => {
+    const lakebase = project();
+    lakebase.addBranch(STAGING, { current_state: "DELETED" });
+    const ctx = appOn(lakebase, {}, { deploy: STAGING });
+
+    const { report } = await init(ctx, { schema: "none" });
+
+    expect(report.sourceBranch).toBe(PRODUCTION);
+  });
+});
+
 describe("runInit — a concurrent run on the same branch", () => {
   /** The API that another run raced: it did `before` first, then this run's call returns 409. */
   function racedApi(
@@ -566,7 +619,7 @@ describe("runInit — session branch", () => {
       `createBranch ${sessionBranchId(USER, id)} ${JSON.stringify({ source_branch: PRODUCTION, ttl: "604800s" })}`,
     );
     expect(steps[0]).toBe(
-      `Creating ${sessionBranchId(USER, id)} from production, expiring after 7 days`,
+      `Creating ${sessionBranchId(USER, id)} from production (the branch databricks.yml deploys to), expiring after 7 days`,
     );
   });
 
