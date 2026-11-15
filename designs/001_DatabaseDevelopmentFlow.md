@@ -9,15 +9,16 @@ The [Google Doc](https://docs.google.com/document/d/1bsMsYsTfoFBSYS3YbXn3FvOOUQl
 
 ## Background and Motivation
 
-The DatabasePlugin (`@databricks/appkit/beta`, shipped in v0.87 and v0.88) provides typed server access to Lakebase
-Postgres from `config/database/schema.ts`. The earlier beta exposed generated CRUD routes. The operation design in
+The DatabasePlugin (`@databricks/appkit/beta`) provides typed server access to Lakebase Postgres from
+`config/database/schema.ts`. The earlier beta exposed generated CRUD routes. The operation design in
 [#687–#692](https://github.com/databricks/appkit/pull/692) replaces those routes with explicitly authorized, named
 operations. Table declarations alone expose no HTTP endpoint.
 
-This design covers branch ownership, migrations and deployment. Its application-facing examples target that operation
-design. The migration implementation in #654–#678 and the operation implementation in #687–#692 are separate PR
-chains; integrating them is required before both flows ship together. The operation stack alone checks existing tables
-at startup and never creates or migrates them. This design adds the opt-in migration step before that check.
+This design covers branch ownership, migrations and deployment. [Design 002](./002_DatabaseRouteOperations.md) defines
+the operation contract. The migration implementation in #654–#678 and the operation implementation in #687–#692 are
+separate PR chains; integrating them is required before both flows ship together. The operation stack alone checks
+existing tables at startup and never creates or migrates them. This design adds the opt-in migration step before that
+check.
 
 The migration problem starts with the manual workflow of the earlier beta:
 
@@ -48,12 +49,13 @@ Lakebase sets the constraints any design has to live with:
 
 Apps and Genie App Builder set three more:
 
-- A horizontally scaled app rolls a deploy to one instance first while the others keep serving, up to five instances.
-- Removing a database resource from an app hands the service principal's objects to the app manager. Re-adding it
-  restores database access but not object ownership, so the next deploy fails with `permission denied for schema`
-  ([XTA-18463](https://databricks.atlassian.net/browse/XTA-18463)).
-- Genie App Builder builds on AppKit. Its apps scale to zero after 30 idle minutes, so start runs on every cold start,
-  and they deploy from the UI with no CI step.
+- Classic compute stops an app's old process before it starts the new one. No-downtime compute, which horizontally
+  scaled apps use, starts the new process beside the old one, which keeps serving until the new one is healthy.
+- Removing a database resource from an app hands the service principal's objects to the person who removed it.
+  Re-adding it restores database access but not object ownership, so the next deploy fails with
+  `permission denied for schema` ([XTA-18463](https://databricks.atlassian.net/browse/XTA-18463)).
+- Genie App Builder builds on AppKit. Its apps scale to zero after 15 idle minutes by default, so start runs on every
+  cold start, and they deploy from the UI with no CI step.
 
 The stack below this design was built and verified against a Lakebase project with a throwaway deploy branch and app.
 Its PR descriptions record the live results.
@@ -63,7 +65,8 @@ Its PR descriptions record the live results.
 1. From `databricks apps init` to a deployed app with one table, a developer runs no SQL, grants nothing and opens no
    console. The stack builds this flow and keeps it hidden. The reveal, a later change that offers the plugin in
    `apps init`, meets this goal.
-2. Each developer works on a Lakebase branch of their own. Only the deployed app changes the branch it deploys to.
+2. Each developer works on a Lakebase branch of their own. Only the deployed app runs migrations on the branch it
+   deploys to.
 3. Schema changes are committed as SQL migrations and reviewed with the code that needs them.
 4. A deploy applies exactly the migrations its commit carries, or fails before serving with a message that names the
    migration and the fix.
@@ -74,7 +77,7 @@ Its PR descriptions record the live results.
 - Down migrations and automatic schema rollback. Fixes go forward.
 - Per-user Postgres connections (OBO). Operations verify the caller and authorize access in application code; the
   database connection and migrations still run as the app's service principal.
-- Several apps sharing one Postgres schema.
+- Several apps sharing one Postgres schema. Two apps on one database each set their own `schemaName`.
 - drizzle-kit v1's migration folder format. This design ships on drizzle-kit 0.31 (journal v7).
 - Seeding or copying data into the deploy branch.
 - Migrations that cannot run in a transaction (`CREATE INDEX CONCURRENTLY`, `VACUUM`).
@@ -87,137 +90,21 @@ Its PR descriptions record the live results.
 `config/database/migrations/`: one `NNNN_<name>.sql` per change, a `meta/NNNN_snapshot.json` per migration and
 `meta/_journal.json`. The SQL is what reviewers read and what the deployed app runs.
 
-### Browser access is an authored operation contract
+### Browser access is a set of authored operations
 
-A table declaration describes storage and typed server access. Each browser capability is a `defineOperation` export
-in `server/database/routes/*.ts`, with a name, entity, HTTP method, authorization and an execute callback. The plugin
-serves it at `/api/database/operations/<name>`. An operation without authorization is skipped with a warning in
-normal generation and fails production generation. Malformed or duplicate operations fail setup.
+[Design 002](./002_DatabaseRouteOperations.md) defines the operation contract, and this design does not restate it.
+This design relies on four of its rules:
 
-```ts
-// server/database/routes/notes.ts
-import { defineOperation } from "@databricks/appkit/beta";
-import { z } from "zod";
-
-export const listNotes = defineOperation({
-  name: "notes.list",
-  entity: "notes",
-  method: "GET",
-  output: z.array(z.object({ id: z.number(), body: z.string() })),
-  authorize: () => true, // Any verified caller; use a policy for narrower access.
-  execute: ({ db }) => db.notes.select(["id", "body"]).toArray(),
-});
-
-export const getNote = defineOperation({
-  name: "notes.get",
-  entity: "notes",
-  method: "GET",
-  input: z.object({ id: z.number().int() }),
-  authorize: () => true,
-  execute: ({ db, input }) => db.notes.find(input.id),
-});
-```
-
-Omitting `input` means the operation accepts no parameters and authorization/execute receive `undefined`. The client
-calls `useDatabaseQuery("notes.list")`; it needs no empty `z.object({})` or placeholder argument. Explicit input
-schemas determine required caller input, such as `useDatabaseQuery("notes.get", { id: 123 })`. No input is inferred
-from a method, primary key or table's writable columns.
-
-Output defaults stay independent of input:
-
-| Method | Output when `output` is omitted |
-|---|---|
-| `GET` | One public row, or 404 when the callback returns `null`. |
-| `POST` | The created public row, with status 201. |
-| `PATCH`, `PUT` | The updated public row, or 404 for `null`. |
-| `DELETE` | Status 204 with no body when the callback returns `true`. |
-
-A list, aggregate, nullable result or joined response declares its output schema. An `{ id }` input does not determine
-whether the result is one row or an array. Private columns are omitted by default; explicit outputs project only the
-fields they declare, so developers review them as part of the public contract.
-
-### Conventional routes need no server-entry import
-
-The usual setup is `database()`. It discovers the generated registry for `server/database/routes/`; the developer
-does not import `routes.gen.ts` in the server entry. Two explicit alternatives cover the other cases:
-
-```ts
-database();                        // Conventional schema and operation discovery.
-database({ routes: false });       // Server-side database access only.
-database({ routes: customRoutes }); // An explicit registry.
-```
-
-The app commits these generated files with its declarations:
-
-| File | Purpose |
-|---|---|
-| `shared/appkit-types/database.d.ts` | Typed server entity access. |
-| `server/database/routes.gen.ts` | Lazy schema and operation imports for the server build. |
-| `shared/appkit-types/database-operations.d.ts` | Browser-safe operation names, methods, inputs and outputs. |
-
-`appkit generate-types` and the AppKit Vite plugin generate the operation registry and browser contracts. A declared
-schema with no operation files gets an empty registry, so adding the first operation and removing the last one remain
-part of the same development flow. With neither schema nor routes, no operation files are created.
-
-In development, setup regenerates the source registry before importing it. Vite watches `config/database/` and all of
-`server/database/`, including shared row schemas, helpers and policies outside `routes/`. Generated `.gen.ts` and
-`.d.ts` files do not trigger generation loops. Native source imports let `tsx watch` reload backend changes and route
-additions/deletions. This is code and type generation; it never applies a database migration.
-
-`appkitServerConfig()` includes the registry, schema and operation modules in the server build. Production loads the
-compiled registry beside the server entry and generates nothing at runtime. A custom build includes those entries or
-imports and passes its own registry. A missing or malformed registry fails setup before the pool opens.
-
-### Policies admit requests; transactions enforce mutable rules
-
-Operations verify the caller before reading input or running authorization. `execute` receives `{ actor, input, db,
-appkit, resource }`, without request headers or access tokens. A verified actor is distinct from the service principal
-that owns the database connection. The operation's policy is responsible for which rows that caller may use.
-
-A policy resource is a snapshot loaded before `execute`, not a lock or a transaction-scoped guarantee. A business
-condition that can change during a write must be checked atomically inside the transaction, through a locked read,
-a conditional update, or a database constraint. For example, adding a note to an open case must serialize with case
-closure. A uniqueness constraint enforces one open case per subject across every writer, and a sequence or other
-database-generated identifier avoids the race in `count() + 1`.
-
-The business write and its audit entry belong in one `db.transaction()` callback. Use the verified actor for audit
-attribution, and persist fields the operation accepts, such as a dismissal reason, with the state change. Migration
-SQL installs the constraints, sequences or triggers needed for these rules; a policy does not replace them.
-
-### React reads and writes share operation-aware state
-
-Use `useDatabaseQuery` for rendered data and `useDatabaseMutation` for writes. They are exported from
-`@databricks/appkit-ui/react/beta` and typed by the generated operation contracts. The imperative
-`databaseApi.execute` remains available from `@databricks/appkit-ui/js/beta`; callers that store its result in React
-state must handle cancellation, request identity, session changes and refresh themselves.
-
-```tsx
-import { skipToken, useDatabaseQuery } from "@databricks/appkit-ui/react/beta";
-
-const notes = useDatabaseQuery("notes.list");
-const selectedNote = useDatabaseQuery(
-  "notes.get",
-  selectedId === null ? skipToken : { id: selectedId },
-);
-```
-
-`skipToken` holds a dependent query idle until its complete typed input exists. It sends nothing, aborts an old read,
-clears its displayed result, and makes `refetch()` a no-op. Only query hooks accept it; imperative calls and mutations
-still require their declared input.
-
-Changing a query's name, input or session clears its old result and ignores late answers. Changing a mutation's
-operation name or session clears its displayed state, including A → B → A switches. Earlier writes still finish. In
-the same session, their success or unknown outcome refreshes queries without populating a renamed hook.
-
-A mutation is sent at most once and is never retried or aborted. Its hook resolves each call with `{ data, error }`.
-Mounted queries refresh after success or an unknown write outcome; a hook-based write needs no duplicate manual
-refetch. Clear a draft only after success, and keep it visible with field feedback on a validation failure. Invalid explicit inputs return bounded
-`details: [{ path, message }]` with schema-declared property names, array indices and standard messages. Raw Zod or
-custom refinement text, submitted values and undeclared property names are never exposed.
+- Operations are the only database HTTP surface. A table declaration exposes no endpoint.
+- Each operation is a `defineOperation` export in `server/database/routes/`, which `database()` discovers.
+- Each operation authorizes its callers explicitly. A missing policy never allows every caller.
+- A migration changes storage and nothing else. Applying one never publishes an operation, and editing an operation
+  never applies DDL.
 
 ### Every developer gets a Lakebase branch
 
-`appkit db init` forks the project's default branch into one of two kinds:
+`appkit db init` forks the branch that the default `databricks.yml` target binds, when that branch resolves in the
+project. Otherwise it forks the project's default branch. It says which branch it forked. The fork is one of two kinds:
 
 - `dev-<user>-<hash6>`, one per developer, no expiry, the same name on every machine.
 - `session-<hash6>-<id>`, one per checkout, with a 7-day TTL. The id lives in `.env` as `APPKIT_DB_SESSION`.
@@ -233,18 +120,34 @@ The developer gets a Postgres role with `DATABRICKS_SUPERUSER` on that branch, a
 `.env` then points at the branch. When `databricks.yml` binds a database that the fork does not have, init refuses and
 names the database and the branch, instead of pointing `.env` at `databricks_postgres`.
 
-A Lakebase fork copies every row of its parent. A branch that init creates still starts with no copied app rows. In the
-run that created it, init drops the fork's app schema and rebuilds it from the committed migrations, which is what
-`--schema clean` does. Without a `schema.ts`, it introspects the fork first and rebuilds from the baseline that
-introspect writes. Reusing an existing dev or session branch keeps its rows, and init applies only what the branch has
-not recorded. Keeping production rows on a new fork is an explicit opt-in, `--schema migrate`. See Security
-Considerations for what the rebuild does not remove.
+A Lakebase fork copies every row of its parent. A dev or session branch still starts with no copied app rows. Init
+decides from the branch itself whether the copied rows are still there, so a rerun from any checkout decides the same
+way. It reads the owner of the app schema and the journal in it:
 
-Branches count against the project's limits, so init keeps them cheap. It creates the branch's endpoint with a
-5-minute scale to zero, because an idle compute counts against the 20 active ones. When the project is at its branch
-limit, init stops before creating anything and lists your other branches with the command that deletes them. With the
-quota of 25, a project holds the deploy branch and about 20 developers with one branch each, fewer when they also keep
-session branches. The 20 active computes cap how many of them work at the same time.
+| App schema on the branch | Meaning | Start without `--schema` |
+|---|---|---|
+| Absent | Nothing was copied. | Migrate, or introspect without `schema.ts`. |
+| Owned by another role | An untouched copy. The owner is the fork's copy of the service principal. | Rebuild. |
+| Yours, and its journal holds the fork-copy tag | A copy whose rebuild did not finish. | Rebuild. |
+| Yours, without the tag | Your working branch. | Migrate, or introspect without `schema.ts`. |
+
+A rebuild tags the copied journal with one row, hands the schema to the developer, then drops it and rebuilds it from
+the committed migrations, which is what `--schema clean` does. Dropping the schema removes the tag in the same
+transaction. Without a `schema.ts`, init introspects the copy first and rebuilds from the baseline that introspect
+writes. `appkit db migrate` refuses a branch whose journal still holds the tag, so no work lands on top of copied rows.
+
+`--schema none` touches nothing, so a later plain init still rebuilds. An explicit `--schema migrate` or
+`--schema introspect` on a copy keeps the copied rows, removes the tag, and says the rows stayed. Schema `public` is
+never handed off or tagged. One rare window remains. A copy whose app schema has tables but no journal has nothing to
+tag, so an init stopped between the hand-off and the drop leaves a schema the developer owns with copied rows, and a
+rerun treats it as the working branch. See Security Considerations for what the rebuild does not remove.
+
+Branches count against the project's limits, so init keeps them cheap. It creates the branch's endpoint with a 5-minute
+scale to zero, because an idle compute counts against the 20 active ones. When the project is at its branch limit, init
+stops before creating anything. It lists your branches with the command that deletes them, and when none of the
+project's branches are yours, it says to ask a project owner. With the quota of 25, a project holds the deploy branch
+and about 20 developers with one branch each, fewer when they also keep session branches. The 20 active computes cap how
+many of them work at the same time.
 
 CI needs no branch, because `appkit db check` runs offline. A CI job that wants a live branch runs
 `appkit db init --session --ttl 1h` and deletes it at the end with `appkit db clean --delete-branch`.
@@ -261,18 +164,23 @@ extra resource to deploy. See the architecture decision below.
 start, so the first deploy needs no grant. `{ schemaName: "public" }` keeps working for apps that already use it, but
 migrations on start cannot create objects there without a manual `GRANT CREATE ON SCHEMA public`.
 
-### Migration opt-in preserves existing beta startup behavior
+Two apps bound to one database with the same schema would share the schema, its journal and its migration lock. That
+is unsupported. Each app sets its own `schemaName`, and the startup error for a schema another role owns says so first.
 
-An app that upgrades from v0.88 does not start migrating, because the deploy flag below is off unless the app's
-`app.yaml` sets it. If the startup check finds every missing table in `public`, its error says the default moved to
-`app` and offers `{ schemaName: "public" }`. With migrate on start and no `schemaName`, startup refuses before it
-applies anything when some declared tables exist in `public` and none exist in `app`. Otherwise an upgraded app would
-create empty tables in `app` and serve them. `appkit db migrate` refuses the same case. Both errors say to set
-`{ schemaName: "public" }` or move the tables. The release notes carry an upgrade section.
+### The upgrade path for apps without `schemaName`
 
-That compatibility covers migration opt-in and the schema location. The operation stack separately replaces the beta
-AutoCRUD HTTP surface and entity hooks. Applications migrate those calls to named operations and regenerate their
-contracts; it provides no compatibility layer for the removed HTTP API.
+An upgraded app without `schemaName` fails its startup check until it sets `{ schemaName: "public" }` or moves its
+tables to `app`. The check runs whether or not the app migrates. When it finds every missing table in `public`, its
+error says the default moved to `app` and offers `{ schemaName: "public" }`.
+
+The upgrade does not start migrating, because the deploy flag below is off unless the app's `app.yaml` sets it. With
+migrate on start and no `schemaName`, startup refuses before it applies anything when some declared tables exist in
+`public` and none exist in `app`. Otherwise an upgraded app would create empty tables in `app` and serve them.
+`appkit db migrate` refuses the same case. Both errors say to set `{ schemaName: "public" }` or move the tables. The
+release notes carry an upgrade section.
+
+The operation stack separately replaces the beta AutoCRUD HTTP surface and entity hooks. Applications move those calls
+to named operations, as design 002 describes. No compatibility layer keeps the removed HTTP API.
 
 ### Seven commands, each with one job
 
@@ -287,10 +195,10 @@ contracts; it provides no compatibility layer for the removed HTTP API.
 | `appkit db check` | Offline check of the committed history, for CI. | No |
 
 `appkit db init` asks nothing on its default path. In a terminal and without `--yes`, it asks only to confirm an
-explicit `--schema clean` on a branch it reused, and about an ambiguous rename in a migration it writes. The rebuild of
-a branch it created in the same run needs no confirmation, because nothing on it is the developer's yet. It keeps
-this checkout's session branch when `.env` points at one and otherwise uses your dev branch. `--session` and `--dev`
-switch between them.
+explicit `--schema clean` on your working branch, and about an ambiguous rename in a migration it writes. The rebuild
+of a copy needs no confirmation, because `appkit db migrate` refuses to work on top of a copy, so nothing on it is the
+developer's. It keeps this checkout's session branch when `.env` points at one and otherwise uses your dev branch.
+`--session` and `--dev` switch between them.
 `appkit db check` is the only command that needs no Databricks or Lakebase access, so CI runs it without credentials.
 
 ## Architecture Decisions
@@ -298,33 +206,66 @@ switch between them.
 ### Migrate on start, behind an explicit flag
 
 The plugin applies migrations in `setup()`, after the pool opens and before the schema check and `server.start()`.
-It runs only when `APPKIT_DB_MIGRATE_ON_START=true` and the process has service principal credentials
-(`DATABRICKS_CLIENT_ID` and `DATABRICKS_CLIENT_SECRET`). The template's `app.yaml.tmpl` writes the flag for apps that
-select the plugin, which `apps init` offers only after the reveal. Until then, an app that adds the plugin by hand adds
-the flag to `app.yaml` too. `.env` never carries it, so `npm start` on a laptop never migrates.
+It runs only when `APPKIT_DB_MIGRATE_ON_START=true` and the process connects as the app's own service principal. Apps
+sets `DATABRICKS_CLIENT_ID` and `DATABRICKS_CLIENT_SECRET` for the app, and sets `PGUSER` to that client ID for a bound
+database. So the plugin migrates only when `PGUSER` equals `DATABRICKS_CLIENT_ID`. An unset `PGUSER` also qualifies,
+because the pool then connects with those credentials. When the flag is set and the process does not qualify, the
+plugin logs why and does not migrate. The template's `app.yaml.tmpl` writes the flag for apps that select the plugin,
+which `apps init` offers only after the reveal. Until then, an app that adds the plugin by hand adds the flag to
+`app.yaml` too. `.env` never carries it.
 
-`databricks apps run-local` reads `app.yaml`, so it sets the flag, but it sets no service principal credentials. It
-migrates only when the shell exports them. As a second guard, migrate on start skips migrating, with a warning, when
-`LAKEBASE_ENDPOINT` names a `dev-` or `session-` branch, because only a developer migrates those.
+A local start never migrates. On a laptop `PGUSER` comes from `.env` and names the developer. So neither `npm start`
+nor `databricks apps run-local`, which reads the flag from `app.yaml`, migrates, even when the shell exports M2M
+credentials.
+
+A deployed app bound to a branch with the exact shape of a dev or session branch, `dev-<user>-<hash6>` or
+`session-<hash6>-<id>`, refuses to start and names the branch. Only a developer migrates those branches. A deploy
+branch named `session-store` does not have that shape, so it migrates.
 
 Rejected alternatives:
 
 | Option | Why not |
 |---|---|
-| Infer deployment from the environment | False positive on a local `npm start` with M2M credentials. No way to turn it off. |
+| Infer deployment from the environment alone | No way to turn it off for a deployed app that must not migrate. The identity check above narrows the flag and does not replace it. |
 | An admin migrates the deploy branch from the CLI | A human step on every schema change, by a person with DDL rights on the production branch. App Builder has nobody to run it. |
 | A shared owner role, with CI migrating on merge ([tmm Lakebase Agentic CI](https://github.com/databricks/tmm/tree/main/Lakebase-Agentic-CI)) | Works. It needs a one-time bootstrap on the deploy branch by someone with `ADMIN OPTION`, database credentials in CI, and a grant to every new app service principal. Developers skip the fork hand-off only if they are members on the deploy branch, which gives them DDL rights there. App Builder apps have no CI. |
 | A one-shot migration job per deploy | Adds a resource to every app, and still needs a shared owner role and its bootstrap so the app can use what the job created. |
 | A bundle script hook | Runs as the person or CI identity that deploys, which then owns the objects. |
 
-The decision costs two rules that the docs and `appkit db migrate` carry:
+The decision costs three rules that the docs and `appkit db migrate` carry:
 
-- **Each migration works with the previous release.** A horizontally scaled rollout updates one instance first while
-  the old instances keep serving. A dropped, renamed or retyped column breaks them. Drops go in a later deploy than
-  the code that stops using the column (expand, then contract). `appkit db migrate` warns when it writes a drop, a
-  rename, a type change or `SET NOT NULL`.
-- **A migration fits in the start window.** A migration that runs longer than the platform's start timeout can never
-  land. Long backfills run as a separate job against the deploy branch, not as a migration.
+- **Each migration works with the previous release.** On no-downtime compute the old instance keeps serving while the
+  new one migrates and starts. A dropped, renamed or retyped column breaks it. Drops go in a later deploy than the code
+  that stops using the column (expand, then contract). `appkit db migrate` warns when it writes a drop, a rename, a
+  type change, `SET NOT NULL`, or an `ADD COLUMN ... NOT NULL` without a default.
+- **A migration can fail on rows a new branch does not have.** `appkit db migrate` warns separately about statements
+  that may fail on existing rows. They are `SET NOT NULL`, an `ADD COLUMN` that is `NOT NULL` without a default or
+  carries a constraint, a `UNIQUE`, `PRIMARY KEY`, `CHECK`, `FOREIGN KEY` or `EXCLUDE` constraint, a unique index, and
+  a type change. A new dev branch starts empty, so such a migration passes there. Before deploying, test it on a
+  session branch that keeps a copy of the deploy branch's rows, created with
+  `appkit db init --session --schema migrate`.
+- **A migration fits in 300 seconds.** That is the longest health check Apps allows, as the next section says. A long
+  backfill runs as an expand migration, such as a nullable column, then a batched DML job whose role has the
+  DATABRICKS_SUPERUSER membership on the deploy branch, then a contract migration, such as `SET NOT NULL`.
+
+### What a deploy does while the app migrates
+
+The Apps runtime decides what users see while the new process migrates:
+
+- A deploy counts as succeeded once the app process has lived 2 seconds, unless an `app.yaml` `health_check` applies.
+  Then the health check must pass within its timeout, which defaults to 300 seconds and cannot be longer.
+- The template declares `health_check` on `/health`. AppKit binds `/health` only after the database plugin's setup,
+  migrations included.
+- Classic compute stops the old process before it starts the new one.
+- No-downtime compute starts the new process beside the old one. When the new one fails its health check, the old one
+  keeps serving.
+- A process that crashes is not restarted. It stays down until the next deploy.
+- An app on compute that scales to zero (`LIQUID`, which Genie App Builder apps use) stops after 15 idle minutes by
+  default. It runs its start, migrations included, on every cold start.
+
+So the old instance keeps serving after a failed migration only on no-downtime compute with the health check. A
+single-instance app on classic compute, and an app that scales to zero, are down until a fixed deploy. Whether Apps
+enables health checks in production is Open Question 1.
 
 ### One transaction per migration
 
@@ -333,9 +274,9 @@ write. A deploy then replays the same commits the developer's branch went throug
 
 drizzle-orm's migrator runs every pending migration in one transaction. That fails on deploy for changes that applied
 cleanly on the dev branch. `ALTER TYPE ... ADD VALUE` in one migration and a use of the new value in the next fails
-with SQLSTATE 55P04 when both run together. A failure after some migrations commit leaves the app not started and
-the old instances serving. Because every migration works with the previous release, that state is safe, and the next
-deploy resumes from it.
+with SQLSTATE 55P04 when both run together. A failure after some migrations commit leaves them committed and the new
+process not serving. Because every migration works with the previous release, an old instance that still serves keeps
+working, and the next deploy resumes from there.
 
 The alternative keeps one transaction and refuses, before `begin`, a batch where an enum value is added before the
 last migration. It keeps all-or-nothing, but the deploy still differs from what the developer ran.
@@ -343,22 +284,27 @@ last migration. It keeps all-or-nothing, but the deploy still differs from what 
 ### When a migration fails on deploy
 
 Some migrations fail on the deploy branch every time, though they passed on the dev branch. For example, a `SET NOT
-NULL` fails when rows on the deploy branch gained a `NULL` after the developer forked. The state after the failure:
+NULL` fails when rows on the deploy branch hold a `NULL`, and a new dev branch has no rows. The state after the
+failure:
 
 - The failed migration rolled back and is not recorded.
 - The migrations before it in that start stay committed and recorded.
-- The new instance does not serve. The old instances keep serving, because each migration works with the previous
-  release.
+- The new process exits 1 and does not serve. Whether the app is down depends on its compute, as the section on
+  deploys says.
 
-The fix goes forward. The developer changes that unrecorded migration, or adds the data repair to it before the
-statement that failed, commits, and redeploys. The deploy branch never recorded it, so it runs the new version. A dev
-branch that already ran the old version reports it as `edited`. The developer rebuilds that branch with
-`appkit db clean` and `appkit db migrate`.
+The fix goes forward, and it never edits a migration a deploy branch applied. A deploy start refuses an `edited`
+migration. A file that differs only in CRLF or LF line endings counts as the same file. When the migration failed
+because of the rows it met, someone repairs those rows on the deploy branch, then redeploys the same migration. The
+repair runs as a role with the DATABRICKS_SUPERUSER membership on the deploy branch, which someone with CAN USE on the
+project creates. A migration may be edited in place only while no deploy branch has recorded it. A dev branch that ran
+the old version then reports it as `edited`, and the developer rebuilds that branch with `appkit db clean` and
+`appkit db migrate`.
 
-A data repair run by hand on the deploy branch needs the owner's rights there, which are the app service principal's.
-Developers do not have them by design, so the repair belongs in the migration. A contract migration, one that drops or
-retypes what older code uses, closes the rollback window. After it lands, an older revision of the app may no longer
-start.
+Measured on a Lakebase fork, a role with the DATABRICKS_SUPERUSER membership can SELECT, INSERT, UPDATE, DELETE and
+TRUNCATE the service principal's tables and create tables in its schema, through the grants Lakebase gives
+`databricks_superuser`. It cannot ALTER, DROP or index them, so schema changes stay in migrations. A contract
+migration, one that drops or retypes what older code uses, closes the rollback window. After it lands, an older
+revision of the app may no longer start.
 
 ### One lock per schema, with a bounded wait
 
@@ -373,19 +319,21 @@ Two limits are different and easy to confuse:
   request queues every later query on its table, so the timeout bounds how long traffic stalls behind the wait, not
   only the migration.
 - **Holding a lock.** Nothing bounds it. `statement_timeout` is 0 while migrating, because a migration must fit the
-  start window rather than a statement deadline. Once DDL holds its lock, it keeps it until the statement and its
-  transaction end.
+  300-second health check rather than a statement deadline. Once DDL holds its lock, it keeps it until the statement
+  and its transaction end.
 
 A killed instance is not cancelled for certain either. The migrating session also sets
-`client_connection_check_interval`, so Postgres cancels a statement whose client went away. That is best effort.
-Postgres sees a closed connection only when the server's kernel reports it, and a host that vanished without closing
-the socket may not be seen until TCP keepalive gives up. When the server rejects the setting, the migrator logs a
-warning and goes on. Until Postgres notices, the killed instance's statement keeps running and holds its locks,
-the advisory lock included.
+`client_connection_check_interval`, which Lakebase allows and sets to 60 seconds server-wide, so Postgres cancels a
+statement whose client went away. That is best effort. Postgres sees a closed connection only when the server's kernel
+reports it, and a host that vanished without closing the socket may not be seen until TCP keepalive gives up. When the
+server rejects the setting, the migrator logs a warning and goes on. Until Postgres notices, the killed instance's
+statement keeps running and holds its locks, the advisory lock included.
 
-For a stuck start, the lock-wait log names the holder's pid. `select pg_cancel_backend(<pid>)` cancels
-its statement. `select pg_terminate_backend(<pid>)` ends its session, which releases the advisory lock. Both need a
-role that is a member of the service principal's role, or that has `pg_signal_backend`.
+For a stuck start, the lock-wait log names the holder's pid. `select pg_cancel_backend(<pid>)` cancels its statement.
+`select pg_terminate_backend(<pid>)` ends its session, which releases the advisory lock. A role with the
+DATABRICKS_SUPERUSER membership on the deploy branch can run both, because `databricks_superuser` inherits
+`pg_signal_backend` (measured on Lakebase) and the service principal is not a superuser. Without such a role, someone
+with CAN MANAGE on the project restarts the branch's compute.
 
 Most starts have nothing to apply, and an App Builder app starts on every cold start. The migrator reads the recorded
 rows first without the lock. It takes the lock only when an entry is pending, then reads again under it. A current
@@ -421,8 +369,8 @@ again under it when an entry is pending and none is stranded:
 | `pending` | Entries newer than the last recorded one. | Apply them. |
 | `current` | Every entry recorded with its hash. | Nothing. |
 | `stranded` | An entry older than the last recorded one, not recorded. | Fail. Nothing changes. |
-| `edited` | A recorded entry whose file hash changed. | Warn. |
-| `ahead` | A recorded row with no committed entry, for example after a code rollback. | Warn. |
+| `edited` | A recorded entry whose file hash changed, with either line ending. | Fail. The CLI only warns. |
+| `ahead` | A recorded row with no committed entry, for example after a code rollback. | Warn, or fail when an entry is also `pending`. |
 | `partial-baseline` | `0000_baseline` tables exist only in part. | Fail. Nothing changes. |
 
 Committed entries and recorded rows that share a `when` match one to one, exact hashes first. A committed entry left
@@ -430,8 +378,9 @@ with no row is `pending` or `stranded`, never `edited`. So a migration that neve
 one with the same timestamp.
 
 Before it reads the rows, startup checks the journal relation itself. It refuses a `__drizzle_migrations` in the app
-schema that is not an ordinary table owned by the schema's owner. A view or a function another role put there would
-otherwise run with the migrator's rights.
+schema that is not an ordinary table. It records only into a journal it trusts, one owned by its own role, by a role it
+inherits, or by the schema's owner. It reads another role's journal only when the table has no row-level security. A
+view, or a trigger on another role's table, would otherwise run that role's code with the migrator's rights.
 
 `appkit db check` runs in CI and reads only files in the checkout: `meta/_journal.json`, each entry's
 `meta/NNNN_snapshot.json`, the list of `.sql` files in `config/database/migrations/`, and `schema.ts`. It takes no
@@ -456,6 +405,11 @@ The check compares the snapshots with each other and with `schema.ts`. It does n
 A journal on `main` that passes the check and only grows can never strand an entry on the deploy branch, because the
 deploy branch applies a prefix of it. Two pull requests that both add `0001_migration` conflict in git first, and the
 check catches a resolution that keeps both.
+
+That holds only when every deploy target deploys commits from `main`. A feature deployed early from its own branch
+merges its migrations into `main` unchanged before `main` deploys again. A deploy start refuses a diverged history, one
+with committed entries pending and recorded rows the checkout lacks at the same time, and names both. A code rollback
+leaves only recorded rows the checkout lacks, so it only warns.
 
 Each finding names its fix. For a missing file, or a snapshot file that is not a drizzle-kit snapshot, the developer
 restores it from version control. For a `schema.ts` change, they run `appkit db migrate` and commit the migration it
@@ -485,8 +439,8 @@ the role also owns objects outside the app schema, init refuses before the delet
 manual command.
 
 `appkit db init --schema none` hands off nothing. It reads no `schema.ts`, takes no history lock, and leaves the schema
-and its owner as the fork copied them. Init never hands off schema `public`, because `public` belongs to the database,
-not to an app.
+and its owner as the fork copied them, so a later plain init still rebuilds the copy. Init never hands off or tags
+schema `public`, because `public` belongs to the database, not to an app.
 
 The role delete returns HTTP 500 when Postgres refuses the drop with SQLSTATE 2BP01, for example when the role still
 owns objects in another database of the branch
@@ -495,12 +449,18 @@ dependencies from `pg_shdepend` before the delete. When the delete fails, init p
 dependencies with where they are, and the fix. What remains is the platform's: the 500 classifies a dependency
 refusal as a server error, and the delete cannot complete until someone repairs those dependencies.
 
-Single ownership by the service principal breaks when that principal changes. A recreated app has a new one, and
-removing and re-adding the database resource hands the objects to the app manager (XTA-18463). Either way the app
-can no longer use or alter its schema, and its next start fails. The startup error names the current owner of schema
-`app` and the manual recovery, which the docs repeat. When the owner belonged to a deleted app, someone with CAN MANAGE
-on the project runs `databricks postgres delete-role <old role> --reassign-owned-to <new role>`, which moves the
-objects and deletes the old role. Otherwise the owner transfers the schema. A zero-touch recovery is Open Question 5.
+Single ownership by the service principal breaks when that principal changes. A recreated app has a new one. Removing
+and re-adding the database resource hands the objects to the role Apps created for the person who removed it
+(`dbrx-apps-user-<email>`), or to that person's existing role (XTA-18463). Either way the app can no longer use or
+alter its schema, and its next start fails.
+
+No Postgres role can hand objects to a service principal's role. Measured on Lakebase, `ALTER ... OWNER TO` that role
+fails with `must be able to SET ROLE`, and nobody holds that right on an Apps service principal role. The startup error
+names the current owner of schema `app`. It says first that two apps on one database each need their own
+`schemaName`. The recovery comes second, and the docs repeat it. Someone with CAN MANAGE on the project checks what
+the owner role holds, then runs `databricks postgres delete-role <owner role> --reassign-owned-to <app role>`. That
+moves every object the owner role holds on the branch to the app's role and deletes the owner role. A zero-touch
+recovery is Open Question 2.
 
 ### Branch policy is one resolver and one table
 
@@ -538,9 +498,10 @@ The stack ships on drizzle-kit 0.31's journal, version 7, as decided in review. 
 removes the journal and its merge conflicts, but moving to it changes the layout of every app's committed migrations.
 That move is future work, in a format-migration proposal of its own.
 
-`appkit db init` installs drizzle-kit as a dev dependency when it is missing, since only database apps run it. A
-template dev dependency would add about 32 MB, 12 downloads and two deprecation warnings to every app, including apps
-that never use it. The template ships one lockfile, so it cannot be dropped per app.
+`appkit db init` installs drizzle-kit as a dev dependency when it is missing, for every start except `--schema none`,
+since only database apps run it. `appkit db migrate` and `appkit db check` both need it, and a dev dependency reaches
+CI too. A template dev dependency would add about 32 MB, 12 downloads and two deprecation warnings to every app,
+including apps that never use it. The template ships one lockfile, so it cannot be dropped per app.
 
 The shared CLI's view of the tooling API is an interface exported from `shared`, and an appkit test assigns the
 tooling's exports to it. Drift then fails typecheck.
@@ -555,12 +516,13 @@ U+2028, U+2029, `*/`, backtick and `${`, loaded without running code.
 Introspect records its migration as applied only if the branch's last recorded migration is the one just before it,
 checked under the schema's advisory lock. A branch ahead of the checkout would otherwise record DDL it never ran.
 
-Introspect keeps what an existing `schema.ts` marks private for default operation outputs. A column the old file
-declares keeps its `.private()`, or stays without one. Introspect writes a column the old file does not declare with
-`.private()`, and a warning names it. When the catalog has a foreign key the old file does not declare, introspect
-refuses before it changes any file, because each foreign key adds a relation that authored operations can include.
-When `schema.ts` does not load, introspect refuses before it reads the branch, because it could not keep the private
-columns. Without a `schema.ts`, introspect writes no column private.
+Introspect keeps what an existing `schema.ts` marks private, because the server entity client omits private columns
+from its reads by default. A column the old file declares keeps its `.private()`, or stays without one. Introspect
+writes a column the old file does not declare with `.private()`, and a warning names it. When the catalog has a
+foreign key the old file does not declare, introspect refuses before it changes any file. Each foreign key adds a
+relation that the server entity client can `include`, which widens what server code reads, so the developer declares
+it with `fk()`. When `schema.ts` does not load, introspect refuses before it reads the branch, because it could not keep
+the private columns. Without a `schema.ts`, introspect writes no column private.
 
 ### Flag Strategy
 
@@ -593,21 +555,20 @@ scaffold to deploy in six steps:
    and database. The branch and database go into `databricks.yml`, and their resource names include the project. The
    project gets no `databricks.yml` variable of its own, because its manifest field sets `bundleIgnore`, which the
    plugin manifest docs define as excluded from `databricks.yml` variables.
-2. `apps init` runs `appkit db init`, which asks nothing on its default path. It forks the project's default branch
-   into `dev-<user>-<hash6>`, adds a read-write endpoint and the developer's role, writes `.env`, hands the fork's app
-   objects to the developer, and rebuilds the app schema from the committed migrations, so the new branch holds no
-   copied app rows. With `--schema none`, init stops after it writes `.env`.
+2. `apps init` runs `appkit db init`, which asks nothing on its default path. It forks the deploy branch that
+   `databricks.yml` now binds into `dev-<user>-<hash6>`, adds a read-write endpoint and the developer's role, writes
+   `.env`, installs drizzle-kit, hands the fork's app objects to the developer, and rebuilds the app schema from the
+   committed migrations, so the new branch holds no copied app rows. With `--schema none`, init stops after it writes
+   `.env`, and a later plain init still rebuilds.
 3. The developer declares a table in `schema.ts` and runs `appkit db migrate`. It writes `0000_migration.sql`,
    regenerates `shared/appkit-types/database.d.ts`, and applies the migration to the dev branch.
-4. The developer adds authorized operations in `server/database/routes/` and uses the query and mutation hooks in
-   the UI. Development saves regenerate the registry and contracts and reload the backend. Changes to storage still
-   require `appkit db migrate`; editing an operation never applies DDL.
-5. The developer commits `config/database/`, operation declarations and policies, the generated registry and type
-   contracts, and the UI changes. `appkit generate-types` regenerates operation artifacts for a build or CI check;
-   `NODE_ENV=production` makes missing authorization a generation error. They run `databricks apps deploy`.
-6. The app starts with `APPKIT_DB_MIGRATE_ON_START=true`. Operation metadata is checked before the pool opens; under
-   the migration lock it reconciles, applies `0000`, creates and owns schema `app`, checks the declared tables, and
-   listens. Applying a migration alone never publishes a browser operation.
+4. The developer adds authorized operations in `server/database/routes/` and uses them in the UI, as design 002
+   describes. Changes to storage still require `appkit db migrate`, and editing an operation never applies DDL.
+5. The developer commits `config/database/`, the operations with their generated contracts, and the UI changes. After
+   the merge, they deploy `main` with `databricks apps deploy`.
+6. The app starts with `APPKIT_DB_MIGRATE_ON_START=true`, as its service principal. Under the migration lock it
+   reconciles, applies `0000`, creates and owns schema `app`, checks the declared tables, binds `/health`, and listens.
+   Applying a migration never publishes a browser operation.
 
 Until the CLI release that runs `appkit db init` ships, the developer runs it once after scaffolding, as the README
 says. Before that run, `.env` points at the branch picked in the prompts, usually the deploy branch, and
@@ -630,16 +591,18 @@ not show that the app applied those migrations. The app's startup log and its sc
 
 ### A second developer
 
-Clone, install, `appkit db init`. Init forks the default branch, which already holds the deployed migrations. It drops
-the fork's copy of the app schema and applies every committed migration, so the new branch has the deployed tables and
-none of their rows. With `--schema migrate`, init keeps the copied rows and applies only the committed migrations the
-fork has not recorded.
+Clone, install, `appkit db init`. Init forks the branch the default `databricks.yml` target binds, which already holds
+the deployed migrations, and says which branch it forked. When that branch does not resolve in the project, init forks
+the project's default branch. The fork's app schema still belongs to the copy of the service principal, so init drops
+it and applies every committed migration. The new branch has the deployed tables and none of their rows. With
+`--schema migrate`, init keeps the copied rows, applies only the committed migrations the fork has not recorded, and
+says the rows stayed.
 
 ### Existing tables
 
 On a fork that has tables but no `schema.ts`, `appkit db init` runs introspect. It writes `schema.ts` and
-`0000_baseline`. On a branch init created in this run, it then rebuilds the app schema from that baseline, so the fork
-has the tables and none of the copied rows. On a reused branch, it records the baseline as applied and keeps the rows.
+`0000_baseline`. On an untouched copy, it then rebuilds the app schema from that baseline, so the fork has the tables
+and none of the copied rows. On your working branch, it records the baseline as applied and keeps the rows.
 The deployed app adopts the baseline on start when every baseline table and column already exists. A partial match
 fails start and changes nothing.
 
@@ -651,24 +614,22 @@ deploy branch are whatever they were.
 ### API Changes
 
 - CLI: `appkit db init | migrate | introspect | clean | seed | verify | check`.
-- Backend operations: `defineOperation`, `definePolicy` and `database()` discovery, with explicit `routes: false`
-  or `routes: customRoutes` alternatives. These replace AutoCRUD and its `api` configuration.
-- Generated contracts: `server/database/routes.gen.ts` and `shared/appkit-types/database-operations.d.ts`, alongside
-  `database.d.ts`. Omitted inputs generate `void`; explicit schemas determine the wire types. Output defaults stay.
-- UI: `databaseApi.execute`, `useDatabaseQuery`, `useDatabaseMutation`, and query-only `skipToken`. Entity CRUD hooks
-  and `databaseApi.list/get/create/update/remove` are removed by the operation cutover.
+- Operations, their generated contracts and the UI hooks, as design 002 defines them. They replace AutoCRUD, its
+  `api` configuration and the entity CRUD hooks.
 - `defineSchema()` defaults `schemaName` to `"app"`.
 - Package export `@databricks/appkit/beta/database-tooling`. It is beta and internal to the AppKit CLI. It has no semver
   guarantee, and only the CLI of the same AppKit release imports it.
-- App env: `APPKIT_DB_MIGRATE_ON_START`. Local env written by init: `LAKEBASE_PROJECT`, `LAKEBASE_ENDPOINT`,
+- App env: `APPKIT_DB_MIGRATE_ON_START`, which takes effect only when `PGUSER` is unset or equals
+  `DATABRICKS_CLIENT_ID`. Local env written by init: `LAKEBASE_PROJECT`, `LAKEBASE_ENDPOINT`,
   `PGHOST`, `PGDATABASE`, `PGUSER`, `PGPORT` when it is unset or not a number, `PGSSLMODE=require` when it is unset,
   `prefer` or `disable`, `APPKIT_DB_SESSION` for a session branch, and `DATABRICKS_CONFIG_PROFILE` or
   `DATABRICKS_HOST` when `.env` names neither.
 - Flags: `appkit db init --dev | --session`, `--ttl <duration>` for session branches,
-  `--schema <migrate|introspect|clean|none>` and `-y, --yes`. On a branch init created in the same run, `--schema`
-  defaults to `clean`, and without `schema.ts` to introspect followed by the same rebuild. On a branch init reused, it
-  defaults to `migrate`, and without `schema.ts` to `introspect`. `--schema migrate` on a new branch keeps the copied
-  rows. `appkit db clean --delete-branch` and `-y, --yes`.
+  `--schema <migrate|introspect|clean|none>` and `-y, --yes`. On an untouched copy, or a copy whose rebuild did not
+  finish, `--schema` defaults to `clean`, and without `schema.ts` to introspect followed by the same rebuild.
+  Otherwise it defaults to `migrate`, and without `schema.ts` to `introspect`. `--schema migrate` or `introspect` on a
+  copy keeps the copied rows and says so. `--schema none` touches nothing. `appkit db clean --delete-branch` and
+  `-y, --yes`.
   `appkit db introspect --schema-name <name>`. `appkit db verify --deployed` and `-t, --target <name>`.
 - Optional peer dependency: `drizzle-kit` `0.31.10`.
 
@@ -682,14 +643,16 @@ the `applied`, `adopted`, `edited` and `unknown` (the `ahead` rows) counts, `loc
 
 ## Security Considerations
 
-- **New forks start without copied app rows.** A Lakebase fork copies every row of the default branch, and the
+- **New forks start without copied app rows.** A Lakebase fork copies every row of the branch it forks, and the
   developer gets `DATABRICKS_SUPERUSER` on it. That role is required, because it is the only role API membership that
-  grants `CREATE` on the database. On a branch init created in this run, init drops the fork's app schema and rebuilds
-  it from the committed migrations, or from the baseline introspect writes, so no copied row stays in it. Limits that
-  the docs repeat:
-  - Until the rebuild runs, the copied rows are on the fork at the Lakebase level. An init interrupted before the
-    rebuild leaves them there, and a rerun reuses the branch, which defaults to `migrate`. The developer reruns
-    `appkit db init --schema clean`.
+  grants `CREATE` on the database. On an untouched copy, init drops the fork's app schema and rebuilds it from the
+  committed migrations, or from the baseline introspect writes, so no copied row stays in it. Limits that the docs
+  repeat:
+  - Until the rebuild runs, the copied rows are on the fork at the Lakebase level. An interrupted init leaves them
+    there. A rerun from any checkout finds the schema still owned by the copy of the service principal, or tagged in
+    its journal, and rebuilds. `appkit db migrate` refuses the branch meanwhile.
+  - A copy whose app schema has tables but no journal has nothing to tag. An init stopped between the hand-off and the
+    drop leaves a schema the developer owns with copied rows, and a rerun treats it as the working branch.
   - Rows in other schemas stay. `DROP SCHEMA ... CASCADE` also drops objects in other schemas that depend on the app
     schema, such as a view over an app table, a foreign key into one, or a column of an app type. Clean lists them
     before it drops. Only independent objects in other schemas stay.
@@ -698,11 +661,12 @@ the `applied`, `adopted`, `edited` and `unknown` (the `ahead` rows) counts, `loc
     on your own branch is `databricks postgres delete-role projects/<project>/branches/<your branch>/roles/<app role>
     --reassign-owned-to projects/<project>/branches/<your branch>/roles/<your role>`, then `appkit db clean`. Moving
     the app to schema `app` avoids it.
-  - A reused dev branch keeps whatever it holds, and `--schema migrate` on a new fork keeps production rows on
-    purpose.
-  - Whether Lakebase offers schema-only branches, which would copy no rows at all, is Open Question 4.
-- **Creating branches needs CAN MANAGE on the project.** That also allows deleting the deploy branch. The narrowest
-  permission is Open Question 3.
+  - Your working branch keeps whatever it holds. `--schema migrate` or `--schema introspect` on a copy keeps
+    production rows on purpose, and init says so.
+  - Lakebase has no schema-only branch this flow can use, as the Open Questions record, so every fork copies the rows
+    first.
+- **Creating branches needs CAN MANAGE on the project.** That also allows deleting the deploy branch. No narrower
+  permission exists. CAN USE manages roles and databases but cannot create a branch.
 - **Branch guards stop mistakes, not people.** The name allowlist, the denylist and the `PGHOST` check run before
   any connection. They stop an `appkit db` command aimed at the wrong branch. They are not an authorization boundary.
   The developer's CAN MANAGE on the project still lets them delete the deploy branch through the console, the API or
@@ -715,10 +679,14 @@ the `applied`, `adopted`, `edited` and `unknown` (the `ahead` rows) counts, `loc
 - **`verify --deployed` proves the deployed source.** It checks the journal and the SQL bytes of the active
   deployment, the bindings, the running status and the service principal's role. It does not show that the migrations
   were applied on the database.
-- **The migration journal must be AppKit's.** Startup refuses a `__drizzle_migrations` relation that is not an
-  ordinary table owned by the app schema's owner, before it reads from it.
-- **`appkit db init` installs drizzle-kit.** It runs the project's package manager to add `drizzle-kit@0.31.10` in the
-  developer's environment, and the packages' lifecycle scripts run as in any install.
+- **The migration journal guard stops mistakes, not people.** Startup refuses a `__drizzle_migrations` relation that
+  is not an ordinary table. It records only into a journal owned by its own role, by a role it inherits, or by the app
+  schema's owner, and reads another role's journal only without row-level security. Any role with the
+  DATABRICKS_SUPERUSER membership on the deploy branch can still write journal rows, because `databricks_superuser`
+  holds `pg_write_all_data`.
+- **`appkit db init` installs drizzle-kit.** For every start except `--schema none`, it runs the project's package
+  manager to add `drizzle-kit@0.31.10` in the developer's environment, and the packages' lifecycle scripts run as in
+  any install.
 - **`appkit db check` runs the pull request's code.** It imports `schema.ts` and what it imports, so CI runs it in a
   job without secrets.
 - **Generated code.** Introspect escapes every catalog string that reaches `schema.ts`. Tests cover each escape
@@ -732,17 +700,11 @@ the `applied`, `adopted`, `edited` and `unknown` (the `ahead` rows) counts, `loc
 - **Session branches are bound to a user.** With the user hash in the name, a copied `.env` fails the guard for
   everyone but its creator.
 
-## Validation of the operation integration
+## Integration with the operation stack
 
-The operation stack is exercised through runtime, generation, hook and playground tests, including a real
-`tsx watch` + Vite lifecycle test and a production build that loads operations after all TypeScript sources are
-removed. Application scenarios cover reordered read responses, refresh after writes, field-validation feedback,
-concurrent investigation creation, audit rollback and note/closure ordering in disposable PostgreSQL.
-
-These checks validate the operation design and application experience. They do not establish that the two PR chains
-have been integrated or repeat the migration stack's live Lakebase validation. Before release, combine both stacks
-and verify registry validation, startup migrations and schema checks in one deployment, and keep the expand/contract
-migration checks for mixed-version rollouts.
+Design 002 records how the operation stack is validated. Neither stack's checks show that the two PR chains work
+together. Before release, combine both stacks and verify in one deployment that the operations load, migrations run on
+start and the schema check passes. Keep the expand and contract migration checks for mixed-version rollouts.
 
 ## Platform Dependencies
 
@@ -750,11 +712,10 @@ migration checks for mixed-version rollouts.
 |---|---|
 | Databricks CLI: `apps init` runs `appkit db init` after install. | Removes the manual init step. Without it the README tells the developer to run init. |
 | Databricks CLI: a minimum version recorded in the template. | An older CLI scaffolds without init, and `.env` points at the deploy branch until the developer runs it. `appkit db verify` warns meanwhile. |
-| Lakebase: `client_connection_check_interval` allowed for app roles (Open Question 2). | Lets Postgres cancel, best effort, the statement of a killed instance that still holds the migration lock. Without it the migrator logs a warning. |
 | Lakebase: role delete returns the 2BP01 dependency error as a 4xx, not a 500 ([ES-2265656](https://databricks.atlassian.net/browse/ES-2265656), open). | Init prints the API error, the dependencies and the fix, but the 500 classifies a dependency refusal as a server error. The hand-off cannot complete on any rerun until someone repairs the dependencies. |
 | Lakebase: raise the quota of 25 unarchived branches per project ([LKB-12894](https://databricks.atlassian.net/browse/LKB-12894), backlog, proposes 100). | One branch per developer caps a project at about 20 developers. |
 | Apps: keep object ownership with the app across a database resource remove and re-add ([XTA-18463](https://databricks.atlassian.net/browse/XTA-18463), to do). | The app cannot use its own schema after a re-add, and start fails. |
-| Apps: the start timeout and whether a non-zero exit restarts the app (Open Question 1). | Sets the lock wait and the longest migration. The template exits 1 on a failed start. |
+| Apps: deployment health checks enabled in production (Open Question 1). | Without them a deploy succeeds once the process lives 2 seconds, and no-downtime compute can send traffic to a process that is still migrating. |
 
 ## Rollout Plan
 
@@ -778,25 +739,32 @@ migration checks for mixed-version rollouts.
 ## PR Stack
 
 1. `00-design`: this doc.
-2. [#654](https://github.com/databricks/appkit/pull/654) Migrations on deploy start: the flag, one transaction per
-   migration, the reconcile states with fail-closed `stranded` and one-to-one matching within a `when`, the refusal of
-   a journal relation that is not an ordinary table owned by the schema's owner, the bounded lock wait, a 5s lock
-   timeout, a warning when `client_connection_check_interval` is rejected, the lock-free read on a current branch, the
-   `-pooler` refusal and the developer-branch skip, the schema owner in the startup error, a log line per run and per
-   applied migration, and a real-Postgres suite.
+2. [#654](https://github.com/databricks/appkit/pull/654) Migrations on deploy start: the flag, migrating only as the
+   app's own service principal (`PGUSER` unset or equal to `DATABRICKS_CLIENT_ID`) with the reason logged otherwise,
+   the refusal of a deployed app bound to a branch shaped like a dev or session branch, one transaction per
+   migration, the reconcile states with fail-closed `stranded` and one-to-one matching within a `when`, a deploy start
+   that refuses an `edited` migration, ignoring line endings, and a diverged history, the journal trust rule, the
+   bounded lock wait, a 5s lock timeout, a warning when `client_connection_check_interval` is rejected, the lock-free
+   read on a current branch, the `-pooler` refusal, the schema owner in the startup error with the two-apps case first
+   and no `ALTER ... OWNER` advice, a log line per run and per applied migration, and a real-Postgres suite.
 3. [#655](https://github.com/databricks/appkit/pull/655) The `app` default schema, with the `public` hint in the
-   startup check, the refusal to create the tables in an implicit `app` when `public` has them, and an upgrade note.
+   startup check, the refusal to create the tables in an implicit `app` when `public` has them, an ownership hint for
+   `public` that does not suggest `ALTER ... OWNER`, and an upgrade note.
 4. [#666](https://github.com/databricks/appkit/pull/666) `appkit db migrate`: the branch resolver, the checkout's
-   history lock, the drizzle-kit version check, the destructive-statement warning, and a checked tooling contract.
+   history lock, the drizzle-kit version check, the warning for statements that break the previous release, a second
+   warning class for statements that may fail on existing rows, and a checked tooling contract.
    When Postgres rejects the migration the run wrote, migrate removes it, so the next run writes it again.
 5. [#670](https://github.com/databricks/appkit/pull/670) `appkit db introspect`: compare-and-set recording, only on
    your own branch, private columns and a refusal of foreign keys that the old `schema.ts` does not declare, and
    catalog tests that run SQL.
 6. [#672](https://github.com/databricks/appkit/pull/672) `appkit db init`, `clean`, `seed`: dev and session branches
-   with no prompts, a new fork rebuilt without copied app rows by default, the hand-off of the app schema and its
-   refusal when the copied owner owns objects outside it, the 2BP01 dependency report, the refusal of a bound
-   database the fork lacks, the 5-minute scale to zero, the branch-limit stop, `--ttl` and `--delete-branch`, atomic
-   `.env` writes with `PGSSLMODE=require`, and the drizzle-kit install.
+   with no prompts, forked from the branch the default `databricks.yml` target binds or else the project default, an
+   untouched copy rebuilt without its app rows by default, decided from the schema owner and a fork-copy tag in the
+   copied journal, `appkit db migrate` refusing a tagged branch, the hand-off of the app schema and its refusal when
+   the copied owner owns objects outside it, the 2BP01 dependency report, the refusal of a bound database the fork
+   lacks, the 5-minute scale to zero, the branch-limit stop that names a project owner when no branch is yours,
+   `--ttl` and `--delete-branch`, atomic `.env` writes with `PGSSLMODE=require`, and the drizzle-kit install for every
+   start except `none`.
 7. [#674](https://github.com/databricks/appkit/pull/674) `appkit db verify`: the local check, including `ahead` rows,
    and `--deployed` with `-t, --target`. The deployed check reads only the Databricks API. It reads the target with
    the same `databricks.yml` reader as the deploy guard, and uses the values in `variable-overrides.json` when that
@@ -812,8 +780,9 @@ migration checks for mixed-version rollouts.
    `verify`.
 8. [#675](https://github.com/databricks/appkit/pull/675) What the template renders for apps that select the plugin,
    which stays hidden: the flag in `app.yaml`, no drizzle-kit in the template, exit 1 on a failed start, a README that
-   works before the CLI release, `verify`'s warning for a `.env` branch that is not yours, the recreated-app recovery
-   in the owner error, and the docs. The manifest keeps `hidden: true`, `beta.ts` exports `database` by hand,
+   works before the CLI release, `verify`'s warning for a `.env` branch that is not yours, the
+   `delete-role --reassign-owned-to` recovery in the owner error, and the docs, with the deploy, failure, backfill and
+   stuck-start runbooks. The manifest keeps `hidden: true`, `beta.ts` exports `database` by hand,
    `template/appkit.plugins.json` does not list the plugin, and `appkit db` stays hidden from `appkit --help`. The
    reveal is a later, separate change.
 9. [#678](https://github.com/databricks/appkit/pull/678) `appkit db check`: the offline check of the committed
@@ -823,7 +792,7 @@ migration checks for mixed-version rollouts.
 
 ### Related operation PRs
 
-The application contract above is implemented in a separate chain:
+Design 002's operation contract is implemented in a separate chain:
 
 | PR | Responsibility |
 |---|---|
@@ -840,21 +809,36 @@ Three earlier questions were decided in review, and the sections above record th
 deploy branch's objects (One owner per branch). A new fork starts without copied app rows (Every developer gets a
 Lakebase branch). The stack ships on drizzle-kit 0.31's journal (drizzle-kit generates, the plugin applies).
 
-1. What is the Apps start timeout, and does a process that exits non-zero get restarted? SUP-36075 suggests about 10
-   minutes, unconfirmed. Reviewer: Apps runtime.
-2. Is `client_connection_check_interval` allowed for Lakebase roles? Reviewer: Lakebase.
-3. What is the narrowest Lakebase permission that lets a developer fork a branch and manage roles on their own fork?
-   CAN MANAGE also allows deleting the deploy branch. Reviewer: Lakebase.
-4. Does Lakebase offer, or plan, schema-only branches? A new fork now drops its copied app rows, but the fork copies
-   them first, and rows in other schemas stay. Reviewer: Lakebase, security.
-5. How does an app with a new service principal take ownership back, after a recreate or a resource re-add? The
-   stack documents a manual recovery with `databricks postgres delete-role --reassign-owned-to`. Options for a
-   zero-touch one are Apps transferring ownership on re-add, or an `appkit db adopt --deployed` built on the role API.
-   Reviewer: Lakebase, Apps.
-6. What scale to zero do child branch computes get by default? Production gets 24 hours. Reviewer: Lakebase.
-7. How does Genie App Builder drive this flow? Its apps have no per-developer `.env` and no CI, and they start on
-   every cold start. Reviewer: App Builder.
-8. Which CLI release runs `appkit db init`, and does it run before or after the dependency install? Init asks nothing
+Four more have answers from the platform's code and from measurements:
+
+- The Apps start timeout is 600 seconds in code, a crashed process is not restarted, and a health check waits at most
+  300 seconds (What a deploy does while the app migrates).
+- Lakebase allows `client_connection_check_interval` and sets it to 60 seconds server-wide (One lock per schema).
+- No Lakebase permission narrower than CAN MANAGE lets a developer fork a branch. CAN USE manages roles and databases
+  but cannot create a branch.
+- Schema-only branches exist only in the console API, as root branches, and fail for some users
+  ([LKB-21345](https://databricks.atlassian.net/browse/LKB-21345)). Resetting a branch is UI-only and copies the
+  parent's data. Neither replaces the rebuild.
+
+Open:
+
+1. Does Apps enable deployment health checks in production? The flag defaults to off in code. Without it a deploy
+   succeeds after 2 seconds. SUP-36075, which suggested a 10-minute start timeout, is still unread. Reviewer: Apps
+   runtime.
+2. How does an app with a new service principal take ownership back, after a recreate or a resource re-add? The
+   stack documents a manual recovery with `databricks postgres delete-role --reassign-owned-to`. No API grants one
+   role to another ([LKB-16323](https://databricks.atlassian.net/browse/LKB-16323),
+   [LKB-5108](https://databricks.atlassian.net/browse/LKB-5108)), and Apps does not keep ownership across a re-add
+   ([XTA-18463](https://databricks.atlassian.net/browse/XTA-18463)). Options for a zero-touch recovery are Apps
+   transferring ownership on re-add, or an `appkit db adopt --deployed` built on the role API. Reviewer: Lakebase,
+   Apps.
+3. What scale to zero do child branch computes get by default? Production gets 24 hours. Reviewer: Lakebase.
+4. How does Genie App Builder drive this flow? Today it drops the `database` plugin when `lakebase` is selected,
+   writes no `.env`, runs its preview as the editor user (LA-2251), and deploys apps that scale to zero, with no CI.
+   It would need to keep the plugin, run `appkit db init --session` for each editing session and pass the branch's
+   env to the preview, give editors CAN MANAGE on the project, and offer a path for a deploy whose migration failed.
+   Reviewer: App Builder.
+5. Which CLI release runs `appkit db init`, and does it run before or after the dependency install? Init asks nothing
    on its default path, so it needs no flags. Reviewer: Databricks CLI.
-9. This design has `appkit db init` install drizzle-kit. Should the CLI support per-plugin dependencies instead, so
+6. This design has `appkit db init` install drizzle-kit. Should the CLI support per-plugin dependencies instead, so
    apps that select the plugin get it at scaffold time? Reviewer: AppKit, Databricks CLI.
