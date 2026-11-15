@@ -14,6 +14,7 @@ vi.mock("../context", async (importOriginal) => ({
 
 import type { WorkspaceRequest } from "../../../workspace-client";
 import type { DbContext } from "../context";
+import { FORK_COPY_TAG } from "../schema-state";
 import { runVerify, type VerifyOptions } from "../verify";
 import { databricksYml, FakeLakebase } from "./fakes";
 
@@ -153,6 +154,11 @@ function branch(state: {
       if (/select hash, created_at from/.test(text)) {
         return { rows: state.recorded === "absent" ? [] : state.recorded };
       }
+      // isForkCopy: whether the journal has the row init writes into a fork's copy.
+      if (/where hash = \$1 limit 1/.test(text)) {
+        const rows = state.recorded === "absent" ? [] : state.recorded;
+        return { rows: rows.filter((row) => row.hash === values?.[0]) };
+      }
       return { rows: [] };
     }),
     release: vi.fn(),
@@ -195,6 +201,7 @@ describe("runVerify", () => {
     strandedMigrations: [],
     editedMigrations: [],
     unknownMigrations: 0,
+    forkCopy: false,
   };
 
   test("a branch that matches schema.ts and has every migration is ok", async () => {
@@ -289,6 +296,43 @@ describe("runVerify", () => {
     expect(await runVerify(ctx)).toMatchObject({
       ...clean,
       editedMigrations: ["0000_migration"],
+      ok: false,
+    });
+  });
+
+  test("a fork's copy whose rebuild did not finish is reported as one, and its tag is not an unknown migration", async () => {
+    const ctx = app(two);
+    branch({
+      columns: { notes: ["id", "body"] },
+      recorded: [
+        ...recordedAs(ctx, two),
+        { hash: FORK_COPY_TAG, created_at: "0" },
+      ],
+    });
+
+    expect(await runVerify(ctx)).toEqual({
+      kind: "local",
+      branch: BRANCH,
+      ...clean,
+      forkCopy: true,
+      ok: false,
+    });
+  });
+
+  test("on a fork's copy, a migration from another git branch still counts as unknown", async () => {
+    const ctx = app(two);
+    branch({
+      columns: { notes: ["id", "body"] },
+      recorded: [
+        ...recordedAs(ctx, two),
+        { hash: FORK_COPY_TAG, created_at: "0" },
+        { hash: "from-another-git-branch", created_at: "3000" },
+      ],
+    });
+
+    expect(await runVerify(ctx)).toMatchObject({
+      forkCopy: true,
+      unknownMigrations: 1,
       ok: false,
     });
   });
