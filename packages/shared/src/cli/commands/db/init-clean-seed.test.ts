@@ -288,7 +288,7 @@ describe("appkit db init", () => {
     expect(output(log)).not.toContain("The branch still held the rows");
   });
 
-  test("copied rows kept on request are a warning that names their source and the flag", async () => {
+  test("copied rows kept on request are a warning that names their source, the flag, and the clean that removes them", async () => {
     tooling.runInit.mockResolvedValue({
       ...report,
       keptCopy: {
@@ -298,8 +298,9 @@ describe("appkit db init", () => {
     });
     await init("--schema", "migrate");
 
+    // The schema is yours after a keep, so a plain init migrates it and keeps the rows.
     expect(output(log)).toContain(
-      "Kept the rows the fork copied from production, as --schema migrate asks. A plain `appkit db init` rebuilds the app schema from the committed migrations without them.",
+      "Kept the rows the fork copied from production, as --schema migrate asks. The app schema is yours now, so a plain `appkit db init` keeps them. `appkit db init --schema clean` drops the app schema with everything in it and rebuilds it from the committed migrations, after a confirmation or with --yes.",
     );
   });
 

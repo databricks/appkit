@@ -322,6 +322,34 @@ describe.skipIf(!url)("runInit against Postgres", () => {
     expect(await rows(`"${app}".notes`)).toEqual([{ body: "mine" }]);
   });
 
+  test("a fork of a source whose app schema you already owned is a copy too: rebuilt without a hand-off, so the copied rows go", async () => {
+    await applyPendingMigrations(asDev, {
+      migrationsFolder: folder(root),
+      schemaName: app,
+    });
+    await asDev.query(`insert into "${app}".notes (body) values ('copied')`);
+
+    const { report, steps } = await init(context(root));
+
+    expect(report).toMatchObject({
+      created: true,
+      sourceBranch: PRODUCTION,
+      handedOff: null,
+      keptCopy: null,
+      start: { kind: "clean", migrate: { applied: ["0000_migration"] } },
+    });
+    expect(steps).toContain(
+      `Dropping schema ${app} on ${devBranchId(USER)}: the branch still holds the rows the fork copied, and the committed migrations recreate its tables`,
+    );
+    expect(lakebase.calls.some((call) => call.startsWith("deleteRole"))).toBe(
+      false,
+    );
+    expect(await rows(`"${app}".notes`)).toEqual([]);
+    expect(await journal(app)).toEqual([
+      hashOf(folder(root), "0000_migration"),
+    ]);
+  });
+
   test("--schema none touches nothing, and the next plain init still rebuilds", async () => {
     await deployed(root, app, `"${app}".notes`);
 
@@ -363,6 +391,53 @@ describe.skipIf(!url)("runInit against Postgres", () => {
     expect(await journal(app)).toEqual([
       hashOf(folder(root), "0000_migration"),
     ]);
+
+    // The schema is yours now. A plain init keeps the rows; only --schema clean removes them, after asking.
+    const kept = await init(onDev(root));
+    expect(kept.report.start.kind).toBe("migrate");
+    expect(await rows(`"${app}".notes`)).toEqual([{ body: "copied" }]);
+
+    const asked: string[] = [];
+    const cleaned = await init(onDev(root), {
+      schema: "clean",
+      confirmClean: async ({ schemaName }) => {
+        asked.push(schemaName);
+        return true;
+      },
+    });
+    expect(asked).toEqual([app]);
+    expect(cleaned.report.start.kind).toBe("clean");
+    expect(await rows(`"${app}".notes`)).toEqual([]);
+  });
+
+  test("migrate, introspect and seed refuse an untouched copy the service principal still owns", async () => {
+    await deployed(root, app, `"${app}".notes`);
+    existingDev(lakebase);
+    lakebase.addRole(DEV, `dbrx-apps-${sp}`, sp);
+    const ctx = onDev(root);
+    const refusal = `${devBranchId(USER)} still holds the rows the fork copied into schema "${app}", which "${sp}" still owns. Run \`appkit db init\` to rebuild it from the committed migrations, or \`appkit db init --schema`;
+
+    await expect(runMigrate(ctx, { interactive: false })).rejects.toThrow(
+      `Did not apply: ${refusal} migrate\` to keep them.`,
+    );
+    const introspect = runIntrospect(ctx, { interactive: false });
+    await expect(introspect).rejects.toBeInstanceOf(IntrospectRefusedError);
+    await expect(introspect).rejects.toThrow(
+      `Refusing to introspect: ${refusal} introspect\` to keep them.`,
+    );
+    fs.writeFileSync(
+      path.join(root, SEED_FILE),
+      `insert into notes (body) values ('seeded');`,
+    );
+    try {
+      await expect(runSeed(ctx)).rejects.toThrow(
+        `Refusing to seed: ${refusal} migrate\` to keep them.`,
+      );
+    } finally {
+      fs.rmSync(path.join(root, SEED_FILE));
+    }
+    expect(await ownerOf(app)).toBe(sp);
+    expect(await rows(`"${app}".notes`)).toEqual([{ body: "copied" }]);
   });
 
   test("migrate, introspect and seed refuse a branch whose journal still carries the tag", async () => {
