@@ -813,6 +813,10 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
       foreignKeys,
     );
 
+  /** Warnings other than the constraint-name one the fixture's `<column>_fkey` names raise. */
+  const otherWarnings = (warnings: readonly string[]) =>
+    warnings.filter((warning) => !warning.startsWith("Constraint names"));
+
   test("a declared column keeps its .private(); a new column and a new table render as the catalog has them", () => {
     const out = renderSchemaSource(
       [
@@ -850,7 +854,7 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
         "",
       ].join("\n"),
     );
-    expect(out.warnings).toEqual([]);
+    expect(otherWarnings(out.warnings)).toEqual([]);
   });
 
   test("a foreign key it declares stays, and one the catalog dropped needs nothing", () => {
@@ -893,7 +897,7 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
     expect(out.source).toContain("note_id: fk(() => notes.id),");
     expect(out.source).toContain("author_email: text().private(),");
     expect(out.skipped).toEqual([]);
-    expect(out.warnings).toEqual([]);
+    expect(otherWarnings(out.warnings)).toEqual([]);
   });
 
   test("a declared foreign key keeps its relation when an undeclared one targets the same table", () => {
@@ -973,7 +977,7 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
     expect(out.source).toContain("author_email: text(),");
     expect(out.source).toContain("board_id: fk(() => boards.id).notNull(),");
     expect(out.source).not.toContain(".private()");
-    expect(out.warnings).toEqual([]);
+    expect(otherWarnings(out.warnings)).toEqual([]);
   });
 
   test("without a schema.ts to replace, nothing is private", () => {
