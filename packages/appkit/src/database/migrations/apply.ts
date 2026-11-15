@@ -290,7 +290,7 @@ interface JournalRelation {
 }
 
 /** What the migrator is about to do with the journal. */
-type JournalUse = "read" | "record";
+export type JournalUse = "read" | "record";
 
 /** Why the relation at the journal's name is refused for a use. */
 type JournalRefusal =
@@ -308,7 +308,7 @@ type JournalRefusal =
  * an ordinary table is used, and one of an untrusted owner's only for a read
  * without row-level security.
  */
-function journalRefusal(
+export function journalRefusal(
   relation: JournalRelation,
   use: JournalUse,
 ): JournalRefusal | undefined {
@@ -511,16 +511,11 @@ function divergence(history: MigrationHistory): HistoryRefusal {
   };
 }
 
-/**
- * Whether the journal table exists. Every read of the journal and every
- * record into it starts here, so a relation at its name that is unfit for
- * that use is refused (see journalRefusal).
- */
-async function journalTableExists(
+/** The relation at the journal's name, as pg_catalog describes it; null when there is none. */
+export async function readJournalRelation(
   client: QueryClient,
   schemaName: string,
-  use: JournalUse,
-): Promise<boolean> {
+): Promise<JournalRelation | null> {
   // pg_catalog needs no privileges, so a missing grant is not mistaken for a missing table.
   const { rows } = await client.query<{
     relkind: string;
@@ -542,8 +537,8 @@ async function journalTableExists(
     [schemaName, MIGRATIONS_TABLE],
   );
   const found = rows[0];
-  if (!found) return false;
-  const relation: JournalRelation = {
+  if (!found) return null;
+  return {
     relkind: found.relkind,
     owner: found.owner,
     schemaOwner: found.schema_owner,
@@ -551,6 +546,20 @@ async function journalTableExists(
     rowSecurity: found.row_security,
     trusted: found.trusted,
   };
+}
+
+/**
+ * Whether the journal table exists. Every read of the journal and every
+ * record into it starts here, so a relation at its name that is unfit for
+ * that use is refused (see journalRefusal).
+ */
+async function journalTableExists(
+  client: QueryClient,
+  schemaName: string,
+  use: JournalUse,
+): Promise<boolean> {
+  const relation = await readJournalRelation(client, schemaName);
+  if (!relation) return false;
   const refusal = journalRefusal(relation, use);
   if (refusal) throw new MigrationJournalError(schemaName, relation, refusal);
   return true;

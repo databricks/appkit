@@ -1,6 +1,11 @@
 import type { PoolClient } from "pg";
 
-import { quoteIdentifier } from "../migrations/apply";
+import {
+  journalRefusal,
+  type JournalUse,
+  quoteIdentifier,
+  readJournalRelation,
+} from "../migrations/apply";
 import { schemaOwnership } from "../migrations/ownership";
 import { MIGRATIONS_TABLE } from "../migrations/paths";
 import { readKeptObjects } from "./clean";
@@ -38,20 +43,21 @@ const journalTable = (schemaName: string) =>
   `${quoteIdentifier(schemaName)}.${quoteIdentifier(MIGRATIONS_TABLE)}`;
 
 /**
- * Whether an ordinary table stands at the journal's name. Anything else there
- * is left alone. The migrator refuses it with its own message.
+ * Whether the journal is an ordinary table the migrator's trust rule lets your
+ * role use this way (journalRefusal in migrations/apply). A table another role
+ * owns could run that role's code as you through a trigger, rule, default or
+ * policy, so the tag is written and deleted only where the migrator would
+ * record, and read only where it would read. A fork's untouched copy keeps the
+ * schema owner's journal, which the rule trusts. Anything else at the
+ * journal's name is left alone; the migrator refuses it with its own message.
  */
-async function hasJournalTable(
+async function journalUsable(
   client: QueryClient,
   schemaName: string,
+  use: JournalUse,
 ): Promise<boolean> {
-  const { rows } = await client.query(
-    `select 1 from pg_catalog.pg_class c
-       join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-      where n.nspname = $1 and c.relname = $2 and c.relkind = 'r'`,
-    [schemaName, MIGRATIONS_TABLE],
-  );
-  return rows.length > 0;
+  const relation = await readJournalRelation(client, schemaName);
+  return relation !== null && journalRefusal(relation, use) === undefined;
 }
 
 /** Whether the branch's journal carries the fork-copy tag. */
@@ -59,7 +65,7 @@ export async function isForkCopy(
   client: QueryClient,
   schemaName: string,
 ): Promise<boolean> {
-  if (!(await hasJournalTable(client, schemaName))) return false;
+  if (!(await journalUsable(client, schemaName, "read"))) return false;
   const { rows } = await client.query(
     `select 1 from ${journalTable(schemaName)} where hash = $1 limit 1`,
     [FORK_COPY_TAG],
@@ -70,13 +76,14 @@ export async function isForkCopy(
 /**
  * Tag the copied journal. On Lakebase your role can insert into the service
  * principal's tables before the hand-off. Returns false when the schema has no
- * journal to tag, which leaves the hand-off and the clean unmarked between them.
+ * journal the trust rule lets you write, which leaves the hand-off and the
+ * clean unmarked between them.
  */
 export async function tagForkCopy(
   client: QueryClient,
   schemaName: string,
 ): Promise<boolean> {
-  if (!(await hasJournalTable(client, schemaName))) return false;
+  if (!(await journalUsable(client, schemaName, "record"))) return false;
   const journal = journalTable(schemaName);
   await client.query(
     `insert into ${journal} (hash, created_at)
@@ -90,7 +97,7 @@ export async function untagForkCopy(
   client: QueryClient,
   schemaName: string,
 ): Promise<void> {
-  if (!(await hasJournalTable(client, schemaName))) return;
+  if (!(await journalUsable(client, schemaName, "record"))) return;
   await client.query(
     `delete from ${journalTable(schemaName)} where hash = $1`,
     [FORK_COPY_TAG],

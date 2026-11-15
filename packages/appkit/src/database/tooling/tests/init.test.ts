@@ -64,6 +64,8 @@ const migrateReport = {
  */
 let schemaOwner: string | null;
 let journal: boolean;
+/** The journal's owner is you, a role you inherit, or the schema's owner. */
+let journalTrusted: boolean;
 let tagged: boolean;
 let keptInPublic: string[];
 let ownedOutside: string[];
@@ -72,10 +74,25 @@ const queries: string[] = [];
 const pool = {
   query: vi.fn(async (text: string) => {
     queries.push(text);
+    if (text.includes("c.relname = $2")) {
+      return {
+        rows: journal
+          ? [
+              {
+                relkind: "r",
+                owner: journalTrusted ? schemaOwner : "someone-else",
+                schema_owner: schemaOwner,
+                current_user: USER,
+                row_security: false,
+                trusted: journalTrusted,
+              },
+            ]
+          : [],
+      };
+    }
     if (text.includes("nspowner")) {
       return { rows: [{ owner: schemaOwner, current_user: USER }] };
     }
-    if (text.includes("c.relkind = 'r'")) return { rows: journal ? [{}] : [] };
     if (text.includes("__drizzle_migrations")) {
       if (text.startsWith("insert")) tagged = true;
       else if (text.startsWith("delete")) tagged = false;
@@ -193,6 +210,7 @@ function conflict(name: string): LakebaseApiError {
 beforeEach(() => {
   schemaOwner = SP;
   journal = true;
+  journalTrusted = true;
   tagged = false;
   keptInPublic = [];
   ownedOutside = [];
@@ -1198,6 +1216,15 @@ describe("runInit — the start follows the branch's own state", () => {
 
   test("a copy without a journal is rebuilt without a tag", async () => {
     journal = false;
+
+    const { report } = await init(appOn(project()));
+
+    expect(report.start.kind).toBe("clean");
+    expect(tagWrites()).toEqual([]);
+  });
+
+  test("a copy whose journal a role you do not trust owns is rebuilt without a tag: a write there could run that role's code as you", async () => {
+    journalTrusted = false;
 
     const { report } = await init(appOn(project()));
 
