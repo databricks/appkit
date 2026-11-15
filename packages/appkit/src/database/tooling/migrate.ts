@@ -66,7 +66,6 @@ export interface MigrateReport {
   readonly adopted?: readonly string[];
   /** Statements of the generated migration that break instances still running the previous release. */
   readonly breaking?: readonly string[];
-  /** Statements of the generated migration that may fail on rows the deploy branch has and a new branch does not. */
   readonly dataDependent?: readonly string[];
   /** Why nothing was applied, when applying was skipped. */
   readonly notApplied?: string;
@@ -82,7 +81,6 @@ export interface MigrateOptions {
 
 type ApplyOutcome = Pick<MigrateReport, "applied" | "adopted" | "notApplied">;
 
-/** What a generated migration's statements warn about; either list may be empty. */
 type MigrationWarnings = Required<
   Pick<MigrateReport, "breaking" | "dataDependent">
 >;
@@ -97,11 +95,6 @@ function migrationWarnings(
   };
 }
 
-/**
- * The run wrote a migration and then failed before applying it. The file
- * stays for the next run, which generates nothing new, so this is the only
- * run that can warn about the migration.
- */
 class UnappliedMigrationError extends Error implements MigrationWarnings {
   readonly generated: GeneratedMigration;
   readonly breaking: readonly string[];

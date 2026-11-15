@@ -51,10 +51,8 @@ export function fail(error: unknown): void {
   process.exitCode = 1;
 }
 
-/** What a written migration's statements warn about; an absent list means none. */
 type MigrationWarnings = Pick<MigrateReport, "breaking" | "dataDependent">;
 
-/** One warning per class of statement in a written migration. */
 export function warnMigration(tag: string, warnings: MigrationWarnings): void {
   if (warnings.breaking?.length) {
     warn(

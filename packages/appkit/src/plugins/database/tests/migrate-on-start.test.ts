@@ -83,14 +83,14 @@ describe("decideMigrateOnStart", () => {
   };
   const optIn = { APPKIT_DB_MIGRATE_ON_START: "true" };
 
-  test.each([
-    ["a deployed app that opts in", { ...optIn, ...credentials }],
-    [
-      "a deployed app with a bound database: Apps sets PGUSER to its client id",
-      { ...optIn, ...credentials, PGUSER: "sp-client-id" },
-    ],
-  ] as const)("%s migrates", (_label, env) => {
-    expect(decideMigrateOnStart(env)).toEqual({ kind: "migrate" });
+  test("a deployed app with a bound database migrates. Apps sets PGUSER to its client id", () => {
+    expect(
+      decideMigrateOnStart({
+        ...optIn,
+        ...credentials,
+        PGUSER: "sp-client-id",
+      }),
+    ).toEqual({ kind: "migrate" });
   });
 
   test.each([
@@ -128,6 +128,11 @@ describe("decideMigrateOnStart", () => {
       { ...optIn, ...credentials, PGUSER: "jane@example.com" },
       `PGUSER is "jane@example.com", not the app's client id in DATABRICKS_CLIENT_ID.`,
     ],
+    [
+      "exported M2M credentials and no PGUSER, where the pool would fall back to the service principal",
+      { ...optIn, ...credentials },
+      "PGUSER is not set. The deployed app gets it from its database resource.",
+    ],
   ] as const)("%s: skipped, naming the reason", (_label, env, reason) => {
     expect(decideMigrateOnStart(env)).toEqual({ kind: "skipped", reason });
   });
@@ -158,7 +163,6 @@ describe("migrateOnStart", () => {
 
     await migrateOnStart(pool, schema, root, deployEnv);
 
-    // A deploy start refuses an edited or diverged history instead of warning.
     expect(applyPendingMigrations).toHaveBeenCalledWith(pool, {
       migrationsFolder: path.join(root, "config/database/migrations"),
       schemaName: "app",
