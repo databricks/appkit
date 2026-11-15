@@ -17,9 +17,6 @@ import type { DbContext } from "../context";
 import { FORK_COPY_TAG } from "../schema-state";
 import { runVerify } from "../verify";
 
-// Local verify against a real server: the Lakebase pool is replaced, nothing
-// else. APPKIT_TEST_PG_URL points at a scratch database, e.g.
-// postgres://localhost:5432/postgres
 const url = process.env.APPKIT_TEST_PG_URL;
 const builder = path.resolve(
   import.meta.dirname,
@@ -69,7 +66,6 @@ describe.skipIf(!url)("runVerify against Postgres", () => {
         ],
       }),
     );
-    // The branch as a fork copied it: the migration ran there and its journal records it.
     await admin.query(`
       create role "${sp}" nologin;
       create schema "${schema}" authorization "${sp}";

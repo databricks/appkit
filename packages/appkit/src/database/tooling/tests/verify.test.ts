@@ -166,7 +166,6 @@ function branch(state: {
       if (/select hash, created_at from/.test(text)) {
         return { rows: state.recorded === "absent" ? [] : state.recorded };
       }
-      // isForkCopy: whether the journal has the row init writes into a fork's copy.
       if (/where hash = \$1 limit 1/.test(text)) {
         const rows = state.recorded === "absent" ? [] : state.recorded;
         return { rows: rows.filter((row) => row.hash === values?.[0]) };
