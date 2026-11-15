@@ -221,6 +221,28 @@ databricks apps deploy           # the deployed app applies it on start
 npx appkit db verify --deployed  # the app runs, and its source has every committed migration
 ```
 
+### Warnings about a generated migration
+
+`migrate` prints a warning for each of two classes of statement in the
+migration it wrote, and names the statements. One statement can be in both
+classes.
+
+Statements that break instances still running the previous release. Drops,
+renames, type changes, `SET NOT NULL` and a new `NOT NULL` column without a
+default are in this class. Those instances can still serve while the new one
+migrates on start, and a code rollback does not undo a migration. Deploy code
+that works with both the old and the new schema first, then this change in a
+later deploy.
+
+Statements that may fail on existing rows. `SET NOT NULL`, a new `NOT NULL`
+column without a default, a type change, a new constraint (`UNIQUE`,
+`PRIMARY KEY`, `CHECK`, `FOREIGN KEY` or `EXCLUDE`) and a unique index are in
+this class. Postgres checks them against the rows already in the table. A new
+dev branch has no rows, so they pass there and can fail on the deploy branch.
+Test the migration on a branch that has a copy of the deploy branch's data
+before you deploy, for example a session branch created with
+`npx appkit db init --session --schema migrate`.
+
 ### Your branch's data
 
 `npx appkit db init` creates your dev branch, or this checkout's session branch
@@ -236,8 +258,9 @@ migrations. Without `config/database/schema.ts`, `init` first writes it and
 `0000_baseline.sql` from the fork's schema, then rebuilds the schema from that
 baseline. Dropping the schema removes the tag. A run that stops after tagging
 and before the rebuild leaves the tag in place, and the next `init`, from any
-checkout, reads it and finishes the rebuild. `npx appkit db migrate` refuses a
-branch that still carries the tag. Run `init` to finish the rebuild.
+checkout, reads it and finishes the rebuild. `npx appkit db migrate`,
+`introspect` and `seed` refuse a branch that still carries the tag, and
+`npx appkit db verify` reports it. Run `init` to finish the rebuild.
 
 To keep the copied rows on a new branch, pass `--schema migrate`, or
 `--schema introspect` without `schema.ts`, and `init` says that it kept them. A
@@ -246,9 +269,19 @@ introspects it without `schema.ts`. `--schema clean` rebuilds such a branch
 too, after a confirmation or with `--yes`. `--schema none` leaves the schema
 and its owner as the fork copied them, so the next plain `init` still rebuilds.
 
-In schema `public`, `init` and `clean` remove only the objects your role owns.
-On a fork of the deploy branch the app's service principal owns the tables, so
-they stay with their rows, and the report lists them as kept.
+To keep the copied rows, pass `--schema migrate`, or `--schema introspect`.
+`init` then hands the schema to you, removes the row, keeps the data, and says
+where it came from. A schema you own with no such row is your working branch.
+`init` migrates it, or introspects it without `schema.ts`. `--schema clean`
+rebuilds your working branch too, after a confirmation or with `--yes`. A
+copy's rebuild asks nothing, because `migrate` refuses a copy, so none of your
+work can be on it. `--schema none` touches nothing, and the next plain `init`
+still rebuilds the copy.
+
+In schema `public`, `init` and `clean` remove only the objects your role owns,
+and `init` never hands `public` off or tags it. On a fork of the deploy branch
+the app's service principal owns the tables, so `init` migrates the schema, the
+tables stay with their rows, and the report lists them as kept.
 
 ### Branches `databricks.yml` deploys to
 

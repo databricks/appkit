@@ -76,7 +76,8 @@ const devBranch = {
   kind: "dev",
 };
 
-const pool = {};
+/** A branch whose journal is not an ordinary table, so it is no fork's copy. */
+const pool = { query: vi.fn(async () => ({ rows: [] })) };
 
 beforeEach(() => {
   applyPendingMigrations.mockReset();
@@ -162,6 +163,7 @@ describe("runMigrate", () => {
     expect(report.applied).toEqual(["0000_migration"]);
     expect(report.notApplied).toBeUndefined();
     expect(report.breaking).toBeUndefined();
+    expect(report.dataDependent).toBeUndefined();
     expect(fs.readFileSync(report.typesFile, "utf-8")).toContain("notes");
   });
 
@@ -396,22 +398,47 @@ describe("runMigrate", () => {
       'ALTER TABLE "app"."notes" DROP COLUMN "body";',
     ]);
     expect(report.breaking).toEqual(report.generated?.statements);
+    expect(report.dataDependent).toBeUndefined();
   });
 
-  test("a failure after generating still carries what the kept migration breaks", async () => {
+  test("reports the statements that may fail on rows the deploy branch has", async () => {
     const ctx = app(`notes: table("notes", { id: id(), body: text() })`);
     resolveEnvBranch.mockResolvedValue(null);
     await runMigrate(ctx, { interactive: false });
 
-    writeSchema(ctx.root, `notes: table("notes", { id: id() })`);
+    writeSchema(
+      ctx.root,
+      `notes: table("notes", { id: id(), body: text().unique() })`,
+    );
+    const report = await runMigrate(ctx, { interactive: false });
+
+    expect(report.generated?.statements).toEqual([
+      'ALTER TABLE "app"."notes" ADD CONSTRAINT "notes_body_unique" UNIQUE("body");',
+    ]);
+    expect(report.dataDependent).toEqual(report.generated?.statements);
+    expect(report.breaking).toBeUndefined();
+  });
+
+  test("a failure after generating still carries what the kept migration warns about", async () => {
+    const ctx = app(`notes: table("notes", { id: id(), body: text() })`);
+    resolveEnvBranch.mockResolvedValue(null);
+    await runMigrate(ctx, { interactive: false });
+
+    writeSchema(
+      ctx.root,
+      `notes: table("notes", { id: id(), body: text().notNull() })`,
+    );
     resolveEnvBranch.mockRejectedValue(new Error("403 Forbidden"));
     const error = await runMigrate(ctx, { interactive: false }).catch(
       (caught: unknown) => caught,
     );
 
+    const setNotNull =
+      'ALTER TABLE "app"."notes" ALTER COLUMN "body" SET NOT NULL;';
     expect(error).toMatchObject({
       generated: { tag: "0001_migration" },
-      breaking: ['ALTER TABLE "app"."notes" DROP COLUMN "body";'],
+      breaking: [setNotNull],
+      dataDependent: [setNotNull],
     });
     expect((error as Error).message).toMatch(
       /^Wrote .*0001_migration\.sql, but did not apply it: 403 Forbidden$/,

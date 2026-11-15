@@ -54,13 +54,23 @@ export function fail(error: unknown): void {
   process.exitCode = 1;
 }
 
-/** Statements of a written migration that break instances still running the previous release. */
-export function warnBreaking(tag: string, breaking: readonly string[]): void {
-  if (breaking.length === 0) return;
-  warn(
-    `${tag} breaks instances still running the previous release, which keep serving while the new one migrates on start: ${breaking.join(" ")} ` +
-      "Deploy code that works with both the old and the new schema first, then this change in a later deploy.",
-  );
+/** What a written migration's statements warn about; an absent list means none. */
+type MigrationWarnings = Pick<MigrateReport, "breaking" | "dataDependent">;
+
+/** One warning per class of statement in a written migration. */
+export function warnMigration(tag: string, warnings: MigrationWarnings): void {
+  if (warnings.breaking?.length) {
+    warn(
+      `${tag} breaks instances still running the previous release, which can still serve while the new one migrates on start: ${warnings.breaking.join(" ")} ` +
+        "Deploy code that works with both the old and the new schema first, then this change in a later deploy.",
+    );
+  }
+  if (warnings.dataDependent?.length) {
+    warn(
+      `${tag} may fail on rows the deploy branch has and a new branch does not: ${warnings.dataDependent.join(" ")} ` +
+        "Test the migration on a branch that has a copy of the deploy branch's data before you deploy.",
+    );
+  }
 }
 
 export function printMigrateReport(report: MigrateReport): void {
@@ -69,7 +79,7 @@ export function printMigrateReport(report: MigrateReport): void {
     ok(
       `Generated ${relative(report.generated.file)} (${count} statement${count === 1 ? "" : "s"})`,
     );
-    warnBreaking(report.generated.tag, report.breaking ?? []);
+    warnMigration(report.generated.tag, report);
   } else {
     info("No schema changes since the last migration");
   }
@@ -167,6 +177,13 @@ function printLocalVerifyReport(report: LocalVerifyReport): void {
     warn(
       `Not committed: the branch ran ${report.unknownMigrations} migration${one ? "" : "s"} this checkout does not have, for example from another git branch`,
     );
+  }
+  // A copy may match schema.ts and the journal; its rows are still not yours, and migrate refuses it.
+  if (report.forkCopy) {
+    console.error(
+      `${pc.red("✖")} ${branch} still holds the rows the fork copied into the app schema, and its rebuild did not finish. Run \`appkit db init\` to rebuild it from the committed migrations, or \`appkit db init --schema migrate\` to keep them.`,
+    );
+    return;
   }
   console.error(
     `${pc.red("✖")} ${branch} does not match config/database/schema.ts and the committed migrations. ${localVerifyHint(report)}`,

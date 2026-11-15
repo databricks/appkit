@@ -6,11 +6,13 @@ const file = (
   tag: string,
   when: number,
   hash = `hash-${tag}`,
+  hashes: readonly string[] = [hash],
 ): MigrationFile => ({
   tag,
   idx: 0,
   when,
   hash,
+  hashes,
   statements: [],
 });
 
@@ -55,6 +57,20 @@ describe("reconcileMigrations", () => {
     ]);
     expect(tags(history.edited)).toEqual(["0000_a"]);
     expect(history.pending).toEqual([]);
+  });
+
+  test("recorded with the hash another checkout of the same file reads: applied, not edited", () => {
+    const checkedOutElsewhere = file("0000_a", 1000, "hash-0000_a", [
+      "hash-0000_a",
+      "hash-0000_a-with-crlf",
+    ]);
+    const history = reconcileMigrations(
+      [checkedOutElsewhere],
+      [{ hash: "hash-0000_a-with-crlf", createdAt: 1000 }],
+    );
+    expect(history.edited).toEqual([]);
+    expect(history.pending).toEqual([]);
+    expect(history.unknown).toEqual([]);
   });
 
   test("recorded rows no committed migration matches: unknown, and they still set the last recorded", () => {
