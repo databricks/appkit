@@ -823,7 +823,7 @@ describe("applyPendingMigrations", () => {
       `"app"."__drizzle_migrations" is a table owned by "mallory". The migrator connects as "app-sp", which neither owns it nor inherits "mallory"`,
     );
     expect((error as Error).message).toContain(
-      `Have "mallory" run the migration, or transfer the table to "app-sp" (ALTER TABLE … OWNER TO), then deploy again. No migration was applied.`,
+      `Have "mallory" run the migration, or have Lakebase move the table to "app-sp", since no Postgres role can hand it over. Then deploy again. No migration was applied.`,
     );
     expect(steps(client.statements)).toEqual([
       "journal table?",
@@ -858,6 +858,9 @@ describe("applyPendingMigrations", () => {
     expect(error).toBeInstanceOf(MigrationJournalError);
     expect((error as Error).message).toContain(
       `"app"."__drizzle_migrations" is a table owned by "mallory" with row-level security enabled. The migrator connects as "app-sp", which neither owns it nor inherits "mallory"`,
+    );
+    expect((error as Error).message).toContain(
+      `Have "mallory" disable row-level security on it, or have Lakebase move the table to "app-sp", since no Postgres role can hand it over. Then deploy again.`,
     );
     expect(steps(client.statements)).toEqual(["journal table?"]);
   });
