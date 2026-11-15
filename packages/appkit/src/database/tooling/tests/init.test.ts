@@ -877,7 +877,7 @@ describe("runInit — hand-off failures", () => {
     schemaOwner = "legacy_owner";
 
     await expect(init(appOn(project()))).rejects.toThrow(
-      `Cannot hand schema app in database databricks_postgres on ${devBranchId(USER)} to you: it belongs to "legacy_owner", which is not a Lakebase-managed role. .env already points at the branch.`,
+      `Cannot hand schema app in database databricks_postgres on ${devBranchId(USER)} to you: it belongs to "legacy_owner", which is not a Lakebase-managed role, and no Postgres role can hand it to you. .env already points at the branch. Set another schemaName in schema.ts, then rerun \`appkit db init\`.`,
     );
   });
 
