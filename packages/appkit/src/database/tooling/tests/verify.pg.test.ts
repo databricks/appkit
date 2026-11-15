@@ -21,6 +21,7 @@ vi.mock("../guard", async (importOriginal) => ({
 }));
 
 import type { DbContext } from "../context";
+import { devBranchId } from "../naming";
 import { FORK_COPY_TAG } from "../schema-state";
 import { runVerify } from "../verify";
 
@@ -29,7 +30,9 @@ const builder = path.resolve(
   import.meta.dirname,
   "../../schema-builder/index.ts",
 );
-const BRANCH = "projects/p/branches/dev-alice-3f9a2c";
+const USER = "alice@example.com";
+const BRANCH = `projects/p/branches/${devBranchId(USER)}`;
+const PRODUCTION = "projects/p/branches/production";
 const MIGRATION = { tag: "0000_migration", when: 1700000000000 };
 
 describe.skipIf(!url)("runVerify against Postgres", () => {
@@ -91,6 +94,7 @@ describe.skipIf(!url)("runVerify against Postgres", () => {
         PGHOST: "ep-1.example.com",
         PGDATABASE: "databricks_postgres",
         LAKEBASE_ENDPOINT: `${BRANCH}/endpoints/primary`,
+        PGUSER: USER,
       },
       workspace: () => {
         throw new Error("no workspace calls expected");
@@ -126,6 +130,26 @@ describe.skipIf(!url)("runVerify against Postgres", () => {
     fs.rmSync(ctx.root, { recursive: true, force: true });
   });
 
+  test("on a deploy branch, the app schema its service principal owns is not a fork copy", async () => {
+    const deploy = {
+      ...ctx,
+      env: { ...ctx.env, LAKEBASE_ENDPOINT: `${PRODUCTION}/endpoints/primary` },
+    };
+
+    expect(await runVerify(deploy)).toEqual({
+      kind: "local",
+      branch: PRODUCTION,
+      schemaProblems: [],
+      schemaAdvice: null,
+      pendingMigrations: [],
+      strandedMigrations: [],
+      editedMigrations: [],
+      unknownMigrations: 0,
+      forkCopy: null,
+      ok: true,
+    });
+  });
+
   test("the fork's untouched copy, which the service principal still owns, is reported with the init advice", async () => {
     expect(await runVerify(ctx)).toEqual({
       kind: "local",
@@ -138,7 +162,7 @@ describe.skipIf(!url)("runVerify against Postgres", () => {
       strandedMigrations: [],
       editedMigrations: [],
       unknownMigrations: 0,
-      forkCopy: `dev-alice-3f9a2c still holds the rows the fork copied into schema "${schema}", which "${sp}" still owns. Run \`appkit db init\` to rebuild it from the committed migrations, or \`appkit db init --schema migrate\` to keep them.`,
+      forkCopy: `${devBranchId(USER)} still holds the rows the fork copied into schema "${schema}", which "${sp}" still owns. Run \`appkit db init\` to rebuild it from the committed migrations, or \`appkit db init --schema migrate\` to keep them.`,
       ok: false,
     });
   });
@@ -161,7 +185,7 @@ describe.skipIf(!url)("runVerify against Postgres", () => {
       strandedMigrations: [],
       editedMigrations: [],
       unknownMigrations: 0,
-      forkCopy: `dev-alice-3f9a2c still holds the rows the fork copied into schema "${schema}", and its rebuild did not finish. Run \`appkit db init\` to rebuild it from the committed migrations, or \`appkit db init --schema migrate\` to keep them.`,
+      forkCopy: `${devBranchId(USER)} still holds the rows the fork copied into schema "${schema}", and its rebuild did not finish. Run \`appkit db init\` to rebuild it from the committed migrations, or \`appkit db init --schema migrate\` to keep them.`,
       ok: false,
     });
   });
