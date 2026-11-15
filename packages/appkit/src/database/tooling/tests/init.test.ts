@@ -960,11 +960,13 @@ describe("runInit — schema start", () => {
     );
   });
 
-  test("clean drops the schema, then applies the committed migrations without generating; it needs no drizzle-kit", async () => {
+  test("clean drops the schema, then applies the committed migrations without generating", async () => {
     const ctx = appOn(project(), {}, { files: { "package.json": "{}" } });
-    const runCommand = vi.fn();
 
-    const { report } = await init(ctx, { schema: "clean", runCommand });
+    const { report } = await init(ctx, {
+      schema: "clean",
+      runCommand: vi.fn(),
+    });
 
     expect(cleanHolding).toHaveBeenCalledOnce();
     expect(migrateHolding.mock.calls[0]?.[2]).toEqual({
@@ -974,12 +976,35 @@ describe("runInit — schema start", () => {
     expect(cleanHolding.mock.invocationCallOrder[0]).toBeLessThan(
       migrateHolding.mock.invocationCallOrder[0] ?? 0,
     );
-    expect(runCommand).not.toHaveBeenCalled();
     expect(report.start).toEqual({
       kind: "clean",
       clean: { branch: DEV, schemaName: "app", dependents: [], kept: [] },
       migrate: migrateReport,
     });
+  });
+
+  test.each(["clean", "migrate", "introspect", undefined] as const)(
+    "--schema %s installs drizzle-kit when the app lacks it, so the next migrate and check have it",
+    async (schema) => {
+      const ctx = appOn(project(), {}, { files: { "package.json": "{}" } });
+      const runCommand = vi.fn();
+
+      const { report } = await init(ctx, { schema, runCommand });
+
+      const install = ["add", "-D", "-E", `drizzle-kit@${DRIZZLE_KIT_VERSION}`];
+      expect(runCommand).toHaveBeenCalledWith("pnpm", install, ctx.root);
+      expect(report.installed).toBe(`pnpm ${install.join(" ")}`);
+    },
+  );
+
+  test("--schema none installs nothing", async () => {
+    const ctx = appOn(project(), {}, { files: { "package.json": "{}" } });
+    const runCommand = vi.fn();
+
+    const { report } = await init(ctx, { schema: "none", runCommand });
+
+    expect(runCommand).not.toHaveBeenCalled();
+    expect(report.installed).toBeNull();
   });
 
   test("one history lock covers init's clean and migrate: another command is refused meanwhile, and the lock goes at the end", async () => {
