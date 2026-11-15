@@ -125,7 +125,7 @@ export async function handOffAppSchema(
   const role = input.roles.find((r) => r.status?.postgres_role === owner);
   if (!role) {
     throw new Error(
-      `Cannot hand ${where} to you: it belongs to "${owner}", which is not a Lakebase-managed role. .env already points at the branch. Have "${owner}" transfer the schema and its objects to you (ALTER … OWNER TO), or set another schemaName in schema.ts, then rerun \`appkit db init\`.`,
+      `Cannot hand ${where} to you: it belongs to "${owner}", which is not a Lakebase-managed role, and no Postgres role can hand it to you. .env already points at the branch. Set another schemaName in schema.ts, then rerun \`appkit db init\`.`,
     );
   }
   if (ownedOutside.length > 0) {

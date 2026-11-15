@@ -80,6 +80,8 @@ const onProduction = {
 let catalog: ReturnType<typeof catalogResponder>;
 /** The journal rows of the branch, as drizzle-orm records them; empty: no journal table. */
 let recorded: Array<{ when: number; hash: string }>;
+/** The journal carries init's fork-copy tag. */
+let tagged: boolean;
 /** The row the branch records for the last committed migration. */
 const lastCommitted = (root: string) => {
   const folder = path.join(root, MIGRATIONS);
@@ -102,6 +104,7 @@ const pool = {
       };
       return { rows: recorded.length > 0 ? [journal] : [] };
     }
+    if (text.includes("where hash = $1")) return { rows: tagged ? [{}] : [] };
     if (text.includes("select hash, created_at")) {
       return {
         rows: recorded.map(({ when, hash }) => ({
@@ -118,6 +121,7 @@ const pool = {
 beforeEach(() => {
   catalog = catalogResponder();
   recorded = [];
+  tagged = false;
   resolveEnvBranch.mockReset().mockResolvedValue(onDevBranch);
   withBranchPool
     .mockReset()
@@ -366,6 +370,39 @@ describe("runIntrospect", () => {
     expect(report.migration).toBeNull();
     expect(report.recorded).toEqual([]);
     expect(markMigrationsApplied).not.toHaveBeenCalled();
+  });
+
+  test("a branch whose journal still carries init's fork-copy tag is refused before anything is written", async () => {
+    const root = tempApp({ [SCHEMA]: declaredSchema });
+    await introspect(root);
+    const written = fs.readFileSync(path.join(root, SCHEMA), "utf-8");
+    markMigrationsApplied.mockClear();
+    tagged = true;
+
+    const refused = introspect(root);
+
+    await expect(refused).rejects.toBeInstanceOf(IntrospectRefusedError);
+    await expect(refused).rejects.toThrow(
+      'Refusing to introspect: dev-alice-3f9a2c still holds the rows the fork copied into schema "app", and its rebuild did not finish. Run `appkit db init` to rebuild it from the committed migrations, or `appkit db init --schema introspect` to keep them.',
+    );
+    expect(fs.readFileSync(path.join(root, SCHEMA), "utf-8")).toBe(written);
+    expect(markMigrationsApplied).not.toHaveBeenCalled();
+  });
+
+  test("record: false writes schema.ts and the migration, and records nothing on the branch", async () => {
+    const root = tempApp({ [SCHEMA]: declaredSchema });
+
+    const report = await runIntrospect(fakeContext({ root }), {
+      interactive: false,
+      record: false,
+    });
+
+    expect(report.migration).toMatchObject({ tag: "0000_baseline" });
+    expect(report.recorded).toEqual([]);
+    expect(markMigrationsApplied).not.toHaveBeenCalled();
+    expect(
+      fs.existsSync(path.join(root, MIGRATIONS, "0000_baseline.sql")),
+    ).toBe(true);
   });
 
   test("a migration an interrupted run wrote but did not record is recorded when the branch matches it", async () => {

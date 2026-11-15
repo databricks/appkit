@@ -24,10 +24,12 @@ import { notYourBranch, resolveEnvBranch, takesWrites } from "./guard";
 import { type HistoryLock, withHistoryLock } from "./history-lock";
 import {
   breakingStatements,
+  dataDependentStatements,
   discardMigrationFiles,
   type GeneratedMigration,
   generateMigrationFiles,
 } from "./migrations";
+import { forkCopyRefusal, isForkCopy } from "./schema-state";
 
 /** Whether the checkout has a config/database/schema.ts yet. */
 export function hasSchemaFile(root: string): boolean {
@@ -66,6 +68,8 @@ export interface MigrateReport {
   readonly adopted?: readonly string[];
   /** Statements of the generated migration that break instances still running the previous release. */
   readonly breaking?: readonly string[];
+  /** Statements of the generated migration that may fail on rows the deploy branch has and a new branch does not. */
+  readonly dataDependent?: readonly string[];
   /** Why nothing was applied, when applying was skipped. */
   readonly notApplied?: string;
   readonly typesFile: string;
@@ -80,20 +84,35 @@ export interface MigrateOptions {
 
 type ApplyOutcome = Pick<MigrateReport, "applied" | "adopted" | "notApplied">;
 
+/** What a generated migration's statements warn about; either list may be empty. */
+type MigrationWarnings = Required<
+  Pick<MigrateReport, "breaking" | "dataDependent">
+>;
+
+function migrationWarnings(
+  generated: GeneratedMigration | null,
+): MigrationWarnings {
+  const statements = generated?.statements ?? [];
+  return {
+    breaking: breakingStatements(statements),
+    dataDependent: dataDependentStatements(statements),
+  };
+}
+
 /**
  * The run wrote a migration and then failed before applying it. The file
  * stays for the next run, which generates nothing new, so this is the only
- * run that can report what the migration breaks.
+ * run that can warn about the migration.
  */
-class UnappliedMigrationError extends Error {
+class UnappliedMigrationError extends Error implements MigrationWarnings {
   readonly generated: GeneratedMigration;
-  /** Statements of the kept migration that break instances still running the previous release. */
   readonly breaking: readonly string[];
+  readonly dataDependent: readonly string[];
 
   constructor(
     root: string,
     generated: GeneratedMigration,
-    breaking: readonly string[],
+    warnings: MigrationWarnings,
     cause: unknown,
   ) {
     super(
@@ -102,19 +121,9 @@ class UnappliedMigrationError extends Error {
     );
     this.name = "UnappliedMigrationError";
     this.generated = generated;
-    this.breaking = breaking;
+    this.breaking = warnings.breaking;
+    this.dataDependent = warnings.dataDependent;
   }
-}
-
-/** Why migrations must not be applied to the `.env` branch; undefined when they may. */
-async function applyBlocker(ctx: DbContext): Promise<string | undefined> {
-  const env = await resolveEnvBranch(ctx);
-  if (!env) return NO_ENV_BRANCH;
-  if (takesWrites(env.kind)) return undefined;
-  return notYourBranch(
-    env,
-    "Migrations are applied only to branches `appkit db init` created for you; the deployed app applies committed migrations to its own branch",
-  );
 }
 
 /** Apply pending migrations to the `.env` branch, or say why they were not. */
@@ -123,11 +132,32 @@ async function applyToEnvBranch(
   folder: string,
   schema: Schema,
 ): Promise<ApplyOutcome> {
-  const blocker = readJournal(folder)
-    ? await applyBlocker(ctx)
-    : "no migrations to apply — schema.ts declares no tables yet";
-  if (blocker) return { applied: [], notApplied: blocker };
+  const notApplied = (reason: string): ApplyOutcome => ({
+    applied: [],
+    notApplied: reason,
+  });
+  if (!readJournal(folder)) {
+    return notApplied(
+      "no migrations to apply — schema.ts declares no tables yet",
+    );
+  }
+  const env = await resolveEnvBranch(ctx);
+  if (!env) return notApplied(NO_ENV_BRANCH);
+  if (!takesWrites(env.kind)) {
+    return notApplied(
+      notYourBranch(
+        env,
+        "Migrations are applied only to branches `appkit db init` created for you; the deployed app applies committed migrations to its own branch",
+      ),
+    );
+  }
   return withBranchPool(ctx, async (pool) => {
+    // A migration on top of the fork's copy would make its rows yours to keep.
+    if (await isForkCopy(pool, schema.$schemaName)) {
+      throw new Error(
+        `Did not apply: ${forkCopyRefusal(env.branch.name, schema.$schemaName, "migrate")}`,
+      );
+    }
     // The deployed app refuses this case on start; refuse it here first.
     const leftInPublic = await detectTablesLeftInPublic(
       catalogSqlOf(pool),
@@ -173,7 +203,7 @@ export async function migrateHolding(
           schema,
           interactive: options.interactive,
         });
-  const breaking = breakingStatements(generated?.statements ?? []);
+  const warnings = migrationWarnings(generated);
 
   // The types follow schema.ts alone, so they are current even if applying fails.
   const typesFile = path.join(ctx.root, DATABASE_TYPES_PATH);
@@ -198,11 +228,14 @@ export async function migrateHolding(
         { cause: error },
       );
     }
-    throw new UnappliedMigrationError(ctx.root, generated, breaking, error);
+    throw new UnappliedMigrationError(ctx.root, generated, warnings, error);
   }
   return {
     generated,
-    ...(breaking.length > 0 ? { breaking } : {}),
+    ...(warnings.breaking.length > 0 ? { breaking: warnings.breaking } : {}),
+    ...(warnings.dataDependent.length > 0
+      ? { dataDependent: warnings.dataDependent }
+      : {}),
     ...outcome,
     typesFile,
   };

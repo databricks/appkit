@@ -4,8 +4,13 @@ export interface MigrationFile {
   readonly idx: number;
   /** The journal's `when`, recorded as `created_at`. */
   readonly when: number;
-  /** sha256 of the .sql file, recorded as `hash`. */
+  /** sha256 of the .sql file as checked out here, recorded as `hash`. */
   readonly hash: string;
+  /**
+   * Every hash a checkout of this file records: as is, with CRLF read as LF,
+   * and with LF read as CRLF. A row with any of them is this file.
+   */
+  readonly hashes: readonly string[];
   /** The file split on `--> statement-breakpoint`. */
   readonly statements: readonly string[];
 }
@@ -30,7 +35,7 @@ export interface AmbiguousTimestamp {
 }
 
 /** Committed migrations compared with what the database recorded. */
-interface MigrationHistory {
+export interface MigrationHistory {
   /** Not recorded and newer than every recorded migration: applied next, oldest first. */
   readonly pending: readonly MigrationFile[];
   /** Not recorded but older than the last recorded migration, so a later one ran first. */
@@ -86,7 +91,7 @@ export function reconcileMigrations(
     const rows = [...(rowsAt.get(when) ?? [])];
     const unmatched: MigrationFile[] = [];
     for (const file of bucket) {
-      const match = rows.findIndex((row) => row.hash === file.hash);
+      const match = rows.findIndex((row) => file.hashes.includes(row.hash));
       if (match === -1) unmatched.push(file);
       else accounted.add(rows.splice(match, 1)[0] as RecordedMigration);
     }

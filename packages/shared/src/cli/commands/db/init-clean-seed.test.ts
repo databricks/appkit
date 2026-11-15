@@ -58,10 +58,30 @@ const report = {
     action: "kept",
   },
   handedOff: "11111111-2222-3333-4444-555555555555",
+  keptCopy: null,
   envFile: "/app/.env",
   installed: null,
   start: { kind: "migrate", migrate },
 };
+
+/** The tooling on your working branch. It asks the confirmation and stops on a no. */
+function toolingThatAsks(): void {
+  tooling.runInit.mockImplementation(async (_ctx, options) => {
+    const confirmed = await options.confirmClean?.({
+      branch: report.branch,
+      schemaName: "app",
+    });
+    if (confirmed === false) {
+      throw Object.assign(
+        new Error(
+          "Cancelled. Schema app on dev-alice-3f9a2c is as it was, and .env points at the branch.",
+        ),
+        { name: "InitCancelledError" },
+      );
+    }
+    return report;
+  });
+}
 
 /** Commander keeps parsed option values on the command; each test parses afresh. */
 function resetOptionValues() {
@@ -260,14 +280,42 @@ describe("appkit db init", () => {
     tooling.runInit.mockResolvedValue(rebuilt);
     await init();
     expect(output(log)).toContain(
-      "A branch init forked starts without the rows it copied: the app schema was rebuilt from the committed migrations. `appkit db init --schema migrate` keeps them.",
+      "The branch still held the rows the fork copied: the app schema was rebuilt from the committed migrations. `appkit db init --schema migrate` keeps them.",
     );
 
     log.mockClear();
     resetOptionValues();
     await init("--schema", "clean", "--yes");
     expect(output(log)).toContain("Dropped schema app on dev-alice-3f9a2c");
-    expect(output(log)).not.toContain("A branch init forked starts without");
+    expect(output(log)).not.toContain("The branch still held the rows");
+  });
+
+  test("copied rows kept on request are a warning that names their source and the flag", async () => {
+    tooling.runInit.mockResolvedValue({
+      ...report,
+      keptCopy: {
+        reason: "requested",
+        from: "projects/p/branches/production",
+      },
+    });
+    await init("--schema", "migrate");
+
+    expect(output(log)).toContain(
+      "Kept the rows the fork copied from production, as --schema migrate asks. A plain `appkit db init` rebuilds the app schema from the committed migrations without them.",
+    );
+  });
+
+  test("in schema public, the tables other roles own are listed as kept with their rows", async () => {
+    tooling.runInit.mockResolvedValue({
+      ...report,
+      handedOff: null,
+      keptCopy: { reason: "public", objects: ["table notes", "table orders"] },
+    });
+    await init();
+
+    expect(output(log)).toContain(
+      "Kept in schema public, with their rows, because other roles own them: table notes, table orders",
+    );
   });
 
   test("an introspect start with a rebuild prints what introspect wrote, the drop, the migrations, and names --schema introspect to keep the rows", async () => {
@@ -324,38 +372,61 @@ describe("appkit db init", () => {
     const command = dbCommand.commands.find((c) => c.name() === "init");
     const schema = command?.options.find((o) => o.long === "--schema");
     expect(schema?.description).toBe(
-      "how the schema starts (default: a new branch is rebuilt from the migrations, a reused one is migrated; introspect without schema.ts)",
+      "how the schema starts (default: a schema that still holds the fork's copy is rebuilt from the migrations, your working branch is migrated; introspect without schema.ts)",
     );
     expect(command?.helpInformation()).not.toContain(
       "start with a copy of its rows",
     );
   });
 
-  test("--schema clean without a TTY needs --yes, and stops before any API call", async () => {
+  test("--schema clean hands the tooling a confirmation, which refuses without a TTY and says to pass --yes", async () => {
+    toolingThatAsks();
     await init("--schema", "clean");
 
     expect(output(error)).toContain(
-      "Refusing to run `--schema clean` without confirmation in a non-interactive shell. Pass --yes.",
+      "Refusing to drop schema app on dev-alice-3f9a2c, your working branch's, without confirmation in a non-interactive shell. Pass --yes. .env already points at the branch.",
     );
-    expect(tooling.runInit).not.toHaveBeenCalled();
+    expect(prompts.confirm).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
   });
 
-  test("--schema clean on a TTY asks first; a no cancels with exit code 1", async () => {
+  test("--schema clean on a TTY asks when the tooling says the schema is yours; a no cancels with exit code 1", async () => {
     setTTY(true);
+    toolingThatAsks();
     prompts.confirm.mockResolvedValueOnce(false);
     await init("--schema", "clean");
 
-    expect(prompts.confirm).toHaveBeenCalledOnce();
-    expect(tooling.runInit).not.toHaveBeenCalled();
-    expect(output(log)).toContain("Cancelled");
+    expect(prompts.confirm.mock.calls[0]?.[0].message).toBe(
+      "Drop schema app on dev-alice-3f9a2c, with every table and row in it, then apply the committed migrations?",
+    );
+    expect(output(log)).toContain(
+      "Cancelled. Schema app on dev-alice-3f9a2c is as it was, and .env points at the branch.",
+    );
     expect(process.exitCode).toBe(1);
 
     process.exitCode = undefined;
+    log.mockClear();
     resetOptionValues();
     prompts.confirm.mockResolvedValueOnce(true);
     await init("--schema", "clean");
+    expect(output(log)).toContain("Applied 0000_migration to the .env branch");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  test("--schema clean on a copy asks nothing: the tooling decides from the branch and never calls the confirmation", async () => {
+    setTTY(true);
+    await init("--schema", "clean");
+
     expect(initOptions()).toMatchObject({ schema: "clean" });
+    expect(initOptions()?.confirmClean).toBeTypeOf("function");
+    expect(prompts.confirm).not.toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  test("--yes passes no confirmation", async () => {
+    await init("--schema", "clean", "--yes");
+
+    expect(initOptions()?.confirmClean).toBeUndefined();
   });
 
   test("an error is printed and exits 1", async () => {

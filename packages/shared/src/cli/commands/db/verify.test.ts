@@ -40,6 +40,7 @@ const local = {
   strandedMigrations: [],
   editedMigrations: [],
   unknownMigrations: 0,
+  forkCopy: false,
   ok: true,
 };
 
@@ -249,6 +250,34 @@ describe("appkit db verify", () => {
       "rebuild the branch from this checkout's migrations, in order. If the branch ran migrations you have not pulled yet, pull them instead.",
     );
     expect(process.exitCode).toBe(1);
+  });
+
+  test("a fork's copy whose rebuild did not finish is told to rebuild with init, as migrate refuses it", async () => {
+    runVerify.mockResolvedValue({ ...local, forkCopy: true, ok: false });
+
+    await dbCommand.parseAsync(["verify"], { from: "user" });
+
+    expect(output(error)).toContain(
+      "dev-alice-3f9a2c still holds the rows the fork copied into the app schema, and its rebuild did not finish. Run `appkit db init` to rebuild it from the committed migrations, or `appkit db init --schema migrate` to keep them.",
+    );
+    expect(output(error)).not.toContain("does not match");
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("on a fork's copy, pending migrations are listed, and the one next step is still init", async () => {
+    runVerify.mockResolvedValue({
+      ...local,
+      pendingMigrations: ["0002_migration"],
+      forkCopy: true,
+      ok: false,
+    });
+
+    await dbCommand.parseAsync(["verify"], { from: "user" });
+
+    expect(output(log)).toContain("Pending migrations: 0002_migration");
+    const printed = output(error);
+    expect(printed).toContain("Run `appkit db init` to rebuild it");
+    expect(printed).not.toContain("`appkit db migrate`");
   });
 
   describe("--deployed", () => {
