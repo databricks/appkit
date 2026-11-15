@@ -144,7 +144,7 @@ classes.
 
 Statements that break instances still running the previous release. Drops,
 renames, type changes, `SET NOT NULL` and a new `NOT NULL` column without a
-default are in this class. Those instances keep serving while the new one
+default are in this class. Those instances can still serve while the new one
 migrates on start, and a code rollback does not undo a migration. Deploy code
 that works with both the old and the new schema first, then this change in a
 later deploy.

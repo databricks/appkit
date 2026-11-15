@@ -131,7 +131,7 @@ describe("appkit db migrate", () => {
     await dbCommand.parseAsync(["migrate"], { from: "user" });
 
     expect(output(log)).toContain(
-      `0002_migration breaks instances still running the previous release, which keep serving while the new one migrates on start: ${drop} Deploy code that works with both the old and the new schema first, then this change in a later deploy.`,
+      `0002_migration breaks instances still running the previous release, which can still serve while the new one migrates on start: ${drop} Deploy code that works with both the old and the new schema first, then this change in a later deploy.`,
     );
     expect(output(log)).not.toContain("may fail on rows");
   });
@@ -207,7 +207,7 @@ describe("appkit db migrate", () => {
       "Wrote config/database/migrations/0002_migration.sql, but did not apply it: 403 Forbidden",
     );
     expect(output(log)).toContain(
-      `0002_migration breaks instances still running the previous release, which keep serving while the new one migrates on start: ${setNotNull} Deploy code that works with both the old and the new schema first, then this change in a later deploy.`,
+      `0002_migration breaks instances still running the previous release, which can still serve while the new one migrates on start: ${setNotNull} Deploy code that works with both the old and the new schema first, then this change in a later deploy.`,
     );
     expect(output(log)).toContain(
       `0002_migration may fail on rows the deploy branch has and a new branch does not: ${setNotNull} Test the migration on a branch that has a copy of the deploy branch's data before you deploy.`,

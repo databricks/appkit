@@ -49,7 +49,7 @@ type MigrationWarnings = Pick<MigrateReport, "breaking" | "dataDependent">;
 export function warnMigration(tag: string, warnings: MigrationWarnings): void {
   if (warnings.breaking?.length) {
     warn(
-      `${tag} breaks instances still running the previous release, which keep serving while the new one migrates on start: ${warnings.breaking.join(" ")} ` +
+      `${tag} breaks instances still running the previous release, which can still serve while the new one migrates on start: ${warnings.breaking.join(" ")} ` +
         "Deploy code that works with both the old and the new schema first, then this change in a later deploy.",
     );
   }
