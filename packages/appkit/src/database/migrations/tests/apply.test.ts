@@ -600,6 +600,65 @@ describe("applyPendingMigrations", () => {
       expect(state.recorded).toHaveLength(2);
     });
 
+    /** Main's new migration is older than the one a branch deployed first, so it is stranded, not pending. */
+    const strandedBehindABranch = () => {
+      const folder = migrations([
+        { tag: "0000_a", when: 1000, sql: [`SELECT 1;`] },
+        { tag: "0001_main", when: 1200, sql: [`SELECT 2;`] },
+      ]);
+      return {
+        folder,
+        recorded: [
+          { hash: hashOf(folder, "0000_a"), created_at: 1000 },
+          { hash: "from-a-branch-deployed-early", created_at: 1500 },
+        ],
+      };
+    };
+
+    test("a stranded migration next to recorded ones this checkout lacks refuses as diverged, with the same runbook", async () => {
+      const { folder, recorded } = strandedBehindABranch();
+      const { pool, client, state } = fakePool({ recorded });
+
+      const error = await applyPendingMigrations(pool, refusing(folder)).catch(
+        (caught: unknown) => caught,
+      );
+
+      expect(error).toBeInstanceOf(MigrationHistoryError);
+      expect(error).toMatchObject({
+        refusal: {
+          diverged: {
+            unrecorded: ["0001_main"],
+            unknown: [
+              { hash: "from-a-branch-deployed-early", createdAt: 1500 },
+            ],
+          },
+        },
+      });
+      expect((error as Error).message).toBe(
+        'Schema "app" recorded 1 migration this checkout does not have (created 1970-01-01T00:00:01.500Z), and 0001_main is committed here but not applied. ' +
+          "The deploy branch ran migrations from a commit this one lacks. " +
+          "Deploy a commit whose journal contains the recorded migrations, or merge them into main unchanged, before main's own migrations. " +
+          "No migration was applied.",
+      );
+      expect(steps(client.statements)).toEqual(["journal table?", "recorded?"]);
+      expect(state.recorded).toHaveLength(2);
+    });
+
+    test("the same history without the option refuses as stranded, with the regenerate runbook", async () => {
+      const { folder, recorded } = strandedBehindABranch();
+      const { pool } = fakePool({ recorded });
+
+      const error = await applyPendingMigrations(pool, options(folder)).catch(
+        (caught: unknown) => caught,
+      );
+
+      expect(error).toBeInstanceOf(MigrationHistoryError);
+      expect(error).toMatchObject({ refusal: { stranded: ["0001_main"] } });
+      expect((error as Error).message).toMatch(
+        /^Migration 0001_main is older than the migration recorded at 1970-01-01T00:00:01\.500Z, which schema "app" already recorded, and was never applied, so it would never run\. .*Delete its \.sql file, snapshot and journal entry, generate the migration again from schema\.ts/,
+      );
+    });
+
     test("recorded migrations this checkout lacks with nothing pending (a code rollback) only warn", async () => {
       const folder = twoMigrations();
       const warn = vi
