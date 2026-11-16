@@ -209,7 +209,7 @@ describe("generate-types --wait: warehouse wait limit", () => {
       "warehouse_unavailable: warehouse wh-stuck is still STARTING after the 50ms wait limit",
     );
     expect(message).toContain("no committed types to fall back on");
-    expect(message).toContain("No type files were written.");
+    expect(message).toContain("Not written: analytics.d.ts.");
     expect(message).not.toContain("result: unknown");
     expect((error as { code?: string }).code).toBe("warehouse_unavailable");
     expect(message).toContain("analytics.d.ts");
@@ -241,30 +241,6 @@ describe("generate-types --wait: warehouse wait limit", () => {
     expect(error).toBeInstanceOf(TypegenFatalError);
     expect((error as Error).message).toContain(
       "warehouse wh-cold is still STARTING after the 50ms wait limit",
-    );
-  });
-
-  test("a status request that hangs mid-wait still ends at the limit", async () => {
-    // Preflight says STARTING, then every warehouses.get hangs.
-    mocks.getWarehouse
-      .mockResolvedValueOnce({ state: "STARTING" })
-      .mockImplementation(() => new Promise(() => {}));
-
-    const started = Date.now();
-    const error = await rejection(
-      generateFromEntryPoint({
-        outFile,
-        queryFolder,
-        warehouseId: "wh-hung",
-        mode: "blocking",
-        waitTimeoutMs: 50,
-      }),
-    );
-
-    expect(Date.now() - started).toBeLessThan(1_000);
-    expect(error).toBeInstanceOf(TypegenFatalError);
-    expect((error as Error).message).toContain(
-      "warehouse_unavailable: warehouse wh-hung is still STARTING after the 50ms wait limit",
     );
   });
 
@@ -314,5 +290,230 @@ describe("generate-types --wait: warehouse wait limit", () => {
     expect(message).toContain("analytics.d.ts");
     expect(message).toContain("metric-views.d.ts");
     expect(mocks.executeStatement).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Hung warehouse API requests. Every request gets at least a 5s floor, so these
+ * run on fake timers (only setTimeout/clearTimeout/Date are faked; real file
+ * I/O and setImmediate keep working).
+ */
+describe("generate-types --wait: hung warehouse API requests", () => {
+  const hang = () => new Promise(() => {});
+
+  /** Advance fake time in steps, letting real I/O run, until `promise` settles. */
+  async function settle(promise: Promise<unknown>): Promise<unknown> {
+    let done = false;
+    const result = promise.then(
+      (value) => {
+        done = true;
+        return value;
+      },
+      (error: unknown) => {
+        done = true;
+        return error;
+      },
+    );
+    for (let i = 0; i < 200 && !done; i++) {
+      await vi.advanceTimersByTimeAsync(250);
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    expect(done).toBe(true);
+    return result;
+  }
+
+  function writeQuery() {
+    fs.mkdirSync(queryFolder, { recursive: true });
+    fs.writeFileSync(
+      path.join(queryFolder, "users.sql"),
+      "SELECT id FROM users",
+      "utf-8",
+    );
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    fs.rmSync(testDir, { recursive: true, force: true });
+    mocks.executeStatement.mockResolvedValue(describeQueryResult());
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  afterAll(() => {
+    fs.rmSync(testDir, { recursive: true, force: true });
+  });
+
+  test("queries: a status request that hangs mid-wait ends within the limit plus the 5s floor", async () => {
+    writeQuery();
+    const calls: number[] = [];
+    mocks.getWarehouse
+      .mockImplementationOnce(async () => {
+        calls.push(Date.now());
+        return { state: "STARTING" };
+      })
+      .mockImplementation(() => {
+        calls.push(Date.now());
+        return hang();
+      });
+
+    const error = await settle(
+      generateFromEntryPoint({
+        outFile,
+        queryFolder,
+        warehouseId: "wh-hung",
+        mode: "blocking",
+        waitTimeoutMs: 50,
+      }),
+    );
+
+    // Measured from the first warehouse call: the settle loop advances fake
+    // time while real file I/O runs, so `started` would include that drift.
+    // Bounded by the limit plus the 5s request floor (plus one 250ms step).
+    expect(calls).toHaveLength(2);
+    expect(Date.now() - calls[0]).toBeLessThanOrEqual(50 + 5_000 + 250);
+    expect(error).toBeInstanceOf(TypegenFatalError);
+    expect((error as Error).message).toContain(
+      "warehouse_unavailable: warehouse wh-hung is still STARTING after the 50ms wait limit",
+    );
+  });
+
+  test("queries: first status check hangs, committed types exist → keeps them and warns", async () => {
+    writeQuery();
+    mocks.getWarehouse.mockImplementation(hang);
+    const committed = "// committed types\n";
+    writeCommitted(outFile, committed);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      const result = await settle(
+        generateFromEntryPoint({
+          outFile,
+          queryFolder,
+          warehouseId: "wh-hung",
+          mode: "blocking",
+          waitTimeoutMs: 50,
+        }),
+      );
+
+      expect(result).toBeUndefined();
+      const warnings = gateWarnings(warnSpy);
+      expect(warnings).toContain("AppKit typegen: using committed types");
+      expect(warnings).toContain(
+        "warehouse_unavailable: warehouse wh-hung did not answer a status request within 5s",
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+    expect(fs.readFileSync(outFile, "utf-8")).toBe(committed);
+    expect(mocks.executeStatement).not.toHaveBeenCalled();
+  });
+
+  test("queries: first status check hangs, no committed types → warehouse_unavailable failure", async () => {
+    writeQuery();
+    mocks.getWarehouse.mockImplementation(hang);
+
+    const error = await settle(
+      generateFromEntryPoint({
+        outFile,
+        queryFolder,
+        warehouseId: "wh-hung",
+        mode: "blocking",
+        waitTimeoutMs: 50,
+      }),
+    );
+
+    expect(error).toBeInstanceOf(TypegenFatalError);
+    expect((error as { code?: string }).code).toBe("warehouse_unavailable");
+    const message = (error as Error).message;
+    expect(message).toContain(
+      "warehouse_unavailable: warehouse wh-hung did not answer a status request within 5s",
+    );
+    expect(message).toContain("Not written: analytics.d.ts.");
+    expect(fs.existsSync(outFile)).toBe(false);
+  });
+
+  test("queries: the start request for a stopped warehouse hangs → warehouse_unavailable failure", async () => {
+    writeQuery();
+    mocks.getWarehouse.mockResolvedValue({ state: "STOPPED" });
+    mocks.startWarehouse.mockImplementation(hang);
+
+    const error = await settle(
+      generateFromEntryPoint({
+        outFile,
+        queryFolder,
+        warehouseId: "wh-hung",
+        mode: "blocking",
+        waitTimeoutMs: 50,
+      }),
+    );
+
+    expect(error).toBeInstanceOf(TypegenFatalError);
+    expect((error as Error).message).toContain(
+      "warehouse_unavailable: warehouse wh-hung did not answer a start request within 5s",
+    );
+  });
+
+  test("metric views: first status check hangs, committed types exist → keeps them and warns", async () => {
+    writeMetricConfig();
+    mocks.getWarehouse.mockImplementation(hang);
+    const committed = "// committed metric types\n";
+    writeCommitted(metricFile, committed);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      const result = await settle(
+        generateFromEntryPoint({
+          outFile,
+          metricViewsFolder,
+          mvOutFile: metricFile,
+          warehouseId: "wh-hung",
+          mode: "blocking",
+          waitTimeoutMs: 50,
+        }),
+      );
+
+      expect(result).toBeUndefined();
+      const warnings = gateWarnings(warnSpy);
+      expect(warnings).toContain(
+        "warehouse_unavailable: warehouse wh-hung did not answer a status request within 5s",
+      );
+      expect(warnings).toContain("kept existing metric-views.d.ts");
+    } finally {
+      warnSpy.mockRestore();
+    }
+    expect(fs.readFileSync(metricFile, "utf-8")).toBe(committed);
+  });
+
+  test("metric views: the start request hangs, no committed types → failure names only the skipped file", async () => {
+    // Metric-view-only app: analytics.d.ts IS written (empty registry); only
+    // metric-views.d.ts is skipped, and the message must say exactly that.
+    writeMetricConfig();
+    mocks.getWarehouse.mockResolvedValue({ state: "STOPPED" });
+    mocks.startWarehouse.mockImplementation(hang);
+
+    const error = await settle(
+      generateFromEntryPoint({
+        outFile,
+        metricViewsFolder,
+        mvOutFile: metricFile,
+        warehouseId: "wh-hung",
+        mode: "blocking",
+        waitTimeoutMs: 50,
+      }),
+    );
+
+    expect(error).toBeInstanceOf(TypegenFatalError);
+    const message = (error as Error).message;
+    expect(message).toContain(
+      "warehouse_unavailable: warehouse wh-hung did not answer a start request within 5s",
+    );
+    expect(message).toContain("Not written: metric-views.d.ts.");
+    expect(message).not.toContain("No type files were written");
+    expect(fs.existsSync(outFile)).toBe(true);
+    expect(fs.existsSync(metricFile)).toBe(false);
   });
 });

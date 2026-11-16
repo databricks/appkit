@@ -197,17 +197,62 @@ describe("waitUntilRunning", () => {
     expect(get).toHaveBeenCalledTimes(3);
   });
 
+  /** A warehouses.get stub whose answer arrives `ms` later, like a real API. */
+  const answersAfter = (ms: number, state: WarehouseState) => () =>
+    new Promise((resolve) =>
+      setTimeout(() => resolve(stateResponse(state)), ms),
+    );
+
   test("a warehouse that comes up on the final check at the limit still resolves RUNNING", async () => {
+    // The final poll is made at the deadline (t=500) and its answer takes 1s.
+    // It still gets the 5s request floor, so RUNNING is accepted instead of
+    // being cut off at the limit.
     const get = vi
       .fn()
       .mockResolvedValueOnce(stateResponse("STARTING"))
-      .mockResolvedValueOnce(stateResponse("RUNNING"));
+      .mockImplementationOnce(answersAfter(1_000, "RUNNING"));
     const client = makeClient(get);
 
     const promise = waitUntilRunning(client, "wh-1", { maxMs: 500 });
-    await vi.advanceTimersByTimeAsync(500);
+    let outcome: string | undefined;
+    promise.then(
+      (state) => {
+        outcome = state;
+      },
+      () => {
+        outcome = "rejected";
+      },
+    );
+    await vi.advanceTimersByTimeAsync(1_499);
+    expect(outcome).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
 
-    await expect(promise).resolves.toBe("RUNNING");
+    expect(outcome).toBe("RUNNING");
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+
+  test("a slow answer to the last poll after a long backoff is still accepted", async () => {
+    // Jorge's case: backoff 1s, 2s, 4s, 8s puts a poll right at a 15s limit;
+    // the warehouse turned RUNNING during that last backoff and the API takes
+    // 2s to say so.
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce(stateResponse("STARTING"))
+      .mockResolvedValueOnce(stateResponse("STARTING"))
+      .mockResolvedValueOnce(stateResponse("STARTING"))
+      .mockResolvedValueOnce(stateResponse("STARTING"))
+      .mockImplementationOnce(answersAfter(2_000, "RUNNING"));
+    const client = makeClient(get);
+
+    const promise = waitUntilRunning(client, "wh-1", { maxMs: 15_000 });
+    const settled = promise.then(
+      (state) => state,
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(17_000);
+
+    expect(await settled).toBe("RUNNING");
+    expect(get).toHaveBeenCalledTimes(5);
   });
 
   test("a status request that never answers can't hold the wait past the limit", async () => {
@@ -228,11 +273,19 @@ describe("waitUntilRunning", () => {
       maxMs: 20,
       pollMs: 5,
     });
+    let rejected = false;
     const settled = promise.then(
       () => undefined,
-      (error: unknown) => error,
+      (error: unknown) => {
+        rejected = true;
+        return error;
+      },
     );
-    await vi.advanceTimersByTimeAsync(20);
+    // The hung poll (made at t=5) gets the 5s request floor, so the wait ends
+    // at t≈5005: past the 20ms limit by at most that floor, never unbounded.
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(rejected).toBe(false);
+    await vi.advanceTimersByTimeAsync(10);
 
     const error = await settled;
     expect(error).toBeInstanceOf(WarehouseWaitTimeoutError);
@@ -253,7 +306,7 @@ describe("waitUntilRunning", () => {
       () => undefined,
       (error: unknown) => error,
     );
-    await vi.advanceTimersByTimeAsync(50);
+    await vi.advanceTimersByTimeAsync(5_000);
 
     const error = (await settled) as WarehouseWaitTimeoutError;
     expect(error).toBeInstanceOf(WarehouseWaitTimeoutError);
@@ -270,7 +323,7 @@ describe("waitUntilRunning", () => {
       () => undefined,
       (error: unknown) => error,
     );
-    await vi.advanceTimersByTimeAsync(50);
+    await vi.advanceTimersByTimeAsync(5_000);
 
     expect(
       describeWaitTimeout((await settled) as WarehouseWaitTimeoutError),
@@ -389,8 +442,9 @@ describe("bounded warehouse API calls", () => {
     });
   });
 
-  test("statusRequestTimeoutMs keeps the preflight check between 10s and 30s", () => {
-    expect(statusRequestTimeoutMs(0)).toBe(10_000);
+  test("statusRequestTimeoutMs keeps any warehouse request between 5s and 30s", () => {
+    expect(statusRequestTimeoutMs(-100)).toBe(5_000);
+    expect(statusRequestTimeoutMs(0)).toBe(5_000);
     expect(statusRequestTimeoutMs(20_000)).toBe(20_000);
     expect(statusRequestTimeoutMs(300_000)).toBe(30_000);
   });

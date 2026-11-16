@@ -272,6 +272,7 @@ function warehouseUnavailableError(
   warehouseId: string,
   detail: string,
   missingFiles: string[],
+  skippedFiles: string[],
 ): TypegenFatalError {
   return new TypegenFatalError(
     [
@@ -285,7 +286,7 @@ function warehouseUnavailableError(
       code: WAREHOUSE_UNAVAILABLE_CODE,
       summary: [
         `Warehouse ${pc.bold(warehouseId)} was not ready in time, and there are no committed types to use instead.`,
-        "No type files were written.",
+        `Not written: ${skippedFiles.join(", ")}.`,
       ],
       causes: [
         "the warehouse is still starting (slow cold start, capacity, or a stuck start)",
@@ -570,18 +571,22 @@ export async function generateFromEntryPoint(options: {
       missingCommittedTypes.push(path.basename(resolvedMvFile));
     }
 
+    // The artifacts this run did not (re)write because their path could not
+    // reach the warehouse. Others (e.g. analytics.d.ts in a run where only the
+    // metric views timed out) were written as usual.
+    const skippedFiles: string[] = [];
+    if (queryHadEnvironmentalFailure) skippedFiles.push(path.basename(outFile));
+    if (metricsHadEnvironmentalFailure) {
+      skippedFiles.push(path.basename(resolvedMvFile));
+    }
+
     if (missingCommittedTypes.length === 0) {
       // Committed types present: emit loud warning and exit 0.
-      const keptFiles: string[] = [];
-      if (queryHadEnvironmentalFailure) keptFiles.push(path.basename(outFile));
-      if (metricsHadEnvironmentalFailure) {
-        keptFiles.push(path.basename(resolvedMvFile));
-      }
       const warningMessage = determineWarningMessage(
         environmentalCause ?? "unavailable",
         warehouseId,
         environmentalDetail,
-        keptFiles,
+        skippedFiles,
       );
       logger.warn(warningMessage);
     } else {
@@ -590,6 +595,7 @@ export async function generateFromEntryPoint(options: {
           warehouseId,
           environmentalDetail,
           missingCommittedTypes,
+          skippedFiles,
         );
       }
       throw new TypegenFatalError(

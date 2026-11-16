@@ -37,21 +37,24 @@ export const WAREHOUSE_WAIT_TIMEOUT_ENV = "APPKIT_TYPEGEN_WAIT_TIMEOUT";
 export const WAREHOUSE_UNAVAILABLE_CODE = "warehouse_unavailable";
 
 /**
- * Cap on a single `warehouses.get` made outside a wait (the preflight status
- * check), so an API that never answers can't hang the run either. Polls inside
- * {@link waitUntilRunning} are bounded by the remaining wait budget instead.
+ * Cap on any single warehouse API request (status check, start, or a poll
+ * inside {@link waitUntilRunning}), so an API that never answers can't hang the
+ * run.
  */
 const STATUS_REQUEST_TIMEOUT_MS = 30_000;
 
 /**
- * Lower bound for the preflight status check, so a very short (or `0`) wait
- * limit still leaves time for one answer from the API.
+ * Lower bound for any single warehouse API request. Without it, a request made
+ * near the end of the limit (e.g. the last poll, at the deadline) would be cut
+ * off before a real API could answer, and a warehouse that came up just in
+ * time would be reported as timed out. The cost: a run can go past its limit
+ * by up to this much.
  */
-const MIN_STATUS_REQUEST_TIMEOUT_MS = 10_000;
+const MIN_STATUS_REQUEST_TIMEOUT_MS = 5_000;
 
 /**
- * Time allowed for the preflight status check given the wait budget left:
- * the budget, but at least {@link MIN_STATUS_REQUEST_TIMEOUT_MS} and at most
+ * Time allowed for one warehouse API request given the wait budget left: the
+ * budget, but at least {@link MIN_STATUS_REQUEST_TIMEOUT_MS} and at most
  * {@link STATUS_REQUEST_TIMEOUT_MS}.
  */
 export function statusRequestTimeoutMs(remainingMs: number): number {
@@ -359,9 +362,10 @@ export async function startWarehouse(
  * down): the next deadline/abort check throws an `AbortError`, and a pending
  * backoff sleep resolves immediately rather than holding the process open.
  *
- * Backoff sleeps never run past the deadline, and each `warehouses.get` is
- * bounded by the budget left, so the wait settles within `maxMs` even when a
- * status request never answers.
+ * Backoff sleeps never run past the deadline, and each `warehouses.get` gets
+ * the budget left (at least a 5s floor, so the poll at the deadline can still
+ * be answered). The wait therefore settles within `maxMs` plus at most that
+ * floor, even when a status request never answers.
  *
  * @throws WarehouseWaitTimeoutError if `maxMs` elapses before the warehouse
  *   reaches RUNNING.
@@ -393,12 +397,13 @@ export async function waitUntilRunning(
   while (true) {
     throwIfAborted(signal);
 
-    // Each poll gets only what's left of the budget, so a status request that
-    // never answers can't hold the wait past the limit.
+    // Each poll gets what's left of the budget (at least the request floor, so
+    // the last poll at the deadline can still get an answer). A status request
+    // that never answers ends the wait at most that floor past the limit.
     let state: WarehouseState;
     try {
       state = await getWarehouseState(client, warehouseId, {
-        timeoutMs: Math.max(0, maxMs - (Date.now() - start)),
+        timeoutMs: statusRequestTimeoutMs(maxMs - (Date.now() - start)),
         signal,
       });
     } catch (error) {
