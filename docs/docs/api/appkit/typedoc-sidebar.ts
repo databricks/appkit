@@ -129,6 +129,11 @@ const typedocSidebar: SidebarsConfig = {
       items: [
         {
           type: "doc",
+          id: "api/appkit/Interface.Actor",
+          label: "Actor"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.AgentAdapter",
           label: "AgentAdapter"
         },
@@ -204,8 +209,18 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.DatabaseOperationContract",
+          label: "DatabaseOperationContract"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.DatabaseRegistry",
           label: "DatabaseRegistry"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.DatabaseRoutes",
+          label: "DatabaseRoutes"
         },
         {
           type: "doc",
@@ -253,11 +268,6 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.EndpointConfig",
           label: "EndpointConfig"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.EntityMutationHooks",
-          label: "EntityMutationHooks"
         },
         {
           type: "doc",
@@ -313,16 +323,6 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.GenerationParams",
           label: "GenerationParams"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.HookApp",
-          label: "HookApp"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.HookContext",
-          label: "HookContext"
         },
         {
           type: "doc",
@@ -411,6 +411,16 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/Interface.OperationContext",
+          label: "OperationContext"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.OperationDefinition",
+          label: "OperationDefinition"
+        },
+        {
+          type: "doc",
           id: "api/appkit/Interface.PluginManifest",
           label: "PluginManifest"
         },
@@ -418,6 +428,16 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.PluginToolkitProvider",
           label: "PluginToolkitProvider"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.PolicyContext",
+          label: "PolicyContext"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Interface.PolicyDenial",
+          label: "PolicyDenial"
         },
         {
           type: "doc",
@@ -433,11 +453,6 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Interface.ReadEvalDatasetOptions",
           label: "ReadEvalDatasetOptions"
-        },
-        {
-          type: "doc",
-          id: "api/appkit/Interface.ReadSerializerContext",
-          label: "ReadSerializerContext"
         },
         {
           type: "doc",
@@ -682,8 +697,8 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/TypeAlias.EntityHooks",
-          label: "EntityHooks"
+          id: "api/appkit/TypeAlias.DatabricksAppKitDatabaseOperations",
+          label: "DatabricksAppKitDatabaseOperations"
         },
         {
           type: "doc",
@@ -747,6 +762,21 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
+          id: "api/appkit/TypeAlias.OperationMethod",
+          label: "OperationMethod"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.OperationWireInput",
+          label: "OperationWireInput"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.OperationWireOutput",
+          label: "OperationWireOutput"
+        },
+        {
+          type: "doc",
           id: "api/appkit/TypeAlias.PluginData",
           label: "PluginData"
         },
@@ -757,8 +787,13 @@ const typedocSidebar: SidebarsConfig = {
         },
         {
           type: "doc",
-          id: "api/appkit/TypeAlias.ReadSerializer",
-          label: "ReadSerializer"
+          id: "api/appkit/TypeAlias.Policy",
+          label: "Policy"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/TypeAlias.PolicyDecision",
+          label: "PolicyDecision"
         },
         {
           type: "doc",
@@ -972,6 +1007,16 @@ const typedocSidebar: SidebarsConfig = {
           type: "doc",
           id: "api/appkit/Function.defineManifest",
           label: "defineManifest"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.defineOperation",
+          label: "defineOperation"
+        },
+        {
+          type: "doc",
+          id: "api/appkit/Function.definePolicy",
+          label: "definePolicy"
         },
         {
           type: "doc",

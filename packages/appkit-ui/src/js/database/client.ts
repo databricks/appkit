@@ -105,8 +105,8 @@ export interface DatabaseApi {
 
   /**
    * Create one row with `POST /api/database/<entity>` and return it as the
-   * database holds it after any `beforeCreate` hook. Private, generated, and
-   * undeclared fields are compile errors, as the server refuses them.
+   * database holds it. Private, generated, and undeclared fields are compile
+   * errors, as the server refuses them.
    *
    * @example
    * ```typescript
@@ -315,7 +315,7 @@ export function isDatabaseListPage(
 }
 
 /**
- * A detail route answers one bare row; a serializer returns an object too.
+ * A detail route answers one bare row.
  * @internal Shared with the React hooks; not part of the public surface.
  */
 export function isDatabaseRow(body: unknown): body is Record<string, unknown> {

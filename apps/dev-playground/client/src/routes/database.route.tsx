@@ -10,11 +10,7 @@ import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { codeToHtml } from "shiki";
 
-import {
-  BoardExplorer,
-  HookLifecycle,
-  RefusalProbe,
-} from "@/components/database";
+import { BoardExplorer, RefusalProbe } from "@/components/database";
 import { Header } from "@/components/layout/header";
 
 export const Route = createFileRoute("/database")({
@@ -130,7 +126,6 @@ database({
   schema,
   // All tables are readable; only boards and notes accept HTTP writes.
   api: { writes: { tables: ["boards", "notes"] } },
-  hooks: { /* inline hooks shown below */ },
 })`;
 
 const PRIVATE_COLUMN = `const notes = table("notes", {
@@ -145,61 +140,6 @@ await db.notes.create({ author_email });     // accepted
 
 // Over HTTP, the same declaration removes it from every surface:
 // the select list, where, the create body, and the update body.`;
-
-const INLINE_HOOKS = `// server/index.ts
-// Model-based redaction is best-effort, not a privacy guarantee.
-const redactor = createAgent({
-  instructions:
-    "Replace every personal name and email address in the user's text with [redacted]. " +
-    "Return only the rewritten text, nothing else.",
-});
-
-database({
-  schema,
-  api: { writes: { tables: ["boards", "notes"] } },
-  hooks: {
-    notes: {
-      async beforeCreate(values) {
-        // Cancel the model request before the 30-second transaction deadline.
-        const signal = AbortSignal.timeout(10_000);
-        const answer = await runAgent(redactor, {
-          messages: String(values.body),
-          signal,
-        });
-        // A cancelled stream can return partial text instead of throwing.
-        signal.throwIfAborted();
-        if (answer.events.some(event =>
-          event.type === "status" && event.status === "error"
-        )) {
-          throw new Error("Note redaction failed");
-        }
-        const body = answer.text.trim();
-        if (!body) throw new Error("Note redaction returned no text");
-
-        return {
-          ...values,
-          body,
-          // Demo only; production apps should use the authenticated session.
-          author_email: \`\${values.author}@example.com\`,
-        };
-      },
-
-      async afterCreate(row, ctx) {
-        // HTTP writes are disabled for this table, but this client is trusted
-        // and bound to the note's transaction.
-        await ctx.app.database.note_events.create({
-          note_id: row.id,
-          action: "created",
-        });
-      },
-
-      serialize: (row, { operation }) =>
-        operation === "list"
-          ? { ...row, body: String(row.body).slice(0, 120) }
-          : row,
-    },
-  },
-});`;
 
 const TIMELINE_QUERY = `// Browser: use the generated board detail route, not a custom controller.
 const include = encodeURIComponent(JSON.stringify({
@@ -225,7 +165,7 @@ const GENERATED_ROUTES = [
   {
     method: "POST",
     suffix: "",
-    purpose: "Create, with before/after hooks in one transaction",
+    purpose: "Create one row against the generated insert schema",
   },
   {
     method: "PATCH",
@@ -235,7 +175,7 @@ const GENERATED_ROUTES = [
   {
     method: "DELETE",
     suffix: "/:id",
-    purpose: "Delete one row, with the same hooks available",
+    purpose: "Delete one row by primary key",
   },
 ] as const;
 
@@ -292,7 +232,7 @@ function DatabaseRoute() {
       <div className="max-w-6xl mx-auto px-6 py-12">
         <Header
           title="Database"
-          description="Declare a Postgres schema once and get typed entities, generated CRUD routes, and transactional hooks — without writing a controller."
+          description="Declare a Postgres schema once and get typed entities and generated CRUD routes — without writing a controller."
           tooltip="The DatabasePlugin reads an explicit schema. It never creates or migrates tables; at startup it checks that every declared table and column exists."
         />
 
@@ -301,8 +241,8 @@ function DatabaseRoute() {
             <CardHeader>
               <CardTitle>Live</CardTitle>
               <CardDescription>
-                Boards, their notes, and the audit trail a hook keeps for them.
-                Every request below hits a route this app never wrote.
+                Boards, their notes, and the read-only events nested under each
+                note. Every request below hits a route this app never wrote.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -353,20 +293,21 @@ function DatabaseRoute() {
                 <p className="text-sm text-muted-foreground mt-1">
                   Set <code>api: false</code> to disable generated endpoints
                   while keeping the typed database client available to your own
-                  routes and hooks. Use <code>api: {"{ writes: false }"}</code>{" "}
-                  for read-only routes on every table. Here,{" "}
+                  routes. Use <code>api: {"{ writes: false }"}</code> for
+                  read-only routes on every table. Here,{" "}
                   <code>api.writes.tables</code> allows writes to boards and
-                  notes while keeping the audit trail read-only.
+                  notes while keeping <code>note_events</code> read-only.
                 </p>
               </div>
               <CodeBlock code={REGISTRATION} />
               <RouteTable />
               <div className="space-y-2">
                 <p className="text-sm font-medium">
-                  Try writing directly to the read-only audit trail
+                  Try writing directly to the read-only <code>note_events</code>{" "}
+                  table
                 </p>
                 <RefusalProbe
-                  label="Create an audit event over HTTP: no write route is registered"
+                  label="Create a note event over HTTP: no write route is registered"
                   request="POST /api/database/note_events"
                   send={() =>
                     fetch("/api/database/note_events", {
@@ -396,9 +337,8 @@ function DatabaseRoute() {
                 query is built, so it never leaves Postgres; it is refused in{" "}
                 <code>where</code>, so nobody can guess it a character at a
                 time; it is refused in write bodies rather than quietly ignored;
-                and it is stripped on the way out even if a serializer puts it
-                back. Server code, meanwhile, reads and writes it normally —
-                which is how <code>author_email</code> gets set at all.
+                and it is stripped on the way out. Server code can still read
+                and write it.
               </p>
               <div className="space-y-2">
                 <RefusalProbe
@@ -439,58 +379,10 @@ function DatabaseRoute() {
 
           <Card className="md:col-span-2">
             <CardHeader>
-              <CardTitle>The lifecycle of one write</CardTitle>
-              <CardDescription>
-                Where your code runs, and what it is allowed to do there. This
-                is the flow the panel at the top of the page executes.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <HookLifecycle />
-            </CardContent>
-          </Card>
-
-          <Card className="md:col-span-2">
-            <CardHeader>
-              <CardTitle>Inline hooks</CardTitle>
-              <CardDescription>
-                Redaction, audit writes, and read previews are defined directly
-                in the plugin registration, without a wrapper or custom routes.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <CodeBlock code={INLINE_HOOKS} />
-              <p className="text-sm text-muted-foreground">
-                A hook needs nothing from the plugin system to do this.{" "}
-                <code>createAgent</code> returns a definition, and the inline
-                hook passes it to <code>runAgent</code>. The capability from{" "}
-                <code>ctx</code> is <code>ctx.app.database</code>, which is
-                bound to the current transaction. Calls to a model or another
-                service do not join that transaction, and rollback cannot undo
-                their external effects.
-              </p>
-              <p className="text-sm text-muted-foreground">
-                The model request receives a 10-second cancellation signal,
-                shorter than the database transaction's 30-second deadline.
-                Cancellation, an agent error status, or blank output rejects the
-                mutation instead of saving the original or partial text. The
-                transaction occupies a pooled connection while it waits, so keep
-                this work short.
-              </p>
-              <p className="text-sm text-muted-foreground">
-                This demonstrates best-effort redaction, not guaranteed removal
-                of personal data. A non-empty model response can still miss
-                names or email addresses; do not use it as the sole privacy
-                control for sensitive data.
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="md:col-span-2">
-            <CardHeader>
               <CardTitle>Nested reads through the generated API</CardTitle>
               <CardDescription>
-                Load a board, its notes, and their audit events in one bounded
+                Load a board, its notes, and their{" "}
+                <code className="text-xs">note_events</code> in one bounded
                 read. A read-only table can participate in includes without
                 exposing write operations.
               </CardDescription>

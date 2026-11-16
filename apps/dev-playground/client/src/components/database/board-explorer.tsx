@@ -20,7 +20,7 @@ import { useId, useState } from "react";
 /**
  * Everything on this panel comes from routes the app never wrote: the note list
  * is a generated read, the two forms are generated writes, and the audit trail
- * is the row an `afterCreate` hook commits alongside each note.
+ * is a nested include on the generated board detail route.
  */
 
 /** Generated routes answer `{ error, details? }`; a field detail reads first. */
@@ -34,13 +34,12 @@ export function BoardExplorer() {
   const boardFieldId = useId();
 
   const [selected, setSelected] = useState<string | null>(null);
-  const [revealedId, setRevealedId] = useState<number | null>(null);
   const [author, setAuthor] = useState("reviewer");
   const [body, setBody] = useState("");
   const [title, setTitle] = useState("");
 
-  // A write restarts every mounted read, so the lists, the board previews, and
-  // the audit trail `afterCreate` writes refresh on their own once it commits.
+  // A write restarts every mounted read, so the lists and the board previews
+  // refresh on their own once it commits.
   const createBoard = useDatabaseCreate("boards");
   const createNote = useDatabaseCreate("notes");
   const busy = createBoard.loading || createNote.loading;
@@ -53,7 +52,6 @@ export function BoardExplorer() {
   const board =
     boardItems.find((entry) => entry.slug === selected) ?? boardItems[0];
 
-  // Listing notes directly is what puts them through the entity's serializer.
   // Null params hold the read until the boards answer.
   const notes = useDatabaseList(
     "notes",
@@ -73,28 +71,18 @@ export function BoardExplorer() {
   });
   const timelineNotes = timeline.data?.notes ?? [];
 
-  // The list route truncates; the detail route does not. Same serializer.
-  const fullNote = useDatabaseRecord("notes", revealedId);
-
   const failure =
     createNote.error ??
     createBoard.error ??
     boards.error ??
     notes.error ??
-    timeline.error ??
-    fullNote.error;
+    timeline.error;
   const error = failure ? errorText(failure) : null;
 
   const refresh = () => {
     boards.refetch();
     notes.refetch();
     timeline.refetch();
-    fullNote.refetch();
-  };
-
-  const selectBoard = (slug: string) => {
-    setSelected(slug);
-    setRevealedId(null);
   };
 
   const addNote = async (event: React.FormEvent) => {
@@ -122,7 +110,7 @@ export function BoardExplorer() {
     const created = await createBoard.create({ slug, title: title.trim() });
     if (!created) return;
     setTitle("");
-    selectBoard(created.slug);
+    setSelected(created.slug);
   };
 
   return (
@@ -142,7 +130,7 @@ export function BoardExplorer() {
             key={entry.slug}
             size="sm"
             variant={entry.slug === board?.slug ? "default" : "outline"}
-            onClick={() => selectBoard(entry.slug)}
+            onClick={() => setSelected(entry.slug)}
           >
             {entry.title}
             <Badge
@@ -200,53 +188,35 @@ export function BoardExplorer() {
           <CardContent className="space-y-3">
             {!notes.loading && noteItems.length === 0 && (
               <p className="text-sm text-muted-foreground">
-                No notes yet. Add one and watch the audit trail fill in.
+                No notes yet. Add one below.
               </p>
             )}
-            {noteItems.map((note) => {
-              const full =
-                note.id === revealedId ? fullNote.data?.body : undefined;
-              return (
-                <div key={note.id} className="rounded-md border p-3">
-                  <div className="flex items-center justify-between gap-2 mb-1">
-                    <span className="text-sm font-medium">{note.author}</span>
-                    <Badge variant="outline" className="tabular-nums">
-                      {(full ?? note.body).length} chars
-                    </Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground break-words">
-                    {full ?? note.body}
-                  </p>
-                  {full === undefined && note.body.length === 120 && (
-                    <Button
-                      size="sm"
-                      variant="link"
-                      className="px-0 h-auto text-xs"
-                      onClick={() => setRevealedId(note.id)}
-                    >
-                      Truncated by the serializer — load the detail route
-                      instead
-                    </Button>
-                  )}
+            {noteItems.map((note) => (
+              <div key={note.id} className="rounded-md border p-3">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="text-sm font-medium">{note.author}</span>
+                  <Badge variant="outline" className="tabular-nums">
+                    {note.body.length} chars
+                  </Badge>
                 </div>
-              );
-            })}
+                <p className="text-sm text-muted-foreground break-words">
+                  {note.body}
+                </p>
+              </div>
+            ))}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">
-              Audit trail written by a hook
-            </CardTitle>
+            <CardTitle className="text-base">Nested read</CardTitle>
             <CardDescription>
               <code className="text-xs break-all">
                 GET /api/database/boards/{board?.id ?? ":id"}?include=…
               </code>{" "}
               reads notes and their events through nested includes. The
               generated API exposes <code className="text-xs">note_events</code>{" "}
-              for reading only; the hook writes it inside the note's
-              transaction.
+              for reading only.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -255,19 +225,23 @@ export function BoardExplorer() {
                 <div className="text-sm font-medium mb-1">
                   note #{note.id} by {note.author}
                 </div>
-                <ul className="space-y-1">
-                  {note.note_events.map((event) => (
-                    <li
-                      key={event.id}
-                      className="text-xs text-muted-foreground flex items-center gap-2"
-                    >
-                      <Badge variant="secondary">{event.action}</Badge>
-                      <span className="tabular-nums">
-                        {new Date(event.created_at).toLocaleTimeString()}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                {note.note_events.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No events</p>
+                ) : (
+                  <ul className="space-y-1">
+                    {note.note_events.map((event) => (
+                      <li
+                        key={event.id}
+                        className="text-xs text-muted-foreground flex items-center gap-2"
+                      >
+                        <Badge variant="secondary">{event.action}</Badge>
+                        <span className="tabular-nums">
+                          {new Date(event.created_at).toLocaleTimeString()}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             ))}
             {!timeline.loading && timelineNotes.length === 0 && (
@@ -283,9 +257,9 @@ export function BoardExplorer() {
         <CardHeader>
           <CardTitle className="text-base">Generated write</CardTitle>
           <CardDescription>
-            <code className="text-xs">POST /api/database/notes</code> — the note
-            and its <code className="text-xs">created</code> event commit
-            together or not at all.
+            <code className="text-xs">POST /api/database/notes</code> — the body
+            is checked against the generated insert schema before the row is
+            written.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -308,7 +282,7 @@ export function BoardExplorer() {
               <Input
                 id={bodyFieldId}
                 value={body}
-                placeholder="Write more than 120 characters to see the serializer work"
+                placeholder="Write a note"
                 onChange={(event) => setBody(event.target.value)}
               />
             </div>

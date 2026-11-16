@@ -29,8 +29,8 @@ import type {
   TransactionClient,
 } from "./entity-types";
 import { assertSchemaMatchesDatabase } from "./schema-check";
-import { createMutationScope, type MutationScope } from "./scope";
-import type { DatabaseHooks, DatabasePoolConfig } from "./types";
+import { createTransactionScope, type TransactionScope } from "./scope";
+import type { DatabasePoolConfig } from "./types";
 
 const logger = createLogger("database");
 
@@ -46,8 +46,7 @@ interface ExportContext {
   readonly getDataPath: () => DataPath;
   readonly execute: EntityExecute;
   readonly assertActive: () => void;
-  readonly scope: MutationScope;
-  readonly hooks?: DatabaseHooks;
+  readonly scope: TransactionScope;
   readonly transactionBound: boolean;
 }
 
@@ -80,10 +79,8 @@ function buildTransactionClient(context: ExportContext): TransactionClient {
       execute: context.execute,
       assertActive: context.assertActive,
       scope: context.scope,
-      hooks: context.hooks?.[name],
       transactionBound: context.transactionBound,
-      runInTransaction: (run) =>
-        runTransaction(context, (tx) => run(entityOf(tx, name))),
+      activeEntity: () => entityOf(context.scope.activeTransaction(), name),
     });
   }
   result.sql = buildSql(context);
@@ -91,7 +88,11 @@ function buildTransactionClient(context: ExportContext): TransactionClient {
 }
 
 /** Typegen owns the entity keys, so reaching one by table name stays dynamic. */
-function entityOf(tx: TransactionClient, name: string): EntityClient {
+function entityOf(
+  tx: TransactionClient | undefined,
+  name: string,
+): EntityClient | undefined {
+  if (!tx) return undefined;
   return (tx as unknown as Record<string, EntityClient>)[name];
 }
 
@@ -111,9 +112,9 @@ function runWithTransactionDeadline<T>(run: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Run inside one transaction, joining the active one rather than nesting:
- * PostgreSQL has no nested transaction, and a savepoint would let part of a
- * hooked mutation survive a rollback.
+ * Run inside one transaction, joining the active one rather than nesting.
+ * PostgreSQL has no nested transaction, and a savepoint would let part of the
+ * work survive a rollback.
  */
 function runTransaction<T>(
   context: ExportContext,
@@ -174,7 +175,6 @@ function buildDatabaseExports(context: ExportContext): DatabaseExports {
 export async function createDatabaseState<TSchema extends Schema>(
   schema: TSchema,
   execute: EntityExecute,
-  hooks?: DatabaseHooks,
   poolConfig?: DatabasePoolConfig,
 ): Promise<DatabaseState> {
   try {
@@ -214,8 +214,7 @@ export async function createDatabaseState<TSchema extends Schema>(
       execute,
       assertActive,
       // One scope per state keeps concurrent instances from sharing a transaction.
-      scope: createMutationScope(),
-      hooks,
+      scope: createTransactionScope(),
       transactionBound: false,
     });
     // Do not publish exports until an authenticated statement succeeds.

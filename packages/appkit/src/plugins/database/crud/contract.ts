@@ -27,7 +27,6 @@ export interface CrudTable {
   readonly updatable: ReadonlySet<string>;
   readonly relations: ReadonlyMap<string, CrudRelation>;
   projectPublicRow(row: Row): JsonValue;
-  sanitizeSerializedRow(row: unknown): JsonValue;
 }
 
 type MutableCrudTable = Omit<CrudTable, "relations"> & {
@@ -49,16 +48,14 @@ export function isPlainObject(
   return hasPlainObjectPrototype(value);
 }
 
-/** A serializer that breaks its contract is trusted code failing, not input. */
-function serializerFault(): never {
-  throw new DatabasePluginError("INTERNAL", "read");
+function rejectUnboundedJson(): never {
+  throw new DatabasePluginError("INVALID_REQUEST", "write");
 }
 
-/** Charge one value against the output budget before descending into it. */
 function countNode(depth: number, state: SanitizeState): void {
   state.nodes += 1;
   if (state.nodes > MAX_SERIALIZED_NODES || depth > MAX_SERIALIZED_DEPTH) {
-    serializerFault();
+    rejectUnboundedJson();
   }
 }
 
@@ -68,7 +65,7 @@ function enterObject<T>(
   state: SanitizeState,
   visit: () => T,
 ): T {
-  if (state.ancestors.has(value)) serializerFault();
+  if (state.ancestors.has(value)) rejectUnboundedJson();
   state.ancestors.add(value);
   try {
     return visit();
@@ -77,7 +74,7 @@ function enterObject<T>(
   }
 }
 
-/** Accept a serializer's own added value only where it is already JSON. */
+/** Accept caller JSON only where it is already a finite JSON value. */
 function sanitizeJson(
   value: unknown,
   depth: number,
@@ -92,7 +89,7 @@ function sanitizeJson(
     return value;
   }
   if (typeof value === "number") {
-    if (!Number.isFinite(value)) serializerFault();
+    if (!Number.isFinite(value)) rejectUnboundedJson();
     return value;
   }
   if (Array.isArray(value)) {
@@ -100,7 +97,7 @@ function sanitizeJson(
       value.map((item) => sanitizeJson(item, depth + 1, state)),
     );
   }
-  if (!isPlainObject(value)) serializerFault();
+  if (!isPlainObject(value)) rejectUnboundedJson();
   return enterObject(value, state, () => {
     // A null prototype keeps `__proto__` an ordinary key instead of a setter.
     const out: Record<string, JsonValue> = Object.create(null);
@@ -112,45 +109,7 @@ function sanitizeJson(
   });
 }
 
-/** Keep an included row under its own table's policy, one row or many. */
-function sanitizeRelation(
-  target: CrudTable,
-  value: unknown,
-  depth: number,
-  state: SanitizeState,
-): JsonValue {
-  if (value === null) return null;
-  if (!Array.isArray(value)) return sanitizeRow(target, value, depth, state);
-  countNode(depth, state);
-  return enterObject(value, state, () =>
-    value.map((row) => sanitizeRow(target, row, depth + 1, state)),
-  );
-}
-
-/** Re-apply the private-column policy wherever the output stays contracted. */
-function sanitizeRow(
-  table: CrudTable,
-  row: unknown,
-  depth: number,
-  state: SanitizeState,
-): JsonValue {
-  countNode(depth, state);
-  if (!isPlainObject(row)) serializerFault();
-  return enterObject(row, state, () => {
-    const out: Record<string, JsonValue> = {};
-    for (const [key, child] of Object.entries(row)) {
-      if (child === undefined) continue;
-      if (table.columns.get(key)?.meta.isPrivate) continue;
-      const relation = table.relations.get(key);
-      out[key] = relation
-        ? sanitizeRelation(relation.target, child, depth + 1, state)
-        : sanitizeJson(child, depth + 1, state);
-    }
-    return out;
-  });
-}
-
-/** The budget a caller's own JSON has to fit, same as the one going back out. */
+/** Copy finite acyclic JSON, bounded by depth and node count. */
 export function boundedJson(value: unknown): JsonValue {
   return sanitizeJson(value, 0, { nodes: 0, ancestors: new Set() });
 }
@@ -210,8 +169,6 @@ function compileTable(table: AppKitTable): MutableCrudTable {
     updatable,
     relations: new Map(),
     projectPublicRow: (row) => projectRow(compiled, row),
-    sanitizeSerializedRow: (row) =>
-      sanitizeRow(compiled, row, 0, { nodes: 0, ancestors: new Set() }),
   };
   return compiled;
 }
