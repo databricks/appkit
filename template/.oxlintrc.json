@@ -198,7 +198,21 @@
         "react-hooks-js/use-memo": "error",
 
         "react/only-export-components": ["warn", { "allowConstantExport": true }],
-        "react/no-array-index-key": "warn"
+        "react/no-array-index-key": "warn",
+
+        // The React Compiler memoizes components and hooks; manual memoization only gets in its way
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "react",
+                "importNames": ["useMemo", "useCallback"],
+                "message": "The React Compiler memoizes automatically: compute the value or define the function inline."
+              }
+            ]
+          }
+        ]
       }
     },
     {

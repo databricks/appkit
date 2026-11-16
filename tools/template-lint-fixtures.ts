@@ -542,7 +542,7 @@ export const LINT_FIXTURES: LintFixture[] = [
   client(
     "react-hooks-js/preserve-manual-memoization",
     'import { useMemo } from "react";\nexport function C({ a }: { a: number[] }) {\n  const v = useMemo(() => a.map((x) => x * 2), [a.length]);\n  return <div>{v.length}</div>;\n}',
-    { also: ["react/exhaustive-deps"] },
+    { also: ["react/exhaustive-deps", "no-restricted-imports"] },
   ),
   client(
     "react-hooks-js/purity",
@@ -571,6 +571,7 @@ export const LINT_FIXTURES: LintFixture[] = [
   client(
     "react-hooks-js/use-memo",
     'import { useMemo } from "react";\nexport function C() {\n  useMemo((x: number) => x, []);\n  return <div />;\n}',
+    { also: ["no-restricted-imports"] },
   ),
 
   // eslint-plugin-react-refresh
@@ -583,6 +584,10 @@ export const LINT_FIXTURES: LintFixture[] = [
   client(
     "react/no-array-index-key",
     "export const C = ({ a }: { a: number[] }) => <ul>{a.map((x, i) => <li key={i}>{x}</li>)}</ul>;",
+  ),
+  client(
+    "no-restricted-imports",
+    "import { useMemo } from 'react';\nexport const C = ({ n }: { n: number }) => {\n  const double = useMemo(() => n * 2, [n]);\n  return <p>{double}</p>;\n};",
   ),
 ];
 
