@@ -1236,10 +1236,10 @@ describe("telemetry", () => {
     );
 
     // The fake workspace runs in-process; its server spans are the workspace's, not the app's.
-    const workspaceHost = new URL(workspace.url).host;
+    const workspacePort = Number(new URL(workspace.url).port);
     const spans = exporter
       .getFinishedSpans()
-      .filter((span) => span.attributes["http.host"] !== workspaceHost);
+      .filter((span) => span.attributes["server.port"] !== workspacePort);
     const operationSpans = spans.filter(
       (span) => span.name === "database.operation",
     );
@@ -1253,12 +1253,10 @@ describe("telemetry", () => {
       "POST /api/database/operations/notes.explode",
       "GET /api/database/operations/notes.get",
     ]);
-    expect(serverSpans[1].attributes["http.target"]).toBe(
+    expect(serverSpans[1].attributes["url.path"]).toBe(
       "/api/database/operations/notes.get",
     );
-    expect(serverSpans[1].attributes["http.url"]).toBe(
-      `${app.url}/api/database/operations/notes.get`,
-    );
+    expect(serverSpans[1].attributes["url.query"]).toBe("REDACTED");
     expect(operationSpans.map((span) => span.attributes)).toEqual([
       expect.objectContaining({
         "database.operation.name": "notes.get",
