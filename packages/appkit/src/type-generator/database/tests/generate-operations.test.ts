@@ -1,10 +1,14 @@
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+import { getSpawnLockPath } from "../../../../../shared/src/cli/commands/spawn-lock";
 import { validateOperationMetadata } from "../../../plugins/database/operation-metadata";
 import type {
   DatabaseRoutes,
@@ -15,13 +19,25 @@ import {
   NEUTRAL_DATABASE_OPERATION_TYPES,
 } from "../generate-operations";
 
+const require = createRequire(import.meta.url);
 const appkitRoot = path.resolve(import.meta.dirname, "../../../..");
 const sourceRoot = path.join(appkitRoot, "src");
 const builder = path.join(sourceRoot, "database/schema-builder/index");
 const operationsModule = path.join(sourceRoot, "plugins/database/operations");
-const zodPackage = path.dirname(
-  createRequire(import.meta.url).resolve("zod/package.json"),
-);
+const zodPackage = path.dirname(require.resolve("zod/package.json"));
+
+const cliEntry = path.join(appkitRoot, "../shared/src/cli/index.ts");
+const tsxLoader = pathToFileURL(require.resolve("tsx")).href;
+/**
+ * `@databricks/appkit/type-generator` resolves only from inside a built
+ * package, so the CLI child process maps it to the source instead.
+ */
+const typeGeneratorHook = `data:text/javascript,${encodeURIComponent(
+  `export const resolve = (specifier, context, next) => next(specifier === "@databricks/appkit/type-generator" ? ${JSON.stringify(pathToFileURL(path.join(sourceRoot, "type-generator/index.ts")).href)} : specifier, context);`,
+)}`;
+const registerHook = `data:text/javascript,${encodeURIComponent(
+  `import { register } from "node:module"; register(${JSON.stringify(typeGeneratorHook)});`,
+)}`;
 
 const ROUTES = "server/database/routes";
 const ROUTES_FILE = "server/database/routes.gen.ts";
@@ -103,6 +119,28 @@ function generate(root: string, strict = false) {
     outFile: path.join(root, TYPES_FILE),
     strict,
   });
+}
+
+/** `appkit generate-types` from source, in a child that must exit on its own. */
+function generateTypesCli(root: string, args: readonly string[]) {
+  return promisify(execFile)(
+    process.execPath,
+    [
+      "--conditions=development",
+      "--import",
+      tsxLoader,
+      "--import",
+      registerHook,
+      cliEntry,
+      "generate-types",
+      ...args,
+    ],
+    {
+      cwd: root,
+      env: { ...process.env, DATABRICKS_WAREHOUSE_ID: "" },
+      timeout: 20_000,
+    },
+  );
 }
 
 const read = (root: string, file: string) =>
@@ -191,6 +229,61 @@ export const databaseRoutes = {
     expect(await exists(root, ROUTES_FILE)).toBe(false);
     expect(await exists(root, TYPES_FILE)).toBe(false);
   });
+
+  test("removes the registry once the schema and the routes are both gone", async () => {
+    const root = await app({ [`${ROUTES}/boards.ts`]: route(getBoard()) });
+    await generate(root);
+    expect(await exists(root, ROUTES_FILE)).toBe(true);
+
+    await fs.rm(path.join(root, "config"), { recursive: true });
+    await fs.rm(path.join(root, ROUTES), { recursive: true });
+    await generate(root);
+
+    expect(await exists(root, ROUTES_FILE)).toBe(false);
+    expect(await read(root, TYPES_FILE)).toBe(NEUTRAL_DATABASE_OPERATION_TYPES);
+  });
+
+  test("skips dotfiles and dangling symlinks while following a symlink to a module", async () => {
+    const root = await app({
+      [`${ROUTES}/boards.ts`]: route(getBoard()),
+      "server/database/policies.ts": "export const owner = () => true;",
+      [`${ROUTES}/.hidden.ts`]: "throw new Error('a dotfile is not a route');",
+    });
+    const routes = path.join(root, ROUTES);
+    await fs.symlink("../policies.ts", path.join(routes, "shared.ts"));
+    await fs.symlink("user@host.1234", path.join(routes, ".#boards.ts"));
+    await fs.symlink("gone.ts", path.join(routes, "stale.ts"));
+
+    await generate(root);
+
+    const registry = await read(root, ROUTES_FILE);
+    expect(registry).toContain('import("./routes/boards")');
+    expect(registry).toContain('import("./routes/shared")');
+    expect(registry).not.toContain("hidden");
+    expect(registry).not.toContain(".#");
+    expect(registry).not.toContain("stale");
+    expect(await read(root, TYPES_FILE)).toContain('"boards.get": {');
+  });
+
+  test.skipIf(process.getuid?.() === 0)(
+    "a routes directory that cannot be read neutralizes the contracts",
+    async () => {
+      const root = await app({ [`${ROUTES}/boards.ts`]: route(getBoard()) });
+      await generate(root);
+      expect(await read(root, TYPES_FILE)).toContain('"boards.get": {');
+
+      const routes = path.join(root, ROUTES);
+      await fs.chmod(routes, 0o000);
+      try {
+        await failure(generate(root));
+      } finally {
+        await fs.chmod(routes, 0o755);
+      }
+      expect(await read(root, TYPES_FILE)).toBe(
+        NEUTRAL_DATABASE_OPERATION_TYPES,
+      );
+    },
+  );
 
   test("regenerates both files deterministically as modules are added, renamed, and removed", async () => {
     const root = await app({ [`${ROUTES}/notes.ts`]: route(getNote) });
@@ -458,5 +551,32 @@ export const headless = defineOperation({ name: "notes.head", method: "HEAD", au
     );
     expect(error.message).not.toContain("SECRET-TOKEN");
     expect(await read(root, TYPES_FILE)).toBe(NEUTRAL_DATABASE_OPERATION_TYPES);
+  });
+
+  test("the generate-types command exits although a route module keeps a timer running", async () => {
+    const lingering = route(`${getBoard()}\nsetInterval(() => {}, 1000);`);
+    const foreground = await app({ [`${ROUTES}/boards.ts`]: lingering });
+    const worker = await app({ [`${ROUTES}/boards.ts`]: lingering });
+    // A held lock keeps the foreground from spawning a detached worker that
+    // would outlive this test.
+    const heldLock = getSpawnLockPath(foreground);
+    await write(foreground, path.relative(foreground, heldLock), "held\n");
+    const workerLock = getSpawnLockPath(worker);
+    await write(worker, path.relative(worker, workerLock), "worker\n");
+
+    const [foregroundRun, workerRun] = await Promise.all([
+      generateTypesCli(foreground, [foreground]),
+      generateTypesCli(worker, ["--wait", "--worker-lock", workerLock, worker]),
+    ]);
+
+    for (const result of [foregroundRun, workerRun]) {
+      expect(result.stdout).toContain("Generated database operations: ");
+    }
+    expect(foregroundRun.stdout).toContain(
+      "Type refresh already in progress, skipping.",
+    );
+    expect(await read(foreground, TYPES_FILE)).toContain('"boards.get": {');
+    expect(await read(worker, TYPES_FILE)).toContain('"boards.get": {');
+    expect(await exists(worker, path.relative(worker, workerLock))).toBe(false);
   });
 });

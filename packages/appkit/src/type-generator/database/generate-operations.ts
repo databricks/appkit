@@ -53,7 +53,11 @@ function compare(a: string, b: string): number {
 }
 
 function isRouteModule(name: string): boolean {
-  return name.endsWith(".ts") && !/\.(?:test|d|gen)\.ts$/.test(name);
+  return (
+    !name.startsWith(".") &&
+    name.endsWith(".ts") &&
+    !/\.(?:test|d|gen)\.ts$/.test(name)
+  );
 }
 
 /** Direct `*.ts` children of the routes directory, as sorted POSIX paths. */
@@ -66,7 +70,12 @@ function discoverRouteModules(appRoot: string): readonly string[] {
         isRouteModule(entry.name) &&
         (entry.isFile() ||
           (entry.isSymbolicLink() &&
-            fsSync.statSync(path.join(directory, entry.name)).isFile())),
+            (fsSync
+              .statSync(path.join(directory, entry.name), {
+                throwIfNoEntry: false,
+              })
+              ?.isFile() ??
+              false))),
     )
     .map((entry) => `${ROUTES_DIR}/${entry.name}`)
     .sort(compare);
@@ -183,7 +192,8 @@ async function contractsOf(
  * discover its first operation without restarting manually. Any malformed or duplicate declaration fails generation and
  * neutralizes the contracts; a declaration without authorization is skipped
  * with a warning, or fails in strict mode. Both files are created only while
- * a schema or routes directory exists, and emptied once routes are gone.
+ * a schema or routes directory exists. The registry is emptied once routes
+ * are gone, and removed once the schema it imports is gone too.
  */
 export async function generateDatabaseOperations(
   options: GenerateDatabaseOperationsOptions,
@@ -195,20 +205,24 @@ export async function generateDatabaseOperations(
         throwIfNoEntry: false,
       })
       ?.isDirectory() ?? false;
-  const files = routesPresent ? discoverRouteModules(options.appRoot) : [];
   const schemaPresent = fsSync.existsSync(
     fromRoot(options.appRoot, SCHEMA_FILE),
   );
-  if (schemaPresent || routesPresent || fsSync.existsSync(routesFile)) {
-    await writeIfChanged(routesFile, renderDatabaseRoutes(files));
-  }
-  if (!routesPresent) {
-    if (schemaPresent || fsSync.existsSync(options.outFile)) {
+  if (!schemaPresent && !routesPresent) {
+    fsSync.rmSync(routesFile, { force: true });
+    if (fsSync.existsSync(options.outFile)) {
       await writeIfChanged(options.outFile, NEUTRAL_DATABASE_OPERATION_TYPES);
     }
     return;
   }
+  if (!routesPresent) {
+    await writeIfChanged(routesFile, renderDatabaseRoutes([]));
+    await writeIfChanged(options.outFile, NEUTRAL_DATABASE_OPERATION_TYPES);
+    return;
+  }
   try {
+    const files = discoverRouteModules(options.appRoot);
+    await writeIfChanged(routesFile, renderDatabaseRoutes(files));
     const contracts = await contractsOf(
       options.appRoot,
       files,

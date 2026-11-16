@@ -298,7 +298,33 @@ export function spawnTypegenWorker(
 }
 
 /**
- * The command action. Orchestrates the non-blocking foreground contract:
+ * The command action. The operation contracts import the app's route modules
+ * in-process, and one may keep a timer or socket open, so this one-shot command
+ * reports any failure itself and exits once its work and its output are done.
+ */
+async function generateTypesAction(
+  rootDir: string | undefined,
+  outFile: string | undefined,
+  warehouseId: string | undefined,
+  options: GenerateTypesOptions,
+) {
+  try {
+    await generateTypesThenSpawn(rootDir, outFile, warehouseId, options);
+  } catch (err) {
+    console.error(`\n${err instanceof Error ? err.message : String(err)}`);
+    process.exitCode = 1;
+  }
+  await Promise.all([flushed(process.stdout), flushed(process.stderr)]);
+  process.exit();
+}
+
+/** Resolves once everything written to `stream` so far has been handed off. */
+function flushed(stream: NodeJS.WritableStream): Promise<void> {
+  return new Promise((resolve) => stream.write("", () => resolve()));
+}
+
+/**
+ * Orchestrates the non-blocking foreground contract:
  *  1. Run the library generate (writes degraded types immediately in non-blocking
  *     mode; does the full blocking lifecycle when this is the worker).
  *  2. If this is a non-blocking, non-worker invocation, try to spawn the detached
@@ -309,7 +335,7 @@ export function spawnTypegenWorker(
  *     releases the lock here (and via a process-exit guard, so a hard failure /
  *     process.exit still frees it).
  */
-async function generateTypesAction(
+async function generateTypesThenSpawn(
   rootDir: string | undefined,
   outFile: string | undefined,
   warehouseId: string | undefined,
