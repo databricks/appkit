@@ -1064,23 +1064,52 @@ describe("migration review fixes (host-only auth, DATABRICKS_AUTH_TYPE, retries,
     expect(responses).toEqual([]);
   });
 
-  test("transport ends a retry wait as soon as the request aborts: last 429 back, no further send", async () => {
+  test.each([
+    ["a cancel", () => undefined, "AbortError"],
+    [
+      "a timeout",
+      () => new DOMException("The operation timed out.", "TimeoutError"),
+      "TimeoutError",
+    ],
+  ])(
+    "transport ends a retry wait on %s and rejects with the signal's reason, without another send",
+    async (_case, reasonFor, name) => {
+      vi.useFakeTimers();
+      const controller = new AbortController();
+      responses.push({
+        statusCode: 429,
+        body: '{"error_code":"TOO_MANY_REQUESTS"}',
+      });
+      const pending = send("{}", controller.signal);
+      await vi.advanceTimersByTimeAsync(100); // inside the >= 1050ms backoff
+      expect(sent).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(1);
+      const outcome = pending.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      controller.abort(reasonFor());
+      expect(vi.getTimerCount()).toBe(0);
+      const error = await outcome;
+      expect(error).toBe(controller.signal.reason);
+      expect(error).toMatchObject({ name });
+      expect(sent).toHaveLength(1);
+    },
+  );
+
+  test("transport does not wait to retry a 429 whose signal is already aborted", async () => {
     vi.useFakeTimers();
     const controller = new AbortController();
+    controller.abort();
     responses.push({
       statusCode: 429,
       body: '{"error_code":"TOO_MANY_REQUESTS"}',
     });
-    const pending = send("{}", controller.signal);
-    await vi.advanceTimersByTimeAsync(100); // inside the >= 1050ms backoff
+    await expect(send("{}", controller.signal)).rejects.toBe(
+      controller.signal.reason,
+    );
     expect(sent).toHaveLength(1);
-    expect(vi.getTimerCount()).toBe(1);
-    controller.abort();
     expect(vi.getTimerCount()).toBe(0);
-    const res = await pending;
-    expect(res.statusCode).toBe(429);
-    expect(await new Response(res.body).text()).toContain("TOO_MANY_REQUESTS");
-    expect(sent).toHaveLength(1);
   });
 
   test("transport still retries a 429 when the request signal never aborts, and drops its listener", async () => {

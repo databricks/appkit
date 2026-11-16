@@ -395,29 +395,29 @@ async function sendWithRetry(
       response.statusCode === 429 ||
       TRANSIENT_ERROR_MESSAGES.some((m) => text.includes(m));
     const waitMs = Math.min(attempt * 1000 + 50 + Math.random() * 700, 10_000);
-    if (
-      !retryable ||
-      Date.now() + waitMs > deadline ||
-      !(await waitUnlessAborted(waitMs, request.signal))
-    ) {
+    if (!retryable || Date.now() + waitMs > deadline) {
       return { ...response, body: new Response(body).body };
     }
+    await abortableWait(waitMs, request.signal);
   }
 }
 
-// Resolves `true` after `ms`, or `false` as soon as `signal` aborts, so a
-// caller's timeout is not held for the rest of a backoff and then failed by a
-// send on the aborted signal.
-function waitUnlessAborted(ms: number, signal?: AbortSignal): Promise<boolean> {
-  if (signal?.aborted) return Promise.resolve(false);
-  return new Promise((resolve) => {
+// Waits `ms`, or rejects with `signal.reason` as soon as `signal` aborts, like
+// the SDK's own retry sleep, so a cancel or timeout ends the backoff and still
+// reaches the caller as that abort.
+function abortableWait(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
     const timer = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
-      resolve(true);
+      resolve();
     }, ms);
     const onAbort = () => {
       clearTimeout(timer);
-      resolve(false);
+      reject(signal?.reason);
     };
     signal?.addEventListener("abort", onAbort, { once: true });
   });
