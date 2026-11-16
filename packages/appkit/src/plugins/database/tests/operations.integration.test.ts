@@ -548,8 +548,8 @@ describe("a database plugin with routes", () => {
     );
     expect(ran.create).toHaveBeenCalledTimes(1);
     expect(ran.get).toHaveBeenCalledTimes(1);
+    // Each token is verified once; Ada's second request reuses her check.
     expect(workspace.authorizations).toEqual([
-      `Bearer ${SENTINEL.token}`,
       `Bearer ${SENTINEL.token}`,
       "Bearer token-bob",
     ]);
