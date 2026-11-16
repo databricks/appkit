@@ -398,8 +398,10 @@ export async function waitUntilRunning(
     throwIfAborted(signal);
 
     // Each poll gets what's left of the budget (at least the request floor, so
-    // the last poll at the deadline can still get an answer). A status request
-    // that never answers ends the wait at most that floor past the limit.
+    // the last poll at the deadline can still get an answer; at most the 30s
+    // request cap). A poll that stalls is cut off and counts as one failed
+    // poll: with budget left we poll again, so the wait only gives up once the
+    // limit itself has run out — at most the floor past it.
     let state: WarehouseState;
     try {
       state = await getWarehouseState(client, warehouseId, {
@@ -408,10 +410,9 @@ export async function waitUntilRunning(
       });
     } catch (error) {
       throwIfAborted(signal);
-      if (error instanceof WarehouseStatusTimeoutError) {
-        throw new WarehouseWaitTimeoutError(warehouseId, lastState, maxMs);
-      }
-      throw error;
+      if (!(error instanceof WarehouseStatusTimeoutError)) throw error;
+      if (maxMs - (Date.now() - start) > 0) continue;
+      throw new WarehouseWaitTimeoutError(warehouseId, lastState, maxMs);
     }
     lastState = state;
     if (state === "RUNNING") return "RUNNING";

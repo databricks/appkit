@@ -295,6 +295,62 @@ describe("waitUntilRunning", () => {
     expect(pendingSignal?.aborted).toBe(true);
   });
 
+  test("a poll that stalls at its 30s cap doesn't end the wait early: it polls again until the limit", async () => {
+    // Reviewer's repro: 60s limit, STARTING once, then every poll hangs. The
+    // first hung poll is cut off at its 30s cap with 30s of budget left; the
+    // wait must keep going and only give up once the 60s limit has passed.
+    let rejectedAt: number | undefined;
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce(stateResponse("STARTING"))
+      .mockImplementation(() => new Promise(() => {}));
+    const client = makeClient(get);
+
+    const start = Date.now();
+    const settled = waitUntilRunning(client, "wh-repro", {
+      maxMs: 60_000,
+    }).then(
+      () => undefined,
+      (error: unknown) => {
+        rejectedAt = Date.now();
+        return error;
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(rejectedAt).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(5_100);
+
+    const error = (await settled) as WarehouseWaitTimeoutError;
+    expect(error).toBeInstanceOf(WarehouseWaitTimeoutError);
+    const elapsed = (rejectedAt as number) - start;
+    expect(elapsed).toBeGreaterThanOrEqual(60_000);
+    expect(elapsed).toBeLessThanOrEqual(65_000);
+    expect(describeWaitTimeout(error)).toBe(
+      "warehouse_unavailable: warehouse wh-repro is still STARTING after the 60s wait limit",
+    );
+    // t=0 STARTING, a poll at ~1s cut off at 30s, then more polls until the end.
+    expect(get.mock.calls.length).toBeGreaterThanOrEqual(3);
+  });
+
+  test("a stalled poll followed by an answer still resolves RUNNING", async () => {
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce(stateResponse("STARTING"))
+      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockResolvedValueOnce(stateResponse("RUNNING"));
+    const client = makeClient(get);
+
+    const settled = waitUntilRunning(client, "wh-1", { maxMs: 60_000 }).then(
+      (state) => state,
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(32_000);
+
+    expect(await settled).toBe("RUNNING");
+    expect(get).toHaveBeenCalledTimes(3);
+  });
+
   test("first poll never answers: reports the caller's last known state", async () => {
     const get = vi.fn().mockImplementation(() => new Promise(() => {}));
     const client = makeClient(get);
