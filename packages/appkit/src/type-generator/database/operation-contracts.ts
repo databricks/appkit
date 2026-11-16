@@ -287,6 +287,14 @@ function render(node: unknown, scope: RenderScope, at: Position): TsType {
     }
     return union(node.enum.map(literal));
   }
+  // Zod 4.6 writes a nullable scalar as one node with a list of types.
+  if (Array.isArray(node.type)) {
+    return union(
+      node.type.map((type) =>
+        render({ ...node, type }, scope, { ...at, readonly }),
+      ),
+    );
+  }
   switch (node.type) {
     case "string":
       return STRING;
