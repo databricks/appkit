@@ -18,6 +18,13 @@ interface Todo {
   created_at: string;
 }
 
+// Outside the component: the React Compiler skips components that `throw` inside `try`.
+async function requestTodos(url: string, init: RequestInit, failure: string): Promise<Response> {
+  const res = await fetch(url, init);
+  if (!res.ok) throw new Error(`${failure}: ${res.statusText}`);
+  return res;
+}
+
 export function LakebasePage() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [newTitle, setNewTitle] = useState('');
@@ -43,26 +50,27 @@ export function LakebasePage() {
 
     setSubmitting(true);
     try {
-      const res = await fetch('/api/lakebase/todos', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title }),
-      });
-      if (!res.ok) throw new Error(`Failed to create todo: ${res.statusText}`);
+      const res = await requestTodos(
+        '/api/lakebase/todos',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title }),
+        },
+        'Failed to create todo',
+      );
       const created = (await res.json()) as Todo;
       setTodos((prev) => [created, ...prev]);
       setNewTitle('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add todo');
-    } finally {
-      setSubmitting(false);
     }
+    setSubmitting(false);
   };
 
   const toggleTodo = async (id: number) => {
     try {
-      const res = await fetch(`/api/lakebase/todos/${id}`, { method: 'PATCH' });
-      if (!res.ok) throw new Error(`Failed to update todo: ${res.statusText}`);
+      const res = await requestTodos(`/api/lakebase/todos/${id}`, { method: 'PATCH' }, 'Failed to update todo');
       const updated = (await res.json()) as Todo;
       setTodos((prev) => prev.map((t) => (t.id === id ? updated : t)));
     } catch (err) {
@@ -72,8 +80,7 @@ export function LakebasePage() {
 
   const deleteTodo = async (id: number) => {
     try {
-      const res = await fetch(`/api/lakebase/todos/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(`Failed to delete todo: ${res.statusText}`);
+      await requestTodos(`/api/lakebase/todos/${id}`, { method: 'DELETE' }, 'Failed to delete todo');
       setTodos((prev) => prev.filter((t) => t.id !== id));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete todo');

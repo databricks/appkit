@@ -10,8 +10,8 @@ import {
 import { FolderPlus, Loader2, Upload } from 'lucide-react';
 import {
   type RefObject,
-  useCallback,
   useEffect,
+  useEffectEvent,
   useRef,
   useState,
 } from 'react';
@@ -26,6 +26,24 @@ function nextSignal(ref: RefObject<AbortController | null>): AbortSignal {
   ref.current = new AbortController();
   return ref.current.signal;
 }
+
+// Outside the component: the React Compiler skips components that `throw` inside `try` or use `finally`.
+// For the same reason, values computed with `?:`, `??` or `||` are prepared before each `try`.
+/** `fetch` that throws the server's `error` message, or `fallback(res)`, on a non-2xx response. */
+async function requestFiles(
+  url: string,
+  init: RequestInit,
+  fallback: (res: Response) => string,
+): Promise<Response> {
+  const response = await fetch(url, init);
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error ?? fallback(response));
+  }
+  return response;
+}
+
+const isAbort = (err: unknown) => err instanceof DOMException && err.name === 'AbortError';
 
 export function FilesPage() {
   const [volumes, setVolumes] = useState<string[]>([]);
@@ -51,82 +69,63 @@ export function FilesPage() {
   const normalize = (p: string) => p.replace(/\/+$/, '');
   const isAtRoot = !currentPath;
 
-  const apiUrl = useCallback(
-    (action: string, params?: Record<string, string>) => {
-      const base = `/api/files/${volumeKey}/${action}`;
-      if (!params) return base;
-      const qs = new URLSearchParams(params).toString();
-      return `${base}?${qs}`;
-    },
-    [volumeKey],
-  );
+  const apiUrl = (action: string, params?: Record<string, string>) => {
+    const base = `/api/files/${volumeKey}/${action}`;
+    if (!params) return base;
+    const qs = new URLSearchParams(params).toString();
+    return `${base}?${qs}`;
+  };
 
-  const loadDirectory = useCallback(
-    async (path?: string) => {
-      if (!volumeKey) return;
-      setLoading(true);
-      setError(null);
-      setSelectedFile(null);
-      setPreview(null);
+  const loadDirectory = async (path?: string) => {
+    if (!volumeKey) return;
+    setLoading(true);
+    setError(null);
+    setSelectedFile(null);
+    setPreview(null);
+    const url = path ? apiUrl('list', { path }) : apiUrl('list');
+    const nextPath = path ?? '';
 
-      try {
-        const signal = nextSignal(listAbort);
-        const url = path ? apiUrl('list', { path }) : apiUrl('list');
-        const response = await fetch(url, { signal });
-
-        if (!response.ok) {
-          const data = await response.json().catch(() => ({}));
-          throw new Error(
-            data.error ?? `HTTP ${response.status}: ${response.statusText}`,
-          );
-        }
-
-        const data: DirectoryEntry[] = await response.json();
-        data.sort((a, b) => {
-          if (a.is_directory && !b.is_directory) return -1;
-          if (!a.is_directory && b.is_directory) return 1;
-          return (a.name ?? '').localeCompare(b.name ?? '');
-        });
-        setEntries(data);
-        setCurrentPath(path ?? '');
-      } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') return;
+    try {
+      const signal = nextSignal(listAbort);
+      const response = await requestFiles(
+        url,
+        { signal },
+        (res) => `HTTP ${res.status}: ${res.statusText}`,
+      );
+      const data: DirectoryEntry[] = await response.json();
+      data.sort((a, b) => {
+        if (a.is_directory && !b.is_directory) return -1;
+        if (!a.is_directory && b.is_directory) return 1;
+        return (a.name ?? '').localeCompare(b.name ?? '');
+      });
+      setEntries(data);
+      setCurrentPath(nextPath);
+    } catch (err) {
+      if (!isAbort(err)) {
         setError(err instanceof Error ? err.message : String(err));
         setEntries([]);
-      } finally {
-        setLoading(false);
       }
-    },
-    [volumeKey, apiUrl, listAbort],
-  );
+    }
+    setLoading(false);
+  };
 
-  const loadPreview = useCallback(
-    async (filePath: string) => {
-      setPreviewLoading(true);
-      setPreview(null);
+  const loadPreview = async (filePath: string) => {
+    setPreviewLoading(true);
+    setPreview(null);
 
-      try {
-        const signal = nextSignal(previewAbort);
-        const response = await fetch(apiUrl('preview', { path: filePath }), {
-          signal,
-        });
-
-        if (!response.ok) {
-          const data = await response.json().catch(() => ({}));
-          throw new Error(data.error ?? `HTTP ${response.status}`);
-        }
-
-        const data = await response.json();
-        setPreview(data);
-      } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') return;
-        setPreview(null);
-      } finally {
-        setPreviewLoading(false);
-      }
-    },
-    [apiUrl, previewAbort],
-  );
+    try {
+      const signal = nextSignal(previewAbort);
+      const response = await requestFiles(
+        apiUrl('preview', { path: filePath }),
+        { signal },
+        (res) => `HTTP ${res.status}`,
+      );
+      setPreview(await response.json());
+    } catch (err) {
+      if (!isAbort(err)) setPreview(null);
+    }
+    setPreviewLoading(false);
+  };
 
   useEffect(() => {
     fetch('/api/files/volumes')
@@ -145,11 +144,14 @@ export function FilesPage() {
       .catch(() => {});
   }, [volumeKey]);
 
+  // An effect event, so the load reruns only when the volume changes, compiled or not.
+  const loadRootDirectory = useEffectEvent(() => {
+    void loadDirectory();
+  });
+
   useEffect(() => {
-    if (volumeKey) {
-      loadDirectory();
-    }
-  }, [volumeKey, loadDirectory]);
+    if (volumeKey) loadRootDirectory();
+  }, [volumeKey]);
 
   const resolveEntryPath = (entry: DirectoryEntry) => {
     const name = entry.name ?? '';
@@ -197,28 +199,21 @@ export function FilesPage() {
     }
 
     setUploading(true);
+    const uploadPath = currentPath ? `${currentPath}/${file.name}` : file.name;
+    const reloadPath = currentPath || undefined;
     try {
-      const uploadPath = currentPath
-        ? `${currentPath}/${file.name}`
-        : file.name;
-      const response = await fetch(apiUrl('upload', { path: uploadPath }), {
-        method: 'POST',
-        body: file,
-      });
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error ?? `Upload failed (${response.status})`);
-      }
-
-      await loadDirectory(currentPath || undefined);
+      await requestFiles(
+        apiUrl('upload', { path: uploadPath }),
+        { method: 'POST', body: file },
+        (res) => `Upload failed (${res.status})`,
+      );
+      await loadDirectory(reloadPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+    }
+    setUploading(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
 
@@ -229,25 +224,20 @@ export function FilesPage() {
     if (!window.confirm(`Delete "${fileName}"?`)) return;
 
     setDeleting(true);
+    const reloadPath = currentPath || undefined;
     try {
-      const response = await fetch(
+      await requestFiles(
         `/api/files/${volumeKey}?path=${encodeURIComponent(selectedFile)}`,
         { method: 'DELETE' },
+        (res) => `Delete failed (${res.status})`,
       );
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error ?? `Delete failed (${response.status})`);
-      }
-
       setSelectedFile(null);
       setPreview(null);
-      await loadDirectory(currentPath || undefined);
+      await loadDirectory(reloadPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setDeleting(false);
     }
+    setDeleting(false);
   };
 
   const handleCreateDirectory = async () => {
@@ -255,29 +245,25 @@ export function FilesPage() {
     if (!name) return;
 
     setCreatingDir(true);
+    const dirPath = currentPath ? `${currentPath}/${name}` : name;
+    const reloadPath = currentPath || undefined;
     try {
-      const dirPath = currentPath ? `${currentPath}/${name}` : name;
-      const response = await fetch(apiUrl('mkdir'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: dirPath }),
-      });
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(
-          data.error ?? `Create directory failed (${response.status})`,
-        );
-      }
-
+      await requestFiles(
+        apiUrl('mkdir'),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: dirPath }),
+        },
+        (res) => `Create directory failed (${res.status})`,
+      );
       setShowNewDirInput(false);
       setNewDirName('');
-      await loadDirectory(currentPath || undefined);
+      await loadDirectory(reloadPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCreatingDir(false);
     }
+    setCreatingDir(false);
   };
 
   return (
