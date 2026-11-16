@@ -349,16 +349,23 @@ describe("generate-types --wait: hung warehouse API requests", () => {
 
   test("queries: a status request that hangs mid-wait ends within the limit plus the 5s floor", async () => {
     writeQuery();
-    const calls: number[] = [];
+    let probedAt: number | undefined;
+    let hungAt: number | undefined;
+    let abortedAt: number | undefined;
     mocks.getWarehouse
       .mockImplementationOnce(async () => {
-        calls.push(Date.now());
+        probedAt = Date.now();
         return { state: "STARTING" };
       })
-      .mockImplementation(() => {
-        calls.push(Date.now());
-        return hang();
-      });
+      .mockImplementation(
+        (_req: unknown, options?: { signal?: AbortSignal }) => {
+          hungAt = Date.now();
+          options?.signal?.addEventListener("abort", () => {
+            abortedAt = Date.now();
+          });
+          return hang();
+        },
+      );
 
     const error = await settle(
       generateFromEntryPoint({
@@ -370,11 +377,16 @@ describe("generate-types --wait: hung warehouse API requests", () => {
       }),
     );
 
-    // Measured from the first warehouse call: the settle loop advances fake
-    // time while real file I/O runs, so `started` would include that drift.
-    // Bounded by the limit plus the 5s request floor (plus one 250ms step).
-    expect(calls).toHaveLength(2);
-    expect(Date.now() - calls[0]).toBeLessThanOrEqual(50 + 5_000 + 250);
+    // Timed by the request's own abort, which a timer fires: the settle loop
+    // advances fake time while real file I/O runs, so wall-clock-style "end
+    // minus start" would include that drift (and did, on a slower CI runner).
+    expect(probedAt).toBeDefined();
+    expect(hungAt).toBeDefined();
+    expect(abortedAt).toBeDefined();
+    // The hung poll is cut off by the 5s request floor (the 50ms limit is
+    // smaller), so the wait ends 5s after it started, never later.
+    expect((abortedAt as number) - (hungAt as number)).toBe(5_000);
+    expect((hungAt as number) - (probedAt as number)).toBeLessThanOrEqual(50);
     expect(error).toBeInstanceOf(TypegenFatalError);
     expect((error as Error).message).toContain(
       "warehouse_unavailable: warehouse wh-hung is still STARTING after the 50ms wait limit",
