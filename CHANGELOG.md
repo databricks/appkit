@@ -208,6 +208,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.96.0](https://github.com/databricks/appkit/compare/v0.95.0...v0.96.0) (2026-11-16)
+
+### appkit
+
+* **appkit:** configurable time limit for generate-types --wait ([#735](https://github.com/databricks/appkit/issues/735)) ([15dbf09](https://github.com/databricks/appkit/commit/15dbf0976d722691e33f91848fac2f8a8b7fcf84))
+
+
 ## [0.95.0](https://github.com/databricks/appkit/compare/v0.94.1...v0.95.0) (2026-11-13)
 
 ### appkit
