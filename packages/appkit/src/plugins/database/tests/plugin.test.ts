@@ -693,6 +693,16 @@ describe("DatabasePlugin", () => {
     },
   );
 
+  test.each([{}, { notes: { beforeCreate: () => undefined } }, undefined])(
+    "rejects the removed hooks option instead of serving routes without it: %j",
+    (hooks) => {
+      expect(
+        () => new DatabasePlugin({ schema: routedSchema, hooks } as never),
+      ).toThrow('"hooks" was removed');
+      expect(mocks.createDatabaseState).not.toHaveBeenCalled();
+    },
+  );
+
   test("can keep an internal table in the schema without generating its routes", async () => {
     const internalSchema = defineSchema((builder) => ({
       notes: builder.table("notes", { id: id() }),

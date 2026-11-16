@@ -177,7 +177,8 @@ fail setup before the plugin creates a connection pool.
 
 Replace the former `crudRoutes` option with `api`. The old name is rejected at
 runtime so an old opt-out cannot silently enable the API. To preserve read-only
-behavior, specify `api: { writes: false }`.
+behavior, specify `api: { writes: false }`. The removed `hooks` option is also
+rejected, so routes never run without the rules it used to enforce.
 
 ### Table names and setup errors
 

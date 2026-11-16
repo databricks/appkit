@@ -18,6 +18,12 @@ export function assertDatabaseConfig(config: unknown): void {
       '"crudRoutes" was renamed to "api". Use api: false to disable generated routes or api: { writes: false } for reads only.',
     );
   }
+  // Ignoring removed hooks would leave the routes they guarded without their rules.
+  if ("hooks" in config) {
+    throw databaseSetupFailed(
+      '"hooks" was removed, so mutation hooks and read serializers no longer run. Enforce their rules in PostgreSQL or server code, and use api: false or api: { writes: false } for the tables they guarded.',
+    );
+  }
   if ("pool" in config && config.pool !== undefined) {
     assertPoolConfig(config.pool);
   }
