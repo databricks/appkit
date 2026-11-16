@@ -22,6 +22,7 @@ declare module "@databricks/appkit/type-generator" {
     warehouseId: string;
     noCache?: boolean;
     mode?: "non-blocking" | "blocking";
+    waitTimeoutMs?: number;
   }): Promise<void>;
 
   export class TypegenSyntaxError extends Error {
