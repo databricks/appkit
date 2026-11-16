@@ -10,6 +10,7 @@ import {
   publishOperations,
   reply,
   resetDatabaseTestEnvironment,
+  streamingReply,
 } from "./test-utils";
 
 // This package has no generated registry, so every operation name is `never`
@@ -474,6 +475,55 @@ describe("decoding replies", () => {
     expect(server.fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  test.each([
+    [
+      "502 HTML",
+      "INTERNAL",
+      502,
+      () => new Response("<html>Bad gateway</html>", { status: 502 }),
+    ],
+    ["504", "INTERNAL", 504, () => new Response(null, { status: 504 })],
+    [
+      "503 envelope",
+      "TRANSIENT",
+      503,
+      () => reply({ error: "Unavailable" }, { status: 503, actor: null }),
+    ],
+  ])(
+    "a %s that names no actor is OUTCOME_UNKNOWN for a write and %s for a read",
+    async (_case, readCode, status, response) => {
+      const write = databaseApi.execute("notes.create", { body: "x" });
+      server.request(0).respondWith(response());
+      await expect(write).rejects.toMatchObject({
+        code: "OUTCOME_UNKNOWN",
+        status,
+        message:
+          "Database write may have completed; check its result before retrying",
+      });
+
+      const read = databaseApi.execute("notes.get", { id: 1 });
+      server.request(1).respondWith(response());
+      await expect(read).rejects.toMatchObject({ code: readCode, status });
+    },
+  );
+
+  test.each([
+    [503, "TRANSIENT"],
+    [500, "INTERNAL"],
+  ])(
+    "a %i the handler answered keeps its category for a write",
+    async (status, code) => {
+      const pending = databaseApi.execute("notes.create", { body: "x" });
+      server.request(0).respond({ error: "Stable message" }, { status });
+
+      await expect(pending).rejects.toMatchObject({
+        code,
+        status,
+        message: "Stable message",
+      });
+    },
+  );
+
   test("passes the caller's signal and rejects with its abort, not a database error", async () => {
     const controller = new AbortController();
     const pending = databaseApi.execute(
@@ -621,22 +671,9 @@ describe("session isolation", () => {
 
   test("a session change while a body is still arriving refuses that body", async () => {
     await signIn("actor-a");
-    let finish!: () => void;
     const slow = databaseApi.execute("notes.get", { id: 1 });
-    server.request(1).respondWith(
-      new Response(
-        new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(new TextEncoder().encode('{"id":1,'));
-            finish = () => {
-              controller.enqueue(new TextEncoder().encode('"owner":"a"}'));
-              controller.close();
-            };
-          },
-        }),
-        { headers: { "x-appkit-database-actor": "actor-a" } },
-      ),
-    );
+    const { response, finish } = streamingReply('{"id":1,', '"owner":"a"}');
+    server.request(1).respondWith(response);
     await flush();
 
     const switched = databaseApi.execute("notes.get", { id: 2 });
@@ -645,5 +682,46 @@ describe("session isolation", () => {
     finish();
 
     await expect(slow).rejects.toMatchObject({ code: "SESSION_CHANGED" });
+  });
+
+  test("an error body that arrives after the session moved is refused, not reported", async () => {
+    await signIn("actor-a");
+    const write = databaseApi.execute("notes.create", { body: "x" });
+    const { response, finish } = streamingReply(
+      '{"error":"Already',
+      ' exists"}',
+      { status: 409 },
+    );
+    server.request(1).respondWith(response);
+    await flush();
+
+    const switched = databaseApi.execute("notes.get", { id: 2 });
+    server.request(2).respond({ id: 2 }, { actor: "actor-b" });
+    await switched;
+    finish();
+
+    await expect(write).rejects.toMatchObject({
+      code: "SESSION_CHANGED",
+      status: null,
+      message:
+        "The session changed before the write answered; it may have completed",
+    });
+  });
+
+  test("an unusable success body that arrives after the session moved is refused", async () => {
+    await signIn("actor-a");
+    const write = databaseApi.execute("notes.create", { body: "x" });
+    const { response, finish } = streamingReply('{"id":1,', "", {
+      status: 201,
+    });
+    server.request(1).respondWith(response);
+    await flush();
+
+    const switched = databaseApi.execute("notes.get", { id: 2 });
+    server.request(2).respond({ id: 2 }, { actor: "actor-b" });
+    await switched;
+    finish();
+
+    await expect(write).rejects.toMatchObject({ code: "SESSION_CHANGED" });
   });
 });

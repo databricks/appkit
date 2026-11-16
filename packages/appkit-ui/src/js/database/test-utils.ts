@@ -49,13 +49,44 @@ interface ReplyOptions {
   headers?: Record<string, string>;
 }
 
-export function reply(body: unknown, options: ReplyOptions = {}): Response {
-  const { status = 200, actor = "actor-a", headers = {} } = options;
+function replyHeaders({ actor = "actor-a", headers = {} }: ReplyOptions) {
   const all = new Headers(headers);
   if (actor !== null) all.set(DATABASE_ACTOR_HEADER, actor);
+  return all;
+}
+
+export function reply(body: unknown, options: ReplyOptions = {}): Response {
+  const { status = 200 } = options;
+  const all = replyHeaders(options);
   if (status === 204) return new Response(null, { status, headers: all });
   all.set("Content-Type", "application/json");
   return new Response(JSON.stringify(body), { status, headers: all });
+}
+
+/**
+ * A reply whose body stops after `head` until `finish` sends `tail` and closes
+ * it, so a test can act while the body is still arriving.
+ */
+export function streamingReply(
+  head: string,
+  tail: string,
+  options: ReplyOptions = {},
+): { response: Response; finish: () => void } {
+  const encoder = new TextEncoder();
+  let finish!: () => void;
+  const response = new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(head));
+        finish = () => {
+          controller.enqueue(encoder.encode(tail));
+          controller.close();
+        };
+      },
+    }),
+    { status: options.status ?? 200, headers: replyHeaders(options) },
+  );
+  return { response, finish };
 }
 
 /** One request the mocked `fetch` holds open until the test answers it. */

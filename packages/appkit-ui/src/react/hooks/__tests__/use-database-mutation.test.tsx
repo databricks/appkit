@@ -8,6 +8,7 @@ import {
   type PendingRequest,
   publishOperations,
   resetDatabaseTestEnvironment,
+  streamingReply,
 } from "@/js/database/test-utils";
 
 import {
@@ -330,6 +331,32 @@ describe("useDatabaseMutation", () => {
     expect(server.request(2).input).toEqual({ id: 1 });
   });
 
+  test("a write a proxy answered 502 reports an unknown outcome and restarts mounted queries", async () => {
+    const { result } = renderHook(() => ({
+      note: useDatabaseQuery("notes.get", { id: 1 }),
+      create: useDatabaseMutation("notes.create"),
+    }));
+    await answer(server.request(0), { id: 1, count: 1 });
+
+    const outcome = start({ current: result.current.create }, { body: "x" });
+    await act(async () => {
+      server
+        .request(1)
+        .respondWith(new Response("<html>Bad gateway</html>", { status: 502 }));
+      await flush();
+    });
+
+    await expect(outcome).resolves.toMatchObject({
+      data: undefined,
+      error: { code: "OUTCOME_UNKNOWN", status: 502 },
+    });
+    expect(result.current.create.error).toMatchObject({
+      code: "OUTCOME_UNKNOWN",
+    });
+    expect(server.requests).toHaveLength(3);
+    expect(server.request(2).input).toEqual({ id: 1 });
+  });
+
   test("a write answered 401 after an authenticated read shows UNAUTHENTICATED", async () => {
     const { result } = renderHook(() => ({
       note: useDatabaseQuery("notes.get", { id: 1 }),
@@ -372,6 +399,43 @@ describe("useDatabaseMutation", () => {
 
     const sent = server.requests.length;
     await answer(server.request(1), { id: 9 }, { actor: "actor-a" });
+    await expect(outcome).resolves.toMatchObject({
+      data: undefined,
+      error: { code: "SESSION_CHANGED" },
+    });
+    expect(result.current.create).toMatchObject({
+      data: undefined,
+      isLoading: false,
+      error: null,
+    });
+    expect(server.requests).toHaveLength(sent);
+  });
+
+  test("an error body that arrives after the session changed leaves the hook idle", async () => {
+    const { result } = renderHook(() => ({
+      note: useDatabaseQuery("notes.get", { id: 1 }),
+      create: useDatabaseMutation("notes.create"),
+    }));
+    await answer(server.request(0), { id: 1 });
+
+    const outcome = start({ current: result.current.create }, { body: "hi" });
+    const { response, finish } = streamingReply(
+      '{"error":"Already',
+      ' exists"}',
+      { status: 409 },
+    );
+    await act(async () => {
+      server.request(1).respondWith(response);
+      await flush();
+    });
+    act(() => result.current.note.refetch());
+    await answer(server.request(2), { id: 1 }, { actor: "actor-b" });
+
+    const sent = server.requests.length;
+    await act(async () => {
+      finish();
+      await flush();
+    });
     await expect(outcome).resolves.toMatchObject({
       data: undefined,
       error: { code: "SESSION_CHANGED" },

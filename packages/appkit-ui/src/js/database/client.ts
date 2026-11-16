@@ -259,7 +259,9 @@ function publicDetails(value: unknown): DatabaseErrorDetail[] {
 
 /**
  * Decode a failure envelope; an oversized or non-JSON body keeps its category.
- * A write the server answered as `outcome: "unknown"` failed after it ran.
+ * A write the server answered as `outcome: "unknown"` failed after it ran. A
+ * 5xx that names no actor did not come from the handler, which names it on
+ * every reply, so a proxy answered and the write may still have run.
  */
 async function failure(
   response: Response,
@@ -274,7 +276,8 @@ async function failure(
     body = undefined;
   }
   const envelope = isRecord(body) ? body : {};
-  if (write && envelope.outcome === "unknown") {
+  const unattributed = status >= 500 && actorOf(response) === undefined;
+  if (write && (envelope.outcome === "unknown" || unattributed)) {
     return new DatabaseApiError(
       "OUTCOME_UNKNOWN",
       status,
@@ -341,6 +344,13 @@ async function send(
 ): Promise<unknown> {
   const { signal } = init;
   const ticket = openDatabaseRequest();
+  // What a body said is moot once the caller aborted or the session moved
+  // while it arrived; an error from the old session must not reach the new.
+  function refuse(error: DatabaseApiError): never {
+    signal?.throwIfAborted();
+    if (!isCurrentDatabaseRequest(ticket)) throw sessionChanged(write);
+    throw error;
+  }
   let response: Response;
   try {
     response = await fetch(url, init);
@@ -367,11 +377,7 @@ async function send(
     discard(response);
     throw sessionChanged(write);
   }
-  if (!response.ok) {
-    const error = await failure(response, write);
-    signal?.throwIfAborted();
-    throw error;
-  }
+  if (!response.ok) refuse(await failure(response, write));
   if (actor === undefined) {
     discard(response);
     throw unusable(write, response.status, "does not name its actor");
@@ -383,14 +389,13 @@ async function send(
     try {
       text = await readText(response, MAX_RESPONSE_BYTES);
     } catch (error) {
-      if (signal?.aborted) throw error;
-      throw unusable(write, response.status, "could not be read", error);
+      refuse(unusable(write, response.status, "could not be read", error));
     }
-    if (text === null) throw unusable(write, response.status, "is too large");
+    if (text === null) refuse(unusable(write, response.status, "is too large"));
     try {
       body = JSON.parse(text);
     } catch (error) {
-      throw unusable(write, response.status, "is not JSON", error);
+      refuse(unusable(write, response.status, "is not JSON", error));
     }
   }
   signal?.throwIfAborted();
