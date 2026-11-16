@@ -331,9 +331,12 @@ logs it. `execute` runs at most once, and only after `authorize` admitted.
 ### Serve the operations
 
 The AppKit Vite plugin and `appkit generate-types` find the modules directly in
-`server/database/routes/`, except `*.test.ts`, `*.d.ts`, and `*.gen.ts` files.
-The Vite plugin runs when the dev server starts, and whenever a file in
-`config/database/` or `server/database/routes/` changes. Both write two files:
+`server/database/routes/`, except `*.test.ts`, `*.d.ts`, and `*.gen.ts` files
+and names that start with `.`. Both import every module to read its
+declarations, so a module must not open a connection or start a timer when it
+is imported: an open handle keeps `vite build` from exiting. The Vite plugin
+runs when the dev server starts, and whenever a file in `config/database/` or
+`server/database/routes/` changes. Both write two files:
 
 - `server/database/routes.gen.ts`, the registry: the schema and each routes
   module, loaded lazily.
@@ -404,9 +407,10 @@ Each operation answers one method at `/api/database/operations/<name>`:
 - A success answers 200, or 201 for `POST`. An operation without `output`
   answers 204 with no body.
 - An unknown name, or a method the operation does not declare, answers 404.
+- A browser request from another origin answers 403, before the plugin asks the
+  workspace who sent it.
 - Without a verified caller, every request answers 401, before the plugin reads
   its input.
-- A browser request from another origin answers 403.
 - Every response carries `Cache-Control: no-store`.
 
 A failure answers `{ "error": "<stable message>" }`. An input that fails its
@@ -419,13 +423,15 @@ fields without displaying submitted values from an error.
 
 ### Caller identity
 
-The plugin verifies the caller on every request, and selects how once, from the
-deployment:
+The plugin identifies the caller of every request, and selects how once, from
+the deployment:
 
 - In Databricks Apps (`DATABRICKS_APP_NAME` is set and `NODE_ENV` is not
   `development`), the user token the Apps proxy forwards is checked with the
   workspace. A rejected token, an inactive user, or a service principal answers
-  401. The forwarded user and email headers are not trusted.
+  401. The forwarded user and email headers are not trusted. A verified token is
+  reused for 30 seconds, and concurrent requests with one token share one check,
+  so a user removed from the workspace can keep access for up to 30 seconds.
 - In local development (`NODE_ENV=development`, with `DATABRICKS_TOKEN` or
   `DATABRICKS_CONFIG_PROFILE`), the caller is the developer those credentials
   sign in. Only same-origin requests to a loopback address are accepted. Set
@@ -632,7 +638,7 @@ A `DatabaseApiError` has a stable `code`, the HTTP `status`, a `message`, and
 | `VALIDATION_FAILED` | 422 | A value failed the schema's validation |
 | `TRANSIENT` | 503 or `null` | Temporarily unavailable, or a read received no response |
 | `SESSION_CHANGED` | `null` | The answer belongs to an earlier session. A write may have completed |
-| `OUTCOME_UNKNOWN` | 500, `null`, or a successful status | A write may have committed without a usable answer, for example when it failed after `execute` ran. Check before retrying |
+| `OUTCOME_UNKNOWN` | 5xx, `null`, or a successful status | A write may have committed without a usable answer, for example when it failed after `execute` ran or a proxy answered it with a server error. Check before retrying |
 | `INTERNAL` | 500 or other | Any other failure |
 
 ## API reference
