@@ -210,6 +210,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.97.0](https://github.com/databricks/appkit/compare/v0.96.0...v0.97.0) (2026-11-16)
+
+### appkit
+
+* **appkit:** define named database operations and policies ([#688](https://github.com/databricks/appkit/issues/688)) ([cc2f276](https://github.com/databricks/appkit/commit/cc2f276cd30da7aa10dc8263c635d3590d94e7fd))
+
+
 ## [0.96.0](https://github.com/databricks/appkit/compare/v0.95.0...v0.96.0) (2026-11-16)
 
 ### appkit
