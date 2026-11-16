@@ -933,11 +933,11 @@ describe("privacy", () => {
       expect(variants.map((reply) => reply.status)).toEqual([400, 404, 400]);
 
       // The fake workspace runs in-process; its own server spans are not the app's.
-      const workspaceHost = new URL(workspace.url).host;
+      const workspacePort = Number(new URL(workspace.url).port);
       const appSpans = () =>
         exporter
           .getFinishedSpans()
-          .filter((span) => span.attributes["http.host"] !== workspaceHost);
+          .filter((span) => span.attributes["server.port"] !== workspacePort);
       const requestSpans = () =>
         appSpans().filter((span) => span.kind === SpanKind.SERVER);
       await vi.waitFor(async () => {
