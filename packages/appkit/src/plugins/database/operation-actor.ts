@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { Request } from "express";
 import {
   createDevOboIdentityProvider,
+  isServicePrincipalUser,
   loadDevOboIdentityFromEnvironment,
 } from "shared";
 
@@ -11,12 +12,17 @@ import { DatabasePluginError } from "../../database/errors";
 import { createLogger } from "../../logging/logger";
 import { ApiError, createWorkspaceClient } from "../../workspace-client";
 import { isLocalRequest } from "../server/dev-obo-middleware";
+import { isPlainObject } from "./crud/contract";
 import type { Actor } from "./operations";
 
 const logger = createLogger("database:operations");
 
 /** How long the workspace may take to name the caller. */
 const ME_TIMEOUT_MS = 10_000;
+/** How long a verified token names its caller, as for the local OBO identity. */
+const ACTOR_TTL_MS = 30_000;
+/** Verified tokens kept per resolver; the oldest leaves first. */
+const MAX_VERIFIED_ACTORS = 1000;
 /** An OAuth access token is a few kilobytes; a longer header is not one. */
 const MAX_TOKEN_BYTES = 16 * 1024;
 const MAX_ORIGIN_LENGTH = 2048;
@@ -97,53 +103,48 @@ function errorName(error: unknown): string {
 }
 
 /** Read the workspace's answer without trusting any field it lacks. */
-function actorFromUser(user: {
-  readonly id?: string;
-  readonly userName?: string;
-  readonly active?: boolean;
-  readonly schemas?: readonly string[];
-}): Actor | undefined {
-  if (
-    typeof user.id !== "string" ||
-    user.id.length === 0 ||
-    user.active === false ||
-    user.schemas?.some((schema) => String(schema).endsWith(":ServicePrincipal"))
-  ) {
+function actorFromUser(user: unknown): Actor | undefined {
+  if (!isPlainObject(user) || isServicePrincipalUser(user)) return undefined;
+  const { id, userName, active } = user;
+  if (typeof id !== "string" || id.length === 0 || active === false) {
     return undefined;
   }
   return Object.freeze(
-    typeof user.userName === "string"
-      ? { id: user.id, email: user.userName }
-      : { id: user.id },
+    typeof userName === "string" ? { id, email: userName } : { id },
   );
 }
 
-/**
- * Ask the workspace who owns the forwarded user token. The client carries
- * only that token, so a rejected token can never fall back to the service
- * principal, and identity headers beside it are never read.
- */
-async function verifyForwardedToken(
-  host: string,
-  req: Request,
-): Promise<Actor | undefined> {
+function forwardedToken(req: Request): string | undefined {
   const header = req.headers["x-forwarded-access-token"];
   const token = typeof header === "string" ? header.trim() : "";
-  if (!token || Buffer.byteLength(token, "utf8") > MAX_TOKEN_BYTES) {
-    return undefined;
-  }
+  return token && Buffer.byteLength(token, "utf8") <= MAX_TOKEN_BYTES
+    ? token
+    : undefined;
+}
+
+/**
+ * Ask the workspace who owns a forwarded user token. The client carries only
+ * that token, so a rejected token can never fall back to the service
+ * principal, and identity headers beside it are never read. The raw SCIM
+ * document is read because the typed client drops `applicationId`.
+ */
+async function verifyToken(
+  host: string,
+  token: string,
+): Promise<Actor | undefined> {
   const client = createWorkspaceClient({
     token,
     host,
     clientOptions: getClientOptions(),
   });
   try {
-    return actorFromUser(
-      await client.currentUser.me(
-        {},
-        { signal: AbortSignal.timeout(ME_TIMEOUT_MS) },
-      ),
-    );
+    const response = await client.request({
+      method: "GET",
+      path: "/api/2.0/preview/scim/v2/Me",
+      headers: new Headers({ Accept: "application/json" }),
+      signal: AbortSignal.timeout(ME_TIMEOUT_MS),
+    });
+    return actorFromUser(await response.json());
   } catch (error) {
     if (
       error instanceof ApiError &&
@@ -174,26 +175,62 @@ async function localActor(
   }
 }
 
-/** SHA-256 of the workspace and the canonical actor id, joined by NUL. */
-function actorDiscriminator(host: string, actorId: string): string {
-  return createHash("sha256").update(`${host}\0${actorId}`).digest("hex");
+/** SHA-256 of the workspace and a canonical actor id or a token, joined by NUL. */
+function workspaceDigest(host: string, value: string): string {
+  return createHash("sha256").update(`${host}\0${value}`).digest("hex");
+}
+
+function authenticated(
+  host: string,
+  actor: Actor | undefined,
+): AuthenticatedActor | undefined {
+  return actor && { actor, discriminator: workspaceDigest(host, actor.id) };
+}
+
+/**
+ * Verify each forwarded token once per TTL, keyed by its digest so the raw
+ * token is never held. Concurrent requests share one in-flight check, and
+ * only a verified actor is kept: a refusal or a failure is asked again.
+ */
+function appsResolver(host: string): ActorResolver {
+  const verified = new Map<string, { actor: Actor; verifiedAt: number }>();
+  const pending = new Map<string, Promise<Actor | undefined>>();
+  const check = (key: string, token: string): Promise<Actor | undefined> => {
+    const inFlight = pending.get(key);
+    if (inFlight) return inFlight;
+    const started = verifyToken(host, token)
+      .then((actor) => {
+        if (actor) {
+          if (verified.size >= MAX_VERIFIED_ACTORS) {
+            const [oldest] = verified.keys();
+            verified.delete(oldest);
+          }
+          verified.set(key, { actor, verifiedAt: Date.now() });
+        }
+        return actor;
+      })
+      .finally(() => pending.delete(key));
+    pending.set(key, started);
+    return started;
+  };
+  return async (req) => {
+    const token = forwardedToken(req);
+    if (!token) return undefined;
+    const key = workspaceDigest(host, token);
+    const cached = verified.get(key);
+    if (cached && Date.now() - cached.verifiedAt < ACTOR_TTL_MS) {
+      return authenticated(host, cached.actor);
+    }
+    verified.delete(key);
+    return authenticated(host, await check(key, token));
+  };
 }
 
 /** Resolve operation callers at the selected boundary. */
 export function createActorResolver(boundary: ActorBoundary): ActorResolver {
-  const authenticated = (
-    host: string,
-    actor: Actor | undefined,
-  ): AuthenticatedActor | undefined =>
-    actor && { actor, discriminator: actorDiscriminator(host, actor.id) };
-
   switch (boundary.kind) {
     case "apps":
-      return async (req) =>
-        authenticated(
-          boundary.host,
-          await verifyForwardedToken(boundary.host, req),
-        );
+      return appsResolver(boundary.host);
     case "local":
       // Forwarded headers are ignored: only the signed-in developer, on loopback.
       return async (req) =>

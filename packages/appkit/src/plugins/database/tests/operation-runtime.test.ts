@@ -279,6 +279,15 @@ async function seedNote(db: any, values: Record<string, unknown> = {}) {
   });
 }
 
+/** A GET that answers with the verified actor's id and touches no table. */
+const whoami = define({
+  name: "me.get",
+  method: "GET",
+  output: z.object({ id: z.string() }),
+  authorize: () => true,
+  execute: ({ actor }: Ctx) => ({ id: actor.id }),
+});
+
 describe("authentication comes first", () => {
   test("answers 401 before reading input, loading, or executing when no verified token arrives", async () => {
     const get = ownedNoteGet();
@@ -409,6 +418,81 @@ describe("authentication comes first", () => {
       discriminator("bob-2002"),
     );
     expect(get.spies.execute).toHaveBeenCalledTimes(2);
+  });
+
+  test("verifies a token once per 30 s and shares one in-flight check", async () => {
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const app = await boot([whoami]);
+    const asHeld = { "x-forwarded-access-token": "token-held" };
+    const release = workspace.hold();
+
+    const parallel = Promise.all(
+      Array.from({ length: 5 }, () =>
+        app.call("GET", "me.get", undefined, asHeld),
+      ),
+    );
+    await vi.waitFor(() => expect(workspace.authorizations).not.toEqual([]));
+    release();
+    const replies = await parallel;
+
+    expect(replies.map((reply) => reply.status)).toEqual([
+      200, 200, 200, 200, 200,
+    ]);
+    expect(replies.map(json)).toEqual(Array(5).fill({ id: "held-5005" }));
+    expect(workspace.authorizations).toEqual(["Bearer token-held"]);
+
+    now += 29_999;
+    const warm = await app.call("GET", "me.get", undefined, asHeld);
+    expect([warm.status, workspace.authorizations.length]).toEqual([200, 1]);
+
+    now += 1;
+    const expired = await app.call("GET", "me.get", undefined, asHeld);
+    expect([expired.status, workspace.authorizations.length]).toEqual([200, 2]);
+    expect(expired.headers["x-appkit-database-actor"]).toBe(
+      discriminator("held-5005"),
+    );
+  });
+
+  test("shares no check across tokens and caches no refusal or failure", async () => {
+    const app = await boot([whoami]);
+    const call = (token: string) =>
+      app.call("GET", "me.get", undefined, {
+        "x-forwarded-access-token": token,
+      });
+
+    const statuses = [
+      await call(SENTINEL.token),
+      await call("token-bob"),
+      await call("token-forged"),
+      await call("token-forged"),
+      await call("token-outage"),
+      await call("token-outage"),
+      await call(SENTINEL.token),
+      await call("token-bob"),
+    ].map((reply) => reply.status);
+
+    expect(statuses).toEqual([200, 200, 401, 401, 503, 503, 200, 200]);
+    expect(workspace.authorizations).toEqual([
+      `Bearer ${SENTINEL.token}`,
+      "Bearer token-bob",
+      "Bearer token-forged",
+      "Bearer token-forged",
+      "Bearer token-outage",
+      "Bearer token-outage",
+    ]);
+  });
+
+  test("refuses a service principal the workspace names only by application id", async () => {
+    const app = await boot([whoami]);
+
+    const reply = await app.call("GET", "me.get", undefined, {
+      "x-forwarded-access-token": "token-sp-app",
+    });
+
+    expect(reply.status).toBe(401);
+    expect(reply.headers["x-appkit-database-actor"]).toBeUndefined();
+    expect(workspace.authorizations).toEqual(["Bearer token-sp-app"]);
   });
 });
 
@@ -1192,6 +1276,21 @@ describe("browser origin", () => {
       ).status,
     ).toBe(200);
   });
+
+  test("refuses a cross-site request before asking the workspace who sent it", async () => {
+    const app = await boot([whoami]);
+    const crossSite = { "sec-fetch-site": "cross-site" };
+
+    const withToken = await app.call("GET", "me.get", undefined, {
+      ...asAda,
+      ...crossSite,
+    });
+    const anonymous = await app.call("GET", "me.get", undefined, crossSite);
+
+    expect([withToken.status, anonymous.status]).toEqual([403, 403]);
+    expect(withToken.headers["x-appkit-database-actor"]).toBeUndefined();
+    expect(workspace.authorizations).toEqual([]);
+  });
 });
 
 describe("telemetry", () => {
@@ -1353,7 +1452,7 @@ describe("local development boundary", () => {
       foreignHost.status,
       foreignOrigin.status,
       signedOut.status,
-    ]).toEqual([401, 401, 401]);
+    ]).toEqual([401, 403, 401]);
     expect(execute).toHaveBeenCalledTimes(1);
     expect(workspace.authorizations).toEqual([]);
     expect(logs.join("\n")).not.toContain(SENTINEL.error);

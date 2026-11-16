@@ -87,8 +87,8 @@ interface CompiledOperation {
 
 /** Where a request stopped. A span attribute, never part of a response. */
 type Stage =
-  | "actor"
   | "origin"
+  | "actor"
   | "route"
   | "input"
   | "resource"
@@ -388,9 +388,10 @@ function sendFailure(res: Response, failure: DatabasePluginError): void {
  * The private HTTP runtime for named operations. Mount it with
  * `router.use(OPERATIONS_PATH, handler)` and keep every body parser off the
  * mount: the caller is authenticated before the body or query is read. Each
- * request resolves its actor once, routes by encoded name and exact method,
- * decodes input, loads at most one resource, admits only literal `true`, then
- * executes once. No response is cacheable.
+ * request refuses a foreign browser origin before any workspace call, resolves
+ * its actor once, routes by encoded name and exact method, decodes input,
+ * loads at most one resource, admits only literal `true`, then executes once.
+ * No response is cacheable.
  */
 export function createOperationHandler(
   options: OperationHandlerOptions,
@@ -467,14 +468,14 @@ export function createOperationHandler(
     span: Span,
     progress: { stage: Stage },
   ): Promise<Reply> {
-    const caller = await options.resolveActor(req);
-    if (!caller) throw new DatabasePluginError("UNAUTHENTICATED", "read");
-    res.setHeader(DATABASE_ACTOR_HEADER, caller.discriminator);
-
-    progress.stage = "origin";
     if (!isSameOriginRequest(req)) {
       throw new DatabasePluginError("FORBIDDEN", "read");
     }
+
+    progress.stage = "actor";
+    const caller = await options.resolveActor(req);
+    if (!caller) throw new DatabasePluginError("UNAUTHENTICATED", "read");
+    res.setHeader(DATABASE_ACTOR_HEADER, caller.discriminator);
 
     progress.stage = "route";
     const operation = route(req);
@@ -507,7 +508,7 @@ export function createOperationHandler(
         "database.operation",
         { attributes: { "http.request.method": req.method } },
         async (span) => {
-          const progress: { stage: Stage } = { stage: "actor" };
+          const progress: { stage: Stage } = { stage: "origin" };
           try {
             // Lower clients and callbacks run untraced: their spans could
             // carry SQL text, row values, tokens, or raw exception messages.

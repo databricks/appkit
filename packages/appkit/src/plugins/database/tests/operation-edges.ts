@@ -118,8 +118,16 @@ export async function startWorkspace() {
       id: "sp-3003",
       schemas: ["urn:ietf:params:scim:schemas:core:2.0:ServicePrincipal"],
     },
+    "Bearer token-sp-app": {
+      id: "sp-4004",
+      applicationId: "4f4a0c5e-sp-app",
+      active: true,
+      schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+    },
+    "Bearer token-held": { id: "held-5005", userName: "held@example.com" },
   };
   const authorizations: string[] = [];
+  let held: Array<() => void> | undefined;
   const server = http.createServer((req, res) => {
     const authorization = req.headers.authorization ?? "";
     authorizations.push(authorization);
@@ -131,15 +139,32 @@ export async function startWorkspace() {
     const user = users[authorization];
     const status =
       authorization === "Bearer token-outage" ? 500 : user ? 200 : 401;
-    res.writeHead(status, { "content-type": "application/json" });
-    res.end(
-      JSON.stringify(
-        user ?? { error_code: "UNAUTHENTICATED", message: "Bad token" },
-      ),
-    );
+    const answer = () => {
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify(
+          user ?? { error_code: "UNAUTHENTICATED", message: "Bad token" },
+        ),
+      );
+    };
+    if (authorization === "Bearer token-held" && held) held.push(answer);
+    else answer();
   });
   const url = await listen(server);
-  return { url, authorizations, close: () => close(server) };
+  return {
+    url,
+    authorizations,
+    /** Hold answers for `token-held` until the returned release runs; later ones answer at once. */
+    hold: () => {
+      const answers: Array<() => void> = [];
+      held = answers;
+      return () => {
+        held = undefined;
+        for (const answer of answers) answer();
+      };
+    },
+    close: () => close(server),
+  };
 }
 
 export async function listen(server: Server): Promise<string> {
