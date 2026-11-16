@@ -397,13 +397,30 @@ async function sendWithRetry(
     const waitMs = Math.min(attempt * 1000 + 50 + Math.random() * 700, 10_000);
     if (
       !retryable ||
-      request.signal?.aborted ||
-      Date.now() + waitMs > deadline
+      Date.now() + waitMs > deadline ||
+      !(await waitUnlessAborted(waitMs, request.signal))
     ) {
       return { ...response, body: new Response(body).body };
     }
-    await new Promise((resolve) => setTimeout(resolve, waitMs));
   }
+}
+
+// Resolves `true` after `ms`, or `false` as soon as `signal` aborts, so a
+// caller's timeout is not held for the rest of a backoff and then failed by a
+// send on the aborted signal.
+function waitUnlessAborted(ms: number, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve(true);
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve(false);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /** A raw REST call against the workspace host. */

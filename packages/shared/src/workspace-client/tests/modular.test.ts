@@ -1,3 +1,5 @@
+import { getEventListeners } from "node:events";
+
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 // The wrapper's own tests are the one place allowed to mock the SDK directly.
@@ -1033,7 +1035,7 @@ describe("migration review fixes (host-only auth, DATABRICKS_AUTH_TYPE, retries,
     expect(cliCalls).toEqual([]);
   });
 
-  async function send(body?: unknown) {
+  async function send(body?: unknown, signal?: AbortSignal) {
     buildWarehousesClient({ host: "https://x" });
     const client = ctorOpts[0].httpClient as {
       send(
@@ -1045,6 +1047,7 @@ describe("migration review fixes (host-only auth, DATABRICKS_AUTH_TYPE, retries,
       method: "POST",
       headers: new Headers(),
       ...(body !== undefined && { body }),
+      ...(signal && { signal }),
     });
   }
 
@@ -1059,6 +1062,41 @@ describe("migration review fixes (host-only auth, DATABRICKS_AUTH_TYPE, retries,
     const res = await pending;
     expect(res.statusCode).toBe(200);
     expect(responses).toEqual([]);
+  });
+
+  test("transport ends a retry wait as soon as the request aborts: last 429 back, no further send", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    responses.push({
+      statusCode: 429,
+      body: '{"error_code":"TOO_MANY_REQUESTS"}',
+    });
+    const pending = send("{}", controller.signal);
+    await vi.advanceTimersByTimeAsync(100); // inside the >= 1050ms backoff
+    expect(sent).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(1);
+    controller.abort();
+    expect(vi.getTimerCount()).toBe(0);
+    const res = await pending;
+    expect(res.statusCode).toBe(429);
+    expect(await new Response(res.body).text()).toContain("TOO_MANY_REQUESTS");
+    expect(sent).toHaveLength(1);
+  });
+
+  test("transport still retries a 429 when the request signal never aborts, and drops its listener", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    responses.push({
+      statusCode: 429,
+      body: '{"error_code":"TOO_MANY_REQUESTS"}',
+    });
+    const pending = send("{}", controller.signal);
+    await vi.runAllTimersAsync();
+    const res = await pending;
+    expect(res.statusCode).toBe(200);
+    expect(sent).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
   });
 
   test("transport does not retry a plain 400 and keeps its body readable", async () => {
