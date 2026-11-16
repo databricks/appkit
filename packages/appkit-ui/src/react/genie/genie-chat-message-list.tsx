@@ -27,6 +27,7 @@ interface GenieChatMessageListProps {
 const STATUS_LABELS: Record<string, string> = {
   ASKING_AI: "Asking AI...",
   EXECUTING_QUERY: "Executing query...",
+  GENERATING_VISUALIZATION: "Generating visualization...",
   FILTERING_RESULTS: "Filtering results...",
   COMPLETED: "Done",
 };
@@ -206,6 +207,7 @@ export function GenieChatMessageList({
             (msg) =>
               msg.role !== "assistant" ||
               msg.content ||
+              msg.reasoning?.length ||
               (msg.id !== "" && TERMINAL_STATUSES.has(msg.status)),
           )
           .map((msg) => (

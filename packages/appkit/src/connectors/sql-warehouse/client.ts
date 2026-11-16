@@ -1,5 +1,6 @@
 import type { TelemetryOptions } from "shared";
 
+import { normalizeIdentityError } from "../../context/execution-context";
 import {
   AppKitError,
   ConfigurationError,
@@ -50,6 +51,19 @@ function arrowColumnNames(response: StatementResponse): string[] | undefined {
   return cols.map((c, i) =>
     c.name && c.name.length > 0 ? c.name : `column_${i}`,
   );
+}
+
+/**
+ * Manifest type names (`LONG`, `DECIMAL`, `BOOLEAN`, …), parallel to
+ * {@link arrowColumnNames}. Lets the analytics query route turn JSON_ARRAY's
+ * all-string cells into the JS types the generated query types promise.
+ */
+function columnTypeNames(
+  response: StatementResponse,
+): Array<string | undefined> | undefined {
+  const cols = response.manifest?.schema?.columns;
+  if (!cols || cols.length === 0) return undefined;
+  return cols.map((c) => c.typeName);
 }
 
 /**
@@ -1036,6 +1050,8 @@ export class SQLWarehouseConnector {
       result: {
         ...restResult,
         data: transformedData,
+        columnNames: arrowColumnNames(response),
+        columnTypes: columnTypeNames(response),
       },
     };
   }
@@ -1083,6 +1099,7 @@ export class SQLWarehouseConnector {
           ...(response.result as ResultData & {
             attachment?: string;
             columnNames?: string[];
+            columnTypes?: Array<string | undefined>;
           }),
           // `statementId` is a top-level field, not on `ResultData` — carry it
           // onto the result (as the EXTERNAL_LINKS path does) so the route can
@@ -1091,6 +1108,7 @@ export class SQLWarehouseConnector {
           // contract), sourced from the modular SDK's camelCase `statementId`.
           statement_id: response.statementId,
           columnNames,
+          columnTypes: columnTypeNames(response),
         },
       };
     }
@@ -1252,8 +1270,9 @@ export class SQLWarehouseConnector {
 
   /**
    * Normalize an error caught during statement execution/polling and rethrow.
-   * Abort and already-structured `AppKitError`s pass through untouched;
-   * anything else is wrapped as an `ExecutionError`, preserving the SDK's
+   * Abort and already-structured `AppKitError`s pass through untouched; a
+   * rejected caller token becomes `IdentityExpiredError`; anything else is
+   * wrapped as an `ExecutionError`, preserving the SDK's
    * structured `ApiError.errorCode` (e.g. "INVALID_PARAMETER_VALUE",
    * "BAD_REQUEST") so callers can branch on a stable identifier rather than
    * substring-matching the message.
@@ -1264,6 +1283,12 @@ export class SQLWarehouseConnector {
     }
     if (error instanceof AppKitError) {
       throw error;
+    }
+    // Classify before wrapping: the wrapper drops the HTTP status, so a
+    // rejected caller token would otherwise surface as a 500 ExecutionError.
+    const identityError = normalizeIdentityError(error);
+    if (identityError !== error) {
+      throw identityError;
     }
     // The legacy SDK exposed the Databricks error code as `errorCode`; the
     // modular SDK's `ApiError` carries it as `code` (e.g. "INVALID_PARAMETER_VALUE").

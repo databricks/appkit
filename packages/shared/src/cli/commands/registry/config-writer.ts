@@ -24,10 +24,14 @@ export interface ConfigWriteResult {
 
 /** Reads and parses a YAML file into a Document, or a fresh doc if absent. */
 function loadDoc(file: string): ReturnType<typeof parseDocument> {
-  if (fs.existsSync(file)) {
-    return parseDocument(fs.readFileSync(file, "utf-8"));
+  if (!fs.existsSync(file)) return parseDocument("");
+  const doc = parseDocument(fs.readFileSync(file, "utf-8"));
+  if (doc.errors.length > 0) {
+    throw new Error(
+      `${path.basename(file)} is not valid YAML: ${doc.errors[0].message}`,
+    );
   }
-  return parseDocument("");
+  return doc;
 }
 
 /**
@@ -52,7 +56,7 @@ function patchAppYaml(file: string, entries: AppYamlEnvEntry[]): string[] {
   const added: string[] = [];
   for (const entry of entries) {
     if (existingNames.has(entry.name)) continue;
-    seq.add(doc.createNode({ name: entry.name, valueFrom: entry.valueFrom }));
+    seq.add(doc.createNode(entry));
     added.push(entry.name);
   }
 
@@ -79,6 +83,93 @@ function ensureMap(
   return node;
 }
 
+/** The bundle's only app, else `app`; throws on several apps with none named `app`. */
+function appKey(doc: ReturnType<typeof parseDocument>): string {
+  const keys = Object.keys(doc.toJSON()?.resources?.apps ?? {});
+  if (keys.length === 1) return keys[0];
+  if (keys.length === 0 || keys.includes("app")) return "app";
+  throw new Error(
+    `databricks.yml defines several apps (${keys.join(", ")}); add the resources to the right one by hand`,
+  );
+}
+
+/** Throws before any write when app.yaml or databricks.yml can't be patched. */
+export function preflightConfig(cwd: string): void {
+  loadDoc(path.join(cwd, APP_YAML_FILE));
+  appKey(loadDoc(path.join(cwd, DATABRICKS_YML_FILE)));
+}
+
+/** JSON with sorted keys, for comparing YAML nodes regardless of key order. */
+function canonical(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonical).join(",")}]`;
+  if (v && typeof v === "object") {
+    return `{${Object.keys(v)
+      .sort()
+      .map(
+        (k) =>
+          `${JSON.stringify(k)}:${canonical((v as Record<string, unknown>)[k])}`,
+      )
+      .join(",")}}`;
+  }
+  return JSON.stringify(v);
+}
+
+/**
+ * Bundle variables and bindings the plan would set differently from
+ * databricks.yml (any target's value or a variable default) or from earlier
+ * plans of the same run, which the additive writer would silently keep.
+ */
+export function bundleConflicts(
+  cwd: string,
+  plan: ConfigPlan,
+  pending: ConfigPlan[] = [],
+): string[] {
+  const doc = loadDoc(path.join(cwd, DATABRICKS_YML_FILE));
+  const json = (doc.toJSON() ?? {}) as {
+    variables?: Record<string, { default?: unknown } | null>;
+    targets?: Record<string, { variables?: Record<string, unknown> } | null>;
+    resources?: { apps?: Record<string, { resources?: { name?: string }[] }> };
+  };
+  const values = new Map<string, Set<string>>();
+  const addValue = (name: string, v: unknown) => {
+    if (v === undefined || v === null) return;
+    if (!values.has(name)) values.set(name, new Set());
+    values.get(name)?.add(String(v));
+  };
+  for (const [name, v] of Object.entries(json.variables ?? {}))
+    addValue(name, v?.default);
+  for (const t of Object.values(json.targets ?? {})) {
+    for (const [name, v] of Object.entries(t?.variables ?? {}))
+      addValue(name, v);
+  }
+  const bindings = new Map<string, string>();
+  for (const b of json.resources?.apps?.[appKey(doc)]?.resources ?? []) {
+    if (b?.name) bindings.set(b.name, canonical(b));
+  }
+  for (const p of pending) {
+    for (const v of p.bundleVariables)
+      if (!values.has(v.name)) addValue(v.name, v.value);
+    for (const b of p.resourceBindings) {
+      if (!bindings.has(b.name))
+        bindings.set(b.name, canonical(bindingToNode(b)));
+    }
+  }
+  const out: string[] = [];
+  for (const v of plan.bundleVariables) {
+    const have = values.get(v.name);
+    if (v.value !== undefined && have && [...have].some((x) => x !== v.value)) {
+      out.push(`variable ${v.name}`);
+    }
+  }
+  for (const b of plan.resourceBindings) {
+    const have = bindings.get(b.name);
+    if (have !== undefined && have !== canonical(bindingToNode(b))) {
+      out.push(`binding ${b.name}`);
+    }
+  }
+  return out;
+}
+
 /**
  * Additively patches `databricks.yml`: adds bundle `variables`, the app
  * `resources` bindings, and the target-level variable values — each only if
@@ -89,7 +180,11 @@ function patchDatabricksYml(
   file: string,
   plan: ConfigPlan,
 ): { added: string[]; changed: boolean } {
-  if (plan.bundleVariables.length === 0 && plan.resourceBindings.length === 0) {
+  if (
+    plan.bundleVariables.length === 0 &&
+    plan.resourceBindings.length === 0 &&
+    !plan.userApiScopes?.length
+  ) {
     return { added: [], changed: false };
   }
   const doc = loadDoc(file);
@@ -109,7 +204,7 @@ function patchDatabricksYml(
 
   // App resource bindings.
   if (plan.resourceBindings.length > 0) {
-    const app = ensureMap(doc, ["resources", "apps", "app"]);
+    const app = ensureMap(doc, ["resources", "apps", appKey(doc)]);
     let bindings = app.get("resources") as YAMLSeq | undefined;
     if (!bindings || typeof (bindings as YAMLSeq).add !== "function") {
       app.set("resources", doc.createNode([]));
@@ -124,6 +219,21 @@ function patchDatabricksYml(
       if (existing.has(binding.name)) continue;
       bindings.add(doc.createNode(bindingToNode(binding)));
       added.push(binding.name);
+    }
+  }
+
+  if (plan.userApiScopes?.length) {
+    const app = ensureMap(doc, ["resources", "apps", appKey(doc)]);
+    let scopes = app.get("user_api_scopes") as YAMLSeq | undefined;
+    if (!scopes || typeof (scopes as YAMLSeq).add !== "function") {
+      app.set("user_api_scopes", doc.createNode([]));
+      scopes = app.get("user_api_scopes") as YAMLSeq;
+    }
+    const existing = new Set(scopes.toJSON() as unknown[]);
+    for (const scope of plan.userApiScopes) {
+      if (existing.has(scope)) continue;
+      scopes.add(scope);
+      added.push(scope);
     }
   }
 

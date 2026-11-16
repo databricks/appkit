@@ -1,6 +1,5 @@
 import type { DatabaseRegistry } from "../../database/contract";
 import type { Schema } from "../../database/schema-builder";
-import type { EntityMutationHooks } from "./hooks";
 
 type RegistryTableName = Extract<keyof DatabaseRegistry, string>;
 
@@ -10,7 +9,7 @@ export type DefaultDatabaseSchema = Schema<
 >;
 
 /** Table names declared by one finalized schema. */
-export type SchemaTableName<TSchema extends Schema> = Extract<
+type SchemaTableName<TSchema extends Schema> = Extract<
   keyof TSchema["$tables"],
   string
 >;
@@ -54,30 +53,24 @@ export type DatabaseApiConfig<TSchema extends Schema> =
       readonly writes?: DatabaseApiWritesConfig<TSchema>;
     };
 
-/** Which entity and generated operation produced the row being shaped. */
-export interface ReadSerializerContext {
-  readonly entity: string;
-  readonly operation: "list" | "detail";
-}
-
 /**
- * Shape one already private-safe row before it reaches the wire. A `Promise`
- * is not assignable to the return type, so an async callback fails to compile:
- * serializers run inside the response path and must not add latency there.
+ * Connection pool overrides. Statement and idle-in-transaction timeouts are
+ * fixed by the plugin and cannot be changed here.
  */
-export type ReadSerializer = (
-  row: Record<string, unknown>,
-  context: ReadSerializerContext,
-) => Record<string, unknown>;
-
-/** Response shaping and mutation lifecycle declared for one table. */
-export type EntityHooks<TTable extends string = string> =
-  EntityMutationHooks<TTable> & {
-    readonly serialize?: ReadSerializer;
-  };
-
-/** Hooks addressed by runtime table name, once the typed keys are erased. */
-export type DatabaseHooks = Readonly<Record<string, EntityHooks | undefined>>;
+export interface DatabasePoolConfig {
+  /**
+   * Maximum connections held by the pool. The Lakebase compute's connection
+   * limit is shared with other pools such as `lakebase()`, every replica, and
+   * any other client, so keep the sum below it.
+   *
+   * @defaultValue 105, the whole budget of the smallest (0.5 CU) compute
+   */
+  readonly max?: number;
+  /** Milliseconds an idle connection stays open. @defaultValue 30000 */
+  readonly idleTimeoutMillis?: number;
+  /** Milliseconds to wait for a free connection. @defaultValue 10000 */
+  readonly connectionTimeoutMillis?: number;
+}
 
 /** Configuration for one schema-bound DatabasePlugin instance. */
 export type IDatabaseConfig<TSchema extends Schema = DefaultDatabaseSchema> = {
@@ -100,7 +93,9 @@ export type IDatabaseConfig<TSchema extends Schema = DefaultDatabaseSchema> = {
    * @defaultValue true
    */
   readonly api?: DatabaseApiConfig<TSchema>;
-  readonly hooks?: {
-    readonly [TTable in SchemaTableName<TSchema>]?: EntityHooks<TTable>;
-  };
+  /**
+   * Overrides for the connection pool. A warning is logged when callers queue
+   * because every connection is in use.
+   */
+  readonly pool?: DatabasePoolConfig;
 };

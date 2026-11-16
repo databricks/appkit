@@ -6,6 +6,7 @@ import {
   type ArrowChunkStreamer,
   arrowDeliveryUnsupported,
   classifyDispositionRejection,
+  coerceScalarCells,
   decodeArrowAttachmentToRows,
   deliverArrowBytes,
   deliverJsonResult,
@@ -422,5 +423,90 @@ describe("decodeArrowAttachmentToRows — captured Reyden fixtures", () => {
       REYDEN_NESTED_FIXTURE.columns as unknown as string[],
     );
     expect(rows).toEqual([REYDEN_NESTED_FIXTURE.expected]);
+  });
+});
+
+describe("deliverJsonResult — coerceScalars", () => {
+  const nativeResult = () => ({
+    data: [
+      { big: "42", dec: "1.50", dbl: "2.5", ok: "true", name: "7", nul: null },
+      { big: "-1", dec: "0.00", dbl: "1e3", ok: "false", name: "x", nul: null },
+    ],
+    columnNames: ["big", "dec", "dbl", "ok", "name", "nul"],
+    columnTypes: ["LONG", "DECIMAL", "DOUBLE", "BOOLEAN", "STRING", "LONG"],
+  });
+
+  test("converts numeric and BOOLEAN cells on the native JSON_ARRAY path", async () => {
+    const { executor } = executorFrom(async () => nativeResult());
+    const result = await deliverJsonResult(
+      executor,
+      "SELECT 1",
+      undefined,
+      undefined,
+      { coerceScalars: true },
+    );
+    expect(result.data).toEqual([
+      { big: 42, dec: 1.5, dbl: 2.5, ok: true, name: "7", nul: null },
+      { big: -1, dec: 0, dbl: 1000, ok: false, name: "x", nul: null },
+    ]);
+  });
+
+  test("leaves cells as delivered without the option", async () => {
+    const { executor } = executorFrom(async () => nativeResult());
+    const result = await deliverJsonResult(executor, "SELECT 1", undefined);
+    expect(result.data).toEqual(nativeResult().data);
+  });
+
+  test("converts ARROW_STREAM fallback rows the same way; temporal and nested cells stay as delivered", async () => {
+    const { executor } = executorFrom(async (fp) => {
+      if (fp.format === "JSON_ARRAY") {
+        throw reject(
+          "INVALID_PARAMETER_VALUE",
+          "Inline disposition only supports ARROW_STREAM format.",
+        );
+      }
+      return {
+        attachment: REYDEN_SCALAR_FIXTURE.attachment,
+        columnNames: [...REYDEN_SCALAR_FIXTURE.columns],
+        columnTypes: [
+          "DECIMAL",
+          "DECIMAL",
+          "TIMESTAMP",
+          "TIMESTAMP_NTZ",
+          "DATE",
+          "STRUCT",
+          "ARRAY",
+        ],
+      };
+    });
+    const result = await deliverJsonResult(
+      executor,
+      "SELECT 1",
+      undefined,
+      undefined,
+      { coerceScalars: true },
+    );
+    expect(result.data).toEqual([
+      { ...REYDEN_SCALAR_FIXTURE.expected, amt: 123.45, neg: -0.99 },
+    ]);
+  });
+
+  test("returns rows unchanged when the manifest names or types are missing", () => {
+    const rows = [{ n: "1" }];
+    expect(coerceScalarCells(rows, undefined, ["LONG"])).toEqual([{ n: "1" }]);
+    expect(coerceScalarCells(rows, ["n"], undefined)).toEqual([{ n: "1" }]);
+  });
+
+  test("keeps NaN and ±Infinity as the warehouse strings (JSON has no number for them)", () => {
+    const rows = [
+      { d: "NaN", f: "NaN" },
+      { d: "Infinity", f: "1.25" },
+      { d: "-Infinity", f: "1.0E20" },
+    ];
+    expect(coerceScalarCells(rows, ["d", "f"], ["DOUBLE", "FLOAT"])).toEqual([
+      { d: "NaN", f: "NaN" },
+      { d: "Infinity", f: 1.25 },
+      { d: "-Infinity", f: 1e20 },
+    ]);
   });
 });

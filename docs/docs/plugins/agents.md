@@ -13,7 +13,7 @@ This page covers the full lifecycle. For the hand-written primitives (`tool()`, 
 ## Requirements
 
 :::info Streaming-capable serving endpoints only
-The agents plugin drives the LLM over Server-Sent Events. Foundation Model APIs (Claude, Llama, GPT, etc.) and other chat-style endpoints support streaming and work out of the box. Custom model endpoints that return a single JSON response (e.g. typical `sklearn` or MLflow `pyfunc` deployments) do **not** stream — pointing an agent at one will fail with "Response body is null — streaming not supported" on the first turn. If you list a serving endpoint in `apps init`, pick one whose model implements the chat-completions streaming protocol; the agents plugin reads its name from `DATABRICKS_SERVING_ENDPOINT_NAME` whenever an agent doesn't pin `model:` itself.
+The agents plugin drives the LLM over Server-Sent Events. Foundation Model APIs (Claude, Llama, GPT, etc.) and other chat-style endpoints support streaming and work out of the box. Custom model endpoints that return a single JSON response (e.g. typical `sklearn` or MLflow `pyfunc` deployments) do **not** stream — pointing an agent at one will fail with "Response body is null — streaming not supported" on the first turn. Whenever an agent doesn't pin `model:` itself, the agents plugin uses its optional `model_service` resource: a Unity Catalog model service (`EXECUTE`) whose full name (`catalog.schema.name`) it reads from `DATABRICKS_MODEL_SERVICE_NAME` and calls through the AI Gateway. The legacy `DATABRICKS_SERVING_ENDPOINT_NAME` is still read as a fallback. A string `model` containing a dot routes to the AI Gateway; any other name is a serving endpoint.
 
 `fromModelServing` (the serving-endpoint adapter) uses the OpenAI **chat-completions** streaming protocol, so it drives chat-completions serving endpoints (task type `agent/*/chat`) and Databricks foundation models. An endpoint on the Responses API (task type `agent/*/responses`, e.g. a `ResponsesAgent`) rejects a chat-completions request, so `fromModelServing` can't drive it.
 
@@ -67,7 +67,7 @@ On startup the plugin:
 
 1. Discovers `server/agents/assistant/agent.md` and registers agent id `assistant`.
 2. Parses the YAML frontmatter and markdown body as the agent's `instructions`.
-3. Resolves the adapter from `endpoint` (or falls back to `DATABRICKS_SERVING_ENDPOINT_NAME`).
+3. Resolves the adapter from `endpoint` (or falls back to `DATABRICKS_MODEL_SERVICE_NAME`, then `DATABRICKS_SERVING_ENDPOINT_NAME`).
 4. Mounts the agent at the default name (`assistant`).
 
 The agent starts with **no tools**. Tools are opt-in — declare them in frontmatter (Level 2 below) or opt into auto-inherit explicitly with `agents({ autoInheritTools: { file: true } })`. See "Auto-inherit posture" further down for what that costs and why it's off by default.
@@ -343,12 +343,12 @@ In markdown, set `auth: on-behalf-of-user` in the frontmatter. A per-agent value
 An on-behalf-of-user agent fails closed:
 
 - No forwarded user token: `401` before any model or tool call, in production and in development. There is no service-principal fallback.
-- A `401` from the model mid-run becomes an `IDENTITY_EXPIRED` error event and the stream ends. The run is not retried as the service principal.
+- A `401` (or an invalid-token `403`) from the model mid-run becomes an `IDENTITY_EXPIRED` error event and the stream ends. The run is not retried as the service principal.
 - A sub-agent never widens: under an on-behalf-of-user parent, a mixed sub-agent also runs as the user.
 
 **Exceptions.** MLflow tracing, the thread store, and catalog skills (see [Catalog skills](#catalog-skills-unity-catalog-volume)) are app-owned and stay service principal in every mode. Thread rows are keyed by the user id.
 
-**Pre-built adapters.** The user's client is applied when AppKit builds the adapter from a model string (`model: "my-endpoint"`, `defaultModel`, or `DATABRICKS_SERVING_ENDPOINT_NAME`). If you build a `DatabricksAdapter` yourself with a fixed `workspaceClient`, an on-behalf-of-user agent throws at boot instead of running the model as the service principal. Pass a provider so the client resolves per call, or use a model string. Mixed agents accept fixed-client adapters as before:
+**Pre-built adapters.** The user's client is applied when AppKit builds the adapter from a model string (`model: "my-endpoint"`, `defaultModel`, `DATABRICKS_MODEL_SERVICE_NAME` or `DATABRICKS_SERVING_ENDPOINT_NAME`). If you build a `DatabricksAdapter` yourself with a fixed `workspaceClient`, an on-behalf-of-user agent throws at boot instead of running the model as the service principal. Pass a provider so the client resolves per call, or use a model string. Mixed agents accept fixed-client adapters as before:
 
 ```ts
 DatabricksAdapter.fromModelServing("my-endpoint", {
@@ -888,7 +888,7 @@ appkit agent eval dataset --root apps/dev-playground --url http://localhost:3000
 | `--root <dir>` | Project root containing `server/agents/` (default: cwd) |
 | `--header <header...>` | Extra request header as `'Key: value'` (repeatable) |
 | `--tag <tag...>` | Only run evals tagged with one of these tags (repeatable) |
-| `--profile <name>` | Databricks CLI profile to authenticate with via OAuth (default: `DATABRICKS_CONFIG_PROFILE`) |
+| `--profile <name>` | Databricks CLI profile to authenticate with via OAuth; the token is also sent to a deployed `*.databricksapps.com` `--url` (default: `DATABRICKS_CONFIG_PROFILE`) |
 | `--databricks-host <host>` | Databricks host for writing MLflow assessments (default: `DATABRICKS_HOST`) |
 | `--databricks-token <token>` | Databricks token for writing MLflow assessments (default: `DATABRICKS_TOKEN`) |
 | `--experiment <id>` | MLflow experiment id for the evaluation run (default: `MLFLOW_EXPERIMENT_ID`) |
@@ -903,7 +903,7 @@ appkit agent eval dataset --root apps/dev-playground --url http://localhost:3000
 
 Notes:
 
-- **Auth is OAuth-first.** `--profile <name>` mints an OAuth token from your Databricks CLI profile — no PAT needed. An explicit `--databricks-host`/`--databricks-token` (or the `DATABRICKS_*` env vars) wins over the profile.
+- **Auth is OAuth-first.** `--profile <name>` mints an OAuth token from your Databricks CLI profile — no PAT needed. An explicit `--databricks-host`/`--databricks-token` (or the `DATABRICKS_*` env vars) wins over the profile. When `--url` is a deployed app (`https://*.databricksapps.com`), that token is sent as its `Authorization` bearer unless you pass your own with `--header`. Databricks Apps accept only OAuth tokens, so a PAT (`--databricks-token`, `DATABRICKS_TOKEN`) is rejected there with a 401.
 - **`--retries` only absorbs infra flakiness.** A retry fires only when an eval throws or times out (`result.error` set); a wrong reply is real signal and is never retried. Each attempt gets a fresh driver.
 - **Gating.** By default the run exits non-zero if any eval fails. `--min-pass-rate 0.9` switches to threshold mode: it exits non-zero only when the aggregate pass rate drops below the threshold. `--strict` additionally treats soft-assertion misses as failures.
 - **CI reports.** `--reporter junit --output results.xml` writes a JUnit file for CI test reporters; `--reporter json` emits machine-readable results. In machine reporters, human-facing lines go to stderr so stdout stays clean for the report.

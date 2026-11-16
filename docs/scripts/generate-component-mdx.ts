@@ -33,7 +33,6 @@ const FILE_EXTENSIONS = {
 } as const;
 
 const COMPONENT_PATTERNS = {
-  DOC_SUFFIX: "Doc",
   CHART_SUFFIX: "Chart",
   EXAMPLE_SUFFIX: "Example",
   DEFAULT_NAME: "Component",
@@ -66,6 +65,8 @@ const PACKAGE_NAMES = {
 
 const MARKDOWN = {
   REQUIRED_CHECKMARK: "✓",
+  // Longer unions (e.g. `keyof HTMLElementTagNameMap`) would swamp the table; show the type name instead
+  MAX_INLINE_ENUM_VALUES: 8,
   EMPTY_VALUE: "-",
   FILE_ENCODING: "utf-8",
   GENERATED_HEADER:
@@ -94,12 +95,6 @@ const parser = docgen.withCustomConfig(
 function toGithubPath(component: ComponentDoc): string {
   const filePath = component.filePath || "";
   return path.relative(repoRoot, filePath);
-}
-
-function stripDocSuffix(name: string): string {
-  return name.endsWith(COMPONENT_PATTERNS.DOC_SUFFIX)
-    ? name.slice(0, -COMPONENT_PATTERNS.DOC_SUFFIX.length)
-    : name;
 }
 
 type ComponentCategory = "chart" | "table" | "ui" | "genie" | "file-browser";
@@ -163,6 +158,14 @@ function isHook(name: string): boolean {
   return name.startsWith("use");
 }
 
+// shouldExtractLiteralValuesFromEnum reports every union as "enum"; list its literal values instead
+function formatPropType(type: docgen.PropItemType): string {
+  if (type.name !== "enum" || !type.value) return type.name;
+  if (type.value.length > MARKDOWN.MAX_INLINE_ENUM_VALUES)
+    return type.raw ?? type.name;
+  return type.value.map((v: { value: string }) => v.value).join(" | ");
+}
+
 function buildPropsSection(
   props: ComponentDoc["props"],
   headingLevel = 2,
@@ -182,9 +185,9 @@ ${fallback}
 `;
   }
 
+  // `appkit docs` reads this table back (tableCells in packages/shared/src/cli/commands/docs.ts).
   const rows = entries
     .map(([name, prop]) => {
-      const typeStr = prop.type.name.replace(/\|/g, "\\|");
       const required = prop.required ? MARKDOWN.REQUIRED_CHECKMARK : "";
       const defaultVal = prop.defaultValue?.value
         ? `\`${prop.defaultValue.value}\``
@@ -192,7 +195,14 @@ ${fallback}
       const desc = prop.description
         ? sanitizeDescriptionText(prop.description)
         : MARKDOWN.EMPTY_VALUE;
-      return `| \`${name}\` | \`${typeStr}\` | ${required} | ${defaultVal} | ${desc} |`;
+      const cells = [
+        `\`${name}\``,
+        `\`${formatPropType(prop.type)}\``,
+        required,
+        defaultVal,
+        desc,
+      ];
+      return `| ${cells.map((cell) => cell.replace(/\|/g, "\\|")).join(" | ")} |`;
     })
     .join("\n");
 
@@ -205,9 +215,8 @@ ${rows}
 `;
 }
 
-function buildUsageSection(displayName: string, headingLevel = 2): string {
+function buildUsageSection(actualName: string, headingLevel = 2): string {
   const headingPrefix = "#".repeat(headingLevel);
-  const actualName = stripDocSuffix(displayName);
 
   if (isHook(actualName)) {
     return `
@@ -293,7 +302,7 @@ function buildExampleInfo(component: ComponentDoc): ExampleInfo | undefined {
       info.chartDir,
       OUTPUT_SUBDIRS.EXAMPLES,
     );
-    const exampleName = stripDocSuffix(component.displayName || "")
+    const exampleName = (component.displayName || "")
       .replace(new RegExp(`${COMPONENT_PATTERNS.CHART_SUFFIX}$`), "")
       .toLowerCase();
 
@@ -358,9 +367,7 @@ function generateGroupedComponentPage(
 ): string {
   const sections = components
     .map((component) => {
-      const displayName = stripDocSuffix(component.displayName || "");
-
-      return `## ${displayName}
+      return `## ${component.displayName || ""}
 
 ${buildComponentDetails(component, {
   propsHeadingLevel: 3,
@@ -589,11 +596,7 @@ function main() {
     return (
       Boolean(displayName) &&
       !excludeList.includes(displayName) &&
-      !component.filePath?.includes(FILE_EXTENSIONS.EXAMPLE) &&
-      // For charts: only include *Doc components
-      (info.category === "chart"
-        ? displayName.endsWith(COMPONENT_PATTERNS.DOC_SUFFIX)
-        : true)
+      !component.filePath?.includes(FILE_EXTENSIONS.EXAMPLE)
     );
   });
 
@@ -607,13 +610,10 @@ function main() {
     const displayName = component.displayName || "";
     const info = categorizeComponent(component);
 
-    // For Doc components from charts, use display name as key (separate pages)
-    // For other components, group by file path
+    // Each chart gets its own page (pie/index.tsx holds PieChart and DonutChart);
+    // other components are grouped by file
     const key =
-      info.category === "chart" &&
-      displayName.endsWith(COMPONENT_PATTERNS.DOC_SUFFIX)
-        ? displayName // Each Doc component gets its own page
-        : filePath || displayName; // Other components grouped by file
+      info.category === "chart" ? displayName : filePath || displayName;
 
     if (!componentsByFile.has(key)) {
       componentsByFile.set(key, []);
@@ -630,9 +630,8 @@ function main() {
     const components = componentsByFile.get(key);
     if (components?.[0]) {
       const displayName = components[0].displayName || "";
-      const strippedName = stripDocSuffix(displayName);
-      if (strippedName) {
-        return strippedName;
+      if (displayName) {
+        return displayName;
       }
     }
 

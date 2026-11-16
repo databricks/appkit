@@ -22,15 +22,15 @@ Group of toggle buttons for selecting one or more options
 
 | Prop | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `type` | `enum` | ✓ | - | - |
+| `type` | `"single" \| "multiple"` | ✓ | - | - |
 | `value` | `string \| string[]` |  | - | The controlled stateful value of the item that is pressed. The controlled stateful value of the items that are pressed. |
 | `defaultValue` | `string \| string[]` |  | - | The value of the item that is pressed when initially rendered. Use `defaultValue` if you do not need to control the state of a toggle group. The value of the items that are pressed when initially rendered. Use `defaultValue` if you do not need to control the state of a toggle group. |
 | `onValueChange` | `((value: string) => void) \| ((value: string[]) => void)` |  | - | The callback that fires when the value of the toggle group changes. The callback that fires when the state of the toggle group changes. |
 | `disabled` | `boolean` |  | - | Whether the group is disabled from user interaction. @defaultValue false |
 | `rovingFocus` | `boolean` |  | - | Whether the group should maintain roving focus of its buttons. @defaultValue true |
 | `loop` | `boolean` |  | - | - |
-| `orientation` | `enum` |  | - | - |
-| `dir` | `enum` |  | - | - |
+| `orientation` | `"horizontal" \| "vertical"` |  | - | - |
+| `dir` | `"ltr" \| "rtl"` |  | - | - |
 | `asChild` | `boolean` |  | - | - |
 | `variant` | `"default" \| "outline" \| null` |  | - | - |
 | `size` | `"default" \| "sm" \| "lg" \| null` |  | - | - |

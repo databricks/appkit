@@ -24,7 +24,11 @@ import {
   toolsFromRegistry,
 } from "../../core/agent/tools/define-tool";
 import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
-import { AppKitError, ExecutionError } from "../../errors";
+import {
+  AppKitError,
+  ExecutionError,
+  IdentityExpiredError,
+} from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import { defineManifest } from "../../registry";
@@ -399,12 +403,14 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
               // warehouse only accepts ARROW_STREAM for INLINE, retries as
               // ARROW_STREAM and decodes server-side — returning the SSE
               // `result` message with plain rows. (ARROW_STREAM requests are
-              // handled earlier via `_handleArrowStreamQuery`.)
+              // handled earlier via `_handleArrowStreamQuery`.) Numeric and
+              // BOOLEAN cells are coerced to match the generated query types.
               return await self._executeJsonArrayPath(
                 executor,
                 query,
                 processedParams,
                 sig,
+                { coerceScalars: true },
               );
             } catch (err) {
               originalError = err;
@@ -760,12 +766,14 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       | Record<string, SQLTypeMarker | null | undefined>
       | undefined,
     signal?: AbortSignal,
+    options?: { coerceScalars?: boolean },
   ): Promise<AnalyticsSseMessage> {
     const result = await deliverJsonResult(
       executor,
       query,
       processedParams,
       signal,
+      options,
     );
     return makeResultMessage(result.data, {
       status: result.status,
@@ -937,10 +945,14 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       // Do not echo upstream / SDK error text — it can include statement
       // fragments and correlation ids. Keep the structured code so the
       // client can branch (e.g. RESULT_TOO_LARGE_FOR_JSON_FALLBACK,
-      // ARROW_DELIVERY_UNSUPPORTED).
+      // ARROW_DELIVERY_UNSUPPORTED, IDENTITY_EXPIRED).
       const errorCode =
-        error instanceof ExecutionError ? error.errorCode : undefined;
-      res.status(500).json({
+        error instanceof IdentityExpiredError
+          ? error.code
+          : error instanceof ExecutionError
+            ? error.errorCode
+            : undefined;
+      res.status(error instanceof AppKitError ? error.statusCode : 500).json({
         // `clientMessage` is the sanitized, actionable text (e.g. "Re-run with
         // JSON_ARRAY" for ARROW_DELIVERY_UNSUPPORTED); it never carries raw
         // warehouse/SDK strings. Fall back to a generic message otherwise.

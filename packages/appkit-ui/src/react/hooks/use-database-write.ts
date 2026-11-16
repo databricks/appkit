@@ -30,9 +30,9 @@ export interface UseDatabaseWriteState<T> {
 export interface UseDatabaseWriteOptions {
   /**
    * Reads to restart once a write succeeds. Default `true`: every mounted
-   * database read, since a server hook may write other tables in the same
-   * transaction. A table list restarts only the reads that show those tables,
-   * directly or through an include; `false` restarts none.
+   * database read, since a foreign key declared with `onDelete("cascade")` can
+   * change other tables too. A table list restarts only the reads that show
+   * those tables, directly or through an include; `false` restarts none.
    */
   invalidate?: DatabaseInvalidation;
 }

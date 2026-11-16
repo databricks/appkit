@@ -365,6 +365,31 @@ describe("listParentContextStep", () => {
     ]);
   });
 
+  it("lists model services by bare full name under the picked schema", () => {
+    const run = vi.fn(() => ({
+      status: 0,
+      stdout: JSON.stringify([{ name: "model-services/system.ai.gpt-5-mini" }]),
+    }));
+    const step = listParentContextStep(
+      "model_service",
+      2,
+      ["system", "ai"],
+      undefined,
+      run,
+    );
+    expect(run).toHaveBeenCalledWith([
+      "ai-gateway",
+      "list-model-services",
+      "--parent",
+      "schemas/system.ai",
+      "-o",
+      "json",
+    ]);
+    expect(step?.choices).toEqual([
+      { value: "system.ai.gpt-5-mini", label: "system.ai.gpt-5-mini" },
+    ]);
+  });
+
   it("drills scope → key for secret", () => {
     const run = vi.fn(() => ({
       status: 0,

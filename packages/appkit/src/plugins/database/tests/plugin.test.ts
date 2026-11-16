@@ -21,7 +21,17 @@ vi.mock("../load-schema", () => ({
   loadDefaultDatabaseSchema: mocks.loadDefaultDatabaseSchema,
 }));
 
+import { DatabasePluginError } from "../../../database/errors";
 import { DatabasePlugin, database } from "../database";
+
+function thrownBy(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return undefined;
+}
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -148,19 +158,58 @@ describe("DatabasePlugin", () => {
     },
   );
 
-  test("applies API restrictions and hooks to the discovered schema", async () => {
+  test("applies API restrictions to the discovered schema", async () => {
     mocks.loadDefaultDatabaseSchema.mockResolvedValue(routedSchema);
-    const hooks = { notes: { beforeCreate: vi.fn() } };
     const { routes } = await registerRoutes({
       api: { tables: ["notes"], writes: false },
-      hooks,
     });
     expect(routes).toEqual(["get /notes", "get /notes/:id"]);
     expect(mocks.createDatabaseState).toHaveBeenCalledWith(
       routedSchema,
       expect.any(Function),
-      hooks,
+      undefined,
     );
+  });
+
+  test("passes the pool configuration to the lifecycle", async () => {
+    const pool = { max: 20, connectionTimeoutMillis: 5_000 };
+    await registerRoutes({ schema: routedSchema, pool });
+    expect(mocks.createDatabaseState).toHaveBeenCalledWith(
+      routedSchema,
+      expect.any(Function),
+      pool,
+    );
+  });
+
+  test("accepts timeouts up to Node's timer limit", async () => {
+    const pool = {
+      idleTimeoutMillis: 2_147_483_647,
+      connectionTimeoutMillis: 2_147_483_647,
+    };
+    await registerRoutes({ schema: routedSchema, pool });
+    expect(mocks.createDatabaseState).toHaveBeenCalledWith(
+      routedSchema,
+      expect.any(Function),
+      pool,
+    );
+  });
+
+  test.each([
+    ["an unknown key", { size: 10 }],
+    ["zero", { max: 0 }],
+    ["a non-integer", { max: 1.5 }],
+    [
+      "a timeout above Node's timer limit",
+      { idleTimeoutMillis: 2_147_483_648 },
+    ],
+    ["a non-plain object", Object.create({ max: 10 })],
+  ])("rejects a pool configuration with %s", (_case, pool) => {
+    const error = thrownBy(
+      () => new DatabasePlugin({ schema: routedSchema, pool } as never),
+    );
+    expect(error).toBeInstanceOf(DatabasePluginError);
+    expect(error).toMatchObject({ category: "SETUP_FAILED", phase: "setup" });
+    expect(mocks.createDatabaseState).not.toHaveBeenCalled();
   });
 
   test("keeps the default schema's typed client available when HTTP is disabled", async () => {
@@ -415,17 +464,13 @@ describe("DatabasePlugin", () => {
       });
       database({
         schema: routedSchema,
-        hooks: { notes: { serialize: (row) => row } },
-      });
-      database({
-        schema: routedSchema,
         // @ts-expect-error only a declared table can be exposed
         api: { tables: ["missing"] },
       });
       database({
         schema: routedSchema,
-        // @ts-expect-error only a declared table can shape its own responses
-        hooks: { missing: { serialize: (row) => row } },
+        // @ts-expect-error lifecycle hooks were removed
+        hooks: { notes: {} },
       });
     };
     const assertApiTypes = () => {
@@ -588,17 +633,6 @@ describe("DatabasePlugin", () => {
     }
   });
 
-  test("fails setup on a hook key that names no declared table", async () => {
-    mocks.createDatabaseState.mockResolvedValue(candidate());
-    const plugin = new DatabasePlugin({
-      schema: routedSchema,
-      hooks: { missing: { beforeCreate: () => undefined } } as never,
-    });
-    await expect(plugin.setup()).rejects.toMatchObject({
-      category: "SETUP_FAILED",
-    });
-  });
-
   test.each([undefined, true] as const)(
     "refuses ambiguous route names with api=%j",
     async (api) => {
@@ -655,6 +689,16 @@ describe("DatabasePlugin", () => {
             } as never),
         ).toThrow('"crudRoutes" was renamed to "api"');
       }
+      expect(mocks.createDatabaseState).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each([{}, { notes: { beforeCreate: () => undefined } }, undefined])(
+    "rejects the removed hooks option instead of serving routes without it: %j",
+    (hooks) => {
+      expect(
+        () => new DatabasePlugin({ schema: routedSchema, hooks } as never),
+      ).toThrow('"hooks" was removed');
       expect(mocks.createDatabaseState).not.toHaveBeenCalled();
     },
   );

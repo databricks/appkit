@@ -72,6 +72,7 @@ Examples:
 - `tsx` is in devDependencies for dev server
 - `dev` script uses `NODE_ENV=development tsx watch server/server.ts`
 - `client/index.html` exists with `<div id="root"></div>` and script pointing to `client/src/main.tsx`
+- `typecheck` script passes. The dev server keeps serving an app with type errors, but logs them as `[appkit:server:typecheck]`, and deployment validation fails until they are fixed
 
 ### Backend
 
