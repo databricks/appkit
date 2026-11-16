@@ -100,7 +100,7 @@ export const getPost = defineOperation({
     type _Plugins = Expect<
       Equal<
         Exclude<keyof typeof appkit, "database">,
-        "agents" | "aiSearch" | "analytics" | "files" | "genie" | "jobs" | "lakebase" | "server" | "serving"
+        "agents" | "aiSearch" | "analytics" | "design" | "files" | "genie" | "jobs" | "lakebase" | "server" | "serving"
       >
     >;
     type _Optional = Expect<Equal<undefined extends typeof appkit.analytics ? true : false, true>>;
