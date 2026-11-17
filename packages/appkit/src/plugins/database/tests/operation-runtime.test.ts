@@ -818,7 +818,12 @@ describe("authorization", () => {
     expect(execute.mock.calls.map(([ctx]) => ctx.resource)).toEqual([0, false]);
   });
 
-  test("a database failure inside a policy fails the request, never a refusal", async () => {
+  const driverBoundaryFailures = [
+    ["TRANSIENT", 503, { error: "Database operation temporarily unavailable" }],
+    ["INTERNAL", 500, { error: "Database operation failed" }],
+  ] as const;
+
+  test("a database failure in a resource lookup or a resource-free policy fails the request, never a refusal", async () => {
     const get = ownedNoteGet();
     let allowFailure: unknown;
     const execute = vi.fn(() => undefined);
@@ -836,18 +841,8 @@ describe("authorization", () => {
       }),
     ]);
     const note = await seedNote(app.db());
-    // What the driver boundary throws for a serialization failure or a
-    // cancelled statement, and for a dropped connection or any other fault.
-    const failures = [
-      [
-        "TRANSIENT",
-        503,
-        { error: "Database operation temporarily unavailable" },
-      ],
-      ["INTERNAL", 500, { error: "Database operation failed" }],
-    ] as const;
 
-    for (const [category, status, body] of failures) {
+    for (const [category, status, body] of driverBoundaryFailures) {
       const failure = () => new DatabasePluginError(category, "runtime");
       vi.spyOn(app.database.path, "findOne").mockRejectedValueOnce(failure());
       const lookup = await app.call("GET", "notes.get", { id: note.id }, asAda);
@@ -881,6 +876,56 @@ describe("authorization", () => {
 
     expect([brokenLookup.status, brokenAllow.status]).toEqual([404, 403]);
     expect(get.spies.execute).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  test("a database failure inside a found record's allow refuses as not found, so it never reveals the record", async () => {
+    const execute = vi.fn();
+    const app = await boot([
+      define({
+        name: "notes.peek",
+        method: "GET",
+        input: z.object({ id: z.number().int() }).strict(),
+        output: noteOutput,
+        authorize: policy({
+          resource: (ctx: Ctx) => ctx.db.notes.find(ctx.input.id),
+          allow: async (ctx: Ctx) => {
+            await ctx.db.notes.count();
+            return ctx.resource.ownerId === ctx.actor.id;
+          },
+        }),
+        execute,
+      }),
+    ]);
+    const note = await seedNote(app.db(), { ownerId: "someone-else" });
+
+    for (const [category] of driverBoundaryFailures) {
+      vi.spyOn(app.database.path, "count").mockRejectedValue(
+        new DatabasePluginError(category, "runtime"),
+      );
+      logs.length = 0;
+      const existing = await app.call(
+        "GET",
+        "notes.peek",
+        { id: note.id },
+        asAda,
+      );
+      const missing = await app.call(
+        "GET",
+        "notes.peek",
+        { id: note.id + 1000 },
+        asAda,
+      );
+
+      expect([existing.status, json(existing)]).toEqual([
+        missing.status,
+        json(missing),
+      ]);
+      expect(existing.status).toBe(404);
+      expect(logs).toEqual([
+        "[appkit:database:operations] Operation notes.peek refused: its authorization threw DatabasePluginError",
+      ]);
+    }
     expect(execute).not.toHaveBeenCalled();
   });
 
