@@ -1,12 +1,14 @@
 /**
  * Which signed-in actor the page's database data belongs to.
  *
- * Every authenticated operation reply names its actor in an opaque header.
- * Requests are numbered as they are sent and stamped with the session epoch.
- * A reply from an earlier epoch, or one that contradicts a reply to a later
- * request, is stale and never delivered. A reply to a later request that names
- * another actor, or a 401 after an authenticated reply, opens a new epoch, and
- * subscribers drop what they show for the old one.
+ * Every authenticated operation reply names its actor in an opaque header,
+ * and a 401 says nobody is signed in. Requests are numbered as they are sent
+ * and stamped with the session epoch. A reply from an earlier epoch, or one
+ * that contradicts a reply to a later request, is stale and never delivered.
+ * The page's first reply only records who is signed in. After it, a reply to
+ * a later request that changes who is signed in opens a new epoch, whether it
+ * names another actor, answers 401 where an actor was signed in, or names an
+ * actor after a 401. Subscribers then drop what they show for the old epoch.
  */
 
 /** The reply header that names, opaquely, the actor a reply was computed for. */
@@ -21,8 +23,12 @@ export interface DatabaseRequestTicket {
 
 let sequence = 0;
 let epoch = 0;
-/** The actor this epoch's replies named; `null` before one, or after a 401. */
-let actor: string | null = null;
+/**
+ * Who this epoch's replies say is signed in. A string is the actor they
+ * named, `null` means a 401 said nobody is, and `undefined` means no reply
+ * has been observed yet.
+ */
+let actor: string | null | undefined;
 /** The latest request whose reply agreed with `actor`. */
 let confirmed = 0;
 const listeners = new Set<() => void>();
@@ -48,7 +54,7 @@ export function acceptDatabaseReply(
   }
   // A request sent before one that answered as `actor` saw an older session.
   if (ticket.sequence < confirmed) return false;
-  const opensEpoch = actor !== null;
+  const opensEpoch = actor !== undefined;
   actor = observed;
   confirmed = ticket.sequence;
   if (opensEpoch) {
@@ -82,6 +88,6 @@ export function subscribeDatabaseSession(listener: () => void): () => void {
 export function resetDatabaseSession(): void {
   sequence = 0;
   epoch = 0;
-  actor = null;
+  actor = undefined;
   confirmed = 0;
 }
