@@ -35,20 +35,23 @@ type Outcome = DatabaseMutationOutcome<unknown>;
 
 let server: ReturnType<typeof mockDatabaseFetch>;
 
-beforeEach(() => {
+function setUp(): void {
   server = mockDatabaseFetch();
   publishOperations({
     "notes.get": "GET",
     "notes.create": "POST",
     "notes.delete": "DELETE",
   });
-});
+}
 
 // This project runs without vitest globals, so nothing unmounts on its own.
-afterEach(() => {
+function tearDown(): void {
   cleanup();
   resetDatabaseTestEnvironment();
-});
+}
+
+beforeEach(setUp);
+afterEach(tearDown);
 
 async function answer(
   request: PendingRequest,
@@ -447,4 +450,84 @@ describe("useDatabaseMutation", () => {
     });
     expect(server.requests).toHaveLength(sent);
   });
+
+  test("a write whose own reply names a new actor shows its answer in that session", async () => {
+    const { result } = renderHook(() => ({
+      note: useDatabaseQuery("notes.get", { id: 1 }),
+      create: useDatabaseMutation("notes.create"),
+    }));
+    await answer(server.request(0), { id: 1 });
+
+    const outcome = start({ current: result.current.create }, { body: "hi" });
+    await answer(server.request(1), { id: 9 }, { actor: "actor-b" });
+    await expect(outcome).resolves.toEqual({ data: { id: 9 }, error: null });
+    expect(result.current.create).toMatchObject({
+      data: { id: 9 },
+      isLoading: false,
+      error: null,
+    });
+  });
+
+  /**
+   * Answer the write as actor A, then answer a read that reveals actor B
+   * `delay` microtasks later. Returns how the write ended and what the hook
+   * shows once both replies settled.
+   */
+  async function raceWriteWithSessionChange(
+    answerWrite: (request: PendingRequest) => void,
+    delay: number,
+  ) {
+    const { result } = renderHook(() => ({
+      note: useDatabaseQuery("notes.get", { id: 1 }),
+      create: useDatabaseMutation("notes.create"),
+    }));
+    await answer(server.request(0), { id: 1 });
+    const outcome = start({ current: result.current.create }, { body: "hi" });
+    act(() => result.current.note.refetch());
+    await act(async () => {
+      answerWrite(server.request(1));
+      for (let tick = 0; tick < delay; tick += 1) await Promise.resolve();
+      server.request(2).respond({ id: 1 }, { actor: "actor-b" });
+      await flush();
+    });
+    const { data, error } = result.current.create;
+    return { delay, outcome: await outcome, shown: { data, error } };
+  }
+
+  test.each([
+    [
+      "answer",
+      (request: PendingRequest) => request.respond({ id: 9 }, { status: 201 }),
+      { data: { id: 9 }, error: null },
+    ],
+    [
+      "error",
+      (request: PendingRequest) =>
+        request.respond({ error: "Exists" }, { status: 409 }),
+      { data: undefined, error: { code: "CONFLICT" } },
+    ],
+  ])(
+    "a write's %s never shows once a later reply opens another actor's session",
+    async (_case, answerWrite, ownOutcome) => {
+      const ends = [];
+      for (let delay = 0; delay < 40; delay += 1) {
+        tearDown();
+        setUp();
+        ends.push(await raceWriteWithSessionChange(answerWrite, delay));
+      }
+
+      expect(
+        ends.filter(({ shown }) => shown.data !== undefined || shown.error),
+      ).toEqual([]);
+      // Unless the new session opened before the write's reply was accepted,
+      // `mutate` still resolves with that reply.
+      const accepted = ends.filter(
+        ({ outcome }) => outcome.error?.code !== "SESSION_CHANGED",
+      );
+      expect(accepted.length).toBeGreaterThan(0);
+      for (const { outcome } of accepted) {
+        expect(outcome).toMatchObject(ownOutcome);
+      }
+    },
+  );
 });
