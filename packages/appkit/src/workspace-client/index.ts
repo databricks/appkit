@@ -4,6 +4,7 @@ export type {
   BaseRun,
   CancelRunRequest,
   ClientOptions,
+  ColumnInfo,
   EndpointState,
   ExecuteStatementRequest,
   ExternalLink,
