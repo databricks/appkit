@@ -3,25 +3,25 @@
     {
       "name": "@databricks/appkit",
       "tarball": {
-        "packed": 1370455,
-        "unpacked": 4693235
+        "packed": 1382861,
+        "unpacked": 4734516
       },
       "dist": {
         "total": {
-          "raw": 4677840,
-          "gzip": 1600585
+          "raw": 4719121,
+          "gzip": 1613851
         },
         "js": {
-          "raw": 1396539,
-          "gzip": 495551
+          "raw": 1411481,
+          "gzip": 500618
         },
         "types": {
-          "raw": 492318,
-          "gzip": 177281
+          "raw": 492277,
+          "gzip": 177261
         },
         "maps": {
-          "raw": 2778188,
-          "gzip": 923935
+          "raw": 2804568,
+          "gzip": 932154
         },
         "css": {
           "raw": 0,
@@ -31,22 +31,22 @@
           "raw": 10795,
           "gzip": 3818
         },
-        "fileCount": 921
+        "fileCount": 923
       },
       "entries": [
         {
           "id": ".",
-          "gzip": 116631,
+          "gzip": 119135,
           "composition": {
-            "initialGzip": 114057,
-            "lazyGzip": 2574,
-            "totalGzip": 116631,
-            "own": 367542,
+            "initialGzip": 116562,
+            "lazyGzip": 2573,
+            "totalGzip": 119135,
+            "own": 374021,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "index.js",
-                "gzip": 109387,
+                "gzip": 111892,
                 "kind": "initial"
               },
               {
@@ -56,7 +56,7 @@
               },
               {
                 "label": "remote-tunnel-manager.js",
-                "gzip": 2574,
+                "gzip": 2573,
                 "kind": "lazy"
               }
             ]
@@ -64,17 +64,17 @@
         },
         {
           "id": "./beta",
-          "gzip": 115895,
+          "gzip": 117833,
           "composition": {
-            "initialGzip": 115410,
-            "lazyGzip": 485,
-            "totalGzip": 115895,
-            "own": 343771,
+            "initialGzip": 117350,
+            "lazyGzip": 483,
+            "totalGzip": 117833,
+            "own": 348584,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "beta.js",
-                "gzip": 94671,
+                "gzip": 96612,
                 "kind": "initial"
               },
               {
@@ -89,7 +89,7 @@
               },
               {
                 "label": "service-context.js",
-                "gzip": 4415,
+                "gzip": 4414,
                 "kind": "initial"
               },
               {
@@ -109,12 +109,12 @@
               },
               {
                 "label": "supervisor-api.js",
-                "gzip": 193,
+                "gzip": 192,
                 "kind": "lazy"
               },
               {
                 "label": "databricks.js",
-                "gzip": 177,
+                "gzip": 176,
                 "kind": "lazy"
               },
               {
@@ -127,11 +127,11 @@
         },
         {
           "id": "./testing",
-          "gzip": 82458,
+          "gzip": 82462,
           "composition": {
             "initialGzip": 47353,
-            "lazyGzip": 35105,
-            "totalGzip": 82458,
+            "lazyGzip": 35109,
+            "totalGzip": 82462,
             "own": 238425,
             "nodeModules": null,
             "chunks": [
@@ -152,12 +152,12 @@
               },
               {
                 "label": "index.js",
-                "gzip": 30674,
+                "gzip": 30676,
                 "kind": "lazy"
               },
               {
                 "label": "remote-tunnel-manager.js",
-                "gzip": 2585,
+                "gzip": 2587,
                 "kind": "lazy"
               },
               {
@@ -188,17 +188,17 @@
         },
         {
           "id": "./type-generator",
-          "gzip": 27975,
+          "gzip": 27976,
           "composition": {
-            "initialGzip": 27975,
+            "initialGzip": 27976,
             "lazyGzip": 0,
-            "totalGzip": 27975,
+            "totalGzip": 27976,
             "own": 80391,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "index.js",
-                "gzip": 27975,
+                "gzip": 27976,
                 "kind": "initial"
               }
             ]

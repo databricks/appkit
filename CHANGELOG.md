@@ -216,6 +216,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.97.3](https://github.com/databricks/appkit/compare/v0.97.2...v0.97.3) (2026-11-17)
+
+### appkit
+
+* **appkit:** fall back to inline results when a Cloud Fetch download fails ([#723](https://github.com/databricks/appkit/issues/723)) ([93fa058](https://github.com/databricks/appkit/commit/93fa058de487694d616dc189a1bb580c6f4b3211))
+
+
 ## [0.97.2](https://github.com/databricks/appkit/compare/v0.97.1...v0.97.2) (2026-11-17)
 
 ### shared
