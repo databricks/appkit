@@ -53,8 +53,6 @@ export const MAX_SERIALIZED_DEPTH = 32;
 export const MAX_SERIALIZED_NODES = 10_000;
 /** Max UTF-8 byte length of one generated read response body. */
 export const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
-/**
- * Max node count of one operation answer. Every JSON value takes at least two
- * bytes with its separator, so any answer within the byte limit fits.
- */
-export const MAX_OUTPUT_NODES = MAX_RESPONSE_BYTES / 2;
+const MIN_JSON_VALUE_BYTES = 2;
+/** Max node count of one operation answer. */
+export const MAX_OUTPUT_NODES = MAX_RESPONSE_BYTES / MIN_JSON_VALUE_BYTES;
