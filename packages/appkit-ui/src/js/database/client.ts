@@ -13,6 +13,7 @@ import { DatabaseApiError, invalidDatabaseInput } from "./errors";
 import {
   acceptDatabaseReply,
   DATABASE_ACTOR_HEADER,
+  type DatabaseRequestTicket,
   isCurrentDatabaseRequest,
   openDatabaseRequest,
 } from "./session";
@@ -70,6 +71,11 @@ type DatabaseOperationKind = "query" | "mutation";
  */
 export interface DatabaseOperationCall {
   readonly url: string;
+  /**
+   * The session epoch the latest `send` belongs to, which is the epoch it was
+   * sent in or the one its own reply opened; `undefined` before any `send`.
+   */
+  readonly epoch: number | undefined;
   send(signal?: AbortSignal): Promise<unknown>;
 }
 
@@ -198,7 +204,7 @@ export function prepareDatabaseOperation(
       cache: "no-store",
       headers: { Accept: "application/json" },
     };
-    return { url, send: (signal) => send(url, { ...init, signal }, false) };
+    return operationCall(url, init, false);
   }
   const init: RequestInit = {
     method,
@@ -208,7 +214,25 @@ export function prepareDatabaseOperation(
     },
     body: json,
   };
-  return { url: path, send: (signal) => send(path, { ...init, signal }, true) };
+  return operationCall(path, init, true);
+}
+
+function operationCall(
+  url: string,
+  init: RequestInit,
+  write: boolean,
+): DatabaseOperationCall {
+  let ticket: DatabaseRequestTicket | undefined;
+  return {
+    url,
+    get epoch() {
+      return ticket?.epoch;
+    },
+    send(signal) {
+      ticket = openDatabaseRequest();
+      return send(ticket, url, { ...init, signal }, write);
+    },
+  };
 }
 
 function discard(response: Response): void {
@@ -338,12 +362,12 @@ function actorOf(response: Response): string | undefined {
  * refused rather than shown.
  */
 async function send(
+  ticket: DatabaseRequestTicket,
   url: string,
   init: RequestInit,
   write: boolean,
 ): Promise<unknown> {
   const { signal } = init;
-  const ticket = openDatabaseRequest();
   // What a body said is moot once the caller aborted or the session moved
   // while it arrived; an error from the old session must not reach the new.
   function refuse(error: DatabaseApiError): never {

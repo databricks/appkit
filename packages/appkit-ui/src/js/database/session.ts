@@ -13,7 +13,7 @@
 export const DATABASE_ACTOR_HEADER = "x-appkit-database-actor";
 
 /** One request's place in the session history. */
-interface DatabaseRequestTicket {
+export interface DatabaseRequestTicket {
   readonly sequence: number;
   /** The epoch it was sent in, moved forward when its own reply opens one. */
   epoch: number;

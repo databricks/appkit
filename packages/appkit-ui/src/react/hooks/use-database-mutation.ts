@@ -6,7 +6,10 @@ import {
   useSyncExternalStore,
 } from "react";
 
-import { prepareDatabaseOperation } from "@/js/database/client";
+import {
+  type DatabaseOperationCall,
+  prepareDatabaseOperation,
+} from "@/js/database/client";
 import {
   asDatabaseApiError,
   type DatabaseApiError,
@@ -112,31 +115,25 @@ export function useDatabaseMutation<N extends DatabaseMutationName>(
       const call = Symbol(name);
       latest.current = call;
       const started = getDatabaseSessionEpoch();
-      // An answer, even a 401 or a new actor's reply that opens an epoch,
-      // belongs to the epoch it was accepted in; a stale one stays in the old.
-      const settle = (
-        next: Omit<MutationState, "epoch" | "operation">,
-        epoch = getDatabaseSessionEpoch(),
-      ) => {
+      let request: DatabaseOperationCall | undefined;
+      // An outcome belongs to the epoch its reply was accepted in, even one
+      // that reply opened, so a later reply that opens another hides it. A
+      // call refused before any request belongs to the epoch it started in.
+      const settle = (next: Omit<MutationState, "epoch" | "operation">) => {
+        const epoch = request?.epoch ?? started;
         if (latest.current === call) setState({ ...next, epoch, operation });
       };
-      settle({ data: undefined, error: null, isLoading: true }, started);
+      settle({ data: undefined, error: null, isLoading: true });
       try {
-        const data = (await prepareDatabaseOperation(
-          name,
-          input,
-          "mutation",
-        ).send()) as Output;
+        request = prepareDatabaseOperation(name, input, "mutation");
+        const data = (await request.send()) as Output;
         settle({ data, error: null, isLoading: false });
         // A new session restarts every query on its own.
         if (getDatabaseSessionEpoch() === started) restartDatabaseQueries();
         return { data, error: null };
       } catch (cause) {
         const error = asDatabaseApiError(cause);
-        settle(
-          { data: undefined, error, isLoading: false },
-          error.code === "SESSION_CHANGED" ? started : undefined,
-        );
+        settle({ data: undefined, error, isLoading: false });
         // A write that may have committed refreshes what it may have changed.
         if (
           error.code === "OUTCOME_UNKNOWN" &&
