@@ -648,7 +648,6 @@ describe("session isolation", () => {
 
       server.request(0).respond({ id: 1 }, options);
       server.request(1).respond({ id: 2 }, options);
-      // A request sent before the first reply still belongs to its session.
       await expect(Promise.all(replies)).resolves.toEqual([settled, settled]);
       expect(opened).not.toHaveBeenCalled();
       unsubscribe();

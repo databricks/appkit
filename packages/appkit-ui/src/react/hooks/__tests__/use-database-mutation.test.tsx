@@ -468,14 +468,9 @@ describe("useDatabaseMutation", () => {
     });
   });
 
-  /**
-   * Answer the write as actor A, then answer a read that reveals actor B
-   * `delay` microtasks later. Returns how the write ended and what the hook
-   * shows once both replies settled.
-   */
   async function raceWriteWithSessionChange(
     answerWrite: (request: PendingRequest) => void,
-    delay: number,
+    microtasksBeforeActorB: number,
   ) {
     const { result } = renderHook(() => ({
       note: useDatabaseQuery("notes.get", { id: 1 }),
@@ -486,12 +481,17 @@ describe("useDatabaseMutation", () => {
     act(() => result.current.note.refetch());
     await act(async () => {
       answerWrite(server.request(1));
-      for (let tick = 0; tick < delay; tick += 1) await Promise.resolve();
+      for (let tick = 0; tick < microtasksBeforeActorB; tick += 1)
+        await Promise.resolve();
       server.request(2).respond({ id: 1 }, { actor: "actor-b" });
       await flush();
     });
     const { data, error } = result.current.create;
-    return { delay, outcome: await outcome, shown: { data, error } };
+    return {
+      microtasksBeforeActorB,
+      outcome: await outcome,
+      shown: { data, error },
+    };
   }
 
   test.each([
@@ -510,22 +510,20 @@ describe("useDatabaseMutation", () => {
     "a write's %s never shows once a later reply opens another actor's session",
     async (_case, answerWrite, ownOutcome) => {
       const ends = [];
-      for (let delay = 0; delay < 40; delay += 1) {
+      for (let microtasks = 0; microtasks < 40; microtasks += 1) {
         tearDown();
         setUp();
-        ends.push(await raceWriteWithSessionChange(answerWrite, delay));
+        ends.push(await raceWriteWithSessionChange(answerWrite, microtasks));
       }
 
       expect(
         ends.filter(({ shown }) => shown.data !== undefined || shown.error),
       ).toEqual([]);
-      // Unless the new session opened before the write's reply was accepted,
-      // `mutate` still resolves with that reply.
-      const accepted = ends.filter(
+      const acceptedBeforeSessionChange = ends.filter(
         ({ outcome }) => outcome.error?.code !== "SESSION_CHANGED",
       );
-      expect(accepted.length).toBeGreaterThan(0);
-      for (const { outcome } of accepted) {
+      expect(acceptedBeforeSessionChange.length).toBeGreaterThan(0);
+      for (const { outcome } of acceptedBeforeSessionChange) {
         expect(outcome).toMatchObject(ownOutcome);
       }
     },
