@@ -1,16 +1,3 @@
-/**
- * Which signed-in actor the page's database data belongs to.
- *
- * Every authenticated operation reply names its actor in an opaque header,
- * and a 401 says nobody is signed in. Requests are numbered as they are sent
- * and stamped with the session epoch. A reply from an earlier epoch, or one
- * that contradicts a reply to a later request, is stale and never delivered.
- * The page's first reply only records who is signed in. After it, a reply to
- * a later request that changes who is signed in opens a new epoch, whether it
- * names another actor, answers 401 where an actor was signed in, or names an
- * actor after a 401. Subscribers then drop what they show for the old epoch.
- */
-
 /** The reply header that names, opaquely, the actor a reply was computed for. */
 export const DATABASE_ACTOR_HEADER = "x-appkit-database-actor";
 
@@ -21,14 +8,11 @@ export interface DatabaseRequestTicket {
   epoch: number;
 }
 
+const UNOBSERVED = Symbol("unobserved");
+
 let sequence = 0;
 let epoch = 0;
-/**
- * Who this epoch's replies say is signed in. A string is the actor they
- * named, `null` means a 401 said nobody is, and `undefined` means no reply
- * has been observed yet.
- */
-let actor: string | null | undefined;
+let actor: string | null | typeof UNOBSERVED = UNOBSERVED;
 /** The latest request whose reply agreed with `actor`. */
 let confirmed = 0;
 const listeners = new Set<() => void>();
@@ -54,10 +38,10 @@ export function acceptDatabaseReply(
   }
   // A request sent before one that answered as `actor` saw an older session.
   if (ticket.sequence < confirmed) return false;
-  const opensEpoch = actor !== undefined;
+  const firstReply = actor === UNOBSERVED;
   actor = observed;
   confirmed = ticket.sequence;
-  if (opensEpoch) {
+  if (!firstReply) {
     epoch += 1;
     ticket.epoch = epoch;
     for (const listener of [...listeners]) listener();
@@ -88,6 +72,6 @@ export function subscribeDatabaseSession(listener: () => void): () => void {
 export function resetDatabaseSession(): void {
   sequence = 0;
   epoch = 0;
-  actor = undefined;
+  actor = UNOBSERVED;
   confirmed = 0;
 }

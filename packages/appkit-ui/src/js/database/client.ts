@@ -71,11 +71,7 @@ type DatabaseOperationKind = "query" | "mutation";
  */
 export interface DatabaseOperationCall {
   readonly url: string;
-  /**
-   * The session epoch the latest `send` belongs to, which is the epoch it was
-   * sent in or the one its own reply opened; `undefined` before any `send`.
-   */
-  readonly epoch: number | undefined;
+  readonly latestRequestEpoch: number | undefined;
   send(signal?: AbortSignal): Promise<unknown>;
 }
 
@@ -225,7 +221,7 @@ function operationCall(
   let ticket: DatabaseRequestTicket | undefined;
   return {
     url,
-    get epoch() {
+    get latestRequestEpoch() {
       return ticket?.epoch;
     },
     send(signal) {

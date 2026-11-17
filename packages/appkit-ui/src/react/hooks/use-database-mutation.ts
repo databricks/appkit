@@ -116,11 +116,8 @@ export function useDatabaseMutation<N extends DatabaseMutationName>(
       latest.current = call;
       const started = getDatabaseSessionEpoch();
       let request: DatabaseOperationCall | undefined;
-      // An outcome belongs to the epoch its reply was accepted in, even one
-      // that reply opened, so a later reply that opens another hides it. A
-      // call refused before any request belongs to the epoch it started in.
       const settle = (next: Omit<MutationState, "epoch" | "operation">) => {
-        const epoch = request?.epoch ?? started;
+        const epoch = request?.latestRequestEpoch ?? started;
         if (latest.current === call) setState({ ...next, epoch, operation });
       };
       settle({ data: undefined, error: null, isLoading: true });
