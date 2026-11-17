@@ -85,11 +85,32 @@ function writeMetricConfig() {
   );
 }
 
-async function rejection(promise: Promise<unknown>): Promise<unknown> {
-  return promise.then(
-    () => undefined,
-    (error: unknown) => error,
+/**
+ * Drives fake time until `promise` settles, returning its value or rejection.
+ * Fake time only jumps to the next timer the code has actually armed; while
+ * none is pending, real file I/O is still running, so it yields a macrotask
+ * instead. Time therefore never runs ahead of the code, however slow the
+ * machine, and the only real-time bound is a generous safety net.
+ */
+async function settle(promise: Promise<unknown>): Promise<unknown> {
+  let done = false;
+  const result = promise.then(
+    (value) => {
+      done = true;
+      return value;
+    },
+    (error: unknown) => {
+      done = true;
+      return error;
+    },
   );
+  const deadline = performance.now() + 20_000;
+  while (!done && performance.now() < deadline) {
+    if (vi.getTimerCount() > 0) await vi.advanceTimersToNextTimerAsync();
+    else await new Promise((resolve) => setImmediate(resolve));
+  }
+  expect(done).toBe(true);
+  return result;
 }
 
 function gateWarnings(spy: ReturnType<typeof vi.spyOn>): string {
@@ -112,9 +133,11 @@ describe("generate-types --wait: warehouse wait limit", () => {
       "utf-8",
     );
     mocks.executeStatement.mockResolvedValue(describeQueryResult());
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllEnvs();
   });
 
@@ -125,13 +148,17 @@ describe("generate-types --wait: warehouse wait limit", () => {
   test("running warehouse: describes immediately, no waiting", async () => {
     mocks.getWarehouse.mockResolvedValue({ state: "RUNNING" });
 
-    await generateFromEntryPoint({
-      outFile,
-      queryFolder,
-      warehouseId: "wh-1",
-      mode: "blocking",
-      waitTimeoutMs: 50,
-    });
+    await expect(
+      settle(
+        generateFromEntryPoint({
+          outFile,
+          queryFolder,
+          warehouseId: "wh-1",
+          mode: "blocking",
+          waitTimeoutMs: 50,
+        }),
+      ),
+    ).resolves.toBeUndefined();
 
     expect(mocks.getWarehouse).toHaveBeenCalledTimes(1);
     expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
@@ -143,13 +170,17 @@ describe("generate-types --wait: warehouse wait limit", () => {
       .mockResolvedValueOnce({ state: "STARTING" })
       .mockResolvedValue({ state: "RUNNING" });
 
-    await generateFromEntryPoint({
-      outFile,
-      queryFolder,
-      warehouseId: "wh-1",
-      mode: "blocking",
-      waitTimeoutMs: 5_000,
-    });
+    await expect(
+      settle(
+        generateFromEntryPoint({
+          outFile,
+          queryFolder,
+          warehouseId: "wh-1",
+          mode: "blocking",
+          waitTimeoutMs: 5_000,
+        }),
+      ),
+    ).resolves.toBeUndefined();
 
     // Preflight probe (STARTING), then the wait loop's poll that sees RUNNING.
     expect(mocks.getWarehouse).toHaveBeenCalledTimes(2);
@@ -167,13 +198,15 @@ describe("generate-types --wait: warehouse wait limit", () => {
 
     try {
       await expect(
-        generateFromEntryPoint({
-          outFile,
-          queryFolder,
-          warehouseId: "wh-stuck",
-          mode: "blocking",
-          waitTimeoutMs: 50,
-        }),
+        settle(
+          generateFromEntryPoint({
+            outFile,
+            queryFolder,
+            warehouseId: "wh-stuck",
+            mode: "blocking",
+            waitTimeoutMs: 50,
+          }),
+        ),
       ).resolves.toBeUndefined();
 
       const warnings = gateWarnings(warnSpy);
@@ -193,7 +226,7 @@ describe("generate-types --wait: warehouse wait limit", () => {
   test("limit reached without committed types: fails with warehouse, state, limit and the knob", async () => {
     stuck();
 
-    const error = await rejection(
+    const error = await settle(
       generateFromEntryPoint({
         outFile,
         queryFolder,
@@ -224,7 +257,7 @@ describe("generate-types --wait: warehouse wait limit", () => {
       .mockResolvedValueOnce({ state: "STOPPED" })
       .mockResolvedValue({ state: "STARTING" });
 
-    const error = await rejection(
+    const error = await settle(
       generateFromEntryPoint({
         outFile,
         queryFolder,
@@ -249,7 +282,7 @@ describe("generate-types --wait: warehouse wait limit", () => {
     vi.stubEnv("APPKIT_TYPEGEN_WAIT_TIMEOUT", "0.05");
 
     const started = Date.now();
-    const error = await rejection(
+    const error = await settle(
       generateFromEntryPoint({
         outFile,
         queryFolder,
@@ -258,6 +291,7 @@ describe("generate-types --wait: warehouse wait limit", () => {
       }),
     );
 
+    // Fake time: the 50ms limit plus at most one poll interval, not seconds.
     expect(Date.now() - started).toBeLessThan(2_000);
     expect((error as Error).message).toContain("after the 50ms wait limit");
   });
@@ -267,7 +301,7 @@ describe("generate-types --wait: warehouse wait limit", () => {
     writeMetricConfig();
 
     const started = Date.now();
-    const error = await rejection(
+    const error = await settle(
       generateFromEntryPoint({
         outFile,
         queryFolder,
@@ -280,7 +314,7 @@ describe("generate-types --wait: warehouse wait limit", () => {
     );
     const elapsed = Date.now() - started;
 
-    // One 300ms budget for the run, not 300ms per path.
+    // One 300ms budget for the run, not 300ms per path (fake time, so exact).
     expect(elapsed).toBeLessThan(550);
     expect(error).toBeInstanceOf(TypegenFatalError);
     const message = (error as Error).message;
@@ -300,27 +334,6 @@ describe("generate-types --wait: warehouse wait limit", () => {
  */
 describe("generate-types --wait: hung warehouse API requests", () => {
   const hang = () => new Promise(() => {});
-
-  /** Advance fake time in steps, letting real I/O run, until `promise` settles. */
-  async function settle(promise: Promise<unknown>): Promise<unknown> {
-    let done = false;
-    const result = promise.then(
-      (value) => {
-        done = true;
-        return value;
-      },
-      (error: unknown) => {
-        done = true;
-        return error;
-      },
-    );
-    for (let i = 0; i < 200 && !done; i++) {
-      await vi.advanceTimersByTimeAsync(250);
-      await new Promise((resolve) => setImmediate(resolve));
-    }
-    expect(done).toBe(true);
-    return result;
-  }
 
   function writeQuery() {
     fs.mkdirSync(queryFolder, { recursive: true });
