@@ -16,6 +16,8 @@ import { type ConfigPlan, planHasContent } from "./config-plan";
 export interface ConfigWriteResult {
   appYamlChanged: boolean;
   databricksYmlChanged: boolean;
+  /** True when the app has no databricks.yml, so bundle entries weren't written. */
+  databricksYmlSkipped: boolean;
   /** Env/binding names actually added (skipping ones already present). */
   added: string[];
   /** Resource types skipped for lack of a verified binding spec. */
@@ -179,14 +181,17 @@ export function bundleConflicts(
 function patchDatabricksYml(
   file: string,
   plan: ConfigPlan,
-): { added: string[]; changed: boolean } {
+): { added: string[]; changed: boolean; skipped: boolean } {
   if (
     plan.bundleVariables.length === 0 &&
     plan.resourceBindings.length === 0 &&
     !plan.userApiScopes?.length
   ) {
-    return { added: [], changed: false };
+    return { added: [], changed: false, skipped: false };
   }
+  // A UI-only app (e.g. from App Builder) has no bundle; creating one here
+  // would yield a partial bundle with no name or targets, which breaks deploy.
+  if (!fs.existsSync(file)) return { added: [], changed: false, skipped: true };
   const doc = loadDoc(file);
   const added: string[] = [];
 
@@ -254,7 +259,7 @@ function patchDatabricksYml(
 
   const changed = added.length > 0 || wroteTargetValue;
   if (changed) fs.writeFileSync(file, doc.toString());
-  return { added, changed };
+  return { added, changed, skipped: false };
 }
 
 /**
@@ -267,6 +272,7 @@ export function writeConfig(cwd: string, plan: ConfigPlan): ConfigWriteResult {
   return {
     appYamlChanged: appAdded.length > 0,
     databricksYmlChanged: db.changed,
+    databricksYmlSkipped: db.skipped,
     added: [...new Set([...appAdded, ...db.added])],
     unverifiedTypes: plan.unverifiedTypes,
   };
@@ -310,7 +316,12 @@ export function reportConfigWrite(result: ConfigWriteResult): void {
       `${pc.green("Updated deploy config:")} ${result.added.join(", ")}`,
     );
   }
-  if (result.unverifiedTypes.length > 0) {
+  if (result.databricksYmlSkipped) {
+    console.log(
+      pc.dim("  Skipped bundle entries: the app has no databricks.yml."),
+    );
+  }
+  if (result.unverifiedTypes.length > 0 && !result.databricksYmlSkipped) {
     console.warn(
       pc.yellow(
         `  No databricks.yml binding written for: ${result.unverifiedTypes.join(", ")}. ` +
