@@ -19,7 +19,11 @@ import type { ITelemetry } from "../../telemetry";
 import type { JsonValue } from "./crud/codecs";
 import { boundedJson, isPlainObject } from "./crud/contract";
 import { sendEmpty, sendJson } from "./crud/response";
-import { MAX_OPERATION_BODY_BYTES, MAX_QUERY_BYTES } from "./defaults";
+import {
+  MAX_OPERATION_BODY_BYTES,
+  MAX_OUTPUT_NODES,
+  MAX_QUERY_BYTES,
+} from "./defaults";
 import type { DatabaseExports } from "./entity-types";
 import { type ActorResolver, isSameOriginRequest } from "./operation-actor";
 import {
@@ -195,7 +199,7 @@ function schemaReply(method: OperationMethod, parse: Parse): Respond {
     if (parsed.data === undefined) return { status: 204 };
     let body: JsonValue;
     try {
-      body = boundedJson(parsed.data);
+      body = boundedJson(parsed.data, MAX_OUTPUT_NODES);
     } catch {
       throw new DatabasePluginError("INTERNAL", "read");
     }
