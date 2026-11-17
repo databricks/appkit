@@ -312,26 +312,24 @@ type Called =
   | { readonly ok: true; readonly value: unknown }
   | { readonly ok: false };
 
-/**
- * Run one authorization callback; a throw is recorded as a refusal. A
- * transient or internal database failure fails the request instead, so an
- * outage never reads as a missing or forbidden record.
- */
+function isDatabaseOutage(error: unknown): boolean {
+  return (
+    error instanceof DatabasePluginError &&
+    (error.category === "TRANSIENT" || error.category === "INTERNAL")
+  );
+}
+
 async function invoke(
   operation: CompiledOperation,
   callback: (...args: never[]) => unknown,
   argument: object,
+  onOutage: "fail" | "refuse",
 ): Promise<Called> {
   try {
     const value: unknown = await Reflect.apply(callback, undefined, [argument]);
     return { ok: true, value };
   } catch (error) {
-    if (
-      error instanceof DatabasePluginError &&
-      (error.category === "TRANSIENT" || error.category === "INTERNAL")
-    ) {
-      throw error;
-    }
+    if (onOutage === "fail" && isDatabaseOutage(error)) throw error;
     logger.warn(
       "Operation %s refused: its authorization threw %s",
       operation.name,
@@ -480,7 +478,7 @@ export function createOperationHandler(
     progress.stage = "allow";
     if (typeof authorize === "function") {
       enforce(
-        await invoke(operation, authorize, Object.freeze({ ...base })),
+        await invoke(operation, authorize, Object.freeze({ ...base }), "fail"),
         "FORBIDDEN",
       );
       return undefined;
@@ -491,6 +489,7 @@ export function createOperationHandler(
           operation,
           authorize.allow,
           Object.freeze({ ...base, resource: undefined }),
+          "fail",
         ),
         "FORBIDDEN",
       );
@@ -501,17 +500,20 @@ export function createOperationHandler(
       operation,
       authorize.resource,
       Object.freeze({ ...base }),
+      "fail",
     );
     // `0`, `false`, and `""` are resources; only null and undefined are missing.
     if (!found.ok || found.value === null || found.value === undefined) {
       throw new DatabasePluginError("NOT_FOUND", "read");
     }
     progress.stage = "allow";
+    // A missing record answered 404 above, so a 5xx here would reveal this one exists.
     enforce(
       await invoke(
         operation,
         authorize.allow,
         Object.freeze({ ...base, resource: found.value }),
+        "refuse",
       ),
       "NOT_FOUND",
     );

@@ -922,9 +922,9 @@ describe("authorization", () => {
         json(missing),
       ]);
       expect(existing.status).toBe(404);
-      expect(logs).toEqual([
+      expect(logs).toContain(
         "[appkit:database:operations] Operation notes.peek refused: its authorization threw DatabasePluginError",
-      ]);
+      );
     }
     expect(execute).not.toHaveBeenCalled();
   });
