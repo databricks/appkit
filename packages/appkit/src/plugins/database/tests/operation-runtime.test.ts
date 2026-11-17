@@ -208,9 +208,11 @@ async function boot(
   const server = http.createServer(app);
   servers.push(server);
   const url = await listen(server);
-  // A same-origin browser fetch names its page's origin on a write. HEAD
-  // carries it too, so routing rather than the origin check answers it.
   const sameOrigin = { origin: new URL(url).origin };
+  const browserHeaders = (method: string, headers: Record<string, string>) =>
+    method === "GET" || method === "HEAD"
+      ? headers
+      : { ...sameOrigin, ...headers };
 
   const call = (
     method: string,
@@ -219,7 +221,7 @@ async function boot(
     headers: Record<string, string> = {},
   ): Promise<Reply> => {
     const target = new URL(`/api/database/operations/${name}`, url);
-    const sent = method === "GET" ? headers : { ...sameOrigin, ...headers };
+    const sent = browserHeaders(method, headers);
     if (method === "GET" || method === "HEAD") {
       if (input !== undefined) {
         target.searchParams.set("input", JSON.stringify(input));
@@ -1655,6 +1657,11 @@ describe("browser origin", () => {
 
     const read = await send(operation("me.get"), { headers: asAda });
     expect([read.status, json(read)]).toEqual([200, { id: SENTINEL.actorId }]);
+    const head = await send(operation("me.get"), {
+      method: "HEAD",
+      headers: asAda,
+    });
+    expect(head.status).toBe(404);
     const browserWrite = await app.call(
       "DELETE",
       "notes.purge",
