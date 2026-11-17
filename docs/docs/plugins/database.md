@@ -635,8 +635,9 @@ in your own component state needs its own request-identity and refresh handling.
 ### Session changes
 
 Every answer names its caller. When an answer shows that a different user is
-signed in, or a 401 shows that the session ended, every query drops its data
-and asks again, and every mutation returns to idle. An answer that arrives
+signed in, that someone signed in after a 401, or a 401 shows that the session
+ended, every query drops its data and asks again, and every mutation returns to
+idle. The page's first answer only records who is signed in. An answer that arrives
 afterwards for the earlier caller fails with `SESSION_CHANGED` instead of
 showing that caller's data.
 
