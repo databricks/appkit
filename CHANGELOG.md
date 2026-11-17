@@ -196,6 +196,97 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+## [0.97.2](https://github.com/databricks/appkit/compare/v0.97.1...v0.97.2) (2026-11-17)
+
+### shared
+
+* **shared:** don't create databricks.yml in plugin add when the app has none ([#740](https://github.com/databricks/appkit/issues/740)) ([c6cefc0](https://github.com/databricks/appkit/commit/c6cefc068a1dbac42773e45f28e5fcc43dd60188))
+
+
+## [0.97.1](https://github.com/databricks/appkit/compare/v0.97.0...v0.97.1) (2026-11-16)
+
+### shared
+
+* **shared:** end workspace retry waits when the request aborts ([#738](https://github.com/databricks/appkit/issues/738)) ([a535cc9](https://github.com/databricks/appkit/commit/a535cc927ac58d0d03279b21c4fdbbe776b572ee))
+
+
+## [0.97.0](https://github.com/databricks/appkit/compare/v0.96.0...v0.97.0) (2026-11-16)
+
+### appkit
+
+* **appkit:** define named database operations and policies ([#688](https://github.com/databricks/appkit/issues/688)) ([cc2f276](https://github.com/databricks/appkit/commit/cc2f276cd30da7aa10dc8263c635d3590d94e7fd))
+
+
+## [0.96.0](https://github.com/databricks/appkit/compare/v0.95.0...v0.96.0) (2026-11-16)
+
+### appkit
+
+* **appkit:** configurable time limit for generate-types --wait ([#735](https://github.com/databricks/appkit/issues/735)) ([15dbf09](https://github.com/databricks/appkit/commit/15dbf0976d722691e33f91848fac2f8a8b7fcf84))
+
+
+## [0.95.0](https://github.com/databricks/appkit/compare/v0.94.1...v0.95.0) (2026-11-13)
+
+### appkit
+
+* **appkit:** support Genie agent mode with reasoning and visualizations ([#732](https://github.com/databricks/appkit/issues/732)) ([2248be0](https://github.com/databricks/appkit/commit/2248be03c9eaab1cb49939b57b8288bba4a9633f))
+
+
+## [0.94.1](https://github.com/databricks/appkit/compare/v0.94.0...v0.94.1) (2026-11-12)
+
+### appkit
+
+* **appkit:** return numbers and booleans from analytics queries ([#709](https://github.com/databricks/appkit/issues/709)) ([bc36740](https://github.com/databricks/appkit/commit/bc36740959d7328f14b914969593fa14d3ad3710))
+
+
+## [0.94.0](https://github.com/databricks/appkit/compare/v0.93.0...v0.94.0) (2026-11-11)
+
+### docs
+
+* **docs:** look up the API by name with `appkit docs NAME...` ([#727](https://github.com/databricks/appkit/issues/727)) ([ac4263a](https://github.com/databricks/appkit/commit/ac4263ad729a9ab96ab033c04495ef1c1f091155))
+
+
+## [0.93.0](https://github.com/databricks/appkit/compare/v0.92.0...v0.93.0) (2026-11-11)
+
+### appkit
+
+* **appkit:** add dev-only design pages plugin and ui-only template ([#680](https://github.com/databricks/appkit/issues/680)) ([3fba340](https://github.com/databricks/appkit/commit/3fba3405dd4031df9f57b43f204fc10787c578bc))
+* **appkit:** appkit plugin add with --auth-mode and --set resource config ([#679](https://github.com/databricks/appkit/issues/679)) ([e037300](https://github.com/databricks/appkit/commit/e03730051787fc83942fea9521364c913290fc37))
+
+
+## [0.92.0](https://github.com/databricks/appkit/compare/v0.91.3...v0.92.0) (2026-11-11)
+
+### appkit
+
+* **appkit:** add model_service resource and use it in the agents plugin ([#705](https://github.com/databricks/appkit/issues/705)) ([82869f3](https://github.com/databricks/appkit/commit/82869f32556f33335d7bcd05cc5f1e2b6b9d26df))
+
+
+## [0.91.3](https://github.com/databricks/appkit/compare/v0.91.2...v0.91.3) (2026-11-10)
+
+### deps
+
+* **deps:** bump echarts, yaml and express pins with moderate advisories ([#724](https://github.com/databricks/appkit/issues/724)) ([2e51bc1](https://github.com/databricks/appkit/commit/2e51bc1d2bb6d743e98979af388e0ba7c4395ba5))
+
+
 ## [0.91.2](https://github.com/databricks/appkit/compare/v0.91.1...v0.91.2) (2026-11-09)
 
 ### deps

@@ -60,10 +60,10 @@ This Software contains code from the following open source projects:
 | [dompurify](https://www.npmjs.com/package/dompurify) | 3.4.17 | (MPL-2.0 OR Apache-2.0) | https://github.com/cure53/DOMPurify |
 | [dotenv](https://www.npmjs.com/package/dotenv) | 16.6.1 | BSD-2-Clause | https://github.com/motdotla/dotenv#readme |
 | [drizzle-orm](https://www.npmjs.com/package/drizzle-orm) | 0.45.2 | Apache-2.0 | https://orm.drizzle.team |
-| [echarts](https://www.npmjs.com/package/echarts) | 6.0.0 | Apache-2.0 | https://echarts.apache.org |
+| [echarts](https://www.npmjs.com/package/echarts) | 6.1.0 | Apache-2.0 | https://echarts.apache.org |
 | [echarts-for-react](https://www.npmjs.com/package/echarts-for-react) | 3.0.5 | MIT | https://github.com/hustcc/echarts-for-react |
 | [embla-carousel-react](https://www.npmjs.com/package/embla-carousel-react) | 8.6.0 | MIT | https://www.embla-carousel.com |
-| [express](https://www.npmjs.com/package/express) | 4.22.2 | MIT | http://expressjs.com/ |
+| [express](https://www.npmjs.com/package/express) | 4.22.3 | MIT | http://expressjs.com/ |
 | [get-port](https://www.npmjs.com/package/get-port) | 7.2.0 | MIT | https://github.com/sindresorhus/get-port#readme |
 | [input-otp](https://www.npmjs.com/package/input-otp) | 1.4.2 | MIT | https://input-otp.rodz.dev/ |
 | [jiti](https://www.npmjs.com/package/jiti) | 1.21.7, 2.6.1 | MIT | https://github.com/unjs/jiti#readme |
@@ -83,6 +83,6 @@ This Software contains code from the following open source projects:
 | [tailwind-merge](https://www.npmjs.com/package/tailwind-merge) | 3.4.0 | MIT | https://github.com/dcastil/tailwind-merge |
 | [vaul](https://www.npmjs.com/package/vaul) | 1.1.2 | MIT | https://vaul.emilkowal.ski/ |
 | [ws](https://www.npmjs.com/package/ws) | 7.5.10, 8.21.0 | MIT | https://github.com/websockets/ws |
-| [yaml](https://www.npmjs.com/package/yaml) | 2.8.2, 2.9.1 | ISC | https://eemeli.org/yaml/ |
+| [yaml](https://www.npmjs.com/package/yaml) | 2.9.1 | ISC | https://eemeli.org/yaml/ |
 | [zod](https://www.npmjs.com/package/zod) | 4.6.7 | MIT | https://zod.dev |
 

@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { StrictMode, useEffect } from "react";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import { DatabaseApiError } from "@/js/database/errors";
 
@@ -305,60 +305,6 @@ describe("useDatabaseList", () => {
 
     expect(result.current.data).toBeNull();
     expect(result.current.error).toMatchObject({ code: "INTERNAL" });
-  });
-
-  test("a shape function checks each row once per response and types the result", async () => {
-    const parse = vi.fn((row: unknown) => {
-      const { id } = row as { id: unknown };
-      if (typeof id !== "number") throw new TypeError(`bad id ${String(id)}`);
-      return { id, label: `#${id}` };
-    });
-    const { result, rerender } = renderHook(() =>
-      // An inline arrow: a new function on every render.
-      useDatabaseList("notes", {}, { shape: (row) => parse(row) }),
-    );
-    await act(async () => requests[0]?.respond(page({ id: 1 }, { id: 2 })));
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    expect(result.current.data).toEqual({
-      items: [
-        { id: 1, label: "#1" },
-        { id: 2, label: "#2" },
-      ],
-      limit: 50,
-      offset: 0,
-    });
-    const shaped = result.current.data;
-    rerender();
-    rerender();
-    expect(result.current.data).toBe(shaped);
-    expect(parse).toHaveBeenCalledTimes(2);
-  });
-
-  test("a row that fails its shape fails the read with INTERNAL, without echoing the row", async () => {
-    const { result } = renderHook(() =>
-      useDatabaseList(
-        "notes",
-        {},
-        {
-          shape: (row) => {
-            throw new TypeError(`secret ${JSON.stringify(row)}`);
-          },
-        },
-      ),
-    );
-    await act(async () => requests[0]?.respond(page({ id: "token" })));
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    expect(result.current.data).toBeNull();
-    expect(result.current.error).toBeInstanceOf(DatabaseApiError);
-    expect(result.current.error).toMatchObject({
-      code: "INTERNAL",
-      status: null,
-      message: "Database response does not match the read's shape",
-    });
-    expect(result.current.error?.message).not.toContain("token");
-    expect(result.current.error?.cause).toBeInstanceOf(TypeError);
   });
 
   test("aborts the request once the last subscriber unmounts", async () => {

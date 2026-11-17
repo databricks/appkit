@@ -32,7 +32,6 @@ function decodeWriteValue(
   if (raw === null) return column.meta.notNull ? undefined : null;
   if (column.meta.kind !== "json") return column.decode(raw);
   try {
-    // JSON columns accept any JSON the response budget can carry back.
     return boundedJson(raw);
   } catch {
     return undefined;

@@ -1349,7 +1349,21 @@ describe("adapterFromModelString", () => {
     expect(serving).not.toHaveBeenCalled();
   });
 
-  test("routes non-`system` names to Model Serving", async () => {
+  test("routes user model service names to the AI Gateway", async () => {
+    const gateway = vi
+      .spyOn(DatabricksAdapter, "fromAiGateway")
+      .mockResolvedValue({} as unknown as DatabricksAdapter);
+    const serving = vi
+      .spyOn(DatabricksAdapter, "fromModelServing")
+      .mockResolvedValue({} as unknown as DatabricksAdapter);
+
+    await adapterFromModelString("main.default.my-chat");
+
+    expect(gateway).toHaveBeenCalledWith({ model: "main.default.my-chat" });
+    expect(serving).not.toHaveBeenCalled();
+  });
+
+  test("routes non-dotted names to Model Serving", async () => {
     const gateway = vi
       .spyOn(DatabricksAdapter, "fromAiGateway")
       .mockResolvedValue({} as unknown as DatabricksAdapter);

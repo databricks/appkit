@@ -286,7 +286,7 @@ Editing `definitions.json` is picked up on the next request — no server restar
 
 ### useAnalyticsQuery
 
-React hook that subscribes to an analytics query over SSE and returns its latest result.
+React hook that subscribes to an analytics query over SSE and returns its latest result. Wrap `parameters` in `useMemo` (see [Memoization](#memoization)): the query re-runs whenever the parameters object is a new reference.
 
 ```ts
 import { useAnalyticsQuery } from "@databricks/appkit-ui/react";
@@ -693,6 +693,13 @@ function RevenueChart() {
 When multiple series share one value axis, its ticks use the first `yKey`; each tooltip uses the matching series field.
 
 The `selected` prop adds declarative emphasis only to bar, pie, and donut charts. Line, area, scatter, heatmap, and radar charts ignore it because category-selection semantics are not defined for those chart types.
+
+**Chart size.** By default a chart fills its container's height, so it fits the card or grid cell it's placed in, and is at least 160px tall when the container's height comes from its content. In a fixed-height card, give the chart's parent the remaining space (e.g. `className="flex-1 min-h-0"` on `CardContent` in a `flex flex-col` card). Pass `height` (pixels) for an exact size instead:
+
+```tsx
+<BarChart data={rows} xKey="city" yKey="trips" />              {/* fills its container */}
+<BarChart data={rows} xKey="city" yKey="trips" height={208} /> {/* exactly 208px */}
+```
 
 **[Plotly](https://plotly.com/javascript/)** — pass the numeric specifier as `tickformat` and the literal currency symbol as `tickprefix`. Keeping them separate is necessary because d3's `$` marker is locale-driven and cannot represent arbitrary symbols:
 

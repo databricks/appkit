@@ -1,3 +1,5 @@
+import type { DatabaseApiEntry } from "shared";
+
 /** The shape of a single generated registry entry. */
 export interface DatabaseRegistryEntry {
   /** Full server-side row (includes private columns). */
@@ -14,6 +16,8 @@ export interface DatabaseRegistryEntry {
   includes: Record<string, unknown>;
   /** Literal capability used to omit keyed methods from keyless entities. */
   hasPrimaryKey: boolean;
+  /** What the generated HTTP routes accept: public inputs, filters, order, and key. */
+  api: DatabaseApiEntry["api"];
 }
 
 /**

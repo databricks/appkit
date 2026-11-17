@@ -69,9 +69,15 @@ vi.mock("./spawn-lock.js", () => ({
   releaseSpawnLock,
   getSpawnLockPath,
   SPAWN_LOCK_STALE_MS: 360_000,
+  spawnLockStaleMsFor: (ms?: number) =>
+    ms === undefined ? 360_000 : Math.max(360_000, ms + 60_000),
 }));
 
-import { generateTypesCommand, resolveTypegenMode } from "./generate-types";
+import {
+  generateTypesCommand,
+  parseWaitTimeoutSeconds,
+  resolveTypegenMode,
+} from "./generate-types";
 
 /**
  * Drive the real commander command the way the bin does, so argv parsing
@@ -103,6 +109,20 @@ describe("resolveTypegenMode (generate-types --wait)", () => {
   });
 });
 
+describe("parseWaitTimeoutSeconds (--wait-timeout)", () => {
+  test("accepts whole and fractional seconds, and 0", () => {
+    expect(parseWaitTimeoutSeconds("300")).toBe(300);
+    expect(parseWaitTimeoutSeconds("0.5")).toBe(0.5);
+    expect(parseWaitTimeoutSeconds("0")).toBe(0);
+  });
+
+  test.each(["", "abc", "-1", "Infinity"])("rejects %j", (value) => {
+    expect(() => parseWaitTimeoutSeconds(value)).toThrow(
+      "Expected a number of seconds",
+    );
+  });
+});
+
 describe("generate-types foreground spawn orchestration", () => {
   let tmpRoot: string;
   let consoleLog: Mock;
@@ -112,6 +132,10 @@ describe("generate-types foreground spawn orchestration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     acquireSpawnLock.mockReturnValue(true);
+    // The command is a module singleton and commander keeps parsed option
+    // values between parseAsync calls; clear the ones these tests vary.
+    generateTypesCommand.setOptionValue("wait", undefined);
+    generateTypesCommand.setOptionValue("waitTimeout", undefined);
 
     // A real temp project root with config/queries and config/metric-views
     // folders so the analytics + metric generate paths run.
@@ -240,10 +264,46 @@ describe("generate-types foreground spawn orchestration", () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
+  test("--wait-timeout <seconds> is passed to the generator in milliseconds", async () => {
+    await runCli([tmpRoot, "--wait", "--wait-timeout", "120"]);
+
+    expect(generateFromEntryPoint).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "blocking", waitTimeoutMs: 120_000 }),
+    );
+  });
+
+  test("without --wait-timeout the generator resolves the limit itself", async () => {
+    await runCli([tmpRoot, "--wait"]);
+
+    expect(generateFromEntryPoint).toHaveBeenCalledWith(
+      expect.objectContaining({ waitTimeoutMs: undefined }),
+    );
+  });
+
+  test("a long --wait-timeout stretches the worker lock's staleness window", async () => {
+    await runCli([tmpRoot, "--wait-timeout", "900"]);
+
+    expect(acquireSpawnLock).toHaveBeenCalledWith(
+      getSpawnLockPath(tmpRoot),
+      960_000,
+    );
+  });
+
+  test("the background worker inherits --wait-timeout", async () => {
+    await runCli([tmpRoot, "--wait-timeout", "45"]);
+
+    expect(spawn).toHaveBeenCalledTimes(1);
+    const argv = spawn.mock.calls[0][1] as string[];
+    const at = argv.indexOf("--wait-timeout");
+    expect(at).toBeGreaterThan(-1);
+    expect(argv[at + 1]).toBe("45");
+  });
+
   test("worker invocation (--worker-lock): runs blocking generate, releases lock, does NOT spawn", async () => {
     const lockPath = getSpawnLockPath(tmpRoot);
 
-    await runCli([tmpRoot, "--worker-lock", lockPath]);
+    // Same flags spawnTypegenWorker passes: a worker is always `--wait`.
+    await runCli([tmpRoot, "--wait", "--worker-lock", lockPath]);
 
     // A worker is always blocking — it does the real DESCRIBE lifecycle.
     expect(generateFromEntryPoint).toHaveBeenCalledWith(

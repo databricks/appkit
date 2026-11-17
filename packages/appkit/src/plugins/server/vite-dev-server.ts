@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type express from "express";
-import type { ViteDevServer as ViteDevServerType } from "vite";
+import type { PluginOption, ViteDevServer as ViteDevServerType } from "vite";
 
 import { ServerError } from "../../errors";
 import { createLogger } from "../../logging/logger";
@@ -35,6 +35,7 @@ export class ViteDevServer extends BaseServer {
     app: express.Application,
     endpoints: PluginEndpoints = {},
     pluginConfigs: PluginClientConfigs = {},
+    private readonly extraPlugins: PluginOption[] = [],
   ) {
     super(app, endpoints, pluginConfigs);
     this.vite = null;
@@ -90,6 +91,7 @@ export class ViteDevServer extends BaseServer {
         typecheckPlugin({ projectRoot }),
         appKitTypesPlugin(),
         appKitServingTypesPlugin(),
+        ...this.extraPlugins,
       ],
       appType: "custom",
     };

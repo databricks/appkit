@@ -239,6 +239,8 @@
     "**/.next/**",
     "**/coverage/**",
     "client/dist/**",
-    "**/.databricks/**"
+    "**/.databricks/**",
+    // Written by `appkit generate-types` and the Vite plugin; edits are overwritten on the next run
+    "shared/appkit-types/**"
   ]
 }

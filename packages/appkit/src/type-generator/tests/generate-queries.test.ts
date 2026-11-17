@@ -803,7 +803,10 @@ describe("generateQueriesFromDescribe", () => {
 
         // The stopped warehouse was started, then described once it came up.
         expect(mocks.startWarehouse).toHaveBeenCalledTimes(1);
-        expect(mocks.startWarehouse).toHaveBeenCalledWith({ id: "wh-123" });
+        expect(mocks.startWarehouse).toHaveBeenCalledWith(
+          { id: "wh-123" },
+          { signal: expect.any(AbortSignal) },
+        );
         expect(mocks.executeStatement).toHaveBeenCalledTimes(1);
         expect(schemas).toHaveLength(1);
         expect(schemas[0].name).toBe("a");

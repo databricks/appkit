@@ -11,6 +11,8 @@ Integrates [Databricks AI/BI Genie](https://docs.databricks.com/en/genie/index.h
 - SSE streaming with real-time status updates
 - Conversation history replay with automatic reconnection
 - Query result attachment fetching
+- Genie's charts, served as PNG images
+- Agent mode: the agent's reasoning, streamed as it works, and the charts it draws
 - On-behalf-of (OBO) user execution
 
 ## Basic usage
@@ -31,7 +33,8 @@ await createApp({
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `spaces` | `Record<string, string>` | `{ default: DATABRICKS_GENIE_SPACE_ID }` | Map of alias names to Genie Space IDs |
-| `timeout` | `number` | `120000` | Polling timeout in ms. Set to `0` for indefinite |
+| `agents` | `Record<string, string>` | `{}` | Map of alias names to Genie Space IDs used in [agent mode](#agent-mode) |
+| `timeout` | `number` | `120000` | Timeout in ms for a chat message or an agent turn. Set to `0` for indefinite |
 
 ### Space aliases
 
@@ -47,6 +50,26 @@ genie({
 ```
 
 If you omit `spaces`, the plugin reads `DATABRICKS_GENIE_SPACE_ID` from the environment and registers it under the `default` alias.
+
+### Agent mode
+
+Genie agent mode answers like an agent: it reasons about the question, runs queries, and draws charts. Register a space under `agents` instead of `spaces` to use it in agent mode. Any Genie space can be used as an agent:
+
+```ts
+genie({
+  spaces: { sales: "01ABCDEF12345678" },
+  agents: { analyst: "01ABCDEF12345678" },
+});
+```
+
+An agent alias works with the same routes, the same `sendMessage` and `getConversation` exports, and the same `<GenieChat alias="analyst" />` component as a chat space. The difference is in what it returns:
+
+- `reasoning` events stream the agent's reasoning while it works. The completed message carries the steps in `reasoning`.
+- Visualizations are always turned on. The charts the agent draws arrive as `viz` attachments, like a chat space's charts (see [Get a visualization](#get-a-visualization)).
+
+An alias can be either a chat space or an agent, not both. To use one space both ways, give it two aliases, as in the example above. Conversations don't carry over between the two modes.
+
+Agent mode uses the Genie agent API (`/api/2.0/genie/agents/{id}/responses` and `/api/2.0/genie/agents/{id}/conversations/{id}/items`), which the Databricks SDK doesn't cover yet.
 
 ### Finding your Genie Space ID
 
@@ -70,6 +93,7 @@ The genie plugin exposes these endpoints (mounted under `/api/genie`):
 
 - `POST /api/genie/:alias/messages` — Send a message to a Genie space (SSE stream)
 - `GET /api/genie/:alias/conversations/:conversationId` — Replay conversation history (SSE stream)
+- `GET /api/genie/:alias/conversations/:conversationId/messages/:messageId/attachments/:attachmentId/visualization` — Download a chart as a PNG
 
 ### Send a message
 
@@ -89,6 +113,7 @@ The response is an SSE stream that emits these event types:
 |------------|-------------|
 | `message_start` | Conversation and message IDs assigned |
 | `status` | Processing status updates (e.g. `ASKING_AI`, `EXECUTING_QUERY`) |
+| `reasoning` | Agent mode only: one step of the agent's reasoning |
 | `message_result` | Final message with text and query attachments |
 | `query_result` | Tabular data for a query attachment |
 | `error` | Error details |
@@ -100,6 +125,16 @@ GET /api/genie/:alias/conversations/:conversationId
 ```
 
 Returns an SSE stream of `message_result` and `query_result` events for all messages in the conversation.
+
+### Get a visualization
+
+```
+GET /api/genie/:alias/conversations/:conversationId/messages/:messageId/attachments/:attachmentId/visualization
+```
+
+Returns the PNG Genie rendered for a `viz` attachment, so it can be used directly as an `<img>` source. Use the `attachmentId` of the `viz` attachment, not its `queryAttachmentId`. The message must be completed.
+
+Chat spaces and agents both return `viz` attachments when Genie draws a chart. For a query with a `viz` attachment, `GenieChat` shows Genie's chart in place of the chart it would otherwise infer from the query result.
 
 ## Programmatic access
 
