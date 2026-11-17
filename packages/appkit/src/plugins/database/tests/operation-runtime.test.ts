@@ -1099,6 +1099,30 @@ describe("execution and output", () => {
     ]);
   });
 
+  test("a list far above the input node limit answers whole while its bytes fit", async () => {
+    const comments = Array.from({ length: 2500 }, (_, index) => ({
+      id: index,
+      author: `author-${index}`,
+      body: `comment body ${index}`,
+    }));
+    const app = await boot([
+      define({
+        name: "comments.list",
+        method: "GET",
+        output: z.array(
+          z.object({ id: z.number(), author: z.string(), body: z.string() }),
+        ),
+        authorize: () => true,
+        execute: () => comments,
+      }),
+    ]);
+
+    const reply = await app.call("GET", "comments.list", undefined, asAda);
+
+    expect(reply.status).toBe(200);
+    expect(json(reply)).toEqual(comments);
+  });
+
   test.each([
     [
       "an answer above the response limit",
