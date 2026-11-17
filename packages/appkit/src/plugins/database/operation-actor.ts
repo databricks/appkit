@@ -26,6 +26,7 @@ const MAX_VERIFIED_ACTORS = 1000;
 /** An OAuth access token is a few kilobytes; a longer header is not one. */
 const MAX_TOKEN_BYTES = 16 * 1024;
 const MAX_ORIGIN_LENGTH = 2048;
+const READ_METHODS: ReadonlySet<string> = new Set(["GET", "HEAD"]);
 
 /** The signed-in developer the local OBO loader verified with the workspace. */
 type LocalIdentity = Awaited<
@@ -146,7 +147,6 @@ async function verifyToken(
     });
     return actorFromUser(await response.json());
   } catch (error) {
-    // An expired token is routine; a refused one can mean a missing scope.
     if (error instanceof ApiError && error.statusCode === 401) {
       logger.debug(
         "Workspace rejected the forwarded token (401); answering 401",
@@ -259,9 +259,9 @@ function forwardedHost(req: Request): string | undefined {
  * Whether a browser could have sent this request only from the app's own
  * pages. Fetch metadata decides when present; reads also accept a direct
  * navigation. Without it, an `Origin` must name the host the request reached.
- * A read with neither header did not come from a browser page. A write must
- * carry one: every browser sends `Origin` on a write, so only an old browser
- * or a non-browser client omits both.
+ * A write must carry fetch metadata or an `Origin`: every browser sends
+ * `Origin` on a write, so only an old browser or a non-browser client omits
+ * both.
  */
 export function isSameOriginRequest(req: Request): boolean {
   const site = req.headers["sec-fetch-site"];
@@ -269,7 +269,7 @@ export function isSameOriginRequest(req: Request): boolean {
     return site === "same-origin" || (site === "none" && req.method === "GET");
   }
   const origin = req.headers.origin;
-  if (origin === undefined) return req.method === "GET";
+  if (origin === undefined) return READ_METHODS.has(req.method);
   if (origin.length > MAX_ORIGIN_LENGTH) return false;
   try {
     const url = new URL(origin);
