@@ -110,10 +110,19 @@ import { schema } from "../config/database/schema";
 database({ schema });
 ```
 
-An explicit schema skips schema file discovery. Operations in the conventional
-directory still load unless `routes: false` disables them. With an explicit
-[`routes` registry](#serve-the-operations), a `schema` passed beside it must be
-the same object the registry loads, or setup fails.
+An explicit schema skips schema file discovery. Operations in
+`server/database/routes/` still load unless `routes: false` disables them. They
+still need `config/database/schema.ts`, because type generation and the
+generated registry import it. With a different layout, re-export the schema
+from that file:
+
+```ts
+// config/database/schema.ts
+export { schema } from "../../server/db/schema";
+```
+
+With an explicit [`routes` registry](#serve-the-operations), a `schema` passed
+beside it must be the same object the registry loads, or setup fails.
 
 ## Connection pool
 
