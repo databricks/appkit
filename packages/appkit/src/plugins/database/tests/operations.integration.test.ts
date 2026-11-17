@@ -595,22 +595,23 @@ describe("a database plugin with routes", () => {
       "x-forwarded-user": SENTINEL.actorId,
       "x-forwarded-email": SENTINEL.email,
     };
+    const page = { "sec-fetch-site": "same-origin" };
     const create = "/api/database/operations/notes.create";
     const unknown = "/api/database/operations/notes.missing";
 
     const replies = [
-      await request("POST", create, { body }),
-      await request("POST", unknown, { body }),
-      await request("POST", create, { body: malformed }),
-      await request("POST", unknown, { body: malformed }),
-      await request("POST", create, { body, headers: forged }),
+      await request("POST", create, { body, headers: page }),
+      await request("POST", unknown, { body, headers: page }),
+      await request("POST", create, { body: malformed, headers: page }),
+      await request("POST", unknown, { body: malformed, headers: page }),
+      await request("POST", create, { body, headers: { ...page, ...forged } }),
       await request("POST", create, {
         body,
-        headers: { "x-forwarded-access-token": "token-forged" },
+        headers: { ...page, "x-forwarded-access-token": "token-forged" },
       }),
       await request("POST", create, {
         body,
-        headers: { "x-forwarded-access-token": "token-sp" },
+        headers: { ...page, "x-forwarded-access-token": "token-sp" },
       }),
       await request(
         "GET",
@@ -638,12 +639,13 @@ describe("a database plugin with routes", () => {
     // The control: once the caller is verified, an unknown name is refused
     // before its body is read, and a known name parses its own body.
     expect(
-      (await request("POST", unknown, { body, headers: asAda })).status,
+      (await request("POST", unknown, { body, headers: { ...page, ...asAda } }))
+        .status,
     ).toBe(404);
     expect(bodyWasParsed()).toBe(false);
     const rejected = await request("POST", create, {
       body: malformed,
-      headers: asAda,
+      headers: { ...page, ...asAda },
     });
     expect(rejected.status).toBe(400);
     expect(rejected.headers.get("x-appkit-database-actor")).toBe(
@@ -651,7 +653,8 @@ describe("a database plugin with routes", () => {
     );
     expect(bodyWasParsed()).toBe(true);
     expect(
-      (await request("POST", create, { body, headers: asAda })).status,
+      (await request("POST", create, { body, headers: { ...page, ...asAda } }))
+        .status,
     ).toBe(201);
     expect(ran.create).toHaveBeenCalledTimes(1);
   });
@@ -668,7 +671,11 @@ describe("a database plugin with routes", () => {
     const write = (headers: Record<string, string>) =>
       send(url, {
         method: "POST",
-        headers: { "content-type": "application/json", ...headers },
+        headers: {
+          "content-type": "application/json",
+          "sec-fetch-site": "same-origin",
+          ...headers,
+        },
         body: JSON.stringify({ title: SENTINEL.input }),
         absoluteForm: true,
       });
