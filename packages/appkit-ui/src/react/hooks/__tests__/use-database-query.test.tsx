@@ -367,5 +367,37 @@ describe("useDatabaseQuery", () => {
         });
       }
     });
+
+    test("signing in after a 401 restarts the queries that report UNAUTHENTICATED", async () => {
+      const notes = renderQuery({ input: { id: 1 } });
+      const other = renderQuery({ input: { id: 2 } });
+      await answer(server.request(0), { id: 1 });
+      await answer(server.request(1), { id: 2 });
+      act(() => other.result.current.refetch());
+      await answer(server.request(2), { error: "Sign in" }, { status: 401 });
+      for (const request of server.requests.slice(3)) {
+        await answer(request, { error: "Sign in" }, { status: 401 });
+      }
+      expect(notes.result.current.error).toMatchObject({
+        code: "UNAUTHENTICATED",
+      });
+
+      act(() => other.result.current.refetch());
+      await answer(server.request(5), { id: 2 }, { actor: "actor-b" });
+      const restarted = server.requests
+        .slice(6)
+        .find((request) => (request.input as { id: number }).id === 1);
+      expect(restarted).toBeDefined();
+      await answer(
+        restarted as PendingRequest,
+        { id: 1 },
+        { actor: "actor-b" },
+      );
+      expect(notes.result.current).toMatchObject({
+        data: { id: 1 },
+        isLoading: false,
+        error: null,
+      });
+    });
   });
 });

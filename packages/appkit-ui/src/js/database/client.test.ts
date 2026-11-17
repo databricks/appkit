@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { databaseApi as typedApi, type DatabaseRequestOptions } from "./client";
 import { DatabaseApiError } from "./errors";
+import { subscribeDatabaseSession } from "./session";
 import {
   flush,
   mockDatabaseFetch,
@@ -628,6 +629,58 @@ describe("session isolation", () => {
     const after = databaseApi.execute("notes.get", { id: 3 });
     server.request(4).respond({ id: 3 }, { actor: "actor-a" });
     await expect(after).resolves.toEqual({ id: 3 });
+  });
+
+  test.each([
+    ["an actor", { actor: "actor-a" }, "answered"],
+    ["a 401", { status: 401, actor: null }, "UNAUTHENTICATED"],
+  ])(
+    "the page's first reply, %s, opens no new session",
+    async (_case, options, settled) => {
+      const opened = vi.fn();
+      const unsubscribe = subscribeDatabaseSession(opened);
+      const replies = [1, 2].map((id) =>
+        databaseApi.execute("notes.get", { id }).then(
+          () => "answered",
+          (error: DatabaseApiError) => error.code,
+        ),
+      );
+
+      server.request(0).respond({ id: 1 }, options);
+      server.request(1).respond({ id: 2 }, options);
+      // A request sent before the first reply still belongs to its session.
+      await expect(Promise.all(replies)).resolves.toEqual([settled, settled]);
+      expect(opened).not.toHaveBeenCalled();
+      unsubscribe();
+    },
+  );
+
+  test("a sign-in after a 401 opens a new session and refuses a 401 body still arriving", async () => {
+    await signIn("actor-a");
+    const expired = databaseApi.execute("notes.get", { id: 1 });
+    server
+      .request(1)
+      .respond({ error: "Sign in" }, { status: 401, actor: null });
+    await expect(expired).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
+
+    const signedOut = databaseApi.execute("notes.get", { id: 2 });
+    const { response, finish } = streamingReply('{"error":"Sign', ' in"}', {
+      status: 401,
+      actor: null,
+    });
+    server.request(2).respondWith(response);
+    await flush();
+
+    const opened = vi.fn();
+    const unsubscribe = subscribeDatabaseSession(opened);
+    const signedIn = databaseApi.execute("notes.get", { id: 3 });
+    server.request(3).respond({ id: 3 }, { actor: "actor-b" });
+    await expect(signedIn).resolves.toEqual({ id: 3 });
+    unsubscribe();
+
+    finish();
+    await expect(signedOut).rejects.toMatchObject({ code: "SESSION_CHANGED" });
+    expect(opened).toHaveBeenCalledTimes(1);
   });
 
   test("a late 401 sent before an authenticated reply does not end the session", async () => {
