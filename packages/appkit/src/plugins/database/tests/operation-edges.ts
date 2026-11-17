@@ -138,7 +138,13 @@ export async function startWorkspace() {
     }
     const user = users[authorization];
     const status =
-      authorization === "Bearer token-outage" ? 500 : user ? 200 : 401;
+      authorization === "Bearer token-outage"
+        ? 500
+        : authorization === "Bearer token-unscoped"
+          ? 403
+          : user
+            ? 200
+            : 401;
     const answer = () => {
       res.writeHead(status, { "content-type": "application/json" });
       res.end(

@@ -11,6 +11,7 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { mockServiceContext } from "@tools/test-helpers";
 import express from "express";
+import { disable as disableDebug, enable as enableDebug } from "obug";
 import {
   afterAll,
   afterEach,
@@ -509,6 +510,49 @@ describe("authentication comes first", () => {
     expect(reply.status).toBe(401);
     expect(reply.headers["x-appkit-database-actor"]).toBeUndefined();
     expect(workspace.authorizations).toEqual(["Bearer token-sp-app"]);
+  });
+
+  test("logs a token the workspace refuses, as a warning only when it may lack a scope", async () => {
+    const app = await boot([whoami]);
+    const stderr: string[] = [];
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      stderr.push(String(chunk));
+      return true;
+    });
+    const namespaces = disableDebug();
+    enableDebug("appkit:database:operations");
+    logs.length = 0;
+
+    let statuses: number[];
+    try {
+      statuses = [
+        await app.call("GET", "me.get", undefined, {
+          "x-forwarded-access-token": "token-forged",
+        }),
+        await app.call("GET", "me.get", undefined, {
+          "x-forwarded-access-token": "token-unscoped",
+        }),
+      ].map((reply) => reply.status);
+    } finally {
+      enableDebug(namespaces);
+    }
+
+    expect(statuses).toEqual([401, 401]);
+    expect(logs).toEqual([
+      "[appkit:database:operations] Workspace refused the identity check for the forwarded token (403); answering 401. The app's user authorization may lack a scope",
+    ]);
+    const debug = stderr.filter((line) =>
+      line.includes("appkit:database:operations"),
+    );
+    expect(debug).toEqual([
+      expect.stringContaining(
+        "Workspace rejected the forwarded token (401); answering 401",
+      ),
+    ]);
+    for (const output of [...logs, ...debug]) {
+      expect(output).not.toContain("token-forged");
+      expect(output).not.toContain("token-unscoped");
+    }
   });
 });
 

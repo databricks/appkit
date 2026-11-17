@@ -146,10 +146,17 @@ async function verifyToken(
     });
     return actorFromUser(await response.json());
   } catch (error) {
-    if (
-      error instanceof ApiError &&
-      (error.statusCode === 401 || error.statusCode === 403)
-    ) {
+    // An expired token is routine; a refused one can mean a missing scope.
+    if (error instanceof ApiError && error.statusCode === 401) {
+      logger.debug(
+        "Workspace rejected the forwarded token (401); answering 401",
+      );
+      return undefined;
+    }
+    if (error instanceof ApiError && error.statusCode === 403) {
+      logger.warn(
+        "Workspace refused the identity check for the forwarded token (403); answering 401. The app's user authorization may lack a scope",
+      );
       return undefined;
     }
     logger.warn(
