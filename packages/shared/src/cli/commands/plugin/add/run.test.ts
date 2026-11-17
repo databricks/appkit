@@ -11,9 +11,10 @@ import {
 } from "./add";
 
 // bundle validate would shell out to the Databricks CLI.
+const validateBundle = vi.hoisted(() => vi.fn(() => true));
 vi.mock("../../registry/config-writer", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../registry/config-writer")>()),
-  validateBundle: () => true,
+  validateBundle,
 }));
 
 const MANIFEST = path.resolve(
@@ -22,10 +23,14 @@ const MANIFEST = path.resolve(
 );
 const dirs: string[] = [];
 
-function makeApp(): string {
+const BUNDLE =
+  "bundle:\n  name: app\nresources:\n  apps:\n    app:\n      name: app\n";
+
+function makeApp({ bundle = true } = {}): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-add-run-"));
   dirs.push(dir);
   fs.copyFileSync(MANIFEST, path.join(dir, "appkit.plugins.json"));
+  if (bundle) fs.writeFileSync(path.join(dir, "databricks.yml"), BUNDLE);
   fs.mkdirSync(path.join(dir, "server"));
   fs.writeFileSync(
     path.join(dir, "server", "server.ts"),
@@ -38,6 +43,7 @@ afterEach(() => {
   for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
   dirs.length = 0;
   vi.restoreAllMocks();
+  validateBundle.mockClear();
 });
 
 describe("requestsFromArgs", () => {
@@ -215,6 +221,27 @@ test.each([[["agents", "serving"]], [["serving", "agents"]]])(
     expect(env).toContain("DATABRICKS_MODEL_SERVICE_NAME=agent-model");
   },
 );
+
+test("an app with no databricks.yml gets no bundle and no bundle validate", async () => {
+  const dir = makeApp({ bundle: false });
+  const log = vi.spyOn(console, "log").mockImplementation(() => {});
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const writes = vi.spyOn(fs, "writeFileSync");
+  await createPluginAddCommand().parseAsync(
+    ["analytics", "--set", "analytics.sql-warehouse.id=wh", "--yes", "-C", dir],
+    { from: "user" },
+  );
+  const written = writes.mock.calls.map((c) =>
+    path.relative(dir, String(c[0])),
+  );
+  expect(written.sort()).toEqual([".env", "app.yaml", "server/server.ts"]);
+  expect(fs.existsSync(path.join(dir, "databricks.yml"))).toBe(false);
+  expect(validateBundle).not.toHaveBeenCalled();
+  expect(fs.readFileSync(path.join(dir, "app.yaml"), "utf-8")).toContain(
+    "DATABRICKS_WAREHOUSE_ID",
+  );
+  expect(log.mock.calls.flat().join("\n")).toContain("no databricks.yml");
+});
 
 test("plugins sharing a resource in one run write its entries once", async () => {
   const dir = makeApp();

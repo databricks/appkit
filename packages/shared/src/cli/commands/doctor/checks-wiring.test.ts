@@ -30,8 +30,15 @@ function target(overrides: Partial<ResourceTarget> = {}): ResourceTarget {
 }
 
 describe("checkWiring", () => {
-  it("returns nothing when no bundle is present", () => {
-    expect(checkWiring(info({ present: false }), [])).toEqual([]);
+  it("skips the bundle checks with a note when no bundle is present", () => {
+    const targets = [target({ envVars: ["DATABRICKS_WAREHOUSE_ID"] })];
+    expect(checkWiring(info({ present: false }), targets)).toEqual([
+      expect.objectContaining({
+        status: "skipped",
+        code: "NO_BUNDLE",
+        detail: "no databricks.yml: bundle checks skipped",
+      }),
+    ]);
   });
 
   it("flags an app.yaml valueFrom that matches no binding", () => {
