@@ -332,7 +332,8 @@ multiple callers can create records concurrently.
 | Returns `{ deny: "forbidden" }` | 403 |
 | Returns `{ deny: "not-found" }` | 404 |
 | `resource` returns `null` or `undefined` | 404, and `allow` does not run |
-| Throws | 403, or 404 for a resource policy |
+| Throws because the database failed | 503 when the failure is temporary, otherwise 500. `execute` does not run |
+| Throws anything else | 403, or 404 for a resource policy |
 
 A denial may carry a `reason` for your own tests. The plugin never sends it or
 logs it. `execute` runs at most once, and only after `authorize` admitted.
@@ -413,11 +414,15 @@ Each operation answers one method at `/api/database/operations/<name>`:
   `/api/database/operations/notes.list?input=%7B%22limit%22%3A20%7D`. The query
   string is limited to 8 KiB.
 - Other methods take a JSON body of at most 1 MiB, and no query parameters.
+- An answer is at most 5 MiB of JSON. A larger answer, or one that does not
+  match `output`, answers 500 and logs a warning that names the operation and
+  the reason, without the value.
 - A success answers 200, or 201 for `POST`. An operation without `output`
   answers 204 with no body.
 - An unknown name, or a method the operation does not declare, answers 404.
 - A browser request from another origin answers 403, before the plugin asks the
-  workspace who sent it.
+  workspace who sent it. A write must carry `Origin` or `Sec-Fetch-Site`, as
+  every browser sends, so a script that calls a write sends the app's origin.
 - Without a verified caller, every request answers 401, before the plugin reads
   its input.
 - Every response carries `Cache-Control: no-store`.
@@ -438,7 +443,9 @@ the deployment:
 - In Databricks Apps (`DATABRICKS_APP_NAME` is set and `NODE_ENV` is not
   `development`), the user token the Apps proxy forwards is checked with the
   workspace. A rejected token, an inactive user, or a service principal answers
-  401. The forwarded user and email headers are not trusted. A verified token is
+  401. When the workspace refuses the check with 403, the plugin also logs a
+  warning, because the app's user authorization usually lacks a scope. The
+  forwarded user and email headers are not trusted. A verified token is
   reused for 30 seconds, and concurrent requests with one token share one check,
   so a user removed from the workspace can keep access for up to 30 seconds.
 - In local development (`NODE_ENV=development`, with `DATABRICKS_TOKEN` or
@@ -639,7 +646,7 @@ A `DatabaseApiError` has a stable `code`, the HTTP `status`, a `message`, and
 | `NOT_EXPOSED` | `null` | The server does not serve this operation, or the hook takes another kind. Nothing was sent |
 | `UNAUTHENTICATED` | 401 | No verified caller |
 | `INVALID_REQUEST` | 400 or `null` | The input failed its schema. `null` when the client could not encode it and sent nothing |
-| `FORBIDDEN` | 403 | `authorize` refused, the request came from another origin, or the database refused |
+| `FORBIDDEN` | 403 | `authorize` refused, the request came from another origin, a write carried no origin, or the database refused |
 | `NOT_FOUND` | 404 | No such operation for this method, a resource policy found nothing, or `execute` answered `null` on a `GET`, `PATCH`, or `PUT` with no `output` or an `output` that rejects `null`. An `output` that accepts `null` answers 200 |
 | `CONFLICT` | 409 | A constraint rejected the change |
 | `PAYLOAD_TOO_LARGE` | 413 | The request body exceeded its limit |
