@@ -1430,8 +1430,7 @@ describe("execution and output", () => {
       "[appkit:database:operations] Operation answer.huge answered 500: its answer exceeds the response limit",
       "[appkit:database:operations] Operation answer.refused answered 500: its output schema threw DatabaseValidationError",
       "[appkit:database:operations] Operation answer.undeclared answered 500: it returned a value but declares no output",
-      // The unclassified throw is logged once, by the classifier.
-      "[appkit:database] Unclassified database error during read (TypeError)",
+      "[appkit:database:operations] Operation answer.broken answered 500: its output schema threw TypeError",
     ]);
     expect(logs.join("\n")).not.toContain(SENTINEL.row);
     expect(logs.join("\n")).not.toContain(SENTINEL.error);

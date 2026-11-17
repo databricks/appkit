@@ -102,7 +102,6 @@ type Stage =
 
 interface Progress {
   stage: Stage;
-  /** Set once the request routed, so a failure can name its operation. */
   operation?: string;
 }
 
@@ -110,9 +109,8 @@ function errorName(error: unknown): string {
   return error instanceof Error ? error.name : typeof error;
 }
 
-/** An answer the server cannot send. Its reason is logged, never answered. */
 class UnusableOutput extends DatabasePluginError {
-  constructor(readonly reason: string) {
+  constructor(readonly logReason: string) {
     super("INTERNAL", "read");
   }
 }
@@ -198,7 +196,9 @@ function schemaInput(parse: Parse, schema: object): Decode {
 
 function schemaReply(method: OperationMethod, parse: Parse): Respond {
   return async (result) => {
-    const parsed = await parse(result);
+    const parsed = await parse(result).catch((error: unknown) => {
+      throw new UnusableOutput(`its output schema threw ${errorName(error)}`);
+    });
     if (!parsed.ok) {
       if (result === null && NULLABLE_METHODS.has(method)) {
         throw new DatabasePluginError("NOT_FOUND", "read");
@@ -407,22 +407,6 @@ function sendReply(res: Response, reply: Reply): void {
   }
 }
 
-/** One warning per unusable answer; the classifier already logged any other throw. */
-function logUnusableOutput(name: string | undefined, error: unknown): void {
-  if (error instanceof UnusableOutput) {
-    logger.warn("Operation %s answered 500: %s", name, error.reason);
-  } else if (
-    error instanceof DatabasePluginError ||
-    error instanceof DatabaseValidationError
-  ) {
-    logger.warn(
-      "Operation %s answered 500: its output schema threw %s",
-      name,
-      errorName(error),
-    );
-  }
-}
-
 function sendFailure(res: Response, failure: DatabasePluginError): void {
   if (res.headersSent) return;
   const details = failure.details?.map((detail) => ({
@@ -582,8 +566,12 @@ export function createOperationHandler(
             });
           } catch (error) {
             const failure = safeFailure(error, progress.stage, req.method);
-            if (progress.stage === "output" && failure.statusCode >= 500) {
-              logUnusableOutput(progress.operation, error);
+            if (error instanceof UnusableOutput) {
+              logger.warn(
+                "Operation %s answered 500: %s",
+                progress.operation,
+                error.logReason,
+              );
             }
             // Once a write's execute returned, its changes may have committed:
             // anything but the contract's own not-found is an unknown outcome.
