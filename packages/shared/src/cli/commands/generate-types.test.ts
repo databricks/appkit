@@ -231,6 +231,33 @@ describe("generate-types foreground spawn orchestration", () => {
     expect(generateFromEntryPoint).not.toHaveBeenCalled();
   });
 
+  test("a failed schema pass still regenerates the operation contracts, then reports the first failure", async () => {
+    delete process.env.DATABRICKS_WAREHOUSE_ID;
+    const schemaFile = path.join(tmpRoot, "config/database/schema.ts");
+    const outFile = path.join(tmpRoot, "shared/appkit-types/analytics.d.ts");
+    fs.mkdirSync(path.dirname(schemaFile), { recursive: true });
+    fs.writeFileSync(schemaFile, "export const schema = {};", "utf8");
+    const typegenError = (message: string) =>
+      Object.assign(new Error(message), { name: "DatabaseTypegenError" });
+    generateDatabaseTypes.mockRejectedValueOnce(
+      typegenError("config/database/schema.ts threw while loading"),
+    );
+    generateDatabaseOperations.mockRejectedValueOnce(
+      typegenError("the routes could not load their schema"),
+    );
+
+    await runCli([tmpRoot, outFile]);
+
+    expect(generateDatabaseOperations).toHaveBeenCalledTimes(1);
+    expect(consoleError).toHaveBeenCalledWith(
+      "config/database/schema.ts threw while loading",
+    );
+    expect(consoleError).not.toHaveBeenCalledWith(
+      "the routes could not load their schema",
+    );
+    expect(exit).toHaveBeenCalledWith(1);
+  });
+
   test("generates the database operations registry and contracts, strictly in production", async () => {
     delete process.env.DATABRICKS_WAREHOUSE_ID;
     const outFile = path.join(tmpRoot, "shared/appkit-types/analytics.d.ts");

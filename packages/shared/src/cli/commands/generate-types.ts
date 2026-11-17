@@ -166,12 +166,19 @@ async function runGenerateTypes(
       path.dirname(resolvedOutFile),
       typeGen.DATABASE_TYPES_FILE,
     );
+    let schemaFailure: unknown;
     if (fs.existsSync(databaseSchemaFile) || fs.existsSync(databaseOutFile)) {
-      await typeGen.generateDatabaseTypes({
-        schemaFile: databaseSchemaFile,
-        outFile: databaseOutFile,
-      });
-      console.log(`Generated database types: ${databaseOutFile}`);
+      try {
+        await typeGen.generateDatabaseTypes({
+          schemaFile: databaseSchemaFile,
+          outFile: databaseOutFile,
+        });
+        console.log(`Generated database types: ${databaseOutFile}`);
+      } catch (error) {
+        // The operation pass still runs so a failed schema leaves no previous
+        // operation visible; the first failure is reported, as in Vite.
+        schemaFailure = error;
+      }
     }
 
     // Generate the routes registry the server loads and the operation
@@ -180,14 +187,19 @@ async function runGenerateTypes(
       path.dirname(resolvedOutFile),
       typeGen.DATABASE_OPERATIONS_TYPES_FILE,
     );
-    await typeGen.generateDatabaseOperations({
-      appRoot: resolvedRootDir,
-      outFile: operationsOutFile,
-      strict: process.env.NODE_ENV === "production",
-    });
+    try {
+      await typeGen.generateDatabaseOperations({
+        appRoot: resolvedRootDir,
+        outFile: operationsOutFile,
+        strict: process.env.NODE_ENV === "production",
+      });
+    } catch (error) {
+      throw schemaFailure ?? error;
+    }
     if (fs.existsSync(path.join(resolvedRootDir, "server/database/routes"))) {
       console.log(`Generated database operations: ${operationsOutFile}`);
     }
+    if (schemaFailure !== undefined) throw schemaFailure;
   } catch (error) {
     if (
       error instanceof Error &&
