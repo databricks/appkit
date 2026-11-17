@@ -214,6 +214,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.97.2](https://github.com/databricks/appkit/compare/v0.97.1...v0.97.2) (2026-11-17)
+
+### shared
+
+* **shared:** don't create databricks.yml in plugin add when the app has none ([#740](https://github.com/databricks/appkit/issues/740)) ([c6cefc0](https://github.com/databricks/appkit/commit/c6cefc068a1dbac42773e45f28e5fcc43dd60188))
+
+
 ## [0.97.1](https://github.com/databricks/appkit/compare/v0.97.0...v0.97.1) (2026-11-16)
 
 ### shared
