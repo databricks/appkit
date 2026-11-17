@@ -774,6 +774,64 @@ describe("authorization", () => {
     expect(execute.mock.calls.map(([ctx]) => ctx.resource)).toEqual([0, false]);
   });
 
+  test("a transient database failure inside a policy answers 503, never a refusal", async () => {
+    const get = ownedNoteGet();
+    let allowFailure: unknown;
+    const execute = vi.fn(() => undefined);
+    const app = await boot([
+      get.operation,
+      define({
+        name: "notes.purge",
+        method: "DELETE",
+        authorize: async ({ db }: Ctx) => {
+          await db.notes.count();
+          if (allowFailure) throw allowFailure;
+          return true;
+        },
+        execute,
+      }),
+    ]);
+    const note = await seedNote(app.db());
+    // What the driver boundary throws for a serialization failure or a cancelled statement.
+    const transient = () => new DatabasePluginError("TRANSIENT", "runtime");
+
+    vi.spyOn(app.database.path, "findOne").mockRejectedValueOnce(transient());
+    const lookup = await app.call("GET", "notes.get", { id: note.id }, asAda);
+    vi.spyOn(app.database.path, "count").mockRejectedValueOnce(transient());
+    const allow = await app.call("DELETE", "notes.purge", undefined, asAda);
+
+    for (const reply of [lookup, allow]) {
+      expect([reply.status, json(reply)]).toEqual([
+        503,
+        { error: "Database operation temporarily unavailable" },
+      ]);
+    }
+    expect(get.spies.allow).not.toHaveBeenCalled();
+    expect(get.spies.execute).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+
+    get.spies.lookup.mockImplementationOnce(() => {
+      throw new TypeError(SENTINEL.error);
+    });
+    allowFailure = new TypeError(SENTINEL.error);
+    const brokenLookup = await app.call(
+      "GET",
+      "notes.get",
+      { id: note.id },
+      asAda,
+    );
+    const brokenAllow = await app.call(
+      "DELETE",
+      "notes.purge",
+      undefined,
+      asAda,
+    );
+
+    expect([brokenLookup.status, brokenAllow.status]).toEqual([404, 403]);
+    expect(get.spies.execute).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   test("callbacks receive the verified actor and services, never the request or its token", async () => {
     const get = ownedNoteGet();
     const app = await boot([get.operation]);

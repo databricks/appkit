@@ -312,7 +312,11 @@ type Called =
   | { readonly ok: true; readonly value: unknown }
   | { readonly ok: false };
 
-/** Run one authorization callback; a throw is recorded as a refusal. */
+/**
+ * Run one authorization callback; a throw is recorded as a refusal. A
+ * transient database failure fails the request instead, so an outage never
+ * reads as a missing or forbidden record.
+ */
 async function invoke(
   operation: CompiledOperation,
   callback: (...args: never[]) => unknown,
@@ -322,6 +326,12 @@ async function invoke(
     const value: unknown = await Reflect.apply(callback, undefined, [argument]);
     return { ok: true, value };
   } catch (error) {
+    if (
+      error instanceof DatabasePluginError &&
+      error.category === "TRANSIENT"
+    ) {
+      throw error;
+    }
     logger.warn(
       "Operation %s refused: its authorization threw %s",
       operation.name,
