@@ -881,7 +881,11 @@ describe("authorization", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  test("a database failure inside a found record's allow refuses as not found, so it never reveals the record", async () => {
+  test("a database failure inside a found record's allow fails the request, while a missing record answers 404 before allow runs", async () => {
+    const allow = vi.fn(async (ctx: Ctx) => {
+      await ctx.db.notes.count();
+      return ctx.resource.ownerId === ctx.actor.id;
+    });
     const execute = vi.fn();
     const app = await boot([
       define({
@@ -891,42 +895,38 @@ describe("authorization", () => {
         output: noteOutput,
         authorize: policy({
           resource: (ctx: Ctx) => ctx.db.notes.find(ctx.input.id),
-          allow: async (ctx: Ctx) => {
-            await ctx.db.notes.count();
-            return ctx.resource.ownerId === ctx.actor.id;
-          },
+          allow,
         }),
         execute,
       }),
     ]);
     const note = await seedNote(app.db(), { ownerId: "someone-else" });
 
-    for (const [category] of driverBoundaryFailures) {
+    for (const [category, status, body] of driverBoundaryFailures) {
       vi.spyOn(app.database.path, "count").mockRejectedValue(
         new DatabasePluginError(category, "runtime"),
       );
-      logs.length = 0;
-      const existing = await app.call(
-        "GET",
-        "notes.peek",
-        { id: note.id },
-        asAda,
-      );
+      allow.mockClear();
       const missing = await app.call(
         "GET",
         "notes.peek",
         { id: note.id + 1000 },
         asAda,
       );
-
-      expect([existing.status, json(existing)]).toEqual([
-        missing.status,
-        json(missing),
-      ]);
-      expect(existing.status).toBe(404);
-      expect(logs).toContain(
-        "[appkit:database:operations] Operation notes.peek refused: its authorization threw DatabasePluginError",
+      expect(allow).not.toHaveBeenCalled();
+      const existing = await app.call(
+        "GET",
+        "notes.peek",
+        { id: note.id },
+        asAda,
       );
+
+      expect([missing.status, json(missing)]).toEqual([
+        404,
+        { error: "Database record not found" },
+      ]);
+      expect([existing.status, json(existing)]).toEqual([status, body]);
+      expect(allow).toHaveBeenCalledTimes(1);
     }
     expect(execute).not.toHaveBeenCalled();
   });
