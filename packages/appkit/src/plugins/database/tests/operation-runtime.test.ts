@@ -207,6 +207,9 @@ async function boot(
   const server = http.createServer(app);
   servers.push(server);
   const url = await listen(server);
+  // A same-origin browser fetch names its page's origin on a write. HEAD
+  // carries it too, so routing rather than the origin check answers it.
+  const sameOrigin = { origin: new URL(url).origin };
 
   const call = (
     method: string,
@@ -215,19 +218,26 @@ async function boot(
     headers: Record<string, string> = {},
   ): Promise<Reply> => {
     const target = new URL(`/api/database/operations/${name}`, url);
+    const sent = method === "GET" ? headers : { ...sameOrigin, ...headers };
     if (method === "GET" || method === "HEAD") {
       if (input !== undefined) {
         target.searchParams.set("input", JSON.stringify(input));
       }
-      return send(target.href, { method, headers });
+      return send(target.href, { method, headers: sent });
     }
     return send(target.href, {
       method,
-      headers: { "content-type": "application/json", ...headers },
+      headers: { "content-type": "application/json", ...sent },
       body: input === undefined ? undefined : JSON.stringify(input),
     });
   };
-  return { url, database, db: () => plugin.exports() as any, call };
+  return {
+    url,
+    sameOrigin,
+    database,
+    db: () => plugin.exports() as any,
+    call,
+  };
 }
 
 const asAda = { "x-forwarded-access-token": SENTINEL.token };
@@ -318,7 +328,11 @@ describe("authentication comes first", () => {
       ),
       await send(`${app.url}/api/database/operations/notes.create`, {
         method: "POST",
-        headers: { ...forged, "content-type": "application/json" },
+        headers: {
+          ...forged,
+          ...app.sameOrigin,
+          "content-type": "application/json",
+        },
         body: "{not json",
       }),
       await app.call("GET", "missing.op", { id: 1 }, forged),
@@ -571,22 +585,34 @@ describe("input", () => {
 
     const text = await send(url, {
       method: "POST",
-      headers: { ...asAda, "content-type": "text/plain" },
+      headers: { ...asAda, ...app.sameOrigin, "content-type": "text/plain" },
       body: JSON.stringify({ title: "t" }),
     });
     const query = await send(`${url}?title=t`, {
       method: "POST",
-      headers: { ...asAda, "content-type": "application/json" },
+      headers: {
+        ...asAda,
+        ...app.sameOrigin,
+        "content-type": "application/json",
+      },
       body: JSON.stringify({ title: "t" }),
     });
     const malformed = await send(url, {
       method: "POST",
-      headers: { ...asAda, "content-type": "application/json" },
+      headers: {
+        ...asAda,
+        ...app.sameOrigin,
+        "content-type": "application/json",
+      },
       body: `{"title": "${SENTINEL.input}"`,
     });
     const large = await send(url, {
       method: "POST",
-      headers: { ...asAda, "content-type": "application/json" },
+      headers: {
+        ...asAda,
+        ...app.sameOrigin,
+        "content-type": "application/json",
+      },
       body: JSON.stringify({ title: "x".repeat(1024 * 1024 + 1) }),
     });
 
@@ -1450,6 +1476,40 @@ describe("browser origin", () => {
     expect(withToken.headers["x-appkit-database-actor"]).toBeUndefined();
     expect(workspace.authorizations).toEqual([]);
   });
+
+  test("a write must carry Origin or fetch metadata, while a read need not", async () => {
+    const execute = vi.fn(() => undefined);
+    const app = await boot([
+      whoami,
+      define({
+        name: "notes.purge",
+        method: "DELETE",
+        authorize: () => true,
+        execute,
+      }),
+    ]);
+    const operation = (name: string) =>
+      `${app.url}/api/database/operations/${name}`;
+
+    const write = await send(operation("notes.purge"), {
+      method: "DELETE",
+      headers: asAda,
+    });
+    expect(write.status).toBe(403);
+    expect(execute).not.toHaveBeenCalled();
+    expect(workspace.authorizations).toEqual([]);
+
+    const read = await send(operation("me.get"), { headers: asAda });
+    expect([read.status, json(read)]).toEqual([200, { id: SENTINEL.actorId }]);
+    const browserWrite = await app.call(
+      "DELETE",
+      "notes.purge",
+      undefined,
+      asAda,
+    );
+    expect(browserWrite.status).toBe(204);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("telemetry", () => {
@@ -1615,6 +1675,46 @@ describe("local development boundary", () => {
     expect(execute).toHaveBeenCalledTimes(1);
     expect(workspace.authorizations).toEqual([]);
     expect(logs.join("\n")).not.toContain(SENTINEL.error);
+  });
+
+  test("a local write needs the loopback page's own origin", async () => {
+    const execute = vi.fn(() => undefined);
+    const app = await boot(
+      [
+        define({
+          name: "notes.purge",
+          method: "DELETE",
+          authorize: () => true,
+          execute,
+        }),
+      ],
+      {
+        resolveActor: createActorResolver({
+          kind: "local",
+          host: "https://dev.example",
+          identity: async () => ({
+            token: "local-token",
+            userId: "dev-user-1",
+          }),
+        }),
+      },
+    );
+    const target = `${app.url}/api/database/operations/notes.purge`;
+
+    const page = await send(target, {
+      method: "DELETE",
+      headers: app.sameOrigin,
+    });
+    const script = await send(target, { method: "DELETE" });
+    const foreign = await send(target, {
+      method: "DELETE",
+      headers: { origin: "http://evil.example" },
+    });
+
+    expect([page.status, script.status, foreign.status]).toEqual([
+      204, 403, 403,
+    ]);
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   test("an unsupported deployment authenticates no one", async () => {

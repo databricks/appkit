@@ -252,7 +252,9 @@ function forwardedHost(req: Request): string | undefined {
  * Whether a browser could have sent this request only from the app's own
  * pages. Fetch metadata decides when present; reads also accept a direct
  * navigation. Without it, an `Origin` must name the host the request reached.
- * A request with neither header did not come from a browser page.
+ * A read with neither header did not come from a browser page. A write must
+ * carry one: every browser sends `Origin` on a write, so only an old browser
+ * or a non-browser client omits both.
  */
 export function isSameOriginRequest(req: Request): boolean {
   const site = req.headers["sec-fetch-site"];
@@ -260,7 +262,7 @@ export function isSameOriginRequest(req: Request): boolean {
     return site === "same-origin" || (site === "none" && req.method === "GET");
   }
   const origin = req.headers.origin;
-  if (origin === undefined) return true;
+  if (origin === undefined) return req.method === "GET";
   if (origin.length > MAX_ORIGIN_LENGTH) return false;
   try {
     const url = new URL(origin);
