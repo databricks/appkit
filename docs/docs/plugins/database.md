@@ -332,8 +332,12 @@ multiple callers can create records concurrently.
 | Returns `{ deny: "forbidden" }` | 403 |
 | Returns `{ deny: "not-found" }` | 404 |
 | `resource` returns `null` or `undefined` | 404, and `allow` does not run |
-| Throws because the database failed | 503 when the failure is temporary, otherwise 500. `execute` does not run |
-| Throws anything else | 403, or 404 for a resource policy |
+| Throws because the database is unavailable or failed unexpectedly | 503 when the failure is temporary, otherwise 500 |
+| Throws anything else, a database permission error included | 403, or 404 for a resource policy |
+
+A missing record answers 404 before `allow` runs. While the database is failing,
+a policy whose queries run only for an existing record answers 503 or 500 for
+that record, so it can reveal that the record exists.
 
 A denial may carry a `reason` for your own tests. The plugin never sends it or
 logs it. `execute` runs at most once, and only after `authorize` admitted.
