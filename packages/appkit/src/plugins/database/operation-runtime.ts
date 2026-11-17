@@ -314,8 +314,8 @@ type Called =
 
 /**
  * Run one authorization callback; a throw is recorded as a refusal. A
- * transient database failure fails the request instead, so an outage never
- * reads as a missing or forbidden record.
+ * transient or internal database failure fails the request instead, so an
+ * outage never reads as a missing or forbidden record.
  */
 async function invoke(
   operation: CompiledOperation,
@@ -328,7 +328,7 @@ async function invoke(
   } catch (error) {
     if (
       error instanceof DatabasePluginError &&
-      error.category === "TRANSIENT"
+      (error.category === "TRANSIENT" || error.category === "INTERNAL")
     ) {
       throw error;
     }

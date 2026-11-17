@@ -818,7 +818,7 @@ describe("authorization", () => {
     expect(execute.mock.calls.map(([ctx]) => ctx.resource)).toEqual([0, false]);
   });
 
-  test("a transient database failure inside a policy answers 503, never a refusal", async () => {
+  test("a database failure inside a policy fails the request, never a refusal", async () => {
     const get = ownedNoteGet();
     let allowFailure: unknown;
     const execute = vi.fn(() => undefined);
@@ -836,19 +836,27 @@ describe("authorization", () => {
       }),
     ]);
     const note = await seedNote(app.db());
-    // What the driver boundary throws for a serialization failure or a cancelled statement.
-    const transient = () => new DatabasePluginError("TRANSIENT", "runtime");
-
-    vi.spyOn(app.database.path, "findOne").mockRejectedValueOnce(transient());
-    const lookup = await app.call("GET", "notes.get", { id: note.id }, asAda);
-    vi.spyOn(app.database.path, "count").mockRejectedValueOnce(transient());
-    const allow = await app.call("DELETE", "notes.purge", undefined, asAda);
-
-    for (const reply of [lookup, allow]) {
-      expect([reply.status, json(reply)]).toEqual([
+    // What the driver boundary throws for a serialization failure or a
+    // cancelled statement, and for a dropped connection or any other fault.
+    const failures = [
+      [
+        "TRANSIENT",
         503,
         { error: "Database operation temporarily unavailable" },
-      ]);
+      ],
+      ["INTERNAL", 500, { error: "Database operation failed" }],
+    ] as const;
+
+    for (const [category, status, body] of failures) {
+      const failure = () => new DatabasePluginError(category, "runtime");
+      vi.spyOn(app.database.path, "findOne").mockRejectedValueOnce(failure());
+      const lookup = await app.call("GET", "notes.get", { id: note.id }, asAda);
+      vi.spyOn(app.database.path, "count").mockRejectedValueOnce(failure());
+      const allow = await app.call("DELETE", "notes.purge", undefined, asAda);
+
+      for (const reply of [lookup, allow]) {
+        expect([reply.status, json(reply)]).toEqual([status, body]);
+      }
     }
     expect(get.spies.allow).not.toHaveBeenCalled();
     expect(get.spies.execute).not.toHaveBeenCalled();
