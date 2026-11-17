@@ -74,6 +74,10 @@ test("the standard watcher reloads first, edited, shared, added, and deleted ope
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
+        // tsx watch re-spawns node, so the workspace source condition rides in NODE_OPTIONS.
+        NODE_OPTIONS: [process.env.NODE_OPTIONS, "--conditions=development"]
+          .filter(Boolean)
+          .join(" "),
         NODE_ENV: "development",
         DATABRICKS_WAREHOUSE_ID: "",
       },
