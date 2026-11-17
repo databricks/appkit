@@ -341,15 +341,17 @@ function safeFailure(
   stage: Stage,
   method: string,
 ): DatabasePluginError {
-  if (error instanceof DatabaseValidationError) {
-    return new DatabasePluginError("VALIDATION_FAILED", "write");
-  }
-  const safe = classifyDatabaseError(
-    error,
-    method === "GET" ? "read" : "write",
-  );
+  const safe =
+    error instanceof DatabaseValidationError
+      ? new DatabasePluginError("VALIDATION_FAILED", "write")
+      : classifyDatabaseError(error, method === "GET" ? "read" : "write");
   // Only authentication answers 401, so a client never drops a session otherwise.
   if (safe.category === "UNAUTHENTICATED" && stage !== "actor") {
+    return new DatabasePluginError("INTERNAL", safe.phase);
+  }
+  // Unusable output, an answer too large to send included, is the server's
+  // failure, so only the contract's not-found keeps its category.
+  if (stage === "output" && safe.category !== "NOT_FOUND") {
     return new DatabasePluginError("INTERNAL", safe.phase);
   }
   return stage === "input" || !safe.details

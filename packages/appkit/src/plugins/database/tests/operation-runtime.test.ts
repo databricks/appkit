@@ -31,6 +31,7 @@ import {
   id,
   text,
 } from "../../../database/schema-builder";
+import { DatabaseValidationError } from "../../../errors";
 import { TelemetryManager } from "../../../telemetry";
 import type { ITelemetry } from "../../../telemetry";
 
@@ -52,6 +53,7 @@ vi.mock("../schema-check", () => ({
 }));
 
 import { DatabasePlugin } from "../database";
+import { MAX_RESPONSE_BYTES } from "../defaults";
 import { type ActorResolver, createActorResolver } from "../operation-actor";
 import { validateOperationMetadata } from "../operation-metadata";
 import { createOperationHandler, OPERATIONS_PATH } from "../operation-runtime";
@@ -1096,6 +1098,69 @@ describe("execution and output", () => {
       { error: "Database operation failed" },
     ]);
   });
+
+  test.each([
+    [
+      "an answer above the response limit",
+      z.string(),
+      () => "x".repeat(MAX_RESPONSE_BYTES),
+    ],
+    [
+      "a validation error the output schema raises",
+      z.string().refine(() => {
+        throw new DatabaseValidationError("output rejected");
+      }),
+      () => "label",
+    ],
+  ])(
+    "%s fails as unusable output, never as a client error",
+    async (_case, output, answer) => {
+      const app = await boot([
+        define({
+          name: "notes.export",
+          method: "GET",
+          output,
+          authorize: () => true,
+          execute: answer,
+        }),
+        define({
+          name: "notes.archive",
+          method: "POST",
+          output,
+          authorize: () => true,
+          execute: answer,
+        }),
+      ]);
+
+      const read = await app.call("GET", "notes.export", undefined, asAda);
+      const write = await app.call("POST", "notes.archive", {}, asAda);
+
+      expect([read.status, json(read)]).toEqual([
+        500,
+        { error: "Database operation failed" },
+      ]);
+      expect([write.status, json(write)]).toEqual([
+        500,
+        { error: "Database write may have completed", outcome: "unknown" },
+      ]);
+      const outcomes = exporter
+        .getFinishedSpans()
+        .filter((span) => span.name === "database.operation")
+        .map((span) => span.attributes);
+      expect(outcomes).toEqual([
+        expect.objectContaining({
+          "database.operation.outcome": "INTERNAL",
+          "database.operation.stage": "output",
+          "http.response.status_code": 500,
+        }),
+        expect.objectContaining({
+          "database.operation.outcome": "OUTCOME_UNKNOWN",
+          "database.operation.stage": "output",
+          "http.response.status_code": 500,
+        }),
+      ]);
+    },
+  );
 
   test("asynchronous refinements and transforms run on input and output", async () => {
     const execute = vi.fn((ctx: Ctx) => ({
