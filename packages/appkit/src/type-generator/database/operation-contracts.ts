@@ -422,7 +422,11 @@ function printType(type: TsType, indent: string): string {
         .join(" | ");
     case "array": {
       const element = printType(type.element, indent);
-      return `${type.readonly ? "readonly " : ""}${type.element.kind === "union" ? `(${element})` : element}[]`;
+      // `|` and `readonly` bind looser than `[]`, so such an element needs parentheses.
+      const grouped =
+        type.element.kind === "union" ||
+        (type.element.kind === "array" && type.element.readonly);
+      return `${type.readonly ? "readonly " : ""}${grouped ? `(${element})` : element}[]`;
     }
     case "object": {
       if (type.properties.length === 0) {

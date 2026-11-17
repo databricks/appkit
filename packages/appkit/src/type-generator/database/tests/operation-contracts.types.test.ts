@@ -142,9 +142,11 @@ export const inspect = defineOperation({
     payloads: z.array(z.unknown()),
     counts: z.record(z.string(), z.number()).readonly(),
     nested: z.record(z.string(), z.object({ at: z.string() })),
+    grid: z.array(z.array(z.string()).readonly()).readonly(),
+    rows: z.array(z.array(z.string()).readonly()),
   }),
   authorize: () => true,
-  execute: () => ({ payloads: [], counts: {}, nested: {} }),
+  execute: () => ({ payloads: [], counts: {}, nested: {}, grid: [], rows: [] }),
 });
 export const maybePost = defineOperation({
   name: "posts.maybe",
