@@ -100,8 +100,21 @@ type Stage =
   | "execute"
   | "output";
 
+interface Progress {
+  stage: Stage;
+  /** Set once the request routed, so a failure can name its operation. */
+  operation?: string;
+}
+
 function errorName(error: unknown): string {
   return error instanceof Error ? error.name : typeof error;
+}
+
+/** An answer the server cannot send. Its reason is logged, never answered. */
+class UnusableOutput extends DatabasePluginError {
+  constructor(readonly reason: string) {
+    super("INTERNAL", "read");
+  }
 }
 
 /** No schema means no parameters; never pass unexpected values to a policy. */
@@ -118,12 +131,10 @@ function noInput(raw: JsonValue | undefined): undefined {
 function noBody(method: OperationMethod): Respond {
   return (result) => {
     if (result === undefined) return { status: 204 };
-    throw new DatabasePluginError(
-      result === null && NULLABLE_METHODS.has(method)
-        ? "NOT_FOUND"
-        : "INTERNAL",
-      "read",
-    );
+    if (result === null && NULLABLE_METHODS.has(method)) {
+      throw new DatabasePluginError("NOT_FOUND", "read");
+    }
+    throw new UnusableOutput("it returned a value but declares no output");
   };
 }
 
@@ -189,19 +200,17 @@ function schemaReply(method: OperationMethod, parse: Parse): Respond {
   return async (result) => {
     const parsed = await parse(result);
     if (!parsed.ok) {
-      throw new DatabasePluginError(
-        result === null && NULLABLE_METHODS.has(method)
-          ? "NOT_FOUND"
-          : "INTERNAL",
-        "read",
-      );
+      if (result === null && NULLABLE_METHODS.has(method)) {
+        throw new DatabasePluginError("NOT_FOUND", "read");
+      }
+      throw new UnusableOutput("its result does not match its output schema");
     }
     if (parsed.data === undefined) return { status: 204 };
     let body: JsonValue;
     try {
       body = boundedJson(parsed.data, MAX_OUTPUT_NODES);
     } catch {
-      throw new DatabasePluginError("INTERNAL", "read");
+      throw new UnusableOutput("its result is not bounded JSON");
     }
     return { status: method === "POST" ? 201 : 200, body };
   };
@@ -375,6 +384,37 @@ function sendOutcomeUnknown(res: Response): void {
   });
 }
 
+function sendReply(res: Response, reply: Reply): void {
+  if (reply.status === 204) return sendEmpty(res, 204);
+  try {
+    sendJson(res, reply.status, reply.body);
+  } catch (error) {
+    if (
+      error instanceof DatabasePluginError &&
+      error.category === "PAYLOAD_TOO_LARGE"
+    ) {
+      throw new UnusableOutput("its answer exceeds the response limit");
+    }
+    throw error;
+  }
+}
+
+/** One warning per unusable answer; the classifier already logged any other throw. */
+function logUnusableOutput(name: string | undefined, error: unknown): void {
+  if (error instanceof UnusableOutput) {
+    logger.warn("Operation %s answered 500: %s", name, error.reason);
+  } else if (
+    error instanceof DatabasePluginError ||
+    error instanceof DatabaseValidationError
+  ) {
+    logger.warn(
+      "Operation %s answered 500: its output schema threw %s",
+      name,
+      errorName(error),
+    );
+  }
+}
+
 function sendFailure(res: Response, failure: DatabasePluginError): void {
   if (res.headersSent) return;
   const details = failure.details?.map((detail) => ({
@@ -424,7 +464,7 @@ export function createOperationHandler(
   async function admit(
     operation: CompiledOperation,
     base: object,
-    progress: { stage: Stage },
+    progress: Progress,
   ): Promise<unknown> {
     const { authorize } = operation;
     progress.stage = "allow";
@@ -472,7 +512,7 @@ export function createOperationHandler(
     req: Request,
     res: Response,
     span: Span,
-    progress: { stage: Stage },
+    progress: Progress,
   ): Promise<Reply> {
     if (!isSameOriginRequest(req)) {
       throw new DatabasePluginError("FORBIDDEN", "read");
@@ -486,6 +526,7 @@ export function createOperationHandler(
     progress.stage = "route";
     const operation = route(req);
     if (!operation) throw new DatabasePluginError("NOT_FOUND", "read");
+    progress.operation = operation.name;
     span.setAttribute("database.operation.name", operation.name);
 
     progress.stage = "input";
@@ -514,7 +555,7 @@ export function createOperationHandler(
         "database.operation",
         { attributes: { "http.request.method": req.method } },
         async (span) => {
-          const progress: { stage: Stage } = { stage: "origin" };
+          const progress: Progress = { stage: "origin" };
           try {
             // Lower clients and callbacks run untraced: their spans could
             // carry SQL text, row values, tokens, or raw exception messages.
@@ -522,14 +563,16 @@ export function createOperationHandler(
               suppressTracing(context.active()),
               () => run(req, res, span, progress),
             );
-            if (reply.status === 204) sendEmpty(res, 204);
-            else sendJson(res, reply.status, reply.body);
+            sendReply(res, reply);
             span.setAttributes({
               "database.operation.outcome": "success",
               "http.response.status_code": reply.status,
             });
           } catch (error) {
             const failure = safeFailure(error, progress.stage, req.method);
+            if (progress.stage === "output" && failure.statusCode >= 500) {
+              logUnusableOutput(progress.operation, error);
+            }
             // Once a write's execute returned, its changes may have committed:
             // anything but the contract's own not-found is an unknown outcome.
             const unknown =

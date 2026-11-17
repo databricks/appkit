@@ -1186,6 +1186,76 @@ describe("execution and output", () => {
     },
   );
 
+  test("each unusable answer logs one warning naming the operation and its reason, never the value", async () => {
+    const answers: Array<[string, string, unknown, unknown]> = [
+      [
+        "answer.mismatch",
+        "POST",
+        z.object({ count: z.number() }),
+        { count: SENTINEL.row },
+      ],
+      [
+        "answer.unbounded",
+        "GET",
+        z.unknown(),
+        { label: SENTINEL.row, count: Number.POSITIVE_INFINITY },
+      ],
+      [
+        "answer.huge",
+        "GET",
+        z.string(),
+        SENTINEL.row + "x".repeat(MAX_RESPONSE_BYTES),
+      ],
+      [
+        "answer.refused",
+        "GET",
+        z.string().refine(() => {
+          throw new DatabaseValidationError(SENTINEL.error);
+        }),
+        SENTINEL.row,
+      ],
+      ["answer.undeclared", "GET", undefined, { secret: SENTINEL.row }],
+      [
+        "answer.broken",
+        "GET",
+        z.string().refine(() => {
+          throw new TypeError(SENTINEL.error);
+        }),
+        SENTINEL.row,
+      ],
+    ];
+    const app = await boot(
+      answers.map(([name, method, output, answer]) =>
+        define({
+          name,
+          method,
+          ...(output === undefined ? {} : { output }),
+          authorize: () => true,
+          execute: () => answer,
+        }),
+      ),
+    );
+    logs.length = 0;
+
+    const statuses: number[] = [];
+    for (const [name, method] of answers) {
+      statuses.push((await app.call(method, name, {}, asAda)).status);
+    }
+
+    expect(statuses).toEqual([500, 500, 500, 500, 500, 500]);
+    expect(logs).toEqual([
+      "[appkit:database:operations] Operation answer.mismatch answered 500: its result does not match its output schema",
+      "[appkit:database:operations] Operation answer.unbounded answered 500: its result is not bounded JSON",
+      "[appkit:database:operations] Operation answer.huge answered 500: its answer exceeds the response limit",
+      "[appkit:database:operations] Operation answer.refused answered 500: its output schema threw DatabaseValidationError",
+      "[appkit:database:operations] Operation answer.undeclared answered 500: it returned a value but declares no output",
+      // The unclassified throw is logged once, by the classifier.
+      "[appkit:database] Unclassified database error during read (TypeError)",
+    ]);
+    expect(logs.join("\n")).not.toContain(SENTINEL.row);
+    expect(logs.join("\n")).not.toContain(SENTINEL.error);
+  });
+
   test("asynchronous refinements and transforms run on input and output", async () => {
     const execute = vi.fn((ctx: Ctx) => ({
       title: ` ${String(Reflect.get(Object(ctx.input), "title"))} `,
