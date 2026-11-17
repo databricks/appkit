@@ -197,6 +197,12 @@ function schemaInput(parse: Parse, schema: object): Decode {
 function schemaReply(method: OperationMethod, parse: Parse): Respond {
   return async (result) => {
     const parsed = await parse(result).catch((error: unknown) => {
+      if (
+        error instanceof DatabasePluginError &&
+        error.category === "NOT_FOUND"
+      ) {
+        throw error;
+      }
       throw new UnusableOutput(`its output schema threw ${errorName(error)}`);
     });
     if (!parsed.ok) {
