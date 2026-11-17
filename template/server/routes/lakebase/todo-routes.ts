@@ -4,6 +4,7 @@
 
 import { z } from 'zod';
 import { Application } from 'express';
+import { withLakebaseTraceContext } from './trace-context';
 
 interface AppKitWithLakebase {
   lakebase: {
@@ -33,13 +34,15 @@ const CREATE_TABLE_SQL = `
 const CreateTodoBody = z.object({ title: z.string().min(1) });
 
 export async function setupSampleLakebaseRoutes(appkit: AppKitWithLakebase) {
+  const lakebase = withLakebaseTraceContext(appkit.lakebase);
+
   try {
-    const { rows } = await appkit.lakebase.query(TABLE_EXISTS_SQL);
+    const { rows } = await lakebase.query(TABLE_EXISTS_SQL);
     if (rows.length > 0) {
       console.log('[lakebase] Table app.todos already exists, skipping setup');
     } else {
-      await appkit.lakebase.query(SETUP_SCHEMA_SQL);
-      await appkit.lakebase.query(CREATE_TABLE_SQL);
+      await lakebase.query(SETUP_SCHEMA_SQL);
+      await lakebase.query(CREATE_TABLE_SQL);
       console.log('[lakebase] Created schema and table app.todos');
     }
   } catch (err) {
@@ -51,7 +54,7 @@ export async function setupSampleLakebaseRoutes(appkit: AppKitWithLakebase) {
   appkit.server.extend((app) => {
     app.get('/api/lakebase/todos', async (_req, res) => {
       try {
-        const result = await appkit.lakebase.query(
+        const result = await lakebase.query(
           'SELECT id, title, completed, created_at FROM app.todos ORDER BY created_at DESC',
         );
         res.json(result.rows);
@@ -68,7 +71,7 @@ export async function setupSampleLakebaseRoutes(appkit: AppKitWithLakebase) {
           res.status(400).json({ error: 'title is required' });
           return;
         }
-        const result = await appkit.lakebase.query(
+        const result = await lakebase.query(
           'INSERT INTO app.todos (title) VALUES ($1) RETURNING id, title, completed, created_at',
           [parsed.data.title.trim()],
         );
@@ -86,7 +89,7 @@ export async function setupSampleLakebaseRoutes(appkit: AppKitWithLakebase) {
           res.status(400).json({ error: 'Invalid id' });
           return;
         }
-        const result = await appkit.lakebase.query(
+        const result = await lakebase.query(
           'UPDATE app.todos SET completed = NOT completed WHERE id = $1 RETURNING id, title, completed, created_at',
           [id],
         );
@@ -108,7 +111,7 @@ export async function setupSampleLakebaseRoutes(appkit: AppKitWithLakebase) {
           res.status(400).json({ error: 'Invalid id' });
           return;
         }
-        const result = await appkit.lakebase.query(
+        const result = await lakebase.query(
           'DELETE FROM app.todos WHERE id = $1 RETURNING id',
           [id],
         );
