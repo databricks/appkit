@@ -1369,6 +1369,40 @@ describe("execution and output", () => {
     },
   );
 
+  test("an output schema that throws not found answers 404, on a write too", async () => {
+    const output = z.string().refine(() => {
+      throw new DatabasePluginError("NOT_FOUND", "read");
+    });
+    const app = await boot([
+      define({
+        name: "notes.export",
+        method: "GET",
+        output,
+        authorize: () => true,
+        execute: () => "label",
+      }),
+      define({
+        name: "notes.archive",
+        method: "POST",
+        output,
+        authorize: () => true,
+        execute: () => "label",
+      }),
+    ]);
+    logs.length = 0;
+
+    const read = await app.call("GET", "notes.export", undefined, asAda);
+    const write = await app.call("POST", "notes.archive", {}, asAda);
+
+    for (const reply of [read, write]) {
+      expect([reply.status, json(reply)]).toEqual([
+        404,
+        { error: "Database record not found" },
+      ]);
+    }
+    expect(logs.filter((line) => line.includes("answered 500"))).toEqual([]);
+  });
+
   test("each unusable answer logs one warning naming the operation and its reason, never the value", async () => {
     const answers: Array<[string, string, unknown, unknown]> = [
       [
