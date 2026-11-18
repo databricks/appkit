@@ -158,6 +158,9 @@ jobs:
       # The generated database registry must reach appkit-ui's built declarations.
       - name: Typecheck database components
         run: pnpm --filter=dev-playground typecheck:database
+      # The playground server and Playwright specs against the built appkit declarations.
+      - name: Typecheck playground
+        run: pnpm --filter=dev-playground check
       - name: Run Integration Tests
         run: pnpm --filter=dev-playground test:integration
         env:

@@ -2,14 +2,15 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "outDir": "dist",
-    "baseUrl": ".",
+    // Sources from shared, lakebase, and tools are compiled in.
+    "rootDir": "../..",
     "paths": {
-      "@/*": ["src/*"],
+      "@/*": ["./src/*"],
       "@tools/*": ["../../tools/*"],
       "shared": ["../../packages/shared/src"],
       "@databricks/lakebase": ["../../packages/lakebase/src"],
-      "@databricks/appkit": ["src/index.ts"],
-      "@databricks/appkit/testing": ["src/testing/index.ts"]
+      "@databricks/appkit": ["./src/index.ts"],
+      "@databricks/appkit/testing": ["./src/testing/index.ts"]
     }
   },
   "include": ["src/**/*"],

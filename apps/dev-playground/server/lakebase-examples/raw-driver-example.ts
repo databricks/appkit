@@ -1,6 +1,6 @@
 import { createLakebasePool } from "@databricks/appkit";
+import type { IAppRouter } from "@databricks/appkit";
 import type { Pool } from "pg";
-import type { IAppRouter } from "shared";
 
 let pool: Pool;
 
