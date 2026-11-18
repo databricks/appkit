@@ -32,7 +32,6 @@ describe("remote-tunnel/gate", () => {
     for (const value of ["true", "False", "FALSE", "0", "no", "off", ""]) {
       expect(
         isRemoteTunnelAllowedByEnv({
-          NODE_ENV: "production",
           DATABRICKS_CLIENT_SECRET: "x",
           DISABLE_REMOTE_SERVING: value,
         } as any),
@@ -40,10 +39,29 @@ describe("remote-tunnel/gate", () => {
     }
   });
 
-  test("isRemoteTunnelAllowedByEnv requires DISABLE_REMOTE_SERVING=false, a secret, and not local dev", () => {
+  test("isRemoteTunnelAllowedByEnv never runs in production, even with DISABLE_REMOTE_SERVING=false", () => {
     expect(
       isRemoteTunnelAllowedByEnv({
         NODE_ENV: "production",
+        DATABRICKS_CLIENT_SECRET: "x",
+        DISABLE_REMOTE_SERVING: "false",
+      } as any),
+    ).toBe(false);
+  });
+
+  test("isRemoteTunnelAllowedByEnv requires DISABLE_REMOTE_SERVING=false, a secret, and neither production nor local dev", () => {
+    // NODE_ENV unset: the start command for a deployed app that uses the bridge.
+    expect(
+      isRemoteTunnelAllowedByEnv({
+        DATABRICKS_CLIENT_SECRET: "x",
+        DISABLE_REMOTE_SERVING: "false",
+      } as any),
+    ).toBe(true);
+
+    // Any other non-production, non-development value also works.
+    expect(
+      isRemoteTunnelAllowedByEnv({
+        NODE_ENV: "staging",
         DATABRICKS_CLIENT_SECRET: "x",
         DISABLE_REMOTE_SERVING: "false",
       } as any),
@@ -59,7 +77,6 @@ describe("remote-tunnel/gate", () => {
 
     expect(
       isRemoteTunnelAllowedByEnv({
-        NODE_ENV: "production",
         DATABRICKS_CLIENT_SECRET: "",
         DISABLE_REMOTE_SERVING: "false",
       } as any),

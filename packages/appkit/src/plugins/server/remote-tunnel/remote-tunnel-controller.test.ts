@@ -103,7 +103,7 @@ describe("RemoteTunnelController", () => {
   });
 
   test("only DISABLE_REMOTE_SERVING=false opts in; other values keep it off", async () => {
-    process.env.NODE_ENV = "production";
+    delete process.env.NODE_ENV;
     process.env.DATABRICKS_CLIENT_SECRET = "x";
 
     for (const value of ["true", "False", "0", ""]) {
@@ -123,8 +123,27 @@ describe("RemoteTunnelController", () => {
     expect(RemoteTunnelManager).not.toHaveBeenCalled();
   });
 
-  test("initializes manager on demand for dev query and calls devModeMiddleware", async () => {
+  test("a production app ignores ?dev even with DISABLE_REMOTE_SERVING=false", async () => {
     process.env.NODE_ENV = "production";
+    process.env.DATABRICKS_CLIENT_SECRET = "x";
+    process.env.DISABLE_REMOTE_SERVING = "false";
+
+    const ctrl = new RemoteTunnelController({} as any);
+    const next = vi.fn();
+
+    await ctrl.middleware(
+      { query: { dev: "" }, originalUrl: "/?dev", method: "GET" } as any,
+      {} as any,
+      next,
+    );
+
+    expect(next).toHaveBeenCalled();
+    expect(RemoteTunnelManager).not.toHaveBeenCalled();
+    expect(ctrl.isAllowedByEnv()).toBe(false);
+  });
+
+  test("initializes manager on demand for dev query and calls devModeMiddleware", async () => {
+    delete process.env.NODE_ENV;
     process.env.DATABRICKS_CLIENT_SECRET = "x";
     process.env.DISABLE_REMOTE_SERVING = "false";
 
@@ -149,7 +168,7 @@ describe("RemoteTunnelController", () => {
   });
 
   test("initializes manager on demand for asset request and calls assetMiddleware", async () => {
-    process.env.NODE_ENV = "production";
+    delete process.env.NODE_ENV;
     process.env.DATABRICKS_CLIENT_SECRET = "x";
     process.env.DISABLE_REMOTE_SERVING = "false";
 
@@ -173,7 +192,7 @@ describe("RemoteTunnelController", () => {
   });
 
   test("setServer before init hooks websocket after init", async () => {
-    process.env.NODE_ENV = "production";
+    delete process.env.NODE_ENV;
     process.env.DATABRICKS_CLIENT_SECRET = "x";
     process.env.DISABLE_REMOTE_SERVING = "false";
 
@@ -197,7 +216,7 @@ describe("RemoteTunnelController", () => {
   });
 
   test("cleanup calls manager.cleanup and resets state", async () => {
-    process.env.NODE_ENV = "production";
+    delete process.env.NODE_ENV;
     process.env.DATABRICKS_CLIENT_SECRET = "x";
     process.env.DISABLE_REMOTE_SERVING = "false";
 
