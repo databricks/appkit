@@ -27,24 +27,25 @@ describe("remote-tunnel/gate", () => {
       isRemoteTunnelAllowedByEnv({ DATABRICKS_CLIENT_SECRET: "x" } as any),
     ).toBe(false);
 
-    // Only the exact string "true" opts in.
-    for (const value of ["1", "yes", "TRUE", ""]) {
+    // DISABLE_REMOTE_SERVING defaults to true: only the exact string "false"
+    // opts in, so typos and other spellings fail closed.
+    for (const value of ["true", "False", "FALSE", "0", "no", "off", ""]) {
       expect(
         isRemoteTunnelAllowedByEnv({
           NODE_ENV: "production",
           DATABRICKS_CLIENT_SECRET: "x",
-          ENABLE_REMOTE_SERVING: value,
+          DISABLE_REMOTE_SERVING: value,
         } as any),
       ).toBe(false);
     }
   });
 
-  test("isRemoteTunnelAllowedByEnv requires opt-in, secret, not disabled, and not local dev", () => {
+  test("isRemoteTunnelAllowedByEnv requires DISABLE_REMOTE_SERVING=false, a secret, and not local dev", () => {
     expect(
       isRemoteTunnelAllowedByEnv({
         NODE_ENV: "production",
         DATABRICKS_CLIENT_SECRET: "x",
-        ENABLE_REMOTE_SERVING: "true",
+        DISABLE_REMOTE_SERVING: "false",
       } as any),
     ).toBe(true);
 
@@ -52,7 +53,7 @@ describe("remote-tunnel/gate", () => {
       isRemoteTunnelAllowedByEnv({
         NODE_ENV: "development",
         DATABRICKS_CLIENT_SECRET: "x",
-        ENABLE_REMOTE_SERVING: "true",
+        DISABLE_REMOTE_SERVING: "false",
       } as any),
     ).toBe(false);
 
@@ -60,28 +61,9 @@ describe("remote-tunnel/gate", () => {
       isRemoteTunnelAllowedByEnv({
         NODE_ENV: "production",
         DATABRICKS_CLIENT_SECRET: "",
-        ENABLE_REMOTE_SERVING: "true",
-      } as any),
-    ).toBe(false);
-
-    // DISABLE_REMOTE_SERVING wins over ENABLE_REMOTE_SERVING.
-    expect(
-      isRemoteTunnelAllowedByEnv({
-        NODE_ENV: "production",
-        DATABRICKS_CLIENT_SECRET: "x",
-        ENABLE_REMOTE_SERVING: "true",
-        DISABLE_REMOTE_SERVING: "true",
-      } as any),
-    ).toBe(false);
-
-    expect(
-      isRemoteTunnelAllowedByEnv({
-        NODE_ENV: "production",
-        DATABRICKS_CLIENT_SECRET: "x",
-        ENABLE_REMOTE_SERVING: "true",
         DISABLE_REMOTE_SERVING: "false",
       } as any),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   test("hasDevQuery returns true for ?dev (blank) and ?dev=true and ?dev=<id>", () => {

@@ -62,7 +62,7 @@ export class RemoteTunnelController {
     if (this.warnedRemoteServingDisabled) return;
     this.warnedRemoteServingDisabled = true;
     logger.warn(
-      "Ignoring ?dev: Remote Bridge is off for this app. Set ENABLE_REMOTE_SERVING=true in app.yaml and redeploy to use `databricks apps dev-remote`.",
+      'Ignoring ?dev: Remote Bridge is off for this app. Set DISABLE_REMOTE_SERVING to "false" in app.yaml and redeploy to use `databricks apps dev-remote`.',
     );
   }
 

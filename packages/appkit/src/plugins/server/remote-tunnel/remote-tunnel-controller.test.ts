@@ -34,7 +34,6 @@ describe("RemoteTunnelController", () => {
     vi.clearAllMocks();
     process.env = { ...originalEnv };
     delete process.env.DEBUG_REMOTE_TUNNEL;
-    delete process.env.ENABLE_REMOTE_SERVING;
     delete process.env.DISABLE_REMOTE_SERVING;
   });
 
@@ -78,7 +77,7 @@ describe("RemoteTunnelController", () => {
     expect(RemoteTunnelManager).not.toHaveBeenCalled();
   });
 
-  test("a deployed app ignores ?dev until it sets ENABLE_REMOTE_SERVING=true", async () => {
+  test("a deployed app ignores ?dev until it sets DISABLE_REMOTE_SERVING=false", async () => {
     // What every deployed app looks like: production plus the platform-injected secret.
     process.env.NODE_ENV = "production";
     process.env.DATABRICKS_CLIENT_SECRET = "x";
@@ -103,29 +102,31 @@ describe("RemoteTunnelController", () => {
     expect(ctrl.isActive()).toBe(false);
   });
 
-  test("DISABLE_REMOTE_SERVING=true wins over ENABLE_REMOTE_SERVING=true", async () => {
+  test("only DISABLE_REMOTE_SERVING=false opts in; other values keep it off", async () => {
     process.env.NODE_ENV = "production";
     process.env.DATABRICKS_CLIENT_SECRET = "x";
-    process.env.ENABLE_REMOTE_SERVING = "true";
-    process.env.DISABLE_REMOTE_SERVING = "true";
 
-    const ctrl = new RemoteTunnelController({} as any);
-    const next = vi.fn();
+    for (const value of ["true", "False", "0", ""]) {
+      process.env.DISABLE_REMOTE_SERVING = value;
+      const ctrl = new RemoteTunnelController({} as any);
+      const next = vi.fn();
 
-    await ctrl.middleware(
-      { query: { dev: "" }, originalUrl: "/?dev", method: "GET" } as any,
-      {} as any,
-      next,
-    );
+      await ctrl.middleware(
+        { query: { dev: "" }, originalUrl: "/?dev", method: "GET" } as any,
+        {} as any,
+        next,
+      );
 
-    expect(next).toHaveBeenCalled();
+      expect(next).toHaveBeenCalled();
+      expect(ctrl.isActive()).toBe(false);
+    }
     expect(RemoteTunnelManager).not.toHaveBeenCalled();
   });
 
   test("initializes manager on demand for dev query and calls devModeMiddleware", async () => {
     process.env.NODE_ENV = "production";
     process.env.DATABRICKS_CLIENT_SECRET = "x";
-    process.env.ENABLE_REMOTE_SERVING = "true";
+    process.env.DISABLE_REMOTE_SERVING = "false";
 
     const ctrl = new RemoteTunnelController({} as any);
     const next = vi.fn();
@@ -150,7 +151,7 @@ describe("RemoteTunnelController", () => {
   test("initializes manager on demand for asset request and calls assetMiddleware", async () => {
     process.env.NODE_ENV = "production";
     process.env.DATABRICKS_CLIENT_SECRET = "x";
-    process.env.ENABLE_REMOTE_SERVING = "true";
+    process.env.DISABLE_REMOTE_SERVING = "false";
 
     const ctrl = new RemoteTunnelController({} as any);
     const next = vi.fn();
@@ -174,7 +175,7 @@ describe("RemoteTunnelController", () => {
   test("setServer before init hooks websocket after init", async () => {
     process.env.NODE_ENV = "production";
     process.env.DATABRICKS_CLIENT_SECRET = "x";
-    process.env.ENABLE_REMOTE_SERVING = "true";
+    process.env.DISABLE_REMOTE_SERVING = "false";
 
     const ctrl = new RemoteTunnelController({} as any);
     const server = {} as any;
@@ -198,7 +199,7 @@ describe("RemoteTunnelController", () => {
   test("cleanup calls manager.cleanup and resets state", async () => {
     process.env.NODE_ENV = "production";
     process.env.DATABRICKS_CLIENT_SECRET = "x";
-    process.env.ENABLE_REMOTE_SERVING = "true";
+    process.env.DISABLE_REMOTE_SERVING = "false";
 
     const ctrl = new RemoteTunnelController({} as any);
 

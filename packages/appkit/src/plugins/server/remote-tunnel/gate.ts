@@ -25,9 +25,10 @@ export function isLocalDev(env: NodeJS.ProcessEnv = process.env): boolean {
  *
  * The Remote Bridge serves UI and query files from a developer's machine
  * through the deployed app, so a deployed app has it off unless it opts in.
+ * DISABLE_REMOTE_SERVING defaults to true: only the exact value "false"
+ * turns the bridge on, and unset or any other value leaves it off.
  * - not in local development mode
- * - ENABLE_REMOTE_SERVING is set to "true" (opt-in)
- * - DISABLE_REMOTE_SERVING is not set to "true" (always wins)
+ * - DISABLE_REMOTE_SERVING is set to "false" (opt-in)
  * - DATABRICKS_CLIENT_SECRET is set
  * @param env - the environment variables
  * @returns true if the environment allows the remote tunnel
@@ -37,8 +38,7 @@ export function isRemoteTunnelAllowedByEnv(
 ): boolean {
   return (
     !isLocalDev(env) &&
-    env.ENABLE_REMOTE_SERVING === "true" &&
-    env.DISABLE_REMOTE_SERVING !== "true" &&
+    env.DISABLE_REMOTE_SERVING === "false" &&
     Boolean(env.DATABRICKS_CLIENT_SECRET)
   );
 }
