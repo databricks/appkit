@@ -218,6 +218,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.98.0](https://github.com/databricks/appkit/compare/v0.97.3...v0.98.0) (2026-11-18)
+
+### appkit
+
+* **appkit:** make Remote Bridge opt-in, and never on in production ([#742](https://github.com/databricks/appkit/issues/742)) ([fd341ec](https://github.com/databricks/appkit/commit/fd341ec90843fcd433608c7668256e4eeedc5ac7))
+
+
 ## [0.97.3](https://github.com/databricks/appkit/compare/v0.97.2...v0.97.3) (2026-11-17)
 
 ### appkit
