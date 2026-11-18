@@ -13,11 +13,46 @@ describe("remote-tunnel/gate", () => {
     expect(isLocalDev({ NODE_ENV: "production" } as any)).toBe(false);
   });
 
-  test("isRemoteTunnelAllowedByEnv requires secret, not disabled, and not local dev", () => {
+  test("isRemoteTunnelAllowedByEnv is off by default in a deployed app", () => {
+    // A deployed app: production, with the platform-injected client secret.
+    expect(
+      isRemoteTunnelAllowedByEnv({
+        NODE_ENV: "production",
+        DATABRICKS_CLIENT_SECRET: "x",
+      } as any),
+    ).toBe(false);
+
+    // NODE_ENV unset (e.g. an app started without npm start) is also off.
+    expect(
+      isRemoteTunnelAllowedByEnv({ DATABRICKS_CLIENT_SECRET: "x" } as any),
+    ).toBe(false);
+
+    // Only the exact string "true" opts in.
+    for (const value of ["1", "yes", "TRUE", ""]) {
+      expect(
+        isRemoteTunnelAllowedByEnv({
+          NODE_ENV: "production",
+          DATABRICKS_CLIENT_SECRET: "x",
+          ENABLE_REMOTE_SERVING: value,
+        } as any),
+      ).toBe(false);
+    }
+  });
+
+  test("isRemoteTunnelAllowedByEnv requires opt-in, secret, not disabled, and not local dev", () => {
+    expect(
+      isRemoteTunnelAllowedByEnv({
+        NODE_ENV: "production",
+        DATABRICKS_CLIENT_SECRET: "x",
+        ENABLE_REMOTE_SERVING: "true",
+      } as any),
+    ).toBe(true);
+
     expect(
       isRemoteTunnelAllowedByEnv({
         NODE_ENV: "development",
         DATABRICKS_CLIENT_SECRET: "x",
+        ENABLE_REMOTE_SERVING: "true",
       } as any),
     ).toBe(false);
 
@@ -25,13 +60,16 @@ describe("remote-tunnel/gate", () => {
       isRemoteTunnelAllowedByEnv({
         NODE_ENV: "production",
         DATABRICKS_CLIENT_SECRET: "",
+        ENABLE_REMOTE_SERVING: "true",
       } as any),
     ).toBe(false);
 
+    // DISABLE_REMOTE_SERVING wins over ENABLE_REMOTE_SERVING.
     expect(
       isRemoteTunnelAllowedByEnv({
         NODE_ENV: "production",
         DATABRICKS_CLIENT_SECRET: "x",
+        ENABLE_REMOTE_SERVING: "true",
         DISABLE_REMOTE_SERVING: "true",
       } as any),
     ).toBe(false);
@@ -40,6 +78,7 @@ describe("remote-tunnel/gate", () => {
       isRemoteTunnelAllowedByEnv({
         NODE_ENV: "production",
         DATABRICKS_CLIENT_SECRET: "x",
+        ENABLE_REMOTE_SERVING: "true",
         DISABLE_REMOTE_SERVING: "false",
       } as any),
     ).toBe(true);

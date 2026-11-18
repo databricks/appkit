@@ -18,6 +18,20 @@ Use remote bridge when:
 - Developing UI without running backend locally
 - Collaborating with team members on the same backend
 
+## Enabling Remote Bridge on your app
+
+Remote Bridge is off by default in deployed apps. To use it, opt in by adding `ENABLE_REMOTE_SERVING` to your app's `app.yaml` and redeploying:
+
+```yaml
+env:
+  - name: ENABLE_REMOTE_SERVING
+    value: "true"
+```
+
+Enable it only on apps you use for development, not on apps you've shared with other users, and remove it (then redeploy) when you're done. `DISABLE_REMOTE_SERVING: "true"` always turns it off, even if `ENABLE_REMOTE_SERVING` is set.
+
+If you open `<app-url>?dev` on an app that hasn't opted in, the app loads normally and logs a warning explaining how to enable Remote Bridge.
+
 ## Starting and stopping Remote Bridge
 
 To start the remote bridge, run the following command:
