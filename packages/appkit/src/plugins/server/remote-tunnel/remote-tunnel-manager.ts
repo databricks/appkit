@@ -14,7 +14,10 @@ import {
   getConfigScript,
   parseCookies,
 } from "../utils";
-import { REMOTE_TUNNEL_ASSET_PREFIXES } from "./gate";
+import {
+  isRemoteTunnelAllowedByEnv,
+  REMOTE_TUNNEL_ASSET_PREFIXES,
+} from "./gate";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -229,13 +232,9 @@ export class RemoteTunnelManager {
     app.use(REMOTE_TUNNEL_ASSET_PREFIXES, this.assetMiddleware());
   }
 
+  /** Same rule as the controller's gate; see isRemoteTunnelAllowedByEnv. */
   static isRemoteServerEnabled() {
-    return (
-      process.env.NODE_ENV !== "production" &&
-      process.env.DISABLE_REMOTE_SERVING !== "true" &&
-      // DATABRICKS_CLIENT_SECRET is set in the .env file for deployed environments
-      Boolean(process.env.DATABRICKS_CLIENT_SECRET)
-    );
+    return isRemoteTunnelAllowedByEnv();
   }
 
   private loadHtmlTemplate(
