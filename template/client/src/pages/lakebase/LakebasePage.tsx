@@ -10,19 +10,13 @@ import {
 } from '@databricks/appkit-ui/react';
 import { useState, useEffect } from 'react';
 import { Check, X } from 'lucide-react';
+import { fetchOrThrow } from '../../lib/fetch-or-throw';
 
 interface Todo {
   id: number;
   title: string;
   completed: boolean;
   created_at: string;
-}
-
-// Outside the component: the React Compiler skips components that `throw` inside `try`.
-async function requestTodos(url: string, init: RequestInit, failure: string): Promise<Response> {
-  const res = await fetch(url, init);
-  if (!res.ok) throw new Error(`${failure}: ${res.statusText}`);
-  return res;
 }
 
 export function LakebasePage() {
@@ -50,14 +44,14 @@ export function LakebasePage() {
 
     setSubmitting(true);
     try {
-      const res = await requestTodos(
+      const res = await fetchOrThrow(
         '/api/lakebase/todos',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ title }),
         },
-        'Failed to create todo',
+        (r) => `Failed to create todo: ${r.statusText}`,
       );
       const created = (await res.json()) as Todo;
       setTodos((prev) => [created, ...prev]);
@@ -70,7 +64,11 @@ export function LakebasePage() {
 
   const toggleTodo = async (id: number) => {
     try {
-      const res = await requestTodos(`/api/lakebase/todos/${id}`, { method: 'PATCH' }, 'Failed to update todo');
+      const res = await fetchOrThrow(
+        `/api/lakebase/todos/${id}`,
+        { method: 'PATCH' },
+        (r) => `Failed to update todo: ${r.statusText}`,
+      );
       const updated = (await res.json()) as Todo;
       setTodos((prev) => prev.map((t) => (t.id === id ? updated : t)));
     } catch (err) {
@@ -80,7 +78,11 @@ export function LakebasePage() {
 
   const deleteTodo = async (id: number) => {
     try {
-      await requestTodos(`/api/lakebase/todos/${id}`, { method: 'DELETE' }, 'Failed to delete todo');
+      await fetchOrThrow(
+        `/api/lakebase/todos/${id}`,
+        { method: 'DELETE' },
+        (r) => `Failed to delete todo: ${r.statusText}`,
+      );
       setTodos((prev) => prev.filter((t) => t.id !== id));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete todo');
