@@ -565,6 +565,10 @@ export const LINT_FIXTURES: LintFixture[] = [
     "export function C() {\n  const Inner = () => <div />;\n  return <Inner />;\n}",
   ),
   client(
+    "react-hooks-js/todo",
+    'export function C({ load }: { load: () => Promise<number | null> }) {\n  const run = async () => {\n    try {\n      document.title = String((await load()) ?? 0);\n    } catch {\n      document.title = "failed";\n    }\n  };\n  return <button onClick={() => void run()}>run</button>;\n}',
+  ),
+  client(
     "react-hooks-js/unsupported-syntax",
     'export function C() {\n  eval("1");\n  return <div />;\n}',
   ),
@@ -587,7 +591,7 @@ export const LINT_FIXTURES: LintFixture[] = [
   ),
   client(
     "no-restricted-imports",
-    "import { useMemo } from 'react';\nexport const C = ({ n }: { n: number }) => {\n  const double = useMemo(() => n * 2, [n]);\n  return <p>{double}</p>;\n};",
+    'import { useCallback } from "react";\nexport const C = ({ n }: { n: number }) => {\n  const show = useCallback(() => n, [n]);\n  return <button onClick={show}>{n}</button>;\n};',
   ),
 ];
 
