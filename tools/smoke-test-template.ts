@@ -12,7 +12,7 @@
  * - {{.appEnv}} → (empty, which means the conditional block is omitted)
  *
  * Usage:
- *   tsx tools/smoke-test-template.ts [--output-dir <path>] [--package-manager <pm>] [--run]
+ *   tsx tools/smoke-test-template.ts [--output-dir <path>] [--package-manager <pm>] [--run] [--all-plugins]
  *
  * Options:
  *   --output-dir        Optional. Scratch directory for the scaffolded app.
@@ -20,6 +20,8 @@
  *   --package-manager   Optional. Package manager to scaffold (pnpm or npm).
  *                       Defaults to "pnpm". (short: -p)
  *   --run              Install, build with prebuild, and check HTTP startup.
+ *   --all-plugins      Keep every plugin's code (the server stays minimal). With --run,
+ *                      install, then typecheck and lint instead of building.
  */
 
 import {
@@ -46,6 +48,7 @@ const { values } = parseArgs({
     "output-dir": { type: "string", default: ".smoke-test/app" },
     "package-manager": { type: "string", default: "pnpm", short: "p" },
     run: { type: "boolean", default: false },
+    "all-plugins": { type: "boolean", default: false },
   },
   strict: true,
 });
@@ -138,12 +141,12 @@ function processAllFiles(dir: string): void {
         }
       }
 
-      // Remove Go template conditionals: {{- if .plugins.*}} blocks
+      // Remove Go template conditionals: {{- if .plugins.*}} blocks, or keep their content
       if (content.includes("{{") && content.includes(".plugins.")) {
         const beforeLen = content.length;
         content = content.replace(
-          /{{-?\s*if\s+\.plugins\.[a-zA-Z0-9_-]+\s*-?\s*}}[\s\S]*?{{-?\s*end\s*-?\s*}}/g,
-          "",
+          /{{-?\s*if\s+\.plugins\.[a-zA-Z0-9_-]+\s*-?\s*}}([\s\S]*?){{-?\s*end\s*-?\s*}}/g,
+          values["all-plugins"] ? "$1" : "",
         );
         if (beforeLen !== content.length) {
           modified = true;
@@ -208,7 +211,9 @@ console.log(
 );
 console.log(`\nTemplate scaffolded to ${SCRATCH_DIR}`);
 if (values.run) {
-  await runTemplateSmoke(SCRATCH_DIR, packageManager);
+  await runTemplateSmoke(SCRATCH_DIR, packageManager, {
+    allPlugins: values["all-plugins"],
+  });
 } else if (packageManager === "pnpm") {
   console.log("Next step: pnpm install --frozen-lockfile in that directory");
 } else if (packageManager === "npm") {

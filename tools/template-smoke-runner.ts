@@ -73,9 +73,40 @@ async function freePort(): Promise<number> {
   return address.port;
 }
 
+/** What typegen writes for the template's queries once a warehouse has described them. */
+const TEMPLATE_QUERY_TYPES = `import "@databricks/appkit-ui/react";
+import type { SQLNumberMarker, SQLStringMarker } from "@databricks/appkit-ui/js";
+
+declare module "@databricks/appkit-ui/react" {
+  interface QueryRegistry {
+    hello_world: {
+      name: "hello_world";
+      parameters: { message: SQLStringMarker };
+      result: Array<{ value: string }>;
+    };
+    mocked_sales: {
+      name: "mocked_sales";
+      parameters: { max_month_num: SQLNumberMarker };
+      result: Array<{
+        month: string;
+        month_num: number;
+        revenue: number;
+        expenses: number;
+        customers: number;
+      }>;
+    };
+  }
+}
+`;
+
+/**
+ * Installs the scaffold, then builds and serves it. With `allPlugins` (a scaffold that keeps
+ * every plugin's code), typechecks and lints it instead.
+ */
 export async function runTemplateSmoke(
   appDir: string,
   pm: PackageManager,
+  { allPlugins = false } = {},
 ): Promise<void> {
   const guardDir = mkdtempSync(join(tmpdir(), "appkit-smoke-pm-"));
   const unexpectedRequests: string[] = [];
@@ -179,6 +210,17 @@ export async function runTemplateSmoke(
       }
     }
     run(process.execPath, ["--input-type=commonjs", "-e", nativeCheck]);
+    if (allPlugins) {
+      const typesDir = join(appDir, "shared/appkit-types");
+      mkdirSync(typesDir, { recursive: true });
+      writeFileSync(join(typesDir, "analytics.d.ts"), TEMPLATE_QUERY_TYPES);
+      // Like checkTemplateLint: make the app its own repository so oxlint ignores .smoke-test's .gitignore.
+      run("git", ["init", "--quiet"]);
+      for (const script of ["typecheck", "lint", "lint:ast-grep"])
+        run(pm, ["run", script]);
+      console.log(`${pm}: every plugin's code typechecks and lints`);
+      return;
+    }
     checkTemplateLint(appDir, env);
     run(pm, ["run", "build"]);
     // The build ran typegen. Add the declarations it writes for an app with no database schema
