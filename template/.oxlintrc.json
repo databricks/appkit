@@ -84,7 +84,6 @@
     "no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
     "typescript/await-thenable": "error",
     "typescript/ban-ts-comment": "error",
-    "typescript/consistent-type-assertions": ["error", { "assertionStyle": "never" }],
     "typescript/no-array-delete": "error",
     "typescript/no-base-to-string": "error",
     "typescript/no-duplicate-enum-values": "error",
@@ -99,7 +98,6 @@
     "typescript/no-misused-promises": "error",
     "typescript/no-namespace": "error",
     "typescript/no-non-null-asserted-optional-chain": "error",
-    "typescript/no-non-null-assertion": "error",
     "typescript/no-redundant-type-constituents": "error",
     "typescript/no-require-imports": "error",
     "typescript/no-this-alias": "error",
@@ -123,7 +121,11 @@
     "typescript/restrict-plus-operands": "error",
     "typescript/restrict-template-expressions": "error",
     "typescript/triple-slash-reference": "error",
-    "typescript/unbound-method": "error"
+    "typescript/unbound-method": "error",
+
+    // No escape hatches around the type checker
+    "typescript/consistent-type-assertions": ["error", { "assertionStyle": "never" }],
+    "typescript/no-non-null-assertion": "error"
   },
   "overrides": [
     {

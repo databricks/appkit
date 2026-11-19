@@ -8,7 +8,7 @@ import {
   NewFolderInput,
 } from '@databricks/appkit-ui/react';
 import { FolderPlus, Loader2, Upload } from 'lucide-react';
-import { fetchOrThrow } from '../../lib/fetch-or-throw';
+import { fetchJson, fetchOrThrow } from '../../lib/fetch-or-throw';
 import {
   type RefObject,
   useEffect,
@@ -18,12 +18,15 @@ import {
 } from 'react';
 import { z } from 'zod';
 
+const VolumeListSchema = z.object({ volumes: z.array(z.string()) });
+
+// Leaves out `last_modified`, which DirectoryList doesn't read: the files plugin sends epoch
+// milliseconds, but AppKit UI's DirectoryEntry declared a string before it was fixed.
 const DirectoryEntrySchema: z.ZodType<DirectoryEntry> = z.object({
   name: z.string().optional(),
   path: z.string().optional(),
   is_directory: z.boolean().optional(),
   file_size: z.number().optional(),
-  last_modified: z.string().optional(),
 });
 
 const FilePreviewSchema: z.ZodType<FilePreview> = z.object({
@@ -35,9 +38,6 @@ const FilePreviewSchema: z.ZodType<FilePreview> = z.object({
   isImage: z.boolean(),
 });
 
-// The files plugin sends `{ error }` in its JSON error responses.
-const ServerError = z.object({ error: z.string() });
-
 function useAbortController(): RefObject<AbortController | null> {
   const ref = useRef<AbortController | null>(null);
   return ref;
@@ -48,12 +48,6 @@ function nextSignal(ref: RefObject<AbortController | null>): AbortSignal {
   ref.current = new AbortController();
   return ref.current.signal;
 }
-
-const serverErrorOr =
-  (fallback: (res: Response) => string) => async (res: Response) => {
-    const body = ServerError.safeParse(await res.json().catch(() => null));
-    return body.success ? body.data.error : fallback(res);
-  };
 
 const isAbort = (err: unknown) =>
   err instanceof DOMException && err.name === 'AbortError';
@@ -99,12 +93,12 @@ export function FilesPage() {
 
     try {
       const signal = nextSignal(listAbort);
-      const response = await fetchOrThrow(
+      const data = await fetchJson(
         url,
         { signal },
-        serverErrorOr((res) => `HTTP ${res.status}: ${res.statusText}`),
+        z.array(DirectoryEntrySchema),
+        (res) => `HTTP ${res.status}: ${res.statusText}`,
       );
-      const data = z.array(DirectoryEntrySchema).parse(await response.json());
       data.sort((a, b) => {
         if (a.is_directory && !b.is_directory) return -1;
         if (!a.is_directory && b.is_directory) return 1;
@@ -127,12 +121,14 @@ export function FilesPage() {
 
     try {
       const signal = nextSignal(previewAbort);
-      const response = await fetchOrThrow(
-        apiUrl('preview', { path: filePath }),
-        { signal },
-        serverErrorOr((res) => `HTTP ${res.status}`),
+      setPreview(
+        await fetchJson(
+          apiUrl('preview', { path: filePath }),
+          { signal },
+          FilePreviewSchema,
+          (res) => `HTTP ${res.status}`,
+        ),
       );
-      setPreview(FilePreviewSchema.parse(await response.json()));
     } catch (err) {
       if (!isAbort(err)) setPreview(null);
     }
@@ -140,10 +136,13 @@ export function FilesPage() {
   };
 
   useEffect(() => {
-    fetch('/api/files/volumes')
-      .then((res) => res.json())
-      .then((data: { volumes: string[] }) => {
-        const list = data.volumes ?? [];
+    fetchJson(
+      '/api/files/volumes',
+      undefined,
+      VolumeListSchema,
+      (res) => `HTTP ${res.status}: ${res.statusText}`,
+    )
+      .then(({ volumes: list }) => {
         setVolumes(list);
         if (!volumeKey || !list.includes(volumeKey)) {
           const first = list[0];
@@ -153,7 +152,7 @@ export function FilesPage() {
           }
         }
       })
-      .catch(() => {});
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, [volumeKey]);
 
   // An effect event, so the load reruns only when the volume changes, whether
@@ -217,7 +216,7 @@ export function FilesPage() {
       await fetchOrThrow(
         apiUrl('upload', { path: childPath(file.name) }),
         { method: 'POST', body: file },
-        serverErrorOr((res) => `Upload failed (${res.status})`),
+        (res) => `Upload failed (${res.status})`,
       );
       await loadDirectory(currentPath);
     } catch (err) {
@@ -240,7 +239,7 @@ export function FilesPage() {
       await fetchOrThrow(
         `/api/files/${volumeKey}?path=${encodeURIComponent(selectedFile)}`,
         { method: 'DELETE' },
-        serverErrorOr((res) => `Delete failed (${res.status})`),
+        (res) => `Delete failed (${res.status})`,
       );
       setSelectedFile(null);
       setPreview(null);
@@ -264,7 +263,7 @@ export function FilesPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ path: childPath(name) }),
         },
-        serverErrorOr((res) => `Create directory failed (${res.status})`),
+        (res) => `Create directory failed (${res.status})`,
       );
       setShowNewDirInput(false);
       setNewDirName('');

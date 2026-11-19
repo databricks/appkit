@@ -5,16 +5,18 @@ import { useServingInvoke } from '@databricks/appkit-ui/react';
 import { useState } from 'react';
 import { z } from 'zod';
 
+// Only the first choice is shown, so only it has to be a chat message.
 const ChatResponse = z.object({
-  choices: z.array(
-    z.object({ message: z.object({ content: z.string() }).optional() }),
+  choices: z.tuple(
+    [z.object({ message: z.object({ content: z.string() }).optional() })],
+    z.unknown(),
   ),
 });
 
 function extractContent(data: unknown): string {
   const resp = ChatResponse.safeParse(data);
   return (
-    (resp.success ? resp.data.choices[0]?.message?.content : undefined) ??
+    (resp.success ? resp.data.choices[0].message?.content : undefined) ??
     JSON.stringify(data)
   );
 }

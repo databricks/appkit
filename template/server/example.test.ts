@@ -58,8 +58,12 @@ class GreeterPlugin extends Plugin {
       method: 'post',
       path: '/greet',
       handler: (req, res) => {
-        const { name } = GreetBody.parse(req.body);
-        res.json({ message: `Hello, ${name}!` });
+        const body = GreetBody.safeParse(req.body);
+        if (!body.success) {
+          res.status(400).json({ error: 'name is required' });
+          return Promise.resolve();
+        }
+        res.json({ message: `Hello, ${body.data.name}!` });
         return Promise.resolve();
       },
     });

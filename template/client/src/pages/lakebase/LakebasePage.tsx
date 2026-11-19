@@ -11,7 +11,7 @@ import {
 import { useState, useEffect } from 'react';
 import { Check, X } from 'lucide-react';
 import { z } from 'zod';
-import { fetchOrThrow } from '../../lib/fetch-or-throw';
+import { fetchJson, fetchOrThrow } from '../../lib/fetch-or-throw';
 
 const Todo = z.object({
   id: z.number(),
@@ -29,11 +29,12 @@ export function LakebasePage() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    fetch('/api/lakebase/todos')
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`Failed to fetch todos: ${res.statusText}`);
-        return z.array(Todo).parse(await res.json());
-      })
+    fetchJson(
+      '/api/lakebase/todos',
+      undefined,
+      z.array(Todo),
+      (r) => `Failed to fetch todos: ${r.statusText}`,
+    )
       .then(setTodos)
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load todos'))
       .finally(() => setLoading(false));
@@ -46,16 +47,16 @@ export function LakebasePage() {
 
     setSubmitting(true);
     try {
-      const res = await fetchOrThrow(
+      const created = await fetchJson(
         '/api/lakebase/todos',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ title }),
         },
+        Todo,
         (r) => `Failed to create todo: ${r.statusText}`,
       );
-      const created = Todo.parse(await res.json());
       setTodos((prev) => [created, ...prev]);
       setNewTitle('');
     } catch (err) {
@@ -66,12 +67,12 @@ export function LakebasePage() {
 
   const toggleTodo = async (id: number) => {
     try {
-      const res = await fetchOrThrow(
+      const updated = await fetchJson(
         `/api/lakebase/todos/${id}`,
         { method: 'PATCH' },
+        Todo,
         (r) => `Failed to update todo: ${r.statusText}`,
       );
-      const updated = Todo.parse(await res.json());
       setTodos((prev) => prev.map((t) => (t.id === id ? updated : t)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update todo');

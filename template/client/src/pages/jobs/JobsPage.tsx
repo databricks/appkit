@@ -8,7 +8,7 @@ import {
 } from '@databricks/appkit-ui/react';
 import { useId, useRef, useState } from 'react';
 import { z } from 'zod';
-import { fetchOrThrow } from '../../lib/fetch-or-throw';
+import { fetchJson, fetchOrThrow } from '../../lib/fetch-or-throw';
 
 const MAX_STREAM_LOG = 500;
 
@@ -55,15 +55,16 @@ function stateColor(state?: string) {
   }
 }
 
-const bodyText = (res: Response) => res.text();
+const httpError = (res: Response) => `HTTP ${res.status}: ${res.statusText}`;
 
 async function listRuns(jobKey: string): Promise<Run[]> {
-  const res = await fetchOrThrow(
+  const { runs } = await fetchJson(
     `/api/jobs/${jobKey}/runs?limit=10`,
     undefined,
-    bodyText,
+    RunList,
+    httpError,
   );
-  return RunList.parse(await res.json()).runs ?? [];
+  return runs ?? [];
 }
 
 async function readStreamData(
@@ -103,12 +104,14 @@ export function JobsPage() {
     setLoading('status');
     setError(null);
     try {
-      const res = await fetchOrThrow(
-        `/api/jobs/${jobKey}/status`,
-        undefined,
-        bodyText,
+      setStatus(
+        await fetchJson(
+          `/api/jobs/${jobKey}/status`,
+          undefined,
+          JobStatus,
+          httpError,
+        ),
       );
-      setStatus(JobStatus.parse(await res.json()));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -135,7 +138,7 @@ export function JobsPage() {
       const res = await fetchOrThrow(
         `/api/jobs/${jobKey}/run?stream=true`,
         { method: 'POST', headers: { 'Content-Type': 'application/json' } },
-        bodyText,
+        httpError,
       );
       await readStreamData(res, (payloads) => {
         const newEntries = payloads.map((text) => ({
@@ -161,7 +164,7 @@ export function JobsPage() {
       await fetchOrThrow(
         `/api/jobs/${jobKey}/runs/${runId}`,
         { method: 'DELETE' },
-        bodyText,
+        httpError,
       );
       await fetchRuns();
     } catch (e) {
