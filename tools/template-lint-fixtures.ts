@@ -258,6 +258,10 @@ export const LINT_FIXTURES: LintFixture[] = [
     "// @ts-ignore\nexport const a: number = 1;",
   ),
   server(
+    "typescript/consistent-type-assertions",
+    "export const parse = (s: string) => JSON.parse(s) as { a: number };",
+  ),
+  server(
     "typescript/no-array-delete",
     "export function f(a: number[]): void {\n  delete a[0];\n}",
   ),
@@ -275,7 +279,12 @@ export const LINT_FIXTURES: LintFixture[] = [
   server(
     "typescript/no-extra-non-null-assertion",
     "export const f = (x?: number) => x!!;",
-    { also: ["typescript/no-unnecessary-type-assertion"] },
+    {
+      also: [
+        "typescript/no-non-null-assertion",
+        "typescript/no-unnecessary-type-assertion",
+      ],
+    },
   ),
   server(
     "typescript/no-floating-promises",
@@ -298,6 +307,11 @@ export const LINT_FIXTURES: LintFixture[] = [
   server(
     "typescript/no-non-null-asserted-optional-chain",
     "export const f = (o?: { a: number }) => o?.a!;",
+    { also: ["typescript/no-non-null-assertion"] },
+  ),
+  server(
+    "typescript/no-non-null-assertion",
+    "export const f = (x?: number) => x! + 1;",
   ),
   server(
     "typescript/no-redundant-type-constituents",
@@ -317,6 +331,7 @@ export const LINT_FIXTURES: LintFixture[] = [
   server(
     "typescript/no-unnecessary-type-assertion",
     "export const f = (s: string) => s as string;",
+    { also: ["typescript/consistent-type-assertions"] },
   ),
   server(
     "typescript/no-unnecessary-type-constraint",
@@ -354,13 +369,16 @@ export const LINT_FIXTURES: LintFixture[] = [
   server(
     "typescript/no-unsafe-unary-minus",
     "export const f = (s: string) => -(s as unknown as bigint | string);",
+    { also: ["typescript/consistent-type-assertions"] },
   ),
   server("typescript/no-wrapper-object-types", "export type S = String;"),
   server(
     "typescript/only-throw-error",
     'export function f(): void {\n  throw "x";\n}',
   ),
-  server("typescript/prefer-as-const", 'export const o = { a: "a" as "a" };'),
+  server("typescript/prefer-as-const", 'export const o = { a: "a" as "a" };', {
+    also: ["typescript/consistent-type-assertions"],
+  }),
   server(
     "typescript/prefer-namespace-keyword",
     "export declare module M {\n  export const a: number;\n}",

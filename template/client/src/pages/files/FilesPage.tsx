@@ -16,6 +16,27 @@ import {
   useRef,
   useState,
 } from 'react';
+import { z } from 'zod';
+
+const DirectoryEntrySchema: z.ZodType<DirectoryEntry> = z.object({
+  name: z.string().optional(),
+  path: z.string().optional(),
+  is_directory: z.boolean().optional(),
+  file_size: z.number().optional(),
+  last_modified: z.string().optional(),
+});
+
+const FilePreviewSchema: z.ZodType<FilePreview> = z.object({
+  contentLength: z.number().or(z.undefined()),
+  contentType: z.string().or(z.undefined()),
+  lastModified: z.string().or(z.undefined()),
+  textPreview: z.string().nullable(),
+  isText: z.boolean(),
+  isImage: z.boolean(),
+});
+
+// The files plugin sends `{ error }` in its JSON error responses.
+const ServerError = z.object({ error: z.string() });
 
 function useAbortController(): RefObject<AbortController | null> {
   const ref = useRef<AbortController | null>(null);
@@ -28,11 +49,10 @@ function nextSignal(ref: RefObject<AbortController | null>): AbortSignal {
   return ref.current.signal;
 }
 
-// The files plugin sends `{ error }` in its JSON error responses.
 const serverErrorOr =
   (fallback: (res: Response) => string) => async (res: Response) => {
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    return data.error ?? fallback(res);
+    const body = ServerError.safeParse(await res.json().catch(() => null));
+    return body.success ? body.data.error : fallback(res);
   };
 
 const isAbort = (err: unknown) =>
@@ -84,7 +104,7 @@ export function FilesPage() {
         { signal },
         serverErrorOr((res) => `HTTP ${res.status}: ${res.statusText}`),
       );
-      const data = (await response.json()) as DirectoryEntry[];
+      const data = z.array(DirectoryEntrySchema).parse(await response.json());
       data.sort((a, b) => {
         if (a.is_directory && !b.is_directory) return -1;
         if (!a.is_directory && b.is_directory) return 1;
@@ -112,7 +132,7 @@ export function FilesPage() {
         { signal },
         serverErrorOr((res) => `HTTP ${res.status}`),
       );
-      setPreview((await response.json()) as FilePreview);
+      setPreview(FilePreviewSchema.parse(await response.json()));
     } catch (err) {
       if (!isAbort(err)) setPreview(null);
     }

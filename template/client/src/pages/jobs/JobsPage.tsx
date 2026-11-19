@@ -7,21 +7,31 @@ import {
   CardTitle,
 } from '@databricks/appkit-ui/react';
 import { useId, useRef, useState } from 'react';
+import { z } from 'zod';
 import { fetchOrThrow } from '../../lib/fetch-or-throw';
 
 const MAX_STREAM_LOG = 500;
 
-interface Run {
-  runId: number;
-  state?: { lifeCycleState?: string; resultState?: string };
-  startTime?: number;
-  endTime?: number;
-}
+const Run = z.object({
+  runId: z.number(),
+  state: z
+    .object({
+      lifeCycleState: z.string().optional(),
+      resultState: z.string().optional(),
+    })
+    .optional(),
+  startTime: z.number().optional(),
+  endTime: z.number().optional(),
+});
+type Run = z.infer<typeof Run>;
 
-interface JobStatus {
-  status: string | null;
-  run: Run | null;
-}
+const JobStatus = z.object({
+  status: z.string().nullable(),
+  run: Run.nullable(),
+});
+type JobStatus = z.infer<typeof JobStatus>;
+
+const RunList = z.object({ runs: z.array(Run).optional() });
 
 function formatTime(ts?: number) {
   if (!ts) return '\u2014';
@@ -31,15 +41,15 @@ function formatTime(ts?: number) {
 function stateColor(state?: string) {
   switch (state) {
     case 'SUCCESS':
-      return 'text-green-600';
+      return 'text-success';
     case 'RUNNING':
     case 'PENDING':
-      return 'text-yellow-600';
+      return 'text-warning';
     case 'FAILED':
     case 'TIMEDOUT':
     case 'SKIPPED':
     case 'INTERNAL_ERROR':
-      return 'text-red-600';
+      return 'text-destructive';
     default:
       return 'text-muted-foreground';
   }
@@ -53,8 +63,7 @@ async function listRuns(jobKey: string): Promise<Run[]> {
     undefined,
     bodyText,
   );
-  const data = (await res.json()) as { runs?: Run[] };
-  return data.runs ?? [];
+  return RunList.parse(await res.json()).runs ?? [];
 }
 
 async function readStreamData(
@@ -99,7 +108,7 @@ export function JobsPage() {
         undefined,
         bodyText,
       );
-      setStatus((await res.json()) as JobStatus);
+      setStatus(JobStatus.parse(await res.json()));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }

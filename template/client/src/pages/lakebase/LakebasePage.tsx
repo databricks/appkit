@@ -10,14 +10,16 @@ import {
 } from '@databricks/appkit-ui/react';
 import { useState, useEffect } from 'react';
 import { Check, X } from 'lucide-react';
+import { z } from 'zod';
 import { fetchOrThrow } from '../../lib/fetch-or-throw';
 
-interface Todo {
-  id: number;
-  title: string;
-  completed: boolean;
-  created_at: string;
-}
+const Todo = z.object({
+  id: z.number(),
+  title: z.string(),
+  completed: z.boolean(),
+  created_at: z.string(),
+});
+type Todo = z.infer<typeof Todo>;
 
 export function LakebasePage() {
   const [todos, setTodos] = useState<Todo[]>([]);
@@ -28,9 +30,9 @@ export function LakebasePage() {
 
   useEffect(() => {
     fetch('/api/lakebase/todos')
-      .then((res) => {
+      .then(async (res) => {
         if (!res.ok) throw new Error(`Failed to fetch todos: ${res.statusText}`);
-        return res.json() as Promise<Todo[]>;
+        return z.array(Todo).parse(await res.json());
       })
       .then(setTodos)
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load todos'))
@@ -53,7 +55,7 @@ export function LakebasePage() {
         },
         (r) => `Failed to create todo: ${r.statusText}`,
       );
-      const created = (await res.json()) as Todo;
+      const created = Todo.parse(await res.json());
       setTodos((prev) => [created, ...prev]);
       setNewTitle('');
     } catch (err) {
@@ -69,7 +71,7 @@ export function LakebasePage() {
         { method: 'PATCH' },
         (r) => `Failed to update todo: ${r.statusText}`,
       );
-      const updated = (await res.json()) as Todo;
+      const updated = Todo.parse(await res.json());
       setTodos((prev) => prev.map((t) => (t.id === id ? updated : t)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update todo');

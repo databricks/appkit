@@ -3,18 +3,20 @@ import { useServingInvoke } from '@databricks/appkit-ui/react';
 // For streaming endpoints (e.g. chat models), use useServingStream instead:
 // import { useServingStream } from '@databricks/appkit-ui/react';
 import { useState } from 'react';
+import { z } from 'zod';
 
-interface ChatChoice {
-  message?: { content?: string };
-}
-
-interface ChatResponse {
-  choices?: ChatChoice[];
-}
+const ChatResponse = z.object({
+  choices: z.array(
+    z.object({ message: z.object({ content: z.string() }).optional() }),
+  ),
+});
 
 function extractContent(data: unknown): string {
-  const resp = data as ChatResponse;
-  return resp?.choices?.[0]?.message?.content ?? JSON.stringify(data);
+  const resp = ChatResponse.safeParse(data);
+  return (
+    (resp.success ? resp.data.choices[0]?.message?.content : undefined) ??
+    JSON.stringify(data)
+  );
 }
 
 interface Message {
