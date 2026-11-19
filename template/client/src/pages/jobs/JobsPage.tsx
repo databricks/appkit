@@ -38,21 +38,41 @@ function formatTime(ts?: number) {
   return new Date(ts).toLocaleString();
 }
 
-function stateColor(state?: string) {
+function stateDotColor(state: string) {
   switch (state) {
     case 'SUCCESS':
-      return 'text-success';
+      return 'bg-success';
     case 'RUNNING':
     case 'PENDING':
-      return 'text-warning';
+      return 'bg-warning';
     case 'FAILED':
     case 'TIMEDOUT':
     case 'SKIPPED':
     case 'INTERNAL_ERROR':
-      return 'text-destructive';
+      return 'bg-destructive';
     default:
-      return 'text-muted-foreground';
+      return 'bg-muted-foreground';
   }
+}
+
+// The state's color is a dot, not the text: the warning color is too light for text on a light card.
+function RunState({
+  state,
+  fallback,
+}: {
+  state: string | null | undefined;
+  fallback: string;
+}) {
+  if (!state) return <>{fallback}</>;
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        aria-hidden
+        className={`size-2 rounded-full ${stateDotColor(state)}`}
+      />
+      {state}
+    </span>
+  );
 }
 
 const httpError = (res: Response) => `HTTP ${res.status}: ${res.statusText}`;
@@ -228,10 +248,8 @@ export function JobsPage() {
           <CardContent>
             <p>
               <span className="text-muted-foreground">State: </span>
-              <span
-                className={`font-medium ${stateColor(status.status ?? undefined)}`}
-              >
-                {status.status ?? 'No runs'}
+              <span className="font-medium">
+                <RunState state={status.status} fallback="No runs" />
               </span>
             </p>
             {status.run && (
@@ -265,15 +283,17 @@ export function JobsPage() {
                   {runs.map((run) => (
                     <tr key={run.runId} className="border-b last:border-0">
                       <td className="py-2 pr-4 font-mono">{run.runId}</td>
-                      <td
-                        className={`py-2 pr-4 ${stateColor(run.state?.lifeCycleState)}`}
-                      >
-                        {run.state?.lifeCycleState ?? '\u2014'}
+                      <td className="py-2 pr-4">
+                        <RunState
+                          state={run.state?.lifeCycleState}
+                          fallback={'\u2014'}
+                        />
                       </td>
-                      <td
-                        className={`py-2 pr-4 ${stateColor(run.state?.resultState)}`}
-                      >
-                        {run.state?.resultState ?? '\u2014'}
+                      <td className="py-2 pr-4">
+                        <RunState
+                          state={run.state?.resultState}
+                          fallback={'\u2014'}
+                        />
                       </td>
                       <td className="py-2 pr-4 text-muted-foreground">
                         {formatTime(run.startTime)}

@@ -196,6 +196,14 @@ describe("compareLintResults", () => {
 });
 
 describe("template lint setup", () => {
+  test("checks indexed access, which the template code is written for", () => {
+    const { config: tsconfig } = ts.parseConfigFileTextToJson(
+      "tsconfig.shared.json",
+      readFileSync(join(template, "tsconfig.shared.json"), "utf-8"),
+    );
+    expect(tsconfig.compilerOptions.noUncheckedIndexedAccess).toBe(true);
+  });
+
   test("enables rules explicitly instead of through categories", () => {
     // A category default would silently decide which rules run; the list in the config is the contract.
     expect(
