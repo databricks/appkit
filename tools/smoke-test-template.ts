@@ -20,8 +20,8 @@
  *   --package-manager   Optional. Package manager to scaffold (pnpm or npm).
  *                       Defaults to "pnpm". (short: -p)
  *   --run              Install, build with prebuild, and check HTTP startup.
- *   --all-plugins      Keep every plugin's code (the server stays minimal). With --run,
- *                      install, then typecheck and lint instead of building.
+ *   --all-plugins      Keep every plugin's code, with the server that registers every plugin.
+ *                      With --run, install, then typecheck and lint instead of building.
  */
 
 import {
@@ -37,6 +37,7 @@ import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 import {
+  checkAllPluginsTemplate,
   runTemplateSmoke,
   selectSmokePackageManager,
 } from "./template-smoke-runner";
@@ -89,7 +90,7 @@ const placeholders = {
 /**
  * Recursively process all files in the scaffold directory to:
  * 1. Replace simple placeholders ({{.projectName}}, {{.appDescription}})
- * 2. Remove Go template conditionals for plugins and appEnv
+ * 2. Remove Go template conditionals for plugins and appEnv, or with --all-plugins keep the plugin blocks' content
  */
 function processAllFiles(dir: string): void {
   const entries = readdirSync(dir, { withFileTypes: true });
@@ -116,7 +117,9 @@ function processAllFiles(dir: string): void {
         fullPath.endsWith(".html") ||
         fullPath.endsWith(".tmpl") ||
         fullPath.endsWith(".yaml") ||
-        fullPath.endsWith(".yml"))
+        fullPath.endsWith(".yml") ||
+        fullPath.endsWith(".sql") ||
+        fullPath.endsWith(".md"))
     ) {
       let content = readFileSync(fullPath, "utf-8");
       let modified = false;
@@ -165,6 +168,7 @@ processAllFiles(SCRATCH_DIR);
 
 // Special handling for server.ts: it's almost entirely Go template code that needs Databricks CLI rendering.
 // For the smoke test, replace it with a minimal valid server that compiles without needing plugin configuration.
+// With --all-plugins, write the server `databricks apps init` renders when every plugin is selected.
 const serverTsPath = join(SCRATCH_DIR, "server/server.ts");
 if (existsSync(serverTsPath)) {
   const minimalServer = `import { createApp, server } from '@databricks/appkit';
@@ -174,7 +178,56 @@ createApp({
   disableInternalTelemetry: true,
 }).catch((error) => { console.error(error); process.exitCode = 1; });
 `;
-  writeFileSync(serverTsPath, minimalServer);
+  writeFileSync(
+    serverTsPath,
+    values["all-plugins"] ? allPluginsServer() : minimalServer,
+  );
+}
+
+// ponytail: mirrors template/server/server.ts by hand; rendering it takes the Go template engine.
+function allPluginsServer(): string {
+  const { plugins } = JSON.parse(
+    readFileSync(join(SCRATCH_DIR, "appkit.plugins.json"), "utf-8"),
+  ) as { plugins: Record<string, { stability?: string }> };
+  const names = Object.keys(plugins).sort();
+  const beta = names.filter((name) => plugins[name].stability === "beta");
+  const stable = names.filter((name) => !beta.includes(name));
+  // Apps set the AI Search index columns after scaffolding, as the plugin's setup steps say.
+  const register = (name: string) =>
+    name === "aiSearch"
+      ? "aiSearch({ indexes: { default: { columns: ['id'] } } })"
+      : `${name}()`;
+  return `import { createApp, ${stable.join(", ")} } from '@databricks/appkit';
+import { ${beta.join(", ")} } from '@databricks/appkit/beta';
+import { setupSampleLakebaseRoutes } from './routes/lakebase/todo-routes';
+
+createApp({
+  plugins: [
+${names.map((name) => `    ${register(name)},`).join("\n")}
+  ],
+  async onPluginsReady(appkit) {
+    await setupSampleLakebaseRoutes(appkit);
+  },
+}).catch(console.error);
+`;
+}
+
+// A Go template construct the conditionals above don't handle would ship as broken code.
+const unrendered = (dir: string): string[] =>
+  readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.name === "node_modules" || entry.name.startsWith(".")) return [];
+    if (entry.isDirectory()) return unrendered(path);
+    return /\.(tsx?|json|sql)$/.test(entry.name) &&
+      readFileSync(path, "utf-8").includes("{{")
+      ? [path]
+      : [];
+  });
+const leftover = unrendered(SCRATCH_DIR);
+if (leftover.length) {
+  throw new Error(
+    `Unrendered Go template code in:\n  ${leftover.join("\n  ")}`,
+  );
 }
 
 // Handle .tmpl file renaming
@@ -211,9 +264,10 @@ console.log(
 );
 console.log(`\nTemplate scaffolded to ${SCRATCH_DIR}`);
 if (values.run) {
-  await runTemplateSmoke(SCRATCH_DIR, packageManager, {
-    allPlugins: values["all-plugins"],
-  });
+  await (values["all-plugins"] ? checkAllPluginsTemplate : runTemplateSmoke)(
+    SCRATCH_DIR,
+    packageManager,
+  );
 } else if (packageManager === "pnpm") {
   console.log("Next step: pnpm install --frozen-lockfile in that directory");
 } else if (packageManager === "npm") {
