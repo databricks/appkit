@@ -102,7 +102,7 @@ export function LakebasePage() {
             A simple CRUD example powered by Databricks Lakebase (PostgreSQL).
           </p>
 
-          <form onSubmit={addTodo} className="flex gap-2 mb-6">
+          <form onSubmit={(e) => void addTodo(e)} className="flex gap-2 mb-6">
             <Input
               placeholder="What needs to be done?"
               value={newTitle}
@@ -147,7 +147,7 @@ export function LakebasePage() {
                 >
                   <button
                     type="button"
-                    onClick={() => toggleTodo(todo.id)}
+                    onClick={() => void toggleTodo(todo.id)}
                     className={`h-5 w-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
                       todo.completed
                         ? 'bg-primary border-primary text-primary-foreground'
@@ -165,7 +165,7 @@ export function LakebasePage() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => deleteTodo(todo.id)}
+                    onClick={() => void deleteTodo(todo.id)}
                     className="text-muted-foreground hover:text-destructive shrink-0"
                     aria-label="Delete todo"
                   >

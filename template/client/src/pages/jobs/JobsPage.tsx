@@ -18,6 +18,11 @@ interface Run {
   endTime?: number;
 }
 
+interface JobStatus {
+  status: string | null;
+  run: Run | null;
+}
+
 function formatTime(ts?: number) {
   if (!ts) return '\u2014';
   return new Date(ts).toLocaleString();
@@ -77,10 +82,7 @@ export function JobsPage() {
   const inputId = useId();
   const [jobKey, setJobKey] = useState('default');
   const [runs, setRuns] = useState<Run[]>([]);
-  const [status, setStatus] = useState<{
-    status: string | null;
-    run: Run | null;
-  } | null>(null);
+  const [status, setStatus] = useState<JobStatus | null>(null);
   const [loading, setLoading] = useState('');
   const [error, setError] = useState<string | null>(null);
   const streamIdRef = useRef(0);
@@ -97,7 +99,7 @@ export function JobsPage() {
         undefined,
         bodyText,
       );
-      setStatus(await res.json());
+      setStatus((await res.json()) as JobStatus);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -182,16 +184,20 @@ export function JobsPage() {
           className="rounded-md border border-input bg-background px-3 py-1.5 text-sm w-full sm:w-48"
         />
         <Button
-          onClick={fetchStatus}
+          onClick={() => void fetchStatus()}
           variant="outline"
           disabled={!!loading}
         >
           {loading === 'status' ? 'Loading...' : 'Get Status'}
         </Button>
-        <Button onClick={fetchRuns} variant="outline" disabled={!!loading}>
+        <Button
+          onClick={() => void fetchRuns()}
+          variant="outline"
+          disabled={!!loading}
+        >
           {loading === 'runs' ? 'Loading...' : 'List Runs'}
         </Button>
-        <Button onClick={triggerRun} disabled={!!loading}>
+        <Button onClick={() => void triggerRun()} disabled={!!loading}>
           {loading === 'run' ? 'Running...' : 'Trigger Run'}
         </Button>
       </div>
@@ -265,7 +271,7 @@ export function JobsPage() {
                           <Button
                             variant="destructive"
                             size="sm"
-                            onClick={() => cancelRun(run.runId)}
+                            onClick={() => void cancelRun(run.runId)}
                           >
                             Cancel
                           </Button>

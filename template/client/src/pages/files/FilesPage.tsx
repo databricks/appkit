@@ -84,7 +84,7 @@ export function FilesPage() {
         { signal },
         serverErrorOr((res) => `HTTP ${res.status}: ${res.statusText}`),
       );
-      const data: DirectoryEntry[] = await response.json();
+      const data = (await response.json()) as DirectoryEntry[];
       data.sort((a, b) => {
         if (a.is_directory && !b.is_directory) return -1;
         if (!a.is_directory && b.is_directory) return 1;
@@ -112,7 +112,7 @@ export function FilesPage() {
         { signal },
         serverErrorOr((res) => `HTTP ${res.status}`),
       );
-      setPreview(await response.json());
+      setPreview((await response.json()) as FilePreview);
     } catch (err) {
       if (!isAbort(err)) setPreview(null);
     }
@@ -155,10 +155,10 @@ export function FilesPage() {
   const handleEntryClick = (entry: DirectoryEntry) => {
     const entryPath = resolveEntryPath(entry);
     if (entry.is_directory) {
-      loadDirectory(entryPath);
+      void loadDirectory(entryPath);
     } else {
       setSelectedFile(entryPath);
-      loadPreview(entryPath);
+      void loadPreview(entryPath);
     }
   };
 
@@ -167,7 +167,7 @@ export function FilesPage() {
     const segments = currentPath.split('/').filter(Boolean);
     segments.pop();
     const parentPath = segments.join('/');
-    loadDirectory(parentPath);
+    void loadDirectory(parentPath);
   };
 
   const allSegments = normalize(currentPath).split('/').filter(Boolean);
@@ -175,7 +175,7 @@ export function FilesPage() {
   const navigateToBreadcrumb = (index: number) => {
     const targetSegments = allSegments.slice(0, index + 1);
     const targetPath = targetSegments.join('/');
-    loadDirectory(targetPath);
+    void loadDirectory(targetPath);
   };
 
   const MAX_UPLOAD_SIZE = 5 * 1024 * 1024 * 1024; // 5 GB
@@ -290,7 +290,7 @@ export function FilesPage() {
           <FileBreadcrumb
             rootLabel={volumeKey || 'Root'}
             segments={allSegments}
-            onNavigateToRoot={() => loadDirectory('')}
+            onNavigateToRoot={() => void loadDirectory('')}
             onNavigateToSegment={navigateToBreadcrumb}
           />
         </div>
@@ -308,7 +308,7 @@ export function FilesPage() {
             ref={fileInputRef}
             type="file"
             className="hidden"
-            onChange={handleUpload}
+            onChange={(e) => void handleUpload(e)}
           />
           <Button
             variant="outline"
@@ -334,7 +334,7 @@ export function FilesPage() {
           error={error}
           onEntryClick={handleEntryClick}
           onNavigateToParent={navigateToParent}
-          onRetry={() => loadDirectory(currentPath)}
+          onRetry={() => void loadDirectory(currentPath)}
           isAtRoot={isAtRoot}
           selectedPath={selectedFile}
           resolveEntryPath={resolveEntryPath}
@@ -344,7 +344,7 @@ export function FilesPage() {
               <NewFolderInput
                 value={newDirName}
                 onChange={setNewDirName}
-                onCreate={handleCreateDirectory}
+                onCreate={() => void handleCreateDirectory()}
                 onCancel={() => {
                   setShowNewDirInput(false);
                   setNewDirName('');
@@ -363,7 +363,7 @@ export function FilesPage() {
           onDownload={(path) =>
             window.open(apiUrl('download', { path }), '_blank')
           }
-          onDelete={handleDelete}
+          onDelete={() => void handleDelete()}
           deleting={deleting}
           imagePreviewSrc={(p) => apiUrl('raw', { path: p })}
         />

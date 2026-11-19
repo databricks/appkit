@@ -12,6 +12,11 @@ import { useAiSearchQuery } from '@databricks/appkit-ui/react/beta';
 import { Search } from 'lucide-react';
 import { useState } from 'react';
 
+function formatValue(value: unknown): string {
+  if (typeof value === 'string') return value;
+  return value === null || value === undefined ? '' : JSON.stringify(value);
+}
+
 export function AiSearchPage() {
   const [query, setQuery] = useState('');
   // Queries the first configured index. Pass `{ alias }` to target another.
@@ -101,7 +106,7 @@ export function AiSearchPage() {
                           {key}
                         </dt>
                         <dd className="text-foreground break-all">
-                          {String(value ?? '')}
+                          {formatValue(value)}
                         </dd>
                       </div>
                     ))}
