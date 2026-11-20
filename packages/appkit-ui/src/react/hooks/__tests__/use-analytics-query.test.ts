@@ -301,6 +301,25 @@ describe("useAnalyticsQuery", () => {
     expect(mockConnectSSE).toHaveBeenCalledTimes(1);
   });
 
+  test("does not refetch when the same params arrive in another key order", () => {
+    const { rerender } = renderHook(
+      ({ reversed }: { reversed: boolean }) =>
+        useAnalyticsQuery(
+          "test_query" as any,
+          (reversed
+            ? { end: sql.string("b"), start: sql.string("a") }
+            : { start: sql.string("a"), end: sql.string("b") }) as any,
+        ),
+      { initialProps: { reversed: false } },
+    );
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+
+    rerender({ reversed: true });
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+  });
+
   test("does refetch when a param value actually changes", () => {
     const { rerender } = renderHook(
       ({ limit }: { limit: number }) =>
