@@ -25,6 +25,25 @@ export interface CompiledColumn {
 const DECIMAL_INT = /^-?(0|[1-9]\d*)$/;
 
 /**
+ * PostgreSQL's ISO text output for a timestamp, such as
+ * `2024-01-01 10:00:00.5` or `2024-01-01 10:00:00+05:30`.
+ */
+const PG_TIMESTAMP =
+  /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}(?:\.\d+)?)(?:([+-]\d{2})(?::(\d{2}))?)?$/;
+
+/**
+ * Answer a timestamp in RFC 3339 form, which browsers parse and the decoder
+ * accepts back: a `T` between date and time, and a `±HH:MM` offset. Any other
+ * text, such as `infinity`, is answered as the driver gave it.
+ */
+function canonicalTimestamp(value: string): string {
+  const match = PG_TIMESTAMP.exec(value);
+  if (!match) return value;
+  const [, date, time, hours, minutes = "00"] = match;
+  return `${date}T${time}${hours === undefined ? "" : `${hours}:${minutes}`}`;
+}
+
+/**
  * Map a wire value onto the runtime representation the schema validators and
  * Drizzle columns expect. Only path segments and JSON scalars reach this, so
  * the accepted shapes stay exact rather than coercing whatever parses.
@@ -75,8 +94,10 @@ function encodeValue(meta: ColumnMeta, value: unknown): JsonValue {
     case "string":
     case "uuid":
     case "enum":
-    case "date":
       if (typeof value === "string") return value;
+      break;
+    case "date":
+      if (typeof value === "string") return canonicalTimestamp(value);
       break;
     case "json":
       if (isJsonValue(value)) return value;

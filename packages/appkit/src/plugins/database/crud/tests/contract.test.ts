@@ -164,6 +164,19 @@ describe("boundedJson", () => {
     }
   });
 
+  it("takes a caller's node budget and keeps the depth bound", () => {
+    const wide = Array.from({ length: MAX_SERIALIZED_NODES }, () => 1);
+    let deep: unknown = 1;
+    for (let level = 0; level <= MAX_SERIALIZED_DEPTH; level += 1) {
+      deep = [deep];
+    }
+
+    expect(boundedJson(wide, MAX_SERIALIZED_NODES + 1)).toEqual(wide);
+    expect(() => boundedJson(deep, MAX_SERIALIZED_NODES * 10)).toThrow(
+      expect.objectContaining({ category: "INVALID_REQUEST" }),
+    );
+  });
+
   it("carries a __proto__ key as data rather than dropping it", () => {
     const sanitized = boundedJson({
       computed: JSON.parse('{"__proto__":{"owned":true},"keep":1}'),
