@@ -224,6 +224,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.101.0](https://github.com/databricks/appkit/compare/v0.100.0...v0.101.0) (2026-11-20)
+
+### template
+
+* **template:** enable the React Compiler ([#741](https://github.com/databricks/appkit/issues/741)) ([18f093e](https://github.com/databricks/appkit/commit/18f093e556dc9cebb3d0cfca64cdaa549d2a8a03))
+
+
 ## [0.100.0](https://github.com/databricks/appkit/compare/v0.99.0...v0.100.0) (2026-11-20)
 
 ### appkit

@@ -3,13 +3,13 @@
     {
       "name": "@databricks/appkit",
       "tarball": {
-        "packed": 1408474,
+        "packed": 1408480,
         "unpacked": 4821956
       },
       "dist": {
         "total": {
           "raw": 4806523,
-          "gzip": 1644039
+          "gzip": 1644041
         },
         "js": {
           "raw": 1440712,
@@ -17,7 +17,7 @@
         },
         "types": {
           "raw": 494788,
-          "gzip": 178345
+          "gzip": 178347
         },
         "maps": {
           "raw": 2860228,
@@ -64,37 +64,37 @@
         },
         {
           "id": "./beta",
-          "gzip": 118172,
+          "gzip": 118183,
           "composition": {
-            "initialGzip": 117692,
-            "lazyGzip": 480,
-            "totalGzip": 118172,
+            "initialGzip": 117699,
+            "lazyGzip": 484,
+            "totalGzip": 118183,
             "own": 349550,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "beta.js",
-                "gzip": 96960,
+                "gzip": 96961,
                 "kind": "initial"
               },
               {
                 "label": "modular.js",
-                "gzip": 6234,
+                "gzip": 6235,
                 "kind": "initial"
               },
               {
                 "label": "stream-manager.js",
-                "gzip": 6022,
+                "gzip": 6024,
                 "kind": "initial"
               },
               {
                 "label": "service-context.js",
-                "gzip": 4414,
+                "gzip": 4415,
                 "kind": "initial"
               },
               {
                 "label": "databricks.js",
-                "gzip": 3396,
+                "gzip": 3398,
                 "kind": "initial"
               },
               {
@@ -109,12 +109,12 @@
               },
               {
                 "label": "supervisor-api.js",
-                "gzip": 189,
+                "gzip": 192,
                 "kind": "lazy"
               },
               {
                 "label": "databricks.js",
-                "gzip": 177,
+                "gzip": 178,
                 "kind": "lazy"
               },
               {
@@ -209,25 +209,25 @@
     {
       "name": "@databricks/appkit-ui",
       "tarball": {
-        "packed": 416011,
-        "unpacked": 1631811
+        "packed": 416396,
+        "unpacked": 1632843
       },
       "dist": {
         "total": {
-          "raw": 1627865,
-          "gzip": 557580
+          "raw": 1628897,
+          "gzip": 557961
         },
         "js": {
-          "raw": 448418,
-          "gzip": 153373
+          "raw": 448750,
+          "gzip": 153500
         },
         "types": {
-          "raw": 277370,
-          "gzip": 102666
+          "raw": 277475,
+          "gzip": 102719
         },
         "maps": {
-          "raw": 885679,
-          "gzip": 298285
+          "raw": 886274,
+          "gzip": 298486
         },
         "css": {
           "raw": 16398,
@@ -288,17 +288,17 @@
         },
         {
           "id": "./react",
-          "gzip": 51575,
+          "gzip": 51641,
           "composition": {
-            "initialGzip": 451364,
+            "initialGzip": 451419,
             "lazyGzip": 49772,
-            "totalGzip": 501136,
-            "own": 183659,
+            "totalGzip": 501191,
+            "own": 183806,
             "nodeModules": 1416722,
             "chunks": [
               {
                 "label": "index.js",
-                "gzip": 449214,
+                "gzip": 449269,
                 "kind": "initial"
               },
               {
