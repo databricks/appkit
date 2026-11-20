@@ -194,11 +194,27 @@
         "react-hooks-js/set-state-in-effect": "error",
         "react-hooks-js/set-state-in-render": "error",
         "react-hooks-js/static-components": "error",
+        // React Compiler 1.0 silently skips a component it can't compile yet, e.g. one using `finally`, or
+        // `throw`, `?:`, `??`, `||` or `?.` directly inside `try`. Report it: memoizing by hand is banned below.
+        "react-hooks-js/todo": "error",
         "react-hooks-js/unsupported-syntax": "warn",
         "react-hooks-js/use-memo": "error",
 
         "react/only-export-components": ["warn", { "allowConstantExport": true }],
-        "react/no-array-index-key": "warn"
+        "react/no-array-index-key": "warn",
+
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "react",
+                "importNames": ["useMemo", "useCallback"],
+                "message": "The React Compiler memoizes automatically: compute the value or define the function inline."
+              }
+            ]
+          }
+        ]
       }
     },
     {

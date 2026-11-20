@@ -48,6 +48,16 @@ function shallowEqualParams(a: unknown, b: unknown): boolean {
   return true;
 }
 
+/** `params` with its keys sorted, so the same values in any key order make the same request. */
+function sortedKeys(params: unknown): unknown {
+  if (params === null || typeof params !== "object" || Array.isArray(params)) {
+    return params;
+  }
+  return Object.fromEntries(
+    Object.entries(params).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+  );
+}
+
 /** Keep structurally-equal params referentially stable across renders. */
 function useStableParams<T>(value: T): T {
   const ref = useRef<T>(value);
@@ -129,7 +139,7 @@ export function useAnalyticsQuery<
   const payload = useMemo(() => {
     try {
       const serialized = JSON.stringify({
-        parameters: stableParameters,
+        parameters: sortedKeys(stableParameters),
         format,
       });
       const sizeInBytes = new Blob([serialized]).size;
