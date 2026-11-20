@@ -539,10 +539,18 @@ U+2028, U+2029, `*/`, backtick and `${`, loaded without running code.
 Introspect records its migration as applied only if the branch's last recorded migration is the one just before it,
 checked under the schema's advisory lock. A branch ahead of the checkout would otherwise record DDL it never ran.
 
+Introspect writes only the part of the catalog the builder can express, so `schema.ts` and the baseline are not a full
+copy of the branch. A table needs a single-column primary key and a name AppKit does not reserve. A column needs a
+supported type, and an identity column is written only as the primary key. Generated columns, columns of unsupported
+types and identity columns other than the primary key are left out, and an unsupported default is dropped from its
+column. A foreign key is written with `fk()` only when one column references the primary key or a single-column unique
+key of another table in the same schema. Composite, cross-schema and self-referencing foreign keys, one that would
+close a cycle, and a few other shapes the builder cannot type are left out while their column stays. Each thing left
+out gets an `// appkit: skipped …` comment in `schema.ts` and a warning from the command.
+
 Introspect keeps the `.private()` an existing `schema.ts` declares, because the server entity client omits private
-columns from its reads by default. Every other column, and every foreign key in the catalog, is written as the catalog
-has it, foreign keys with `fk()`. When `schema.ts` does not load, introspect refuses before it reads the branch,
-because it could not keep the columns the file marks private.
+columns from its reads by default. Every other column it writes is public. When `schema.ts` does not load, introspect
+refuses before it reads the branch, because it could not keep the columns the file marks private.
 
 ### Flag Strategy
 
