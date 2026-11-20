@@ -197,7 +197,9 @@ function schemaInput(parse: Parse, schema: object): Decode {
 function schemaReply(method: OperationMethod, parse: Parse): Respond {
   return async (result) => {
     const parsed = await parse(result).catch((error: unknown) => {
+      // A write may have committed by now, so only a read's not-found stays 404.
       if (
+        method === "GET" &&
         error instanceof DatabasePluginError &&
         error.category === "NOT_FOUND"
       ) {
