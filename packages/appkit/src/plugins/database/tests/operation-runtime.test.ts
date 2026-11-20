@@ -1369,7 +1369,7 @@ describe("execution and output", () => {
     },
   );
 
-  test("an output schema that throws not found answers 404, on a write too", async () => {
+  test("an output schema that throws not found answers 404 on a read and an unknown outcome on a write", async () => {
     const output = z.string().refine(() => {
       throw new DatabasePluginError("NOT_FOUND", "read");
     });
@@ -1394,13 +1394,33 @@ describe("execution and output", () => {
     const read = await app.call("GET", "notes.export", undefined, asAda);
     const write = await app.call("POST", "notes.archive", {}, asAda);
 
-    for (const reply of [read, write]) {
-      expect([reply.status, json(reply)]).toEqual([
-        404,
-        { error: "Database record not found" },
-      ]);
-    }
-    expect(logs.filter((line) => line.includes("answered 500"))).toEqual([]);
+    expect([read.status, json(read)]).toEqual([
+      404,
+      { error: "Database record not found" },
+    ]);
+    expect([write.status, json(write)]).toEqual([
+      500,
+      { error: "Database write may have completed", outcome: "unknown" },
+    ]);
+    const outcomes = exporter
+      .getFinishedSpans()
+      .filter((span) => span.name === "database.operation")
+      .map((span) => span.attributes);
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        "database.operation.outcome": "NOT_FOUND",
+        "database.operation.stage": "output",
+        "http.response.status_code": 404,
+      }),
+      expect.objectContaining({
+        "database.operation.outcome": "OUTCOME_UNKNOWN",
+        "database.operation.stage": "output",
+        "http.response.status_code": 500,
+      }),
+    ]);
+    expect(logs.filter((line) => line.includes("answered 500"))).toEqual([
+      "[appkit:database:operations] Operation notes.archive answered 500: its output schema threw DatabasePluginError",
+    ]);
   });
 
   test("each unusable answer logs one warning naming the operation and its reason, never the value", async () => {
