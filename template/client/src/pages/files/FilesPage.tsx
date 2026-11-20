@@ -8,7 +8,7 @@ import {
   NewFolderInput,
 } from '@databricks/appkit-ui/react';
 import { FolderPlus, Loader2, Upload } from 'lucide-react';
-import { fetchOrThrow } from '../../lib/fetch-or-throw';
+import { fetchJson, fetchOrThrow } from '../../lib/fetch-or-throw';
 import {
   type RefObject,
   useEffect,
@@ -16,6 +16,27 @@ import {
   useRef,
   useState,
 } from 'react';
+import { z } from 'zod';
+
+const VolumeListSchema = z.object({ volumes: z.array(z.string()) });
+
+// Leaves out `last_modified`, which DirectoryList doesn't read: the files plugin sends epoch
+// milliseconds, but AppKit UI's DirectoryEntry declared a string before it was fixed.
+const DirectoryEntrySchema: z.ZodType<DirectoryEntry> = z.object({
+  name: z.string().optional(),
+  path: z.string().optional(),
+  is_directory: z.boolean().optional(),
+  file_size: z.number().optional(),
+});
+
+const FilePreviewSchema: z.ZodType<FilePreview> = z.object({
+  contentLength: z.number().or(z.undefined()),
+  contentType: z.string().or(z.undefined()),
+  lastModified: z.string().or(z.undefined()),
+  textPreview: z.string().nullable(),
+  isText: z.boolean(),
+  isImage: z.boolean(),
+});
 
 function useAbortController(): RefObject<AbortController | null> {
   const ref = useRef<AbortController | null>(null);
@@ -27,13 +48,6 @@ function nextSignal(ref: RefObject<AbortController | null>): AbortSignal {
   ref.current = new AbortController();
   return ref.current.signal;
 }
-
-// The files plugin sends `{ error }` in its JSON error responses.
-const serverErrorOr =
-  (fallback: (res: Response) => string) => async (res: Response) => {
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    return data.error ?? fallback(res);
-  };
 
 const isAbort = (err: unknown) =>
   err instanceof DOMException && err.name === 'AbortError';
@@ -79,12 +93,12 @@ export function FilesPage() {
 
     try {
       const signal = nextSignal(listAbort);
-      const response = await fetchOrThrow(
+      const data = await fetchJson(
         url,
         { signal },
-        serverErrorOr((res) => `HTTP ${res.status}: ${res.statusText}`),
+        z.array(DirectoryEntrySchema),
+        (res) => `HTTP ${res.status}: ${res.statusText}`,
       );
-      const data: DirectoryEntry[] = await response.json();
       data.sort((a, b) => {
         if (a.is_directory && !b.is_directory) return -1;
         if (!a.is_directory && b.is_directory) return 1;
@@ -107,23 +121,29 @@ export function FilesPage() {
 
     try {
       const signal = nextSignal(previewAbort);
-      const response = await fetchOrThrow(
-        apiUrl('preview', { path: filePath }),
-        { signal },
-        serverErrorOr((res) => `HTTP ${res.status}`),
+      setPreview(
+        await fetchJson(
+          apiUrl('preview', { path: filePath }),
+          { signal },
+          FilePreviewSchema,
+          (res) => `HTTP ${res.status}`,
+        ),
       );
-      setPreview(await response.json());
     } catch (err) {
       if (!isAbort(err)) setPreview(null);
     }
     setPreviewLoading(false);
   };
 
-  useEffect(() => {
-    fetch('/api/files/volumes')
-      .then((res) => res.json())
-      .then((data: { volumes: string[] }) => {
-        const list = data.volumes ?? [];
+  const loadVolumes = () => {
+    setError(null);
+    return fetchJson(
+      '/api/files/volumes',
+      undefined,
+      VolumeListSchema,
+      (res) => `HTTP ${res.status}: ${res.statusText}`,
+    )
+      .then(({ volumes: list }) => {
         setVolumes(list);
         if (!volumeKey || !list.includes(volumeKey)) {
           const first = list[0];
@@ -133,7 +153,15 @@ export function FilesPage() {
           }
         }
       })
-      .catch(() => {});
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+  };
+
+  const loadVolumesForKey = useEffectEvent(() => {
+    void loadVolumes();
+  });
+
+  useEffect(() => {
+    loadVolumesForKey();
   }, [volumeKey]);
 
   // An effect event, so the load reruns only when the volume changes, whether
@@ -155,10 +183,10 @@ export function FilesPage() {
   const handleEntryClick = (entry: DirectoryEntry) => {
     const entryPath = resolveEntryPath(entry);
     if (entry.is_directory) {
-      loadDirectory(entryPath);
+      void loadDirectory(entryPath);
     } else {
       setSelectedFile(entryPath);
-      loadPreview(entryPath);
+      void loadPreview(entryPath);
     }
   };
 
@@ -167,7 +195,7 @@ export function FilesPage() {
     const segments = currentPath.split('/').filter(Boolean);
     segments.pop();
     const parentPath = segments.join('/');
-    loadDirectory(parentPath);
+    void loadDirectory(parentPath);
   };
 
   const allSegments = normalize(currentPath).split('/').filter(Boolean);
@@ -175,7 +203,7 @@ export function FilesPage() {
   const navigateToBreadcrumb = (index: number) => {
     const targetSegments = allSegments.slice(0, index + 1);
     const targetPath = targetSegments.join('/');
-    loadDirectory(targetPath);
+    void loadDirectory(targetPath);
   };
 
   const MAX_UPLOAD_SIZE = 5 * 1024 * 1024 * 1024; // 5 GB
@@ -197,7 +225,7 @@ export function FilesPage() {
       await fetchOrThrow(
         apiUrl('upload', { path: childPath(file.name) }),
         { method: 'POST', body: file },
-        serverErrorOr((res) => `Upload failed (${res.status})`),
+        (res) => `Upload failed (${res.status})`,
       );
       await loadDirectory(currentPath);
     } catch (err) {
@@ -220,7 +248,7 @@ export function FilesPage() {
       await fetchOrThrow(
         `/api/files/${volumeKey}?path=${encodeURIComponent(selectedFile)}`,
         { method: 'DELETE' },
-        serverErrorOr((res) => `Delete failed (${res.status})`),
+        (res) => `Delete failed (${res.status})`,
       );
       setSelectedFile(null);
       setPreview(null);
@@ -244,7 +272,7 @@ export function FilesPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ path: childPath(name) }),
         },
-        serverErrorOr((res) => `Create directory failed (${res.status})`),
+        (res) => `Create directory failed (${res.status})`,
       );
       setShowNewDirInput(false);
       setNewDirName('');
@@ -290,7 +318,7 @@ export function FilesPage() {
           <FileBreadcrumb
             rootLabel={volumeKey || 'Root'}
             segments={allSegments}
-            onNavigateToRoot={() => loadDirectory('')}
+            onNavigateToRoot={() => void loadDirectory('')}
             onNavigateToSegment={navigateToBreadcrumb}
           />
         </div>
@@ -308,7 +336,7 @@ export function FilesPage() {
             ref={fileInputRef}
             type="file"
             className="hidden"
-            onChange={handleUpload}
+            onChange={(e) => void handleUpload(e)}
           />
           <Button
             variant="outline"
@@ -334,7 +362,9 @@ export function FilesPage() {
           error={error}
           onEntryClick={handleEntryClick}
           onNavigateToParent={navigateToParent}
-          onRetry={() => loadDirectory(currentPath)}
+          onRetry={() =>
+            void (volumeKey ? loadDirectory(currentPath) : loadVolumes())
+          }
           isAtRoot={isAtRoot}
           selectedPath={selectedFile}
           resolveEntryPath={resolveEntryPath}
@@ -344,7 +374,7 @@ export function FilesPage() {
               <NewFolderInput
                 value={newDirName}
                 onChange={setNewDirName}
-                onCreate={handleCreateDirectory}
+                onCreate={() => void handleCreateDirectory()}
                 onCancel={() => {
                   setShowNewDirInput(false);
                   setNewDirName('');
@@ -363,7 +393,7 @@ export function FilesPage() {
           onDownload={(path) =>
             window.open(apiUrl('download', { path }), '_blank')
           }
-          onDelete={handleDelete}
+          onDelete={() => void handleDelete()}
           deleting={deleting}
           imagePreviewSrc={(p) => apiUrl('raw', { path: p })}
         />

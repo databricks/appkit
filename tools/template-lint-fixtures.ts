@@ -258,6 +258,10 @@ export const LINT_FIXTURES: LintFixture[] = [
     "// @ts-ignore\nexport const a: number = 1;",
   ),
   server(
+    "typescript/consistent-type-assertions",
+    "export const parse = (s: string) => JSON.parse(s) as { a: number };",
+  ),
+  server(
     "typescript/no-array-delete",
     "export function f(a: number[]): void {\n  delete a[0];\n}",
   ),
@@ -275,7 +279,12 @@ export const LINT_FIXTURES: LintFixture[] = [
   server(
     "typescript/no-extra-non-null-assertion",
     "export const f = (x?: number) => x!!;",
-    { also: ["typescript/no-unnecessary-type-assertion"] },
+    {
+      also: [
+        "typescript/no-non-null-assertion",
+        "typescript/no-unnecessary-type-assertion",
+      ],
+    },
   ),
   server(
     "typescript/no-floating-promises",
@@ -298,6 +307,11 @@ export const LINT_FIXTURES: LintFixture[] = [
   server(
     "typescript/no-non-null-asserted-optional-chain",
     "export const f = (o?: { a: number }) => o?.a!;",
+    { also: ["typescript/no-non-null-assertion"] },
+  ),
+  server(
+    "typescript/no-non-null-assertion",
+    "export const f = (x?: number) => x! + 1;",
   ),
   server(
     "typescript/no-redundant-type-constituents",
@@ -317,6 +331,7 @@ export const LINT_FIXTURES: LintFixture[] = [
   server(
     "typescript/no-unnecessary-type-assertion",
     "export const f = (s: string) => s as string;",
+    { also: ["typescript/consistent-type-assertions"] },
   ),
   server(
     "typescript/no-unnecessary-type-constraint",
@@ -354,13 +369,16 @@ export const LINT_FIXTURES: LintFixture[] = [
   server(
     "typescript/no-unsafe-unary-minus",
     "export const f = (s: string) => -(s as unknown as bigint | string);",
+    { also: ["typescript/consistent-type-assertions"] },
   ),
   server("typescript/no-wrapper-object-types", "export type S = String;"),
   server(
     "typescript/only-throw-error",
     'export function f(): void {\n  throw "x";\n}',
   ),
-  server("typescript/prefer-as-const", 'export const o = { a: "a" as "a" };'),
+  server("typescript/prefer-as-const", 'export const o = { a: "a" as "a" };', {
+    also: ["typescript/consistent-type-assertions"],
+  }),
   server(
     "typescript/prefer-namespace-keyword",
     "export declare module M {\n  export const a: number;\n}",
@@ -645,20 +663,52 @@ export function fixturePath(fixture: LintFixture, index: number): string {
 export interface Diagnostic {
   code: string;
   filename: string;
+  /** oxlint's `error` or `warning`. */
+  severity?: string;
+}
+
+/** Each rule the config sets to the same level everywhere, by oxlint's severity name. */
+export function configuredSeverities(
+  config: OxlintConfig,
+): Map<string, string> {
+  const levels = new Map<string, Set<string>>();
+  for (const rules of [
+    config.rules,
+    ...(config.overrides ?? []).map((o) => o.rules),
+  ]) {
+    for (const [rule, setting] of Object.entries(rules ?? {})) {
+      const level = Array.isArray(setting) ? setting[0] : setting;
+      if (level === "off" || level === 0) continue;
+      const severity = level === "warn" || level === 1 ? "warning" : "error";
+      levels.set(rule, (levels.get(rule) ?? new Set()).add(severity));
+    }
+  }
+  return new Map(
+    [...levels].flatMap(([rule, set]) =>
+      set.size === 1 ? [[rule, [...set][0]] as const] : [],
+    ),
+  );
 }
 
 /** Problems with the reported rules, empty when every fixture reports exactly what it declares. */
 export function compareLintResults(
   fixtures: LintFixture[],
   diagnostics: Diagnostic[],
+  severities: Map<string, string> = new Map(),
 ): string[] {
   const reported = new Map<string, Set<string>>();
-  for (const { code, filename } of diagnostics) {
-    const rules = reported.get(filename) ?? new Set<string>();
-    rules.add(ruleOf(code));
-    reported.set(filename, rules);
-  }
   const problems: string[] = [];
+  for (const { code, filename, severity } of diagnostics) {
+    const rule = ruleOf(code);
+    const rules = reported.get(filename) ?? new Set<string>();
+    rules.add(rule);
+    reported.set(filename, rules);
+    const configured = severities.get(rule);
+    if (severity && configured && severity !== configured)
+      problems.push(
+        `${filename}: ${rule} reports as ${severity}, configured as ${configured}`,
+      );
+  }
   const files = new Set<string>();
   fixtures.forEach((fixture, index) => {
     const file = fixturePath(fixture, index);
@@ -689,17 +739,50 @@ export function compareLintResults(
 }
 
 /**
+ * oxlint honours .gitignore files up to the repository root; make the app its own root so a
+ * scaffold inside a gitignored directory (like .smoke-test/) is still linted.
+ */
+export function ownGitRoot(appDir: string, env: NodeJS.ProcessEnv): void {
+  execFileSync("git", ["init", "--quiet"], { cwd: appDir, env });
+}
+
+/** Lints `paths` (the whole app by default) with the app's own oxlint. */
+export function lintApp(
+  appDir: string,
+  env: NodeJS.ProcessEnv,
+  paths: string[] = [],
+): Diagnostic[] {
+  // Exit status 1 only means oxlint reported errors.
+  const result = spawnSync(
+    join(appDir, "node_modules/.bin/oxlint"),
+    ["--format", "json", ...paths],
+    { cwd: appDir, env, encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0 && result.status !== 1) {
+    throw new Error(`oxlint exited with ${result.status}:\n${result.stderr}`);
+  }
+  try {
+    return (JSON.parse(result.stdout) as { diagnostics: Diagnostic[] })
+      .diagnostics;
+  } catch {
+    throw new Error(
+      `oxlint did not report JSON:\n${result.stdout}\n${result.stderr}`,
+    );
+  }
+}
+
+/**
  * Writes the fixtures into an installed app, lints them with the app's own oxlint, and throws
- * unless every fixture reports exactly its declared rules. Removes the fixtures afterwards.
+ * unless every fixture reports exactly its declared rules, at their configured severity.
+ * Removes the fixtures afterwards.
  */
 export function checkTemplateLint(
   app: string,
   env: NodeJS.ProcessEnv = process.env,
 ): void {
   const appDir = resolve(app);
-  // oxlint honours .gitignore files up to the repository root; make the app its own root so a
-  // scaffold inside a gitignored directory (like .smoke-test/) is still linted.
-  execFileSync("git", ["init", "--quiet"], { cwd: appDir, env });
+  ownGitRoot(appDir, env);
   const roots = [...new Set(Object.values(directories))];
   try {
     LINT_FIXTURES.forEach((fixture, index) => {
@@ -708,27 +791,11 @@ export function checkTemplateLint(
       const module = /^\s*export\b/m.test(fixture.code) ? "" : "\nexport {};";
       writeFileSync(path, `${fixture.code}${module}\n`);
     });
-    // Exit status 1 only means the fixtures reported errors, which they are meant to.
-    const result = spawnSync(
-      join(appDir, "node_modules/.bin/oxlint"),
-      ["--format", "json", ...roots],
-      { cwd: appDir, env, encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 },
+    const problems = compareLintResults(
+      LINT_FIXTURES,
+      lintApp(appDir, env, roots),
+      configuredSeverities(readOxlintConfig(join(appDir, ".oxlintrc.json"))),
     );
-    if (result.error) throw result.error;
-    if (result.status !== 0 && result.status !== 1) {
-      throw new Error(`oxlint exited with ${result.status}:\n${result.stderr}`);
-    }
-    let diagnostics: Diagnostic[];
-    try {
-      ({ diagnostics } = JSON.parse(result.stdout) as {
-        diagnostics: Diagnostic[];
-      });
-    } catch {
-      throw new Error(
-        `oxlint did not report JSON:\n${result.stdout}\n${result.stderr}`,
-      );
-    }
-    const problems = compareLintResults(LINT_FIXTURES, diagnostics);
     if (problems.length) {
       throw new Error(
         `Template oxlint config drifted:\n  ${problems.join("\n  ")}`,

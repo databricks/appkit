@@ -863,9 +863,15 @@ expectations  {"guidelines":{"value":["...","..."]}}   (optional)
 `userTurns(t.input)` extracts every `role: "user"` message content in order from the `{messages:[...]}` input — a row can carry a full multi-turn conversation, and replaying each user turn against one thread lets the agent build up history (interleaved assistant/system turns are ignored; the agent generates its own). Read `expectations.guidelines.value` yourself; the UI wraps the array as `{value: [...]}`:
 
 ```ts
-function guidelines(expected: Record<string, unknown> | undefined): string[] {
-  const g = (expected?.guidelines as { value?: unknown } | undefined)?.value;
-  return Array.isArray(g) ? g.map(String) : [];
+import { z } from "zod";
+
+const Expectations = z.object({
+  guidelines: z.object({ value: z.array(z.string()) }),
+});
+
+function guidelines(expected: unknown): string[] {
+  const parsed = Expectations.safeParse(expected);
+  return parsed.success ? parsed.data.guidelines.value : [];
 }
 ```
 

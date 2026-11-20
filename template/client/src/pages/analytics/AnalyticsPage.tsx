@@ -23,6 +23,7 @@ export function AnalyticsPage() {
   const { data, loading, error } = useAnalyticsQuery('hello_world', {
     message: sql.string('hello world'),
   });
+  const first = data?.[0];
 
   const [maxMonthNum, setMaxMonthNum] = useState<number>(12);
   const salesParameters = { max_month_num: sql.number(maxMonthNum) };
@@ -42,10 +43,10 @@ export function AnalyticsPage() {
               </div>
             )}
             {error && <div className="text-destructive bg-destructive/10 p-3 rounded-md">Error: {error}</div>}
-            {data && data.length > 0 && (
+            {first && (
               <div className="space-y-2">
                 <div className="text-sm text-muted-foreground">Query: SELECT :message AS value</div>
-                <div className="text-2xl font-bold text-primary">{data[0].value}</div>
+                <div className="text-2xl font-bold text-primary">{first.value}</div>
               </div>
             )}
             {data && data.length === 0 && <div className="text-muted-foreground">No results</div>}
