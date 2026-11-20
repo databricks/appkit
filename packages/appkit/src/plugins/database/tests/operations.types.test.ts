@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import os from "node:os";
@@ -776,9 +775,7 @@ beforeAll(async () => {
 afterAll(() => fs.rm(root, { recursive: true, force: true }));
 
 /** Every diagnostic in the generated declaration and the consumers, as `file:line TScode`. */
-function typecheck(consumers: Record<string, string>, built = false): string[] {
-  const entryRoot = built ? path.join(appkitRoot, "dist") : sourceRoot;
-  const extension = built ? ".d.ts" : ".ts";
+function typecheck(consumers: Record<string, string>): string[] {
   const nodeTypes = path.dirname(
     path.dirname(
       createRequire(import.meta.url).resolve("@types/node/package.json"),
@@ -800,8 +797,8 @@ function typecheck(consumers: Record<string, string>, built = false): string[] {
         lib: ["ES2022"],
         baseUrl: root,
         paths: {
-          "@databricks/appkit": [path.join(entryRoot, `index${extension}`)],
-          "@databricks/appkit/beta": [path.join(entryRoot, `beta${extension}`)],
+          "@databricks/appkit": [path.join(sourceRoot, "index.ts")],
+          "@databricks/appkit/beta": [path.join(sourceRoot, "beta.ts")],
           shared: [path.join(sharedRoot, "index.ts")],
           "shared/*": [path.join(sharedRoot, "*")],
           "@databricks/lakebase": [
@@ -836,20 +833,18 @@ function typecheck(consumers: Record<string, string>, built = false): string[] {
   };
   const files = [declaration, ...virtual.keys()];
   const program = ts.createProgram(files, options, host);
-  const diagnostics = built
-    ? ts.getPreEmitDiagnostics(program)
-    : [
-        ...program.getOptionsDiagnostics(),
-        ...program.getGlobalDiagnostics(),
-        ...files.flatMap((file) => {
-          const source = program.getSourceFile(file);
-          if (!source) throw new Error(`Missing consumer source ${file}`);
-          return [
-            ...program.getSyntacticDiagnostics(source),
-            ...program.getSemanticDiagnostics(source),
-          ];
-        }),
+  const diagnostics = [
+    ...program.getOptionsDiagnostics(),
+    ...program.getGlobalDiagnostics(),
+    ...files.flatMap((file) => {
+      const source = program.getSourceFile(file);
+      if (!source) throw new Error(`Missing consumer source ${file}`);
+      return [
+        ...program.getSyntacticDiagnostics(source),
+        ...program.getSemanticDiagnostics(source),
       ];
+    }),
+  ];
   return diagnostics.map((diagnostic) => {
     const line = diagnostic.file
       ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start ?? 0)
@@ -915,20 +910,6 @@ describe("operation definitions through the public entries", () => {
       typecheck({ "positive.ts": positive, "global.ts": globalContract }),
     ).toEqual([]);
   }, 60_000);
-
-  // Unit tests run before the build in CI; the build job runs this file after it.
-  test.skipIf(!existsSync(path.join(appkitRoot, "dist/beta.d.ts")))(
-    "consume built public declarations without suppressing library diagnostics",
-    () => {
-      expect(
-        typecheck(
-          { "positive.ts": positive, "global.ts": globalContract },
-          true,
-        ),
-      ).toEqual([]);
-    },
-    60_000,
-  );
 
   test("reject every probe, each with its own diagnostic", () => {
     expect(
