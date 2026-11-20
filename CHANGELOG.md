@@ -220,6 +220,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.99.0](https://github.com/databricks/appkit/compare/v0.98.0...v0.99.0) (2026-11-20)
+
+### appkit
+
+* **appkit:** verify database callers and authorize named operations ([#689](https://github.com/databricks/appkit/issues/689)) ([5b2d4ad](https://github.com/databricks/appkit/commit/5b2d4ad077410a54ad68607899af7fa7ecf533a2))
+
+
 ## [0.98.0](https://github.com/databricks/appkit/compare/v0.97.3...v0.98.0) (2026-11-18)
 
 ### appkit
