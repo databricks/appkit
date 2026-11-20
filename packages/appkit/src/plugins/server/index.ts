@@ -16,6 +16,7 @@ import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import { defineManifest } from "../../registry";
 import { instrumentations } from "../../telemetry";
+import { routedPath } from "../../utils/routed-path";
 import { sanitizeClientConfig } from "./client-config-sanitizer";
 import { createDevOboMiddleware } from "./dev-obo-middleware";
 import manifest from "./manifest.json";
@@ -79,6 +80,8 @@ export class ServerPlugin extends Plugin {
   declare protected config: ServerConfig;
   private serverExtensions: ((app: express.Application) => void)[] = [];
   private rawBodyPaths: RegExp[] = [];
+  /** Lowercase, because Express matches a mount path case-insensitively. */
+  private rawBodyPrefixes: Set<string> = new Set();
   /**
    * Resolves when `server.close()` completes. Created in
    * {@link abortActiveOperations} (which initiates the close) and awaited in
@@ -147,9 +150,15 @@ export class ServerPlugin extends Plugin {
           // (e.g. file uploads where the raw body must flow through).
           // rawBodyPaths is populated by extendRoutes() below; the type
           // callback runs per-request so the list is already filled.
-          const urlPath = req.url?.split("?")[0];
-          if (urlPath && this.rawBodyPaths.some((re) => re.test(urlPath)))
+          const urlPath =
+            req.url === undefined ? undefined : routedPath(req.url);
+          if (
+            urlPath &&
+            (this.rawBodyPaths.some((re) => re.test(urlPath)) ||
+              isUnderPrefix(urlPath, this.rawBodyPrefixes))
+          ) {
             return false;
+          }
           const ct = req.headers["content-type"] ?? "";
           return ct.includes("json");
         },
@@ -304,13 +313,24 @@ export class ServerPlugin extends Plugin {
             this.rawBodyPaths.push(new RegExp(`^${source}/?$`, "i"));
           }
         }
+        if (plugin instanceof Plugin) {
+          for (const prefix of plugin.getSkipBodyParsingPrefixes()) {
+            this.rawBodyPrefixes.add(prefix.toLowerCase());
+          }
+        }
       }
 
       if (typeof plugin.clientConfig === "function") {
         try {
           const raw = plugin.clientConfig();
           if (raw != null) {
-            const sanitized = sanitizeClientConfig(plugin.name, raw);
+            // The boot payload already carries this plugin's endpoint names
+            // and paths verbatim, so they are public in its config too.
+            const sanitized = sanitizeClientConfig(
+              plugin.name,
+              raw,
+              Object.entries(endpoints[plugin.name] ?? {}).flat(),
+            );
             if (Object.keys(sanitized).length > 0) {
               pluginConfigs[plugin.name] = sanitized;
             }
@@ -553,6 +573,15 @@ export class ServerPlugin extends Plugin {
 }
 
 const EXCLUDED_PLUGINS: string[] = [ServerPlugin.manifest.name];
+
+/** Whether Express would route `path` into one of these lowercase mounts. */
+function isUnderPrefix(path: string, prefixes: ReadonlySet<string>): boolean {
+  const lower = path.toLowerCase();
+  for (const prefix of prefixes) {
+    if (lower === prefix || lower.startsWith(`${prefix}/`)) return true;
+  }
+  return false;
+}
 
 /** @internal Exported for unit tests. */
 export function requestMetricsMiddleware(
