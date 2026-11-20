@@ -135,8 +135,9 @@ export function FilesPage() {
     setPreviewLoading(false);
   };
 
-  useEffect(() => {
-    fetchJson(
+  const loadVolumes = () => {
+    setError(null);
+    return fetchJson(
       '/api/files/volumes',
       undefined,
       VolumeListSchema,
@@ -153,6 +154,14 @@ export function FilesPage() {
         }
       })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+  };
+
+  const loadVolumesForKey = useEffectEvent(() => {
+    void loadVolumes();
+  });
+
+  useEffect(() => {
+    loadVolumesForKey();
   }, [volumeKey]);
 
   // An effect event, so the load reruns only when the volume changes, whether
@@ -353,7 +362,9 @@ export function FilesPage() {
           error={error}
           onEntryClick={handleEntryClick}
           onNavigateToParent={navigateToParent}
-          onRetry={() => void loadDirectory(currentPath)}
+          onRetry={() =>
+            void (volumeKey ? loadDirectory(currentPath) : loadVolumes())
+          }
           isAtRoot={isAtRoot}
           selectedPath={selectedFile}
           resolveEntryPath={resolveEntryPath}
