@@ -400,8 +400,13 @@ it explicitly with `database({ routes: databaseRoutes })`.
 Setup loads every listed module and validates each operation before the plugin
 opens a connection. A malformed declaration or a repeated name fails setup. An
 operation without `authorize` is not served; setup logs a warning that names
-its file and export, and a production build (`NODE_ENV=production`) fails
-generation instead. With `routes: false`, the plugin registers no HTTP endpoint.
+its file and export. When `NODE_ENV` is `production`, the Vite plugin and
+`appkit generate-types` fail generation on such an operation under
+`server/database/routes/` instead. The template's build runs
+`NODE_ENV=production appkit generate-types --wait`, and a custom build that
+calls the command sets `NODE_ENV` the same way. A module listed only in an
+explicit registry is checked by setup alone. With `routes: false`, the plugin
+registers no HTTP endpoint.
 
 An explicit schema must have an exact JSON type. Strings, numbers, booleans,
 `null`, literals, enums, arrays, objects, records with string keys, unions, and
