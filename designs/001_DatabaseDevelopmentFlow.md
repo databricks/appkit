@@ -545,8 +545,9 @@ supported type, and an identity column is written only as the primary key. Gener
 types and identity columns other than the primary key are left out, and an unsupported default is dropped from its
 column. A foreign key is written with `fk()` only when one column references the primary key or a single-column unique
 key of another table in the same schema. Composite, cross-schema and self-referencing foreign keys, one that would
-close a cycle, and a few other shapes the builder cannot type are left out while their column stays. Each thing left
-out gets an `// appkit: skipped …` comment in `schema.ts` and a warning from the command.
+close a cycle, and a few other shapes the builder cannot type are left out, and their column stays when it is otherwise
+supported. What is left out is marked with an `// appkit: skipped …` comment in `schema.ts` and a warning from the
+command.
 
 Introspect keeps the `.private()` an existing `schema.ts` declares, because the server entity client omits private
 columns from its reads by default. Every other column it writes is public. When `schema.ts` does not load, introspect
