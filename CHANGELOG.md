@@ -222,6 +222,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.100.0](https://github.com/databricks/appkit/compare/v0.99.0...v0.100.0) (2026-11-20)
+
+### appkit
+
+* **appkit:** generate the database operation registry and browser contracts ([#690](https://github.com/databricks/appkit/issues/690)) ([691501d](https://github.com/databricks/appkit/commit/691501d6297f1c13be5ccdf55dd9dd578ecc989e))
+
+
 ## [0.99.0](https://github.com/databricks/appkit/compare/v0.98.0...v0.99.0) (2026-11-20)
 
 ### appkit
