@@ -226,6 +226,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.102.0](https://github.com/databricks/appkit/compare/v0.101.0...v0.102.0) (2026-11-20)
+
+### appkit-ui
+
+* **appkit-ui:** call named database operations from the client and hooks ([#691](https://github.com/databricks/appkit/issues/691)) ([9819f8d](https://github.com/databricks/appkit/commit/9819f8db8e88eaf7f5707f86a015881ad93f59ff))
+
+
 ## [0.101.0](https://github.com/databricks/appkit/compare/v0.100.0...v0.101.0) (2026-11-20)
 
 ### template
