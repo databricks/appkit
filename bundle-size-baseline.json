@@ -209,25 +209,25 @@
     {
       "name": "@databricks/appkit-ui",
       "tarball": {
-        "packed": 416396,
-        "unpacked": 1632843
+        "packed": 438285,
+        "unpacked": 1704082
       },
       "dist": {
         "total": {
-          "raw": 1628897,
-          "gzip": 557961
+          "raw": 1700136,
+          "gzip": 584218
         },
         "js": {
-          "raw": 448750,
-          "gzip": 153500
+          "raw": 467512,
+          "gzip": 160593
         },
         "types": {
-          "raw": 277475,
-          "gzip": 102719
+          "raw": 288075,
+          "gzip": 106806
         },
         "maps": {
-          "raw": 886274,
-          "gzip": 298486
+          "raw": 928151,
+          "gzip": 313563
         },
         "css": {
           "raw": 16398,
@@ -237,7 +237,7 @@
           "raw": 0,
           "gzip": 0
         },
-        "fileCount": 565
+        "fileCount": 579
       },
       "entries": [
         {
@@ -270,17 +270,17 @@
         },
         {
           "id": "./js/beta",
-          "gzip": 2181,
+          "gzip": 3593,
           "composition": {
-            "initialGzip": 2181,
+            "initialGzip": 3593,
             "lazyGzip": 0,
-            "totalGzip": 2181,
-            "own": 5143,
+            "totalGzip": 3593,
+            "own": 9575,
             "nodeModules": 0,
             "chunks": [
               {
                 "label": "beta.js",
-                "gzip": 2181,
+                "gzip": 3593,
                 "kind": "initial"
               }
             ]
@@ -316,17 +316,17 @@
         },
         {
           "id": "./react/beta",
-          "gzip": 6211,
+          "gzip": 8461,
           "composition": {
-            "initialGzip": 14228,
+            "initialGzip": 16479,
             "lazyGzip": 0,
-            "totalGzip": 14228,
-            "own": 15611,
-            "nodeModules": 25372,
+            "totalGzip": 16479,
+            "own": 22802,
+            "nodeModules": 25385,
             "chunks": [
               {
                 "label": "beta.js",
-                "gzip": 14228,
+                "gzip": 16479,
                 "kind": "initial"
               }
             ]

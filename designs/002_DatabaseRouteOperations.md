@@ -414,10 +414,10 @@ actor or a 401 advances the client's session state, clears hooks, and rejects la
 `SESSION_CHANGED`. Detection is response-driven; this is not a push notification of an identity change before any
 response arrives.
 
-`databaseApi.execute` rejects with `DatabaseApiError` on failure and supports an optional AbortSignal. A write with a
-lost or unusable response can report `OUTCOME_UNKNOWN`; cancellation cannot undo a committed write. React callers
-should prefer hooks for rendered database state. Imperative callers own request identity, state updates, cancellation,
-and refresh after writes.
+`databaseApi.execute` rejects with `DatabaseApiError` on failure and supports an optional AbortSignal. A write whose
+response is lost, unusable, or a 5xx without the actor discriminator (a proxy answered, not the handler) can report
+`OUTCOME_UNKNOWN`; cancellation cannot undo a committed write. React callers should prefer hooks for rendered database
+state. Imperative callers own request identity, state updates, cancellation, and refresh after writes.
 
 ## Observability and boundaries
 
