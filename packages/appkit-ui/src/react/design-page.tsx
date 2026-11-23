@@ -67,12 +67,19 @@ function HoldReady() {
 /** Marks the shell `data-design-rendered` while the page itself is on screen. */
 function MarkRendered({ shell }: { shell: RefObject<HTMLElement | null> }) {
   useEffect(() => {
-    const el = shell.current;
-    el?.setAttribute("data-design-rendered", "");
-    return () => el?.removeAttribute("data-design-rendered");
+    shell.current?.setAttribute("data-design-rendered", "");
   }, [shell]);
+  // Removed in the commit that puts an error in, so it never shows beside one.
+  useLayoutEffect(
+    () => () => shell.current?.removeAttribute("data-design-rendered"),
+    [shell],
+  );
   return null;
 }
+
+/** A thrown non-Error (a string, null) as an Error with its text. */
+const asError = (error: unknown) =>
+  error instanceof Error ? error : new Error(String(error));
 
 interface LastGoodFrameProps {
   children: ReactNode;
@@ -80,9 +87,10 @@ interface LastGoodFrameProps {
   shell: RefObject<HTMLElement | null>;
   resetKey: unknown;
   onError?: (error: Error) => void;
+  errorFallback: (error: Error) => ReactNode;
 }
 
-/** On a render error, shows the last good frame (or the error) and holds readiness back. */
+/** On a render error, shows the last good frame (or `errorFallback`) and holds readiness back. */
 interface LastGoodFrameState {
   error: Error | null;
   resetKey: unknown;
@@ -90,8 +98,8 @@ interface LastGoodFrameState {
 
 class LastGoodFrame extends Component<LastGoodFrameProps, LastGoodFrameState> {
   state: LastGoodFrameState = { error: null, resetKey: this.props.resetKey };
-  static getDerivedStateFromError(error: Error) {
-    return { error };
+  static getDerivedStateFromError(error: unknown) {
+    return { error: asError(error) };
   }
   // A new resetKey retries: render the children again.
   static getDerivedStateFromProps(
@@ -102,8 +110,8 @@ class LastGoodFrame extends Component<LastGoodFrameProps, LastGoodFrameState> {
       ? null
       : { error: null, resetKey: props.resetKey };
   }
-  componentDidCatch(error: Error) {
-    this.props.onError?.(error);
+  componentDidCatch(error: unknown) {
+    this.props.onError?.(asError(error));
   }
   render() {
     const { error } = this.state;
@@ -127,9 +135,7 @@ class LastGoodFrame extends Component<LastGoodFrameProps, LastGoodFrameState> {
           />
         ) : (
           <div data-design-error="" style={{ display: "contents" }}>
-            <pre className="text-destructive p-4 whitespace-pre-wrap">
-              Design page failed to render: {error.message}
-            </pre>
+            {this.props.errorFallback(error) ?? defaultErrorFallback(error)}
           </div>
         )}
       </>
@@ -137,12 +143,20 @@ class LastGoodFrame extends Component<LastGoodFrameProps, LastGoodFrameState> {
   }
 }
 
+const defaultErrorFallback = (error: Error) => (
+  <pre className="text-destructive p-4 whitespace-pre-wrap">
+    Design page failed to render: {error.message}
+  </pre>
+);
+
 export interface DesignPageProps {
   children: ReactNode;
   /** Called with each render error the page hits. */
   onError?: (error: Error) => void;
   /** Changing it retries rendering after an error (e.g. after a hot update). */
   resetKey?: unknown;
+  /** Shown for an error before anything rendered. Defaults to (and, when it renders nothing, falls back to) the message. */
+  errorFallback?: (error: Error) => ReactNode;
 }
 
 /**
@@ -156,11 +170,19 @@ export interface DesignPageProps {
  *   commits a render without an error. An empty page counts: that's its output.
  * - last-good: `[data-design-last-good]` in the shell, a copy of the last
  *   rendered frame, after a render error. No `data-design-rendered`.
- * - error: `[data-design-error]` in the shell, with the message, for a render
- *   error before any good render (or a streamed draft that fails to load).
- *   No `data-design-rendered`.
+ * - error: `[data-design-error]` in the shell, with the message (or
+ *   `errorFallback`), for a render error before any good render (or a streamed
+ *   draft that fails to load). No `data-design-rendered`.
+ *
+ * `data-design-rendered` goes in the same commit an error replaces the page,
+ * so a MutationObserver never sees it beside `last-good` or `error`.
  */
-export function DesignPage({ children, onError, resetKey }: DesignPageProps) {
+export function DesignPage({
+  children,
+  onError,
+  resetKey,
+  errorFallback = defaultErrorFallback,
+}: DesignPageProps) {
   useDesignTheme();
   const root = useRef<HTMLDivElement>(null);
   const frame = useRef<Frame | null>(null);
@@ -204,6 +226,7 @@ export function DesignPage({ children, onError, resetKey }: DesignPageProps) {
         shell={root}
         resetKey={resetKey}
         onError={onError}
+        errorFallback={errorFallback}
       >
         {children}
       </LastGoodFrame>

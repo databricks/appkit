@@ -236,6 +236,6 @@ A builder showing a page in a frame can read what happened from markers on the p
 | last-good | `[data-design-last-good]` inside the shell | A render error after a good render: a copy of the last good frame is shown. No `data-design-rendered`. |
 | error | `[data-design-error]` inside the shell, with the message | A render error before any good render, or, on a stream page, a published version that fails to load or evaluate (shown at once). No `data-design-rendered`. |
 
-`data-design-rendered` is removed when an error replaces the page, and set again once a retry (a hot update, or the next published version) renders.
+`data-design-rendered` is removed in the same commit an error replaces the page, so a `MutationObserver` never sees it together with `[data-design-last-good]` or `[data-design-error]`. It's set again once a retry (a hot update, or the next published version) renders. A thrown value that isn't an `Error` (a string, `null`) shows as its text.
 
 Lock-in is a file operation for the builder: keep the chosen page as `client/src/design/index.tsx` (`/design`, repointing `../mock` to `./mock`), or as the app's home page for apps with no data, and delete the other drafts.

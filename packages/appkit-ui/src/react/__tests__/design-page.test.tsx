@@ -1,6 +1,10 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import * as react from "react";
-import { type ComponentType, useLayoutEffect } from "react";
+import {
+  type ComponentType,
+  useLayoutEffect,
+  useSyncExternalStore,
+} from "react";
 import * as reactDomClient from "react-dom/client";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -120,6 +124,94 @@ describe("DesignPage", () => {
     expect(shell().hasAttribute("data-design-rendered")).toBe(true);
   });
 
+  test("an observer of the DOM sees one state at a time through error, rendered, last-good and back", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    // Outside act(), so effects run when React schedules them, as in a browser.
+    const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    env.IS_REACT_ACT_ENVIRONMENT = false;
+    const el = document.body.appendChild(document.createElement("div"));
+    const root = reactDomClient.createRoot(el);
+    const seen: string[] = [];
+    const observer = new MutationObserver(() => {
+      const s = el.querySelector("[data-design-page]");
+      if (!s) return;
+      const state = [
+        s.hasAttribute("data-design-rendered") && "rendered",
+        s.querySelector("[data-design-last-good]") && "last-good",
+        s.querySelector("[data-design-error]") && "error",
+      ].filter(Boolean);
+      seen.push(state.join("+") || "none");
+    });
+    observer.observe(el, { subtree: true, childList: true, attributes: true });
+    const show = async (text: string, resetKey: number) => {
+      root.render(
+        <DesignPage resetKey={resetKey}>
+          <Page text={text} />
+        </DesignPage>,
+      );
+      await new Promise((r) => setTimeout(r, 50));
+    };
+    try {
+      await show("boom", 0);
+      await show("Trips", 1);
+      await show("boom", 1);
+      await show("Trips", 2);
+    } finally {
+      observer.disconnect();
+      root.unmount();
+      el.remove();
+      env.IS_REACT_ACT_ENVIRONMENT = true;
+    }
+    expect(seen.filter((s) => s.includes("+"))).toEqual([]);
+    expect(seen).toEqual(
+      expect.arrayContaining(["error", "rendered", "last-good"]),
+    );
+    expect(seen.at(-1)).toBe("rendered");
+  });
+
+  test("a thrown non-Error still shows its reason", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    function Throws({ value }: { value: unknown }): never {
+      throw value;
+    }
+    const { rerender } = render(
+      <DesignPage resetKey={0}>
+        <Throws value="draft import failed" />
+      </DesignPage>,
+    );
+    expect(shell().querySelector("[data-design-error]")?.textContent).toBe(
+      "Design page failed to render: draft import failed",
+    );
+    rerender(
+      <DesignPage resetKey={1}>
+        <Throws value={null} />
+      </DesignPage>,
+    );
+    expect(shell().querySelector("[data-design-error]")?.textContent).toBe(
+      "Design page failed to render: null",
+    );
+  });
+
+  test("errorFallback replaces the message, but rendering nothing still shows it", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { rerender } = render(
+      <DesignPage errorFallback={(e) => <p>Oops: {e.message}</p>}>
+        <Page text="boom" />
+      </DesignPage>,
+    );
+    expect(shell().querySelector("[data-design-error]")?.textContent).toBe(
+      "Oops: boom",
+    );
+    rerender(
+      <DesignPage errorFallback={() => null} resetKey={1}>
+        <Page text="boom" />
+      </DesignPage>,
+    );
+    expect(shell().querySelector("[data-design-error]")?.textContent).toBe(
+      "Design page failed to render: boom",
+    );
+  });
+
   test("applies ?theme=dark before the first paint", () => {
     history.replaceState(null, "", "/design?theme=dark");
     render(
@@ -180,6 +272,11 @@ async function streamPage(published: boolean, first: ReturnType<Load>) {
       handlers["appkit:stream"]({ name: "dash" });
       await settle();
     },
+    /** Vite's `vite:afterUpdate`, once a hot update applied (the host retries 50 ms later). */
+    afterUpdate: async () => {
+      handlers["vite:afterUpdate"]({});
+      await act(() => new Promise((r) => setTimeout(r, 100)));
+    },
   };
 }
 
@@ -189,6 +286,26 @@ const notFound = () =>
 const page = (Default: ComponentType) => Promise.resolve({ default: Default });
 const errorText = () =>
   shell()?.querySelector("[data-design-error]")?.textContent;
+
+/** A draft whose module hot-updates in place, as Fast Refresh does it. */
+function hotDraft(text: string) {
+  const listeners = new Set<() => void>();
+  const subscribe = (l: () => void) => {
+    listeners.add(l);
+    return () => listeners.delete(l);
+  };
+  function Draft() {
+    const now = useSyncExternalStore(subscribe, () => text);
+    if (now === "boom") throw new Error("boom");
+    return <h1>{now}</h1>;
+  }
+  const edit = (next: string) =>
+    act(() => {
+      text = next;
+      listeners.forEach((l) => l());
+    });
+  return { Draft, edit };
+}
 
 describe("stream page", () => {
   test("pending until a version is out; a failed import shows at once; a good publish renders", async () => {
@@ -218,6 +335,26 @@ describe("stream page", () => {
       "Design page failed to render: Failed to fetch dynamically imported module",
     );
     expect(shell().hasAttribute("data-design-rendered")).toBe(false);
+  });
+
+  test("rendered, then a broken update keeps the last good frame, then a fixed update renders again", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const draft = hotDraft("Trips");
+    const stream = await streamPage(true, page(draft.Draft));
+    expect(shell().hasAttribute("data-design-rendered")).toBe(true);
+
+    await draft.edit("boom");
+    expect(shell().querySelector("[data-design-last-good]")?.textContent).toBe(
+      "Trips",
+    );
+    expect(errorText()).toBeUndefined();
+    expect(shell().hasAttribute("data-design-rendered")).toBe(false);
+
+    await draft.edit("Trips today");
+    await stream.afterUpdate();
+    expect(shell().querySelector("[data-design-last-good]")).toBeNull();
+    expect(shell().hasAttribute("data-design-rendered")).toBe(true);
+    expect(screen.getByRole("heading").textContent).toBe("Trips today");
   });
 
   test("a page that throws before its first good render shows the message, not a blank frame", async () => {
