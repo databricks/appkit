@@ -600,7 +600,7 @@ try {
   process.exit(1);
 }
 const endAt = startedAt + MINUTES * 60_000;
-for (let tick = 0; Date.now() < endAt && !stopRequested; tick++) {
+while (Date.now() < endAt && !stopRequested) {
   const activeSlots = Math.min(
     SLOTS,
     1 + Math.floor((Date.now() - startedAt) / RAMP_MS),
@@ -621,7 +621,13 @@ for (let tick = 0; Date.now() < endAt && !stopRequested; tick++) {
       `connections=${pool.totalCount} connects=${connects} mints=${mints} ` +
       `ok=${queriesOk} failed=${queriesFailed} auth_errors=${authErrors}`,
   );
-  const nextTickAt = startedAt + (tick + 1) * INTERVAL_MS;
+  // The next tick on the interval grid that's still ahead. After a sleep or
+  // a slow tick, the missed ticks are skipped rather than run back to back,
+  // and normal ticks stay on the grid instead of drifting by each tick's own
+  // duration.
+  const nextTickAt =
+    startedAt +
+    (Math.floor((Date.now() - startedAt) / INTERVAL_MS) + 1) * INTERVAL_MS;
   if (Date.now() - lastSuccessAt > MAX_GAP_S * 1000) {
     console.warn(
       `  no successful query for ${Math.round((Date.now() - lastSuccessAt) / 1000)} s; this stretch of the run is invalid`,
