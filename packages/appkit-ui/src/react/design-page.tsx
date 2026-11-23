@@ -3,6 +3,7 @@ import {
   type ReactNode,
   type RefObject,
   Suspense,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -49,8 +50,8 @@ function capture(root: HTMLElement): Frame {
   };
 }
 
-function restore(holder: HTMLElement | null, frame: Frame) {
-  if (!holder) return;
+function restore(holder: HTMLElement | null, frame: Frame | null) {
+  if (!holder || !frame) return;
   holder.replaceChildren(...frame.nodes.map((n) => n.cloneNode(true)));
   holder.querySelectorAll("canvas").forEach((c, i) => {
     const px = frame.pixels[i];
@@ -66,19 +67,33 @@ function HoldReady() {
   return null;
 }
 
-/** Marks the shell `data-design-rendered` while the page itself is on screen. */
-function MarkRendered({ shell }: { shell: RefObject<HTMLElement | null> }) {
-  const shown = useRef(false);
+/**
+ * Tracks whether the page itself is on screen (`shown`), and marks the shell
+ * `data-design-rendered` while it is, from an effect after its first commit.
+ */
+function MarkRendered({
+  shell,
+  shown,
+}: {
+  shell: RefObject<HTMLElement | null>;
+  shown: { current: boolean };
+}) {
+  const marked = useRef(false);
   useEffect(() => {
-    shown.current = true;
-    shell.current?.setAttribute("data-design-rendered", "");
-  }, [shell]);
-  // Removed in the commit that puts an error in (or hides the page for a
-  // Suspense fallback), so it never shows beside one; set again on reveal.
-  useLayoutEffect(() => {
+    marked.current = true;
     if (shown.current) shell.current?.setAttribute("data-design-rendered", "");
-    return () => shell.current?.removeAttribute("data-design-rendered");
-  }, [shell]);
+  }, [shell, shown]);
+  // On screen from its commit (or a reveal after a Suspense fallback) until
+  // the commit that hides or replaces it, which also takes the marker off: it
+  // never shows beside an error, a copy or a fallback.
+  useLayoutEffect(() => {
+    shown.current = true;
+    if (marked.current) shell.current?.setAttribute("data-design-rendered", "");
+    return () => {
+      shown.current = false;
+      shell.current?.removeAttribute("data-design-rendered");
+    };
+  }, [shell, shown]);
   return null;
 }
 
@@ -115,6 +130,9 @@ interface LastGoodFrameProps {
   children: ReactNode;
   frame: { current: Frame | null };
   shell: RefObject<HTMLElement | null>;
+  shown: { current: boolean };
+  /** Copies the page into `frame`, if it's on screen. */
+  keep: () => void;
   resetKey: unknown;
   onError?: (error: Error) => void;
   errorFallback: (error: Error) => ReactNode;
@@ -144,6 +162,13 @@ class LastGoodFrame extends Component<LastGoodFrameProps, LastGoodFrameState> {
   componentDidCatch(error: unknown) {
     this.props.onError?.(asError(error));
   }
+  // Just before an error replaces the page: copy it as it is on screen now
+  // (it may have committed in this same task, after the last copy).
+  getSnapshotBeforeUpdate(_: LastGoodFrameProps, prev: LastGoodFrameState) {
+    if (this.state.error && !prev.error) this.props.keep();
+    return null;
+  }
+  componentDidUpdate() {}
   render() {
     const { error } = this.state;
     if (!error) {
@@ -151,19 +176,21 @@ class LastGoodFrame extends Component<LastGoodFrameProps, LastGoodFrameState> {
       return (
         <Suspense fallback={this.props.pendingFallback}>
           {this.props.children}
-          <MarkRendered shell={this.props.shell} />
+          <MarkRendered shell={this.props.shell} shown={this.props.shown} />
         </Suspense>
       );
     }
-    const frame = this.props.frame.current;
+    // A page on screen now is copied before this commit (above).
+    const lastGood =
+      this.props.frame.current !== null || this.props.shown.current;
     return (
       <>
         <HoldReady />
-        {frame ? (
+        {lastGood ? (
           <div
             data-design-last-good=""
             style={{ display: "contents" }}
-            ref={(el) => restore(el, frame)}
+            ref={(el) => restore(el, this.props.frame.current)}
           />
         ) : (
           <ShowError error={error} fallback={this.props.errorFallback} />
@@ -201,8 +228,10 @@ export interface DesignPageProps {
  *   markers below while the page suspends (`pendingFallback` on screen).
  * - rendered: `[data-design-page][data-design-rendered]`, set after the page
  *   commits a render without an error. An empty page counts: that's its output.
- * - last-good: `[data-design-last-good]` in the shell, a copy of the last
- *   rendered frame, after a render error. No `data-design-rendered`.
+ * - last-good: `[data-design-last-good]` in the shell, after a render error
+ *   once the page has shown: a copy of it as it was on screen when the error
+ *   came (or, if a Suspense fallback had replaced it, as it last showed). No
+ *   `data-design-rendered`.
  * - error: `[data-design-error]` in the shell, with the message (or
  *   `errorFallback`), for a render error before any good render (or a streamed
  *   draft that fails to load). No `data-design-rendered`.
@@ -221,28 +250,19 @@ export function DesignPage({
   useDesignTheme();
   const root = useRef<HTMLDivElement>(null);
   const frame = useRef<Frame | null>(null);
-  // Hot updates re-render the page without this component: copy every frame.
+  // The page itself is on screen: not an error, a copy, or a Suspense fallback.
+  const shown = useRef(false);
+  const keep = useCallback(() => {
+    if (shown.current && root.current) frame.current = capture(root.current);
+  }, []);
+  // Hot updates re-render the page without this component: copy every frame,
+  // after each change (not on an animation frame: a hidden frame gets none).
   useLayoutEffect(() => {
     const el = root.current;
     if (!el) return;
-    // Only the page itself (marked rendered): not an error, a restored copy,
-    // or a Suspense fallback.
-    const keep = () => {
-      if (el.hasAttribute("data-design-rendered")) frame.current = capture(el);
-    };
-    let pending = false;
-    const observer = new MutationObserver((records) => {
-      // The page just showed: copy it now (a hidden frame gets no animation frame).
-      if (records.some((r) => r.attributeName === "data-design-rendered")) {
-        keep();
-      }
-      if (pending) return;
-      pending = true;
-      requestAnimationFrame(() => {
-        pending = false;
-        keep();
-      });
-    });
+    // The first frame is already in place: no mutation reports it.
+    keep();
+    const observer = new MutationObserver(keep);
     observer.observe(el, {
       subtree: true,
       childList: true,
@@ -250,7 +270,7 @@ export function DesignPage({
       attributes: true,
     });
     return () => observer.disconnect();
-  }, []);
+  }, [keep]);
   return (
     <div
       ref={root}
@@ -260,6 +280,8 @@ export function DesignPage({
       <LastGoodFrame
         frame={frame}
         shell={root}
+        shown={shown}
+        keep={keep}
         resetKey={resetKey}
         onError={onError}
         errorFallback={errorFallback}
