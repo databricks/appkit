@@ -270,7 +270,7 @@ export function entryModule(
   router: boolean,
 ): string {
   const shared = `
-import { Component, createElement, Suspense, useLayoutEffect } from "react";
+import { Component, createElement, useLayoutEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { DesignPage } from "@databricks/appkit-ui/react/beta";
 import * as initial from "/src/design/${file}";
@@ -369,8 +369,8 @@ function withReady(mod, name) {
     render() {
       return createElement(
         DesignPage,
-        { onError: this.onError, resetKey: this.state.reset },
-        createElement(Suspense, { fallback: createElement(Pending) }, createElement(mod.default)),
+        { onError: this.onError, resetKey: this.state.reset, pendingFallback: createElement(Pending) },
+        createElement(mod.default),
       );
     }
   };

@@ -2,9 +2,11 @@ import {
   Component,
   type ReactNode,
   type RefObject,
+  Suspense,
   useEffect,
   useLayoutEffect,
   useRef,
+  useState,
 } from "react";
 
 import { useDesignReady } from "./hooks/use-design-ready";
@@ -66,15 +68,43 @@ function HoldReady() {
 
 /** Marks the shell `data-design-rendered` while the page itself is on screen. */
 function MarkRendered({ shell }: { shell: RefObject<HTMLElement | null> }) {
+  const shown = useRef(false);
   useEffect(() => {
+    shown.current = true;
     shell.current?.setAttribute("data-design-rendered", "");
   }, [shell]);
-  // Removed in the commit that puts an error in, so it never shows beside one.
-  useLayoutEffect(
-    () => () => shell.current?.removeAttribute("data-design-rendered"),
-    [shell],
-  );
+  // Removed in the commit that puts an error in (or hides the page for a
+  // Suspense fallback), so it never shows beside one; set again on reveal.
+  useLayoutEffect(() => {
+    if (shown.current) shell.current?.setAttribute("data-design-rendered", "");
+    return () => shell.current?.removeAttribute("data-design-rendered");
+  }, [shell]);
   return null;
+}
+
+/** `errorFallback`'s output, or the message when that shows no text (`null`, `false`, `""`). */
+function ShowError({
+  error,
+  fallback,
+}: {
+  error: Error;
+  fallback: (error: Error) => ReactNode;
+}) {
+  const el = useRef<HTMLDivElement>(null);
+  // For which error and fallback it came out empty (a retry can reuse this).
+  const [blankFor, setBlankFor] = useState<unknown[]>([]);
+  const blank = blankFor[0] === error && blankFor[1] === fallback;
+  // Before the paint, so the empty node is never seen.
+  useLayoutEffect(() => {
+    if (!blank && !el.current?.textContent?.trim()) {
+      setBlankFor([error, fallback]);
+    }
+  });
+  return (
+    <div ref={el} data-design-error="" style={{ display: "contents" }}>
+      {blank ? defaultErrorFallback(error) : fallback(error)}
+    </div>
+  );
 }
 
 /** A thrown non-Error (a string, null) as an Error with its text. */
@@ -88,6 +118,7 @@ interface LastGoodFrameProps {
   resetKey: unknown;
   onError?: (error: Error) => void;
   errorFallback: (error: Error) => ReactNode;
+  pendingFallback: ReactNode;
 }
 
 /** On a render error, shows the last good frame (or `errorFallback`) and holds readiness back. */
@@ -116,11 +147,12 @@ class LastGoodFrame extends Component<LastGoodFrameProps, LastGoodFrameState> {
   render() {
     const { error } = this.state;
     if (!error) {
+      // Inside the boundary: while the page suspends, it isn't rendered yet.
       return (
-        <>
+        <Suspense fallback={this.props.pendingFallback}>
           {this.props.children}
           <MarkRendered shell={this.props.shell} />
-        </>
+        </Suspense>
       );
     }
     const frame = this.props.frame.current;
@@ -134,9 +166,7 @@ class LastGoodFrame extends Component<LastGoodFrameProps, LastGoodFrameState> {
             ref={(el) => restore(el, frame)}
           />
         ) : (
-          <div data-design-error="" style={{ display: "contents" }}>
-            {this.props.errorFallback(error) ?? defaultErrorFallback(error)}
-          </div>
+          <ShowError error={error} fallback={this.props.errorFallback} />
         )}
       </>
     );
@@ -155,8 +185,10 @@ export interface DesignPageProps {
   onError?: (error: Error) => void;
   /** Changing it retries rendering after an error (e.g. after a hot update). */
   resetKey?: unknown;
-  /** Shown for an error before anything rendered. Defaults to (and, when it renders nothing, falls back to) the message. */
+  /** Shown for an error before anything rendered. Defaults to (and, when it shows no text, falls back to) the message. */
   errorFallback?: (error: Error) => ReactNode;
+  /** Shown while the page suspends (lazy code, data). Defaults to nothing. */
+  pendingFallback?: ReactNode;
 }
 
 /**
@@ -165,7 +197,8 @@ export interface DesignPageProps {
  *
  * Its state, for a builder to read from the DOM (one at a time):
  * - pending: no `[data-design-page]` shell yet (the page hasn't loaded; for a
- *   streamed draft, no version is published yet).
+ *   streamed draft, no version is published yet), or a shell with none of the
+ *   markers below while the page suspends (`pendingFallback` on screen).
  * - rendered: `[data-design-page][data-design-rendered]`, set after the page
  *   commits a render without an error. An empty page counts: that's its output.
  * - last-good: `[data-design-last-good]` in the shell, a copy of the last
@@ -174,14 +207,16 @@ export interface DesignPageProps {
  *   `errorFallback`), for a render error before any good render (or a streamed
  *   draft that fails to load). No `data-design-rendered`.
  *
- * `data-design-rendered` goes in the same commit an error replaces the page,
- * so a MutationObserver never sees it beside `last-good` or `error`.
+ * `data-design-rendered` goes in the same commit an error (or a Suspense
+ * fallback) replaces the page, so a MutationObserver never sees it beside
+ * `last-good` or `error`.
  */
 export function DesignPage({
   children,
   onError,
   resetKey,
   errorFallback = defaultErrorFallback,
+  pendingFallback = null,
 }: DesignPageProps) {
   useDesignTheme();
   const root = useRef<HTMLDivElement>(null);
@@ -227,6 +262,7 @@ export function DesignPage({
         resetKey={resetKey}
         onError={onError}
         errorFallback={errorFallback}
+        pendingFallback={pendingFallback}
       >
         {children}
       </LastGoodFrame>

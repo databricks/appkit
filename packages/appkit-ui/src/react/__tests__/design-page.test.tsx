@@ -202,14 +202,74 @@ describe("DesignPage", () => {
     expect(shell().querySelector("[data-design-error]")?.textContent).toBe(
       "Oops: boom",
     );
+    // Nothing to show (null, false, ""): the message, never an empty node.
+    for (const [i, empty] of [null, false, ""].entries()) {
+      rerender(
+        <DesignPage errorFallback={() => empty} resetKey={i + 1}>
+          <Page text="boom" />
+        </DesignPage>,
+      );
+      expect(shell().querySelector("[data-design-error]")?.textContent).toBe(
+        "Design page failed to render: boom",
+      );
+    }
+    // And a retry with a fallback that shows text uses it again.
     rerender(
-      <DesignPage errorFallback={() => null} resetKey={1}>
+      <DesignPage errorFallback={(e) => <p>Oops: {e.message}</p>} resetKey={9}>
         <Page text="boom" />
       </DesignPage>,
     );
     expect(shell().querySelector("[data-design-error]")?.textContent).toBe(
-      "Design page failed to render: boom",
+      "Oops: boom",
     );
+  });
+
+  test("a page that suspends isn't marked rendered while its fallback shows", async () => {
+    // Suspends until open(); close() makes the next render suspend again.
+    let done = false;
+    let promise = Promise.resolve();
+    let open = () => {};
+    const close = () => {
+      done = false;
+      promise = new Promise<void>((r) => {
+        open = () => {
+          done = true;
+          r();
+        };
+      });
+    };
+    function Slow({ text }: { text: string }) {
+      if (!done) throw promise;
+      return <h1>{text}</h1>;
+    }
+    const reveal = () =>
+      act(async () => {
+        open();
+        await promise;
+        // React may hold a reveal back a moment after a fallback.
+        await new Promise((r) => setTimeout(r, 400));
+      });
+    const show = (text: string) => (
+      <DesignPage pendingFallback={<p>Loading</p>}>
+        <Slow text={text} />
+      </DesignPage>
+    );
+    close();
+    const { rerender } = render(show("Trips"));
+    expect(screen.getByText("Loading")).toBeTruthy();
+    expect(shell().hasAttribute("data-design-rendered")).toBe(false);
+    await reveal();
+    expect(screen.getByRole("heading").textContent).toBe("Trips");
+    expect(shell().hasAttribute("data-design-rendered")).toBe(true);
+
+    // A later update that suspends hides the page: not rendered until it shows.
+    close();
+    rerender(show("Trips today"));
+    expect(screen.getByText("Loading")).toBeTruthy();
+    expect(shell().hasAttribute("data-design-rendered")).toBe(false);
+    await reveal();
+    expect(screen.getByRole("heading").textContent).toBe("Trips today");
+    expect(shell().hasAttribute("data-design-rendered")).toBe(true);
   });
 
   test("applies ?theme=dark before the first paint", () => {

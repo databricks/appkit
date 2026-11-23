@@ -231,11 +231,11 @@ A builder showing a page in a frame can read what happened from markers on the p
 
 | State | Marker | When |
 | --- | --- | --- |
-| pending | no `[data-design-page]` shell yet | The page hasn't loaded. For `/design/__stream/<name>`: no version is published yet. |
+| pending | no `[data-design-page]` shell yet, or a shell with none of the markers below | The page hasn't loaded, or it suspended (lazy code, data) and a `Suspense` fallback shows. For `/design/__stream/<name>`: no version is published yet. |
 | rendered | `[data-design-page][data-design-rendered]` | The page committed a render without an error (set in an effect after mount). A page that renders an empty element counts: that's its own output. |
 | last-good | `[data-design-last-good]` inside the shell | A render error after a good render: a copy of the last good frame is shown. No `data-design-rendered`. |
 | error | `[data-design-error]` inside the shell, with the message | A render error before any good render, or, on a stream page, a published version that fails to load or evaluate (shown at once). No `data-design-rendered`. |
 
-`data-design-rendered` is removed in the same commit an error replaces the page, so a `MutationObserver` never sees it together with `[data-design-last-good]` or `[data-design-error]`. It's set again once a retry (a hot update, or the next published version) renders. A thrown value that isn't an `Error` (a string, `null`) shows as its text.
+`data-design-rendered` is removed in the same commit an error (or a `Suspense` fallback) replaces the page, so a `MutationObserver` never sees it together with `[data-design-last-good]` or `[data-design-error]`. It's set again once a retry (a hot update, or the next published version) renders, or the page shows again. A thrown value that isn't an `Error` (a string, `null`) shows as its text, and an `errorFallback` that shows no text (`null`, `false`, `""`) gives way to the message.
 
 Lock-in is a file operation for the builder: keep the chosen page as `client/src/design/index.tsx` (`/design`, repointing `../mock` to `./mock`), or as the app's home page for apps with no data, and delete the other drafts.
