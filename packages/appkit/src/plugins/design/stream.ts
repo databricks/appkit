@@ -3,6 +3,8 @@
  * `.staging/<name>.tsx` is served as `pages/<name>.tsx` and hot-swapped in place.
  */
 
+import path from "node:path";
+
 type Frame =
   | { k: "brace" | "paren" | "bracket" | "tpl" | "tplExpr" | "jsxExpr" }
   | { k: "tag" | "el"; name: string };
@@ -297,15 +299,39 @@ export async function renderablePartial(
   return null;
 }
 
+const MODULE_NODES = new Set([
+  "ImportDeclaration",
+  "ExportNamedDeclaration",
+  "ExportAllDeclaration",
+  "ImportExpression",
+]);
+
 /**
- * Whether a page imports `../mock` at run time (an `import type` doesn't).
+ * Whether a compiled page (the ESTree program of the JS Vite serves for
+ * `pages/<name>.tsx`, types already stripped) imports `src/design/mock`.
  *
  * @internal
  */
-export function importsMock(page: string): boolean {
-  return /^\s*(?:import|export)\b(?!\s+type\s)[^;'"]*?["']\.\.\/mock(?:\.[jt]s)?["']/m.test(
-    page,
-  );
+export function importsMock(program: unknown): boolean {
+  const walk = (node: unknown): boolean => {
+    if (!node || typeof node !== "object") return false;
+    if (Array.isArray(node)) return node.some(walk);
+    const { type, source } = node as {
+      type?: string;
+      source?: { value?: unknown };
+    };
+    if (
+      MODULE_NODES.has(type as string) &&
+      typeof source?.value === "string" &&
+      /^\/src\/design\/mock(?:\.[jt]sx?)?$/.test(
+        path.posix.resolve("/src/design/pages", source.value),
+      )
+    ) {
+      return true;
+    }
+    return Object.values(node).some(walk);
+  };
+  return walk(program);
 }
 
 /**

@@ -1,4 +1,8 @@
-import { transformWithOxc } from "vite";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { parseAst, transformWithOxc } from "vite";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -143,25 +147,44 @@ describe("placeholderKind", () => {
 });
 
 describe("importsMock", () => {
-  test("a value import, re-export or bare import of ../mock counts", () => {
-    expect(importsMock(PAGE)).toBe(true);
-    expect(
-      importsMock('import {\n  trips,\n  kpis,\n} from "../mock.ts";'),
-    ).toBe(true);
-    expect(importsMock("import * as data from '../mock';")).toBe(true);
-    expect(importsMock('import mock from "../mock.js";')).toBe(true);
-    expect(importsMock('export { trips } from "../mock";')).toBe(true);
-    expect(importsMock('import "../mock";')).toBe(true);
+  // Compiled as Vite serves a page, under a tsconfig without verbatimModuleSyntax.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "design-mock-"));
+  fs.writeFileSync(path.join(dir, "tsconfig.json"), "{}");
+  const usesMock = async (code: string) => {
+    const js = await transformWithOxc(code, path.join(dir, "page.tsx"), {
+      lang: "tsx",
+      jsx: { runtime: "automatic" },
+    });
+    return importsMock(parseAst(js.code));
+  };
+
+  test("a value import, re-export, bare or dynamic import of the mock counts", async () => {
+    for (const code of [
+      PAGE,
+      'import {\n  trips,\n  kpis,\n} from "../mock.ts";\nconsole.log(trips, kpis);',
+      "import * as data from '../mock';\nconsole.log(data);",
+      'import mock from "../mock.js";\nconsole.log(mock);',
+      'import { trips } /* ; */ from "../mock";\nconsole.log(trips);',
+      'export { trips } from "../mock";',
+      'import "../mock";',
+      'const load = () => import("../mock");\nconsole.log(load);',
+      'import { trips } from "/src/design/mock.ts";\nconsole.log(trips);',
+    ]) {
+      expect(await usesMock(code), code).toBe(true);
+    }
   });
 
-  test("a type-only import, another module or a comment doesn't", () => {
-    expect(importsMock('import type { Trip } from "../mock";')).toBe(false);
-    expect(importsMock('export type { Trip } from "../mock";')).toBe(false);
-    expect(
-      importsMock('import { a } from "./x"\nimport type { T } from "../mock";'),
-    ).toBe(false);
-    expect(importsMock('import { trips } from "../mocks";')).toBe(false);
-    expect(importsMock('import { trips } from "./mock";')).toBe(false);
-    expect(importsMock('// import { trips } from "../mock";')).toBe(false);
+  test("type-only imports, strings, comments and other modules don't", async () => {
+    for (const code of [
+      'import type { Trip } from "../mock";\nlet t: Trip;',
+      'import { type Trip } from "../mock";\nlet t: Trip;',
+      'export type { Trip } from "../mock";',
+      'export default () => "../mock";',
+      '// import { trips } from "../mock";',
+      'import { trips } from "../mocks";\nconsole.log(trips);',
+      'import { trips } from "./mock";\nconsole.log(trips);',
+    ]) {
+      expect(await usesMock(code), code).toBe(false);
+    }
   });
 });

@@ -11,17 +11,25 @@ const cwd = process.cwd();
 afterEach(() => process.chdir(cwd));
 
 /** The plugin on a fake dev server whose watcher the test drives. */
-function start() {
+function start(compilerOptions = {}) {
   const app = fs.mkdtempSync(path.join(os.tmpdir(), "design-stream-"));
   const root = path.join(app, "client");
   fs.mkdirSync(path.join(root, "src/design/.staging"), { recursive: true });
   fs.mkdirSync(path.join(root, "src/design/pages"), { recursive: true });
+  // The app's own tsconfig decides what a page imports once compiled.
+  fs.writeFileSync(
+    path.join(root, "tsconfig.json"),
+    JSON.stringify({ compilerOptions }),
+  );
   process.chdir(app);
   const plugin = designVitePlugin();
   (plugin.configResolved as (c: { root: string }) => void)({ root });
   const watcher = new EventEmitter();
   const sent: { event: string; data: { name: string; done?: boolean } }[] = [];
   const warn = vi.fn();
+  // Modules the browser has loaded, by file, and the ones hot-updated since.
+  const modules = new Map<string, object[]>();
+  const reloaded: object[] = [];
   let handler: Handler | undefined;
   (plugin.configureServer as (s: unknown) => void)({
     config: { root, logger: { warn } },
@@ -30,10 +38,12 @@ function start() {
     middlewares: { use: (h: Handler) => (handler = h) },
     transformIndexHtml: async (_url: string, html: string) => html,
     moduleGraph: {
-      getModulesByFile: () => [],
+      getModulesByFile: (file: string) => modules.get(file) ?? [],
       getModuleById: async () => undefined,
     },
-    reloadModule: async () => {},
+    reloadModule: async (mod: object) => {
+      reloaded.push(mod);
+    },
   });
   /** The HTML of `/design/__stream/<name>`. */
   const streamHtml = async (name: string) => {
@@ -45,7 +55,34 @@ function start() {
     );
     return html;
   };
-  return { root, watcher, sent, warn, streamHtml };
+  /** What the plugin's hotUpdate leaves of Vite's update of `file`. */
+  const hotUpdate = (file: string, mods: object[]) =>
+    (
+      plugin.hotUpdate as (o: {
+        type: string;
+        file: string;
+        modules: object[];
+        read: () => string;
+      }) => Promise<object[] | undefined>
+    ).call(
+      {},
+      {
+        type: "create",
+        file,
+        modules: mods,
+        read: () => fs.readFileSync(file, "utf-8"),
+      },
+    );
+  return {
+    root,
+    watcher,
+    sent,
+    warn,
+    streamHtml,
+    modules,
+    reloaded,
+    hotUpdate,
+  };
 }
 
 type Handler = (
@@ -97,6 +134,8 @@ test("the stream page says whether a version is out, so a failed import isn't ta
   );
 });
 
+const TYPES_PAGE =
+  'import { type Trip } from "../mock";\n\nexport default function Page() {\n  const trip: Trip | null = null;\n  return <h1>Trips {String(trip)}</h1>;\n}\n';
 const MOCK_PAGE =
   'import { trips } from "../mock";\n\nexport default function Page() {\n  return <h1>{trips.length} trips</h1>;\n}\n';
 const published = (sent: { data: { name: string; done?: boolean } }[]) =>
@@ -107,14 +146,12 @@ test("a page that imports ../mock is published only once mock.ts exists", async 
   const staging = path.join(root, "src/design/.staging/dash.tsx");
   fs.writeFileSync(staging, MOCK_PAGE);
   watcher.emit("change", staging);
-  // Type-only imports don't wait: it's published as before.
+  // Type-only imports compile away: it doesn't wait, it's published as before.
   const types = path.join(root, "src/design/.staging/types.tsx");
-  fs.writeFileSync(
-    types,
-    'import type { Trip } from "../mock";\n\nexport default function Page() {\n  return <h1>Trips</h1>;\n}\n',
-  );
+  fs.writeFileSync(types, TYPES_PAGE);
   watcher.emit("change", types);
   await until(() => sent.some((m) => m.data?.name === "types"));
+  expect(sent.some((m) => m.data?.name === "types")).toBe(true);
   await new Promise((r) => setTimeout(r, 200));
   expect(published(sent)).toEqual([]);
   expect(await streamHtml("dash")).toContain('<div id="root"></div>');
@@ -157,4 +194,55 @@ test("a finished page waits for mock.ts too, also when its draft was moved in", 
   expect(await streamHtml("dash")).toContain(
     '<div id="root" data-published></div>',
   );
+});
+
+test("with verbatimModuleSyntax, an inline type import keeps ../mock, so the page waits", async () => {
+  const { root, watcher, sent } = start({ verbatimModuleSyntax: true });
+  const staging = path.join(root, "src/design/.staging/dash.tsx");
+  fs.writeFileSync(staging, TYPES_PAGE);
+  watcher.emit("change", staging);
+  await new Promise((r) => setTimeout(r, 300));
+  expect(published(sent)).toEqual([]);
+
+  const mock = path.join(root, "src/design/mock.ts");
+  fs.writeFileSync(mock, "export type Trip = { id: number };\n");
+  watcher.emit("add", mock);
+  await until(() => published(sent).length > 0);
+  expect(published(sent)).toMatchObject([{ data: { name: "dash" } }]);
+});
+
+test("a finished page shown in an earlier version gets its hot update once mock.ts lands", async () => {
+  const { root, watcher, sent, modules, reloaded, hotUpdate } = start();
+  // An early cut doesn't use the mock yet: its import compiles away, it's published.
+  const staging = path.join(root, "src/design/.staging/dash.tsx");
+  fs.writeFileSync(
+    staging,
+    'import { trips } from "../mock";\n\nexport default function Page() {\n  return <h1>Trips</h1>;\n}\n',
+  );
+  watcher.emit("change", staging);
+  await until(() => published(sent).length > 0);
+  expect(published(sent)).toHaveLength(1);
+
+  // The browser has that version; the finished page, which uses the mock, lands.
+  const page = path.join(root, "src/design/pages/dash.tsx");
+  const mod = { importers: new Set(), isSelfAccepting: true };
+  modules.set(page, [mod]);
+  fs.writeFileSync(page, MOCK_PAGE);
+  // Vite's update would fail without mock.ts: it's held, and so is done.
+  expect(await hotUpdate(page, [mod])).toEqual([]);
+  watcher.emit("add", page);
+  await new Promise((r) => setTimeout(r, 200));
+  expect(published(sent)).toHaveLength(1);
+  expect(reloaded).toEqual([]);
+
+  const mock = path.join(root, "src/design/mock.ts");
+  fs.writeFileSync(mock, "export const trips = [{ id: 1 }];\n");
+  watcher.emit("add", mock);
+  await until(() => published(sent).length > 1);
+  expect(reloaded).toEqual([mod]);
+  expect(published(sent)[1]).toMatchObject({
+    data: { name: "dash", done: true },
+  });
+  // With mock.ts there, Vite's own update of the page goes through.
+  expect(await hotUpdate(page, [mod])).toBeUndefined();
 });

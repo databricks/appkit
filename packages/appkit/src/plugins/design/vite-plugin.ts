@@ -612,17 +612,6 @@ export function designVitePlugin({
       ? code
       : null;
   };
-  /** A page using `../mock` before mock.ts exists would render without its data. */
-  const waitsForMock = (code: string) =>
-    importsMock(code) && !fs.existsSync(finalFile("mock"));
-  /** Whether the finished page exists and is published (it doesn't wait for mock.ts). */
-  const finalReady = (name: string) => {
-    try {
-      return !waitsForMock(fs.readFileSync(finalFile(name), "utf-8"));
-    } catch {
-      return false;
-    }
-  };
   const reloadFile = async (file: string) => {
     for (const mod of viteServer?.moduleGraph.getModulesByFile(file) ?? []) {
       // Not imported (page closed): a hot update would reload every page.
@@ -655,6 +644,47 @@ export function designVitePlugin({
       return false;
     }
   };
+  /** Whether a page, compiled as Vite serves it (its tsconfig applies), imports the mock. */
+  const usesMock = async (code: string, file: string) => {
+    const vite = (await import("vite")) as typeof import("vite") & {
+      transformWithOxc?: (
+        code: string,
+        file: string,
+        opts: object,
+      ) => Promise<{ code: string }>;
+    };
+    try {
+      const js = vite.transformWithOxc
+        ? await vite.transformWithOxc(code, file, {
+            lang: "tsx",
+            jsx: { runtime: "automatic" },
+          })
+        : await vite.transformWithEsbuild(code, file, {
+            loader: "tsx",
+            jsx: "automatic",
+          });
+      return importsMock(vite.parseAst(js.code));
+    } catch {
+      // It doesn't build: loading it shows that error, with or without the mock.
+      return false;
+    }
+  };
+  /** A page using `../mock` before mock.ts exists would render without its data. */
+  const waitsForMock = async (code: string, file: string) =>
+    !fs.existsSync(finalFile("mock")) &&
+    (await usesMock(code, file)) &&
+    // Again: it may have landed while compiling.
+    !fs.existsSync(finalFile("mock"));
+  /** Whether the finished page exists and is published (it doesn't wait for mock.ts). */
+  const finalReady = async (name: string) => {
+    let code: string;
+    try {
+      code = fs.readFileSync(finalFile(name), "utf-8");
+    } catch {
+      return false;
+    }
+    return !(await waitsForMock(code, finalFile(name)));
+  };
   /** Publishes the renderable version of a staging file, if it changed. */
   const publish = async (name: string) => {
     const s = streams.get(name);
@@ -671,7 +701,7 @@ export function designVitePlugin({
     const code = await renderablePartial(raw, isValid);
     if (code === null || code === s.code) return;
     // Published once mock.ts lands, not before.
-    if (waitsForMock(code)) {
+    if (await waitsForMock(code, finalFile(name))) {
       waiting.add(name);
       return;
     }
@@ -736,15 +766,17 @@ export function designVitePlugin({
       return;
     }
     // Its done event too waits for mock.ts.
-    if (waitsForMock(code)) {
+    if (await waitsForMock(code, file)) {
       waiting.add(name);
       return;
     }
-    waiting.delete(name);
+    const held = waiting.delete(name);
     if (newTokens(code)) {
       fs.writeFileSync(path.join(streamCssDir, `${name}.tsx`), code);
       await reloadCss();
     }
+    // Its hot update was held too: send it now.
+    if (held) await reloadFile(file);
     viteServer?.ws.send({
       type: "custom",
       event: "appkit:stream",
@@ -836,7 +868,7 @@ export function designVitePlugin({
     },
 
     // A deleted draft still in the graph would reload every page.
-    hotUpdate({ type, file, modules }) {
+    async hotUpdate({ type, file, modules, read }) {
       const name = streamName(file);
       if (
         type === "delete" &&
@@ -848,6 +880,20 @@ export function designVitePlugin({
           this.environment.moduleGraph.invalidateModule(mod);
           for (const dep of mod.importedModules) dep.importers.delete(mod);
         }
+        return [];
+      }
+      // A finished page waiting for mock.ts would fail to load (and then lose
+      // its update): onFinal sends it once mock.ts lands.
+      if (
+        type !== "delete" &&
+        name &&
+        name !== "mock" &&
+        file === finalFile(name) &&
+        (await waitsForMock(
+          await Promise.resolve(read()).catch(() => ""),
+          file,
+        ))
+      ) {
         return [];
       }
       // Nothing imports it yet: no boundary, Vite would reload every page.
@@ -952,7 +998,7 @@ export function designVitePlugin({
         if (streamPage && !isReservedName(streamPage)) {
           // With a version out, a failed import is an error, not still pending.
           const published =
-            streamedCode(streamPage) !== null || finalReady(streamPage);
+            streamedCode(streamPage) !== null || (await finalReady(streamPage));
           const html = await server.transformIndexHtml(
             req.url ?? pathname,
             pageHtml(
