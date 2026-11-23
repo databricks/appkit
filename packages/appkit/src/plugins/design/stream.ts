@@ -423,6 +423,17 @@ import.meta.hot?.on("vite:afterUpdate", () => {
 
 // Whether a version exists: before one, a failed import is still pending.
 let published = rootEl.hasAttribute("data-published");
+// This HTML can predate a publish whose event came before the listener below:
+// ask the server again (served afresh, it says whether a version is out now).
+async function publishedNow() {
+  try {
+    const html = await (await fetch(location.href)).text();
+    const page = new DOMParser().parseFromString(html, "text/html");
+    return page.getElementById("root")?.hasAttribute("data-published") ?? false;
+  } catch {
+    return false;
+  }
+}
 let mounted = false;
 let root;
 let loads = 0;
@@ -434,7 +445,8 @@ async function mount() {
   try {
     page = (await import(/* @vite-ignore */ "/src/design/pages/" + NAME + ".tsx?t=" + Date.now())).default;
   } catch (error) {
-    if (!wasPublished) return;
+    if (!wasPublished && !(await publishedNow())) return;
+    published = true;
     // A version that doesn't load or evaluate: DesignPage shows the error.
     ok = false;
     page = () => {

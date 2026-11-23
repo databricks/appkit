@@ -225,16 +225,17 @@ export function DesignPage({
   useLayoutEffect(() => {
     const el = root.current;
     if (!el) return;
-    // Only what the page rendered, not an error or a restored copy.
+    // Only the page itself (marked rendered): not an error, a restored copy,
+    // or a Suspense fallback.
     const keep = () => {
-      if (!el.querySelector("[data-design-last-good], [data-design-error]")) {
-        frame.current = capture(el);
-      }
+      if (el.hasAttribute("data-design-rendered")) frame.current = capture(el);
     };
-    // The first frame is already in place: no mutation reports it.
-    if (el.childNodes.length > 0) keep();
     let pending = false;
-    const observer = new MutationObserver(() => {
+    const observer = new MutationObserver((records) => {
+      // The page just showed: copy it now (a hidden frame gets no animation frame).
+      if (records.some((r) => r.attributeName === "data-design-rendered")) {
+        keep();
+      }
       if (pending) return;
       pending = true;
       requestAnimationFrame(() => {

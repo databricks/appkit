@@ -272,6 +272,53 @@ describe("DesignPage", () => {
     expect(shell().hasAttribute("data-design-rendered")).toBe(true);
   });
 
+  test("only the page itself is kept as the last good frame, not a pending fallback", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    // A hidden frame: no animation frames, so the copy can't wait for one.
+    const raf = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation(() => 0);
+    try {
+      let state = "wait";
+      let open = () => {};
+      const wait = new Promise<void>((r) => (open = r));
+      function Draft() {
+        if (state === "wait") throw wait;
+        if (state === "boom") throw new Error("first draft failed");
+        return <h1>Trips</h1>;
+      }
+      const show = (resetKey: number) => (
+        <DesignPage pendingFallback={<p>Loading draft</p>} resetKey={resetKey}>
+          <Draft />
+        </DesignPage>
+      );
+      const { rerender } = render(show(0));
+      // It suspended, then failed: never rendered, so the error shows.
+      await act(async () => {
+        state = "boom";
+        open();
+        await wait;
+        await new Promise((r) => setTimeout(r, 400));
+      });
+      expect(shell().querySelector("[data-design-last-good]")).toBeNull();
+      expect(errorText()).toBe(
+        "Design page failed to render: first draft failed",
+      );
+
+      // A good render is kept, and shown for the next error.
+      state = "ok";
+      rerender(show(1));
+      await act(async () => {});
+      state = "boom";
+      rerender(show(2));
+      expect(
+        shell().querySelector("[data-design-last-good]")?.textContent,
+      ).toBe("Trips");
+    } finally {
+      raf.mockRestore();
+    }
+  });
+
   test("applies ?theme=dark before the first paint", () => {
     history.replaceState(null, "", "/design?theme=dark");
     render(
@@ -288,15 +335,27 @@ const roots: reactDomClient.Root[] = [];
 afterEach(() => {
   act(() => roots.splice(0).forEach((r) => r.unmount()));
   document.body.innerHTML = "";
+  vi.unstubAllGlobals();
 });
 
 /**
  * Runs the `/design/__stream/dash` script here, as the plugin serves it, with
  * the page's import and Vite's HMR client stubbed. `published`: the server had
- * a version out when it served the page.
+ * a version out when it served the page; `publishedNow`: it has one now.
  */
-async function streamPage(published: boolean, first: ReturnType<Load>) {
-  document.body.innerHTML = `<div id="root"${published ? " data-published" : ""}></div>`;
+async function streamPage(
+  published: boolean,
+  first: ReturnType<Load>,
+  publishedNow = published,
+) {
+  const html = (on: boolean) =>
+    `<div id="root"${on ? " data-published" : ""}></div>`;
+  document.body.innerHTML = html(published);
+  // The page's HTML served again, as the host fetches it.
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({ text: async () => html(publishedNow) })),
+  );
   const load = vi.fn<Load>(() => first);
   const handlers: Record<string, (data: object) => void> = {};
   const modules: Record<string, unknown> = {
@@ -393,6 +452,20 @@ describe("stream page", () => {
     await streamPage(true, notFound());
     expect(errorText()).toBe(
       "Design page failed to render: Failed to fetch dynamically imported module",
+    );
+    expect(shell().hasAttribute("data-design-rendered")).toBe(false);
+  });
+
+  test("a first publish missed before the host listened still shows its failed import", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    // Served before the publish; its event came before the listener.
+    await streamPage(
+      false,
+      Promise.reject(new ReferenceError("trips is not defined")),
+      true,
+    );
+    expect(errorText()).toBe(
+      "Design page failed to render: trips is not defined",
     );
     expect(shell().hasAttribute("data-design-rendered")).toBe(false);
   });
