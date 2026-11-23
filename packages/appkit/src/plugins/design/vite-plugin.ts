@@ -4,12 +4,7 @@ import path from "node:path";
 
 import type { Plugin, ViteDevServer } from "vite";
 
-import {
-  mockImports,
-  renderablePartial,
-  streamHostModule,
-  stubMock,
-} from "./stream";
+import { importsMock, renderablePartial, streamHostModule } from "./stream";
 
 /** Virtual page entry; `.mjs` so plugin-react doesn't inject Fast Refresh into it. */
 const ENTRY_PREFIX = "virtual:appkit-design-page:";
@@ -556,8 +551,8 @@ export function designVitePlugin({
   >();
   let appPath: string | undefined;
 
-  // Streamed drafts (.staging/<name>.tsx, .staging/mock.ts): by name, the
-  // published version and the staging mtime it came from.
+  // Streamed drafts (.staging/<name>.tsx): by name, the published version and
+  // the staging mtime it came from.
   const streams = new Map<
     string,
     {
@@ -570,12 +565,10 @@ export function designVitePlugin({
       last: number;
     }
   >();
+  // Pages whose latest version waits for mock.ts (kept when its draft is moved in).
+  const waiting = new Set<string>();
   const stagingFile = (name: string) =>
-    path.join(
-      root,
-      "src/design/.staging",
-      name === "mock" ? "mock.ts" : `${name}.tsx`,
-    );
+    path.join(root, "src/design/.staging", `${name}.tsx`);
   const finalFile = (name: string) =>
     name === "mock"
       ? path.join(root, "src/design/mock.ts")
@@ -585,9 +578,9 @@ export function designVitePlugin({
       .relative(path.join(root, "src/design"), file)
       .split(path.sep)
       .join("/");
-    if (rel === ".staging/mock.ts" || rel === "mock.ts") return "mock";
+    if (rel === "mock.ts") return "mock";
     const name = /^(?:\.staging|pages)\/([A-Za-z0-9_-]+)\.tsx$/.exec(rel)?.[1];
-    return name && !isReservedName(name) ? name : undefined;
+    return name && name !== "mock" && !isReservedName(name) ? name : undefined;
   };
   const streamCssDir = path.join(
     projectRoot,
@@ -619,35 +612,23 @@ export function designVitePlugin({
       ? code
       : null;
   };
-  /** The mock before mock.ts exists: .staging/mock.ts so far, plus stubs. */
-  const mockCode = (): string | null => {
-    if (fs.existsSync(finalFile("mock"))) return null;
-    const pages = [...streams.keys()]
-      .filter((n) => n !== "mock")
-      .map(streamedCode)
-      .filter((c): c is string => c !== null);
-    const mock = fs.existsSync(stagingFile("mock"))
-      ? (streams.get("mock")?.code ?? null)
-      : null;
-    if (mock === null && pages.length === 0) return null;
-    return stubMock(
-      mock ?? "",
-      pages.flatMap((p) => mockImports(p)),
-    );
+  /** A page using `../mock` before mock.ts exists would render without its data. */
+  const waitsForMock = (code: string) =>
+    importsMock(code) && !fs.existsSync(finalFile("mock"));
+  /** Whether the finished page exists and is published (it doesn't wait for mock.ts). */
+  const finalReady = (name: string) => {
+    try {
+      return !waitsForMock(fs.readFileSync(finalFile(name), "utf-8"));
+    } catch {
+      return false;
+    }
   };
-  let servedMock: string | null = null;
   const reloadFile = async (file: string) => {
     for (const mod of viteServer?.moduleGraph.getModulesByFile(file) ?? []) {
       // Not imported (page closed): a hot update would reload every page.
       if (mod.importers.size === 0 && !mod.isSelfAccepting) continue;
       await viteServer?.reloadModule(mod);
     }
-  };
-  const reloadMock = async () => {
-    const code = mockCode();
-    if (code === servedMock) return;
-    servedMock = code;
-    await reloadFile(finalFile("mock"));
   };
   const reloadCss = async () => {
     for (const id of streamCssIds) {
@@ -687,18 +668,22 @@ export function designVitePlugin({
     } catch {
       return;
     }
-    const mock = name === "mock";
-    const code = await renderablePartial(raw, isValid, { page: !mock });
+    const code = await renderablePartial(raw, isValid);
     if (code === null || code === s.code) return;
+    // Published once mock.ts lands, not before.
+    if (waitsForMock(code)) {
+      waiting.add(name);
+      return;
+    }
+    waiting.delete(name);
     s.code = code;
     s.last = Date.now();
     // Styles first, so the version never shows without its classes.
-    if (!mock && newTokens(code)) {
+    if (newTokens(code)) {
       fs.writeFileSync(path.join(streamCssDir, `${name}.tsx`), code);
       await reloadCss();
     }
-    if (!mock) await reloadFile(finalFile(name));
-    await reloadMock();
+    await reloadFile(finalFile(name));
     viteServer?.ws.send({
       type: "custom",
       event: "appkit:stream",
@@ -750,13 +735,16 @@ export function designVitePlugin({
       // Deleted again already (a builder starting the draft over).
       return;
     }
-    if (name !== "mock") {
-      if (newTokens(code)) {
-        fs.writeFileSync(path.join(streamCssDir, `${name}.tsx`), code);
-        await reloadCss();
-      }
+    // Its done event too waits for mock.ts.
+    if (waitsForMock(code)) {
+      waiting.add(name);
+      return;
     }
-    await reloadMock();
+    waiting.delete(name);
+    if (newTokens(code)) {
+      fs.writeFileSync(path.join(streamCssDir, `${name}.tsx`), code);
+      await reloadCss();
+    }
     viteServer?.ws.send({
       type: "custom",
       event: "appkit:stream",
@@ -780,7 +768,7 @@ export function designVitePlugin({
     resolveId: {
       // Before Vite's resolver, which can't find a streamed file not on disk yet.
       order: "pre",
-      handler(id, importer) {
+      handler(id) {
         if (
           id.startsWith(ENTRY_PREFIX) ||
           id.startsWith(STREAM_HOST_PREFIX) ||
@@ -800,13 +788,6 @@ export function designVitePlugin({
           streamedCode(page) !== null
         ) {
           return finalFile(page);
-        }
-        if (
-          /^\.\.\/mock(?:\.ts)?$/.test(clean) &&
-          importer?.startsWith(path.join(root, "src/design/pages")) &&
-          mockCode() !== null
-        ) {
-          return finalFile("mock");
         }
       },
     },
@@ -837,15 +818,13 @@ export function designVitePlugin({
           ? streamHostModule(name)
           : undefined;
       }
-      // A streamed page or mock: its latest renderable version.
+      // A streamed page: its latest renderable version.
       const loaded = id.split("?")[0];
       const streamed =
-        loaded === finalFile("mock")
-          ? mockCode()
-          : streams.has(path.basename(loaded, ".tsx")) &&
-              loaded === finalFile(path.basename(loaded, ".tsx"))
-            ? streamedCode(path.basename(loaded, ".tsx"))
-            : null;
+        streams.has(path.basename(loaded, ".tsx")) &&
+        loaded === finalFile(path.basename(loaded, ".tsx"))
+          ? streamedCode(path.basename(loaded, ".tsx"))
+          : null;
       if (streamed !== null) return streamed;
       if (!id.startsWith(`\0${ENTRY_PREFIX}`)) return;
       if (!id.endsWith(ENTRY_SUFFIX)) return;
@@ -909,8 +888,21 @@ export function designVitePlugin({
             `[appkit-design] ${name}: ${String(error)}`,
           );
         if (file === stagingFile(name)) onStagingChange(name).catch(failed);
-        else if (file === finalFile(name) && streams.has(name))
+        else if (
+          file === finalFile(name) &&
+          (streams.has(name) || waiting.has(name))
+        )
           onFinal(name).catch(failed);
+        // mock.ts is out: publish the versions that waited for it.
+        if (name === "mock") {
+          for (const page of [...waiting]) {
+            onFile(
+              fs.existsSync(finalFile(page))
+                ? finalFile(page)
+                : stagingFile(page),
+            );
+          }
+        }
       };
       server.watcher?.on("add", onFile);
       server.watcher?.on("change", onFile);
@@ -960,8 +952,7 @@ export function designVitePlugin({
         if (streamPage && !isReservedName(streamPage)) {
           // With a version out, a failed import is an error, not still pending.
           const published =
-            streamedCode(streamPage) !== null ||
-            fs.existsSync(finalFile(streamPage));
+            streamedCode(streamPage) !== null || finalReady(streamPage);
           const html = await server.transformIndexHtml(
             req.url ?? pathname,
             pageHtml(

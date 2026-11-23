@@ -279,13 +279,7 @@ const MAX_CUTS = 60;
 export async function renderablePartial(
   source: string,
   isValid: IsValid,
-  {
-    page = true,
-    complete = false,
-  }: {
-    page?: boolean;
-    complete?: boolean;
-  } = {},
+  { complete = false }: { complete?: boolean } = {},
 ): Promise<string | null> {
   const src = stripFence(source);
   if (complete && (await isValid(src))) return src;
@@ -294,67 +288,24 @@ export async function renderablePartial(
   let end = lines.length - 1;
   for (let tries = 0; end > 0 && tries < MAX_CUTS; end--, tries++) {
     const cut = lines.slice(0, end).join("\n");
-    if (page && !/export\s+default\b/.test(cut)) return null;
+    if (!/export\s+default\b/.test(cut)) return null;
     const closed = closeOpen(cut);
     if (closed === null) continue;
-    const code = page ? stubComponents(closed) : closed;
+    const code = stubComponents(closed);
     if (await isValid(code)) return code;
   }
   return null;
 }
 
-/** Value names a page imports from `../<mock>` (type-only imports excluded). */
-export function mockImports(page: string, mock = "mock"): string[] {
-  const names: string[] = [];
-  for (const m of page.matchAll(
-    /import\s*\{([^}]*)\}\s*from\s*["']\.\.\/([\w-]+?)(?:\.ts)?["']/g,
-  )) {
-    if (m[2] !== mock) continue;
-    for (const spec of m[1].split(",")) {
-      const s = spec.trim();
-      if (!s || s.startsWith("type ")) continue;
-      names.push(s.split(/\s+as\s+/)[0]);
-    }
-  }
-  return names;
-}
-
-/** Stands in for mock values not written yet: never throws, renders as nothing. */
-const DRAFT_VALUE = `const __draftValue: any = (() => {
-  const target: any = function () {};
-  const value: any = new Proxy(target, {
-    get: (_t, key) =>
-      key === Symbol.toPrimitive
-        ? (hint: string) => (hint === "number" ? 0 : "")
-        : key === Symbol.iterator
-          ? function* () {}
-          : key === "then"
-            ? undefined
-            : value,
-    apply: () => value,
-    construct: () => value,
-  });
-  return value;
-})();`;
-
 /**
- * The partial mock plus a placeholder for each value a page imports from it that
- * isn't defined yet (a missing named export would be a SyntaxError).
+ * Whether a page imports `../mock` at run time (an `import type` doesn't).
  *
  * @internal
  */
-export function stubMock(mock: string, imported: Iterable<string>): string {
-  const exported = new Set(
-    [
-      ...mock
-        .replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")
-        .matchAll(/export\s+(?:const|let|var|function|class|enum)\s+([\w$]+)/g),
-    ].map((m) => m[1]),
+export function importsMock(page: string): boolean {
+  return /^\s*(?:import|export)\b(?!\s+type\s)[^;'"]*?["']\.\.\/mock(?:\.[jt]s)?["']/m.test(
+    page,
   );
-  const stubs = [...new Set(imported)].filter((name) => !exported.has(name));
-  return stubs.length === 0
-    ? mock
-    : `${mock}\n${DRAFT_VALUE}\n${stubs.map((name) => `export const ${name}: any = __draftValue;`).join("\n")}\n`;
 }
 
 /**

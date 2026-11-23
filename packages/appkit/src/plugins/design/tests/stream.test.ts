@@ -3,10 +3,9 @@ import { describe, expect, test } from "vitest";
 
 import {
   closeOpen,
-  mockImports,
+  importsMock,
   placeholderKind,
   renderablePartial,
-  stubMock,
 } from "../stream";
 
 const parses = async (code: string) => {
@@ -143,14 +142,26 @@ describe("placeholderKind", () => {
   });
 });
 
-describe("stubMock", () => {
-  test("stubs the values a page imports that the mock doesn't export yet", () => {
-    expect(mockImports(PAGE)).toEqual(["trips"]);
-    // The contract comment lists trips before it is defined.
-    const mock =
-      "export type Trip = { id: number };\n// export const trips: Trip[]\nexport const kpis = {};";
-    const code = stubMock(mock, ["trips", "kpis"]);
-    expect(code).toContain("export const trips: any = __draftValue;");
-    expect(code).not.toContain("export const kpis: any");
+describe("importsMock", () => {
+  test("a value import, re-export or bare import of ../mock counts", () => {
+    expect(importsMock(PAGE)).toBe(true);
+    expect(
+      importsMock('import {\n  trips,\n  kpis,\n} from "../mock.ts";'),
+    ).toBe(true);
+    expect(importsMock("import * as data from '../mock';")).toBe(true);
+    expect(importsMock('import mock from "../mock.js";')).toBe(true);
+    expect(importsMock('export { trips } from "../mock";')).toBe(true);
+    expect(importsMock('import "../mock";')).toBe(true);
+  });
+
+  test("a type-only import, another module or a comment doesn't", () => {
+    expect(importsMock('import type { Trip } from "../mock";')).toBe(false);
+    expect(importsMock('export type { Trip } from "../mock";')).toBe(false);
+    expect(
+      importsMock('import { a } from "./x"\nimport type { T } from "../mock";'),
+    ).toBe(false);
+    expect(importsMock('import { trips } from "../mocks";')).toBe(false);
+    expect(importsMock('import { trips } from "./mock";')).toBe(false);
+    expect(importsMock('// import { trips } from "../mock";')).toBe(false);
   });
 });

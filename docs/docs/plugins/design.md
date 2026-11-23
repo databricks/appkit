@@ -218,10 +218,10 @@ Each page renders in its own error boundary and posts `appkit:design-ready` once
 
 A builder can show a draft while it's still being written, instead of only once it's finished:
 
-- Append the page's source, as it arrives, to `client/src/design/.staging/<name>.tsx` (and the shared mock's to `.staging/mock.ts`).
+- Append the page's source, as it arrives, to `client/src/design/.staging/<name>.tsx`.
 - Show `/design/__stream/<name>`. The dev server keeps the latest renderable version of the staging file under the page's real module (`pages/<name>.tsx`): it closes whatever is still open at the cut (JSX tags, brackets, template literals) and stubs what the page uses that hasn't arrived yet. Components not written yet show a `DraftPlaceholder` skeleton of the right shape. Each version reaches the page as a hot update, so it fills in in place, with no reload and with its state kept.
-- Until `mock.ts` exists, the page's `../mock` import is what `.staging/mock.ts` has so far, plus stubs for whatever the page imports from it that isn't there yet.
-- When the page type-checks, write it to `pages/<name>.tsx` (and `mock.ts`): the same module then loads from disk. Deleting the staging file starts that draft over.
+- A page that imports `../mock` (anything but `import type`) is published only once `mock.ts` exists, so it never shows without its data. Until then it stays pending; the moment `mock.ts` lands, its latest version (or the finished page) is published. So write `mock.ts` first, as soon as it's complete.
+- When the page type-checks, write it to `pages/<name>.tsx`: the same module then loads from disk. Deleting the staging file starts that draft over.
 
 Every design page, streamed or not, renders through `DesignPage` (from `@databricks/appkit-ui/react/beta`; the plugin adds it, pages don't). It applies the app's theme before the first paint (`?theme=dark` or `?theme=light` on the URL, else the system setting), so a dark page never flashes light. If a render fails mid-stream, it keeps the last good frame on screen instead of a broken page, and holds readiness back until a render succeeds.
 
@@ -231,7 +231,7 @@ A builder showing a page in a frame can read what happened from markers on the p
 
 | State | Marker | When |
 | --- | --- | --- |
-| pending | no `[data-design-page]` shell yet, or a shell with none of the markers below | The page hasn't loaded, or it suspended (lazy code, data) and a `Suspense` fallback shows. For `/design/__stream/<name>`: no version is published yet. |
+| pending | no `[data-design-page]` shell yet, or a shell with none of the markers below | The page hasn't loaded, or it suspended (lazy code, data) and a `Suspense` fallback shows. For `/design/__stream/<name>`: no version is published yet (a page that imports `../mock` waits for `mock.ts`). |
 | rendered | `[data-design-page][data-design-rendered]` | The page committed a render without an error (set in an effect after mount). A page that renders an empty element counts: that's its own output. |
 | last-good | `[data-design-last-good]` inside the shell | A render error once the page has shown: a copy of it as it was on screen when the error came (or, if a `Suspense` fallback had replaced it, as it last showed). No `data-design-rendered`. |
 | error | `[data-design-error]` inside the shell, with the message | A render error before any good render, or, on a stream page, a published version that fails to load or evaluate (shown at once). No `data-design-rendered`. |
@@ -245,6 +245,7 @@ What moves a page between them:
 | pending | The page renders (an empty page too) | rendered |
 | pending | It throws while rendering, or (stream) the published version fails to load or evaluate | error |
 | pending | It suspends | pending, the fallback on screen |
+| pending | (stream) A version imports `../mock` before `mock.ts` exists | pending; once `mock.ts` lands, its latest version (or the finished page) is published |
 | pending | (stream) An import fails before any version is out | pending (the server is asked again, in case a publish came before the page listened) |
 | pending, the fallback on screen | It shows, or throws | rendered, or error (the fallback is never copied) |
 | rendered (from its first commit) | It or an update throws, at once or later (a timer, data), also in the task it committed in | last-good: the frame on screen, that update's included |
