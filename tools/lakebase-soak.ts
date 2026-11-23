@@ -25,9 +25,9 @@
  *   and to read each token's remaining life from its JWT `exp` claim. Tokens
  *   are never written anywhere; they are identified by mint number only.
  *
- * Pass criteria: no stalls (a gap between successful queries longer than
- * three intervals, as when the machine sleeps or loses its network, makes the
- * run invalid), no auth or query errors, every pool connection younger than
+ * Pass criteria: the run lasts its full --minutes (not stopped with Ctrl-C),
+ * no stalls (a gap between successful queries longer than three intervals, as
+ * when the machine sleeps or loses its network, makes the run invalid), no auth or query errors, every pool connection younger than
  * the lifetime, every connection recycled before its token is 4 hours old
  * (when Unity Catalog claims lapse; oldest token age at login + lifetime under
  * 3.5 hours), the custom application_name on every connection, and a run that
@@ -71,7 +71,7 @@
  * Omit --lifetime-seconds to test the package default. Results go to
  * --out (default tmp/lakebase-soak/<timestamp>/, which is gitignored): events.jsonl and summary.json.
  * Exit code is 0 when every check passes, 1 otherwise. Ctrl-C stops early and
- * still writes a summary, marked incomplete.
+ * still writes a summary, marked incomplete; a stopped run always fails.
  */
 
 import { spawn } from "node:child_process";
@@ -620,6 +620,9 @@ const maxTokenAgeAtConnect = connectTokenAge.length
   : undefined;
 
 const checks = {
+  // A run stopped with Ctrl-C didn't cover the time it was asked to, so it
+  // can't pass, even if it crossed the token boundary first.
+  ran_full_duration: !stopRequested,
   // A sleeping or disconnected machine makes no queries, so it can't see
   // errors either; without this, a stalled run could still pass.
   no_stalls: stalls.count === 0,
