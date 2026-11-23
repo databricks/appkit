@@ -223,6 +223,12 @@ function isAuthError(error: unknown): boolean {
 
 // ── Pool under test ──────────────────────────────────────────────────
 
+// A query on a dead socket never settles, which would stop the run without a
+// summary. query_timeout fails it on the client instead, after one interval
+// (a slower query is a stall anyway) but never before the probe's own sleep
+// has had room to finish. It's recorded as a query error, so the run fails.
+const QUERY_TIMEOUT_MS = Math.max(INTERVAL_MS, QUERY_SECONDS * 1000 + 10_000);
+
 const pool: Pool = createLakebasePool({
   application_name: APP_NAME,
   ...(REQUESTED_LIFETIME_S === undefined
@@ -230,6 +236,10 @@ const pool: Pool = createLakebasePool({
     : { maxLifetimeSeconds: REQUESTED_LIFETIME_S }),
   idleTimeoutMillis: 0,
   max: SLOTS + 1,
+  query_timeout: QUERY_TIMEOUT_MS,
+  // TCP keep-alive notices a dead peer on idle connections, such as the held
+  // one between ticks.
+  keepAlive: true,
   logger: {
     debug: () => {},
     info: () => {},
@@ -239,6 +249,11 @@ const pool: Pool = createLakebasePool({
       record({ type: "package_error", message, detail: String(rest) }),
   },
 });
+// keepAlive alone waits for the OS default (2 hours on macOS and Linux)
+// before its first probe. The package doesn't expose the delay, so set it on
+// pg.Pool's options directly; pg reads them when it creates each client.
+pool.options.keepAliveInitialDelayMillis = 10_000;
+
 // What actually reached pg.Pool. 0 means pg never recycles connections.
 const effectiveLifetimeS = Number(pool.options.maxLifetimeSeconds ?? 0);
 
@@ -553,6 +568,7 @@ record({
   interval_s: INTERVAL_MS / 1000,
   requested_lifetime_s: REQUESTED_LIFETIME_S ?? "package default",
   effective_lifetime_s: effectiveLifetimeS,
+  query_timeout_s: QUERY_TIMEOUT_MS / 1000,
   slots: SLOTS,
   ramp_minutes: RAMP_MS / 60_000,
   held_connection: !args["skip-held"],
