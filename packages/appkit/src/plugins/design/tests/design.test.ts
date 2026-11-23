@@ -177,9 +177,7 @@ describe("entryModule", () => {
     expect(code).toContain("pendingFetches === 0 && quiet");
     expect(code).toContain("host.blockers === 0");
     // A Suspense fallback holds readiness while it's on screen.
-    expect(code).toContain(
-      "createElement(Suspense, { fallback: createElement(Pending) }",
-    );
+    expect(code).toContain("pendingFallback: createElement(Pending)");
     // The useDesignReady() contract with appkit-ui.
     expect(code).toContain("window.__appkitDesign ??= { blockers: 0 }");
   });

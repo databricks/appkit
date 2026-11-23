@@ -22,19 +22,37 @@ function start() {
   const watcher = new EventEmitter();
   const sent: { event: string; data: { name: string; done?: boolean } }[] = [];
   const warn = vi.fn();
+  let handler: Handler | undefined;
   (plugin.configureServer as (s: unknown) => void)({
     config: { root, logger: { warn } },
     watcher,
     ws: { send: (m: (typeof sent)[number]) => sent.push(m) },
-    middlewares: { use() {} },
+    middlewares: { use: (h: Handler) => (handler = h) },
+    transformIndexHtml: async (_url: string, html: string) => html,
     moduleGraph: {
       getModulesByFile: () => [],
       getModuleById: async () => undefined,
     },
     reloadModule: async () => {},
   });
-  return { root, watcher, sent, warn };
+  /** The HTML of `/design/__stream/<name>`. */
+  const streamHtml = async (name: string) => {
+    let html = "";
+    await (handler as Handler)(
+      { url: `/design/__stream/${name}`, headers: {} },
+      { setHeader() {}, end: (b: string) => (html = b) },
+      () => {},
+    );
+    return html;
+  };
+  return { root, watcher, sent, warn, streamHtml };
 }
+
+type Handler = (
+  req: { url: string; headers: object },
+  res: { setHeader(k: string, v: string): void; end(b: string): void },
+  next: () => void,
+) => Promise<void>;
 
 const until = async (check: () => boolean) => {
   for (let i = 0; i < 100 && !check(); i++)
@@ -61,4 +79,20 @@ test("a staging write is published, and a finished file deleted before it's read
   await new Promise((r) => setTimeout(r, 100));
   expect(sent.some((m) => m.data?.done)).toBe(false);
   expect(warn).not.toHaveBeenCalled();
+});
+
+test("the stream page says whether a version is out, so a failed import isn't taken for pending", async () => {
+  const { root, watcher, sent, streamHtml } = start();
+  expect(await streamHtml("dash")).toContain('<div id="root"></div>');
+
+  const staging = path.join(root, "src/design/.staging/dash.tsx");
+  fs.writeFileSync(
+    staging,
+    "export default function Page() {\n  return <h1>Trips</h1>;\n}\n",
+  );
+  watcher.emit("change", staging);
+  await until(() => sent.some((m) => m.data?.name === "dash"));
+  expect(await streamHtml("dash")).toContain(
+    '<div id="root" data-published></div>',
+  );
 });

@@ -396,7 +396,7 @@ class Host extends Component {
   render() {
     return createElement(
       DesignPage,
-      { onError: this.onError, resetKey: this.state.reset, errorFallback: () => null },
+      { onError: this.onError, resetKey: this.state.reset },
       createElement(this.props.page, { key: this.state.generation }),
     );
   }
@@ -421,18 +421,50 @@ import.meta.hot?.on("vite:afterUpdate", () => {
   setTimeout(() => host?.retry(), 50);
 });
 
+// Whether a version exists: before one, a failed import is still pending.
+let published = rootEl.hasAttribute("data-published");
+// This HTML can predate a publish whose event came before the listener below:
+// ask the server again (served afresh, it says whether a version is out now).
+async function publishedNow() {
+  try {
+    const html = await (await fetch(location.href)).text();
+    const page = new DOMParser().parseFromString(html, "text/html");
+    return page.getElementById("root")?.hasAttribute("data-published") ?? false;
+  } catch {
+    return false;
+  }
+}
 let mounted = false;
+let root;
+let loads = 0;
+// Imports can finish out of order: only the latest one's outcome counts.
+let latest = 0;
 async function mount() {
   if (mounted) return;
+  const mine = ++latest;
+  const wasPublished = published;
+  let page;
+  let ok = true;
   try {
-    const mod = await import(/* @vite-ignore */ "/src/design/pages/" + NAME + ".tsx?t=" + Date.now());
-    if (mounted) return;
-    mounted = true;
-    createRoot(rootEl).render(createElement(Host, { page: mod.default }));
-  } catch {}
+    page = (await import(/* @vite-ignore */ "/src/design/pages/" + NAME + ".tsx?t=" + Date.now())).default;
+  } catch (error) {
+    if (!wasPublished && !(await publishedNow())) return;
+    published = true;
+    // A version that doesn't load or evaluate: DesignPage shows the error.
+    ok = false;
+    page = () => {
+      throw error;
+    };
+  }
+  if (mounted || mine !== latest) return;
+  mounted = ok;
+  root ??= createRoot(rootEl);
+  // A new Host after a failed version: a fresh DesignPage, without the error.
+  root.render(createElement(Host, { key: ++loads, page }));
 }
 import.meta.hot?.on("appkit:stream", (data) => {
   if (data?.name !== NAME) return;
+  published = true;
   if (data.done) {
     final = true;
     remount(1000);
