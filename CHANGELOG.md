@@ -228,6 +228,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.103.0](https://github.com/databricks/appkit/compare/v0.102.0...v0.103.0) (2026-11-23)
+
+### appkit
+
+* **appkit:** design pages report render failures and success ([#745](https://github.com/databricks/appkit/issues/745)) ([fda3830](https://github.com/databricks/appkit/commit/fda383040aad839892fd6836b7045a54f1ce18e8))
+
+
 ## [0.102.0](https://github.com/databricks/appkit/compare/v0.101.0...v0.102.0) (2026-11-20)
 
 ### appkit-ui
