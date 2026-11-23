@@ -230,6 +230,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.104.0](https://github.com/databricks/appkit/compare/v0.103.0...v0.104.0) (2026-11-23)
+
+### template
+
+* **template:** lint every plugin's code and ban type escape hatches ([#743](https://github.com/databricks/appkit/issues/743)) ([11c2c56](https://github.com/databricks/appkit/commit/11c2c5640e653d1137eeafe5ff9cc74c67aa2940))
+
+
 ## [0.103.0](https://github.com/databricks/appkit/compare/v0.102.0...v0.103.0) (2026-11-23)
 
 ### appkit
