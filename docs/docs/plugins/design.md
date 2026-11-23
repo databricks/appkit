@@ -225,4 +225,17 @@ A builder can show a draft while it's still being written, instead of only once 
 
 Every design page, streamed or not, renders through `DesignPage` (from `@databricks/appkit-ui/react/beta`; the plugin adds it, pages don't). It applies the app's theme before the first paint (`?theme=dark` or `?theme=light` on the URL, else the system setting), so a dark page never flashes light. If a render fails mid-stream, it keeps the last good frame on screen instead of a broken page, and holds readiness back until a render succeeds.
 
+#### Page states in the DOM
+
+A builder showing a page in a frame can read what happened from markers on the page, one state at a time:
+
+| State | Marker | When |
+| --- | --- | --- |
+| pending | no `[data-design-page]` shell yet | The page hasn't loaded. For `/design/__stream/<name>`: no version is published yet. |
+| rendered | `[data-design-page][data-design-rendered]` | The page committed a render without an error (set in an effect after mount). A page that renders an empty element counts: that's its own output. |
+| last-good | `[data-design-last-good]` inside the shell | A render error after a good render: a copy of the last good frame is shown. No `data-design-rendered`. |
+| error | `[data-design-error]` inside the shell, with the message | A render error before any good render, or, on a stream page, a published version that fails to load or evaluate (shown at once). No `data-design-rendered`. |
+
+`data-design-rendered` is removed when an error replaces the page, and set again once a retry (a hot update, or the next published version) renders.
+
 Lock-in is a file operation for the builder: keep the chosen page as `client/src/design/index.tsx` (`/design`, repointing `../mock` to `./mock`), or as the app's home page for apps with no data, and delete the other drafts.

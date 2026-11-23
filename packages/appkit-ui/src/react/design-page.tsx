@@ -1,4 +1,11 @@
-import { Component, type ReactNode, useLayoutEffect, useRef } from "react";
+import {
+  Component,
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+} from "react";
 
 import { useDesignReady } from "./hooks/use-design-ready";
 import { Skeleton } from "./ui/skeleton";
@@ -57,15 +64,25 @@ function HoldReady() {
   return null;
 }
 
+/** Marks the shell `data-design-rendered` while the page itself is on screen. */
+function MarkRendered({ shell }: { shell: RefObject<HTMLElement | null> }) {
+  useEffect(() => {
+    const el = shell.current;
+    el?.setAttribute("data-design-rendered", "");
+    return () => el?.removeAttribute("data-design-rendered");
+  }, [shell]);
+  return null;
+}
+
 interface LastGoodFrameProps {
   children: ReactNode;
   frame: { current: Frame | null };
+  shell: RefObject<HTMLElement | null>;
   resetKey: unknown;
   onError?: (error: Error) => void;
-  errorFallback: (error: Error) => ReactNode;
 }
 
-/** On a render error, shows the last good frame (or `errorFallback`) and holds readiness back. */
+/** On a render error, shows the last good frame (or the error) and holds readiness back. */
 interface LastGoodFrameState {
   error: Error | null;
   resetKey: unknown;
@@ -90,7 +107,14 @@ class LastGoodFrame extends Component<LastGoodFrameProps, LastGoodFrameState> {
   }
   render() {
     const { error } = this.state;
-    if (!error) return this.props.children;
+    if (!error) {
+      return (
+        <>
+          {this.props.children}
+          <MarkRendered shell={this.props.shell} />
+        </>
+      );
+    }
     const frame = this.props.frame.current;
     return (
       <>
@@ -103,7 +127,9 @@ class LastGoodFrame extends Component<LastGoodFrameProps, LastGoodFrameState> {
           />
         ) : (
           <div data-design-error="" style={{ display: "contents" }}>
-            {this.props.errorFallback(error)}
+            <pre className="text-destructive p-4 whitespace-pre-wrap">
+              Design page failed to render: {error.message}
+            </pre>
           </div>
         )}
       </>
@@ -111,32 +137,30 @@ class LastGoodFrame extends Component<LastGoodFrameProps, LastGoodFrameState> {
   }
 }
 
-const defaultErrorFallback = (error: Error) => (
-  <pre className="text-destructive p-4 whitespace-pre-wrap">
-    Design page failed to render: {error.message}
-  </pre>
-);
-
 export interface DesignPageProps {
   children: ReactNode;
   /** Called with each render error the page hits. */
   onError?: (error: Error) => void;
   /** Changing it retries rendering after an error (e.g. after a hot update). */
   resetKey?: unknown;
-  /** Shown for an error before anything rendered. Defaults to the message. */
-  errorFallback?: (error: Error) => ReactNode;
 }
 
 /**
  * The shell the `design()` plugin renders every `/design` page in: the app's
  * theme from the first paint, and the last good frame instead of a broken one.
+ *
+ * Its state, for a builder to read from the DOM (one at a time):
+ * - pending: no `[data-design-page]` shell yet (the page hasn't loaded; for a
+ *   streamed draft, no version is published yet).
+ * - rendered: `[data-design-page][data-design-rendered]`, set after the page
+ *   commits a render without an error. An empty page counts: that's its output.
+ * - last-good: `[data-design-last-good]` in the shell, a copy of the last
+ *   rendered frame, after a render error. No `data-design-rendered`.
+ * - error: `[data-design-error]` in the shell, with the message, for a render
+ *   error before any good render (or a streamed draft that fails to load).
+ *   No `data-design-rendered`.
  */
-export function DesignPage({
-  children,
-  onError,
-  resetKey,
-  errorFallback = defaultErrorFallback,
-}: DesignPageProps) {
+export function DesignPage({ children, onError, resetKey }: DesignPageProps) {
   useDesignTheme();
   const root = useRef<HTMLDivElement>(null);
   const frame = useRef<Frame | null>(null);
@@ -177,9 +201,9 @@ export function DesignPage({
     >
       <LastGoodFrame
         frame={frame}
+        shell={root}
         resetKey={resetKey}
         onError={onError}
-        errorFallback={errorFallback}
       >
         {children}
       </LastGoodFrame>

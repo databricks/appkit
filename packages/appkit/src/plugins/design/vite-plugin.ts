@@ -518,7 +518,11 @@ export async function compileGraph(
   return undefined;
 }
 
-const pageHtml = (title: string, entryUrl: string) => `<!doctype html>
+const pageHtml = (
+  title: string,
+  entryUrl: string,
+  rootAttrs = "",
+) => `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -527,7 +531,7 @@ const pageHtml = (title: string, entryUrl: string) => `<!doctype html>
     <title>${title}</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"${rootAttrs}></div>
     <script type="module" src="${entryUrl}"></script>
   </body>
 </html>
@@ -954,11 +958,16 @@ export function designVitePlugin({
 
         const streamPage = STREAM_ROUTE.exec(pathname)?.[1];
         if (streamPage && !isReservedName(streamPage)) {
+          // With a version out, a failed import is an error, not still pending.
+          const published =
+            streamedCode(streamPage) !== null ||
+            fs.existsSync(finalFile(streamPage));
           const html = await server.transformIndexHtml(
             req.url ?? pathname,
             pageHtml(
               `Streaming: ${streamPage}`,
               `/@id/__x00__${STREAM_HOST_PREFIX}${streamPage}${ENTRY_SUFFIX}`,
+              published ? " data-published" : "",
             ),
           );
           res.setHeader("Content-Type", "text/html");
