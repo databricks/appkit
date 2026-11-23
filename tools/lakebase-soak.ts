@@ -27,8 +27,10 @@
  *
  * Pass criteria: the run lasts its full --minutes (not stopped with Ctrl-C),
  * no stalls (a gap between successful queries longer than three intervals, as
- * when the machine sleeps or loses its network, makes the run invalid), no auth or query errors, every pool connection younger than
- * the lifetime, every connection recycled before its token is 4 hours old
+ * when the machine sleeps or loses its network, makes the run invalid), no
+ * auth or query errors, every pool connection younger than the lifetime and
+ * at least one reaching it (so --minutes must be longer than the lifetime),
+ * every connection recycled before its token is 4 hours old
  * (when Unity Catalog claims lapse; oldest token age at login + lifetime under
  * 3.5 hours), the custom application_name on every connection, and a run that
  * crosses the one-hour token boundary. With --probe-table, every read on a
@@ -629,8 +631,14 @@ const checks = {
   run_crossed_token_boundary: durationH * 60 > TOKEN_BOUNDARY_MINUTES,
   no_auth_errors: authErrors === 0,
   no_query_errors: queriesFailed === 0,
+  // No pool connection outlived the lifetime, and at least one reached it.
+  // Each connection is sampled once per tick, so one that lived its full
+  // lifetime was last seen within an interval of it. Without the lower bound,
+  // a run shorter than the lifetime would pass without seeing any recycling.
   connections_recycled:
-    effectiveLifetimeS > 0 && maxAge <= effectiveLifetimeS + AGE_SLACK_S,
+    effectiveLifetimeS > 0 &&
+    maxAge >= effectiveLifetimeS - INTERVAL_MS / 1000 - AGE_SLACK_S &&
+    maxAge <= effectiveLifetimeS + AGE_SLACK_S,
   // The oldest token any connection logged in with, plus the lifetime, must
   // stay clear of the 4-hour claims lapse. The held connection is excluded by
   // design: it's never recycled, to show what a long-held client does.
