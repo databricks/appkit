@@ -525,12 +525,27 @@ function noteGap(now: number) {
   }
 }
 
+// One Ctrl-C can arrive several times: under `pnpm exec tsx`, the terminal
+// sends SIGINT, pnpm sends SIGTERM 1 ms later, and tsx passes the SIGINT on
+// again 30 ms after that. Treat signals within a second of the first as the
+// same stop request, and SIGTERM like SIGINT, so the run still writes its
+// summary. Only a later signal means "quit now".
+const REPEAT_SIGNAL_WINDOW_MS = 1000;
 let stopRequested = false;
-process.on("SIGINT", () => {
-  if (stopRequested) process.exit(130);
+let stopRequestedAt = 0;
+function requestStop(): void {
+  if (stopRequested) {
+    if (Date.now() - stopRequestedAt > REPEAT_SIGNAL_WINDOW_MS) {
+      process.exit(130);
+    }
+    return;
+  }
   stopRequested = true;
+  stopRequestedAt = Date.now();
   console.log("\nStopping after this tick (Ctrl-C again to quit immediately)…");
-});
+}
+process.on("SIGINT", requestStop);
+process.on("SIGTERM", requestStop);
 
 record({
   type: "start",
