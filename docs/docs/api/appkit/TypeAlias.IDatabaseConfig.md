@@ -3,7 +3,6 @@
 ```ts
 type IDatabaseConfig<TSchema> = {
   api?: DatabaseApiConfig<TSchema>;
-  hooks?: { readonly [TTable in SchemaTableName<TSchema>]?: EntityHooks<TTable> };
   pool?: DatabasePoolConfig;
   schema?: TSchema;
 };
@@ -38,14 +37,6 @@ use `{ writes: { operations: ["create", "update"] } }`.
 
 ```ts
 true
-```
-
-***
-
-### hooks?
-
-```ts
-readonly optional hooks: { readonly [TTable in SchemaTableName<TSchema>]?: EntityHooks<TTable> };
 ```
 
 ***

@@ -228,7 +228,7 @@ The actor boundary is selected from deployment configuration, then verifies requ
 
 | Deployment | Identity source and behavior |
 |---|---|
-| Databricks Apps, `DATABRICKS_APP_NAME` set outside development | Verify `x-forwarded-access-token` with workspace Current User Me on each request. User/email headers are not trusted. Rejected credentials, inactive users, and service principals give 401; workspace identity-service failure can give 503. |
+| Databricks Apps, `DATABRICKS_APP_NAME` set outside development | Verify `x-forwarded-access-token` with workspace Current User Me once per token per 30 s per server process, shared by concurrent requests, so a user removed from the workspace can keep access for up to 30 s on a warm process. User/email headers are not trusted. Rejected credentials, inactive users, and service principals, by schema or application id, give 401 and are not cached; workspace identity-service failure can give 503. |
 | Explicit local development | `NODE_ENV=development` plus `DATABRICKS_TOKEN` or `DATABRICKS_CONFIG_PROFILE` uses the verified local OBO identity loader. Requests must satisfy the loopback and origin boundary. `APPKIT_DEV_OBO=false` disables it. Forwarded identity headers are ignored. |
 | Other hosting/configuration | Resolve no actor, answer 401, and warn during setup. |
 
@@ -331,7 +331,7 @@ setup. A missing/empty source directory is distinct from a broken expected artif
 The operation namespace bypasses the server's global JSON parser using the same routed-path semantics as dispatch.
 The operation handler controls ordering and limits:
 
-1. Set `Cache-Control: no-store`, resolve the actor, and check the browser origin boundary.
+1. Set `Cache-Control: no-store`, check the browser origin boundary, then resolve the actor. A cross-origin request costs no workspace call.
 2. Match the explicit name and exact declared method. Unknown names or wrong methods give 404 after authentication.
 3. Decode and validate input, then evaluate authorization.
 4. Execute at most once and parse/project the output before sending it.
@@ -414,10 +414,10 @@ actor or a 401 advances the client's session state, clears hooks, and rejects la
 `SESSION_CHANGED`. Detection is response-driven; this is not a push notification of an identity change before any
 response arrives.
 
-`databaseApi.execute` rejects with `DatabaseApiError` on failure and supports an optional AbortSignal. A write with a
-lost or unusable response can report `OUTCOME_UNKNOWN`; cancellation cannot undo a committed write. React callers
-should prefer hooks for rendered database state. Imperative callers own request identity, state updates, cancellation,
-and refresh after writes.
+`databaseApi.execute` rejects with `DatabaseApiError` on failure and supports an optional AbortSignal. A write whose
+response is lost, unusable, or a 5xx without the actor discriminator (a proxy answered, not the handler) can report
+`OUTCOME_UNKNOWN`; cancellation cannot undo a committed write. React callers should prefer hooks for rendered database
+state. Imperative callers own request identity, state updates, cancellation, and refresh after writes.
 
 ## Observability and boundaries
 

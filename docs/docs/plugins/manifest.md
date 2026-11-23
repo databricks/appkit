@@ -66,6 +66,7 @@ A resource requirement declares one Databricks resource the plugin depends on. T
 | `job` | `CAN_VIEW`, `CAN_MANAGE_RUN`, `CAN_MANAGE` |
 | `sql_warehouse` | `CAN_USE`, `CAN_MANAGE` |
 | `serving_endpoint` | `CAN_VIEW`, `CAN_QUERY`, `CAN_MANAGE` |
+| `model_service` | `EXECUTE` |
 | `volume` | `READ_VOLUME`, `WRITE_VOLUME` |
 | `vector_search_index` | `SELECT` |
 | `uc_function` | `EXECUTE` |

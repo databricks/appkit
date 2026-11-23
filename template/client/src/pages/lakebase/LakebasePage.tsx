@@ -10,6 +10,7 @@ import {
 } from '@databricks/appkit-ui/react';
 import { useState, useEffect } from 'react';
 import { Check, X } from 'lucide-react';
+import { fetchOrThrow } from '../../lib/fetch-or-throw';
 
 interface Todo {
   id: number;
@@ -43,26 +44,31 @@ export function LakebasePage() {
 
     setSubmitting(true);
     try {
-      const res = await fetch('/api/lakebase/todos', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title }),
-      });
-      if (!res.ok) throw new Error(`Failed to create todo: ${res.statusText}`);
+      const res = await fetchOrThrow(
+        '/api/lakebase/todos',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title }),
+        },
+        (r) => `Failed to create todo: ${r.statusText}`,
+      );
       const created = (await res.json()) as Todo;
       setTodos((prev) => [created, ...prev]);
       setNewTitle('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add todo');
-    } finally {
-      setSubmitting(false);
     }
+    setSubmitting(false);
   };
 
   const toggleTodo = async (id: number) => {
     try {
-      const res = await fetch(`/api/lakebase/todos/${id}`, { method: 'PATCH' });
-      if (!res.ok) throw new Error(`Failed to update todo: ${res.statusText}`);
+      const res = await fetchOrThrow(
+        `/api/lakebase/todos/${id}`,
+        { method: 'PATCH' },
+        (r) => `Failed to update todo: ${r.statusText}`,
+      );
       const updated = (await res.json()) as Todo;
       setTodos((prev) => prev.map((t) => (t.id === id ? updated : t)));
     } catch (err) {
@@ -72,8 +78,11 @@ export function LakebasePage() {
 
   const deleteTodo = async (id: number) => {
     try {
-      const res = await fetch(`/api/lakebase/todos/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(`Failed to delete todo: ${res.statusText}`);
+      await fetchOrThrow(
+        `/api/lakebase/todos/${id}`,
+        { method: 'DELETE' },
+        (r) => `Failed to delete todo: ${r.statusText}`,
+      );
       setTodos((prev) => prev.filter((t) => t.id !== id));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete todo');

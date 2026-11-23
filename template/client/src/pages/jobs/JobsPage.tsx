@@ -6,7 +6,8 @@ import {
   CardHeader,
   CardTitle,
 } from '@databricks/appkit-ui/react';
-import { useCallback, useId, useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
+import { fetchOrThrow } from '../../lib/fetch-or-throw';
 
 const MAX_STREAM_LOG = 500;
 
@@ -39,6 +40,39 @@ function stateColor(state?: string) {
   }
 }
 
+const bodyText = (res: Response) => res.text();
+
+async function listRuns(jobKey: string): Promise<Run[]> {
+  const res = await fetchOrThrow(
+    `/api/jobs/${jobKey}/runs?limit=10`,
+    undefined,
+    bodyText,
+  );
+  const data = (await res.json()) as { runs?: Run[] };
+  return data.runs ?? [];
+}
+
+async function readStreamData(
+  res: Response,
+  onData: (payloads: string[]) => void,
+): Promise<void> {
+  const reader = res.body?.getReader();
+  if (!reader) return;
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    const payloads = lines
+      .filter((line) => line.startsWith('data: '))
+      .map((line) => line.slice(6));
+    if (payloads.length > 0) onData(payloads);
+  }
+}
+
 export function JobsPage() {
   const inputId = useId();
   const [jobKey, setJobKey] = useState('default');
@@ -54,96 +88,75 @@ export function JobsPage() {
     [],
   );
 
-  const fetchStatus = useCallback(async () => {
+  const fetchStatus = async () => {
     setLoading('status');
     setError(null);
     try {
-      const res = await fetch(`/api/jobs/${jobKey}/status`);
-      if (!res.ok) throw new Error(await res.text());
+      const res = await fetchOrThrow(
+        `/api/jobs/${jobKey}/status`,
+        undefined,
+        bodyText,
+      );
       setStatus(await res.json());
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading('');
     }
-  }, [jobKey]);
+    setLoading('');
+  };
 
-  const fetchRuns = useCallback(async () => {
+  const fetchRuns = async () => {
     setLoading('runs');
     setError(null);
     try {
-      const res = await fetch(`/api/jobs/${jobKey}/runs?limit=10`);
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      setRuns(data.runs ?? []);
+      setRuns(await listRuns(jobKey));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading('');
     }
-  }, [jobKey]);
+    setLoading('');
+  };
 
-  const triggerRun = useCallback(async () => {
+  const triggerRun = async () => {
     setLoading('run');
     setError(null);
     setStreamLog([]);
     streamIdRef.current = 0;
     try {
-      const res = await fetch(`/api/jobs/${jobKey}/run?stream=true`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetchOrThrow(
+        `/api/jobs/${jobKey}/run?stream=true`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' } },
+        bodyText,
+      );
+      await readStreamData(res, (payloads) => {
+        const newEntries = payloads.map((text) => ({
+          id: ++streamIdRef.current,
+          text,
+        }));
+        setStreamLog((prev) => {
+          const next = [...prev, ...newEntries];
+          return next.length > MAX_STREAM_LOG
+            ? next.slice(next.length - MAX_STREAM_LOG)
+            : next;
+        });
       });
-      if (!res.ok) throw new Error(await res.text());
-
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-      if (!reader) return;
-
-      let buffer = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-        const newEntries: Array<{ id: number; text: string }> = [];
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const id = ++streamIdRef.current;
-            newEntries.push({ id, text: line.slice(6) });
-          }
-        }
-        if (newEntries.length > 0) {
-          setStreamLog((prev) => {
-            const next = [...prev, ...newEntries];
-            return next.length > MAX_STREAM_LOG
-              ? next.slice(next.length - MAX_STREAM_LOG)
-              : next;
-          });
-        }
-      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading('');
     }
-  }, [jobKey]);
+    setLoading('');
+  };
 
-  const cancelRun = useCallback(
-    async (runId: number) => {
-      setError(null);
-      try {
-        const res = await fetch(`/api/jobs/${jobKey}/runs/${runId}`, {
-          method: 'DELETE',
-        });
-        if (!res.ok && res.status !== 204) throw new Error(await res.text());
-        await fetchRuns();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    },
-    [jobKey, fetchRuns],
-  );
+  const cancelRun = async (runId: number) => {
+    setError(null);
+    try {
+      await fetchOrThrow(
+        `/api/jobs/${jobKey}/runs/${runId}`,
+        { method: 'DELETE' },
+        bodyText,
+      );
+      await fetchRuns();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   return (
     <div className="space-y-6 w-full max-w-4xl mx-auto">

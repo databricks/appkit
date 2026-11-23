@@ -181,10 +181,7 @@ export type InsertFor<R, K> = WireInput<ApiOf<R, K>["insert"]>;
 /** The body a generated update route accepts for `K`, as JSON carries it. */
 export type UpdateFor<R, K> = WireInput<ApiOf<R, K>["update"]>;
 
-/**
- * The public row a generated create or update route answers with. A read
- * serializer never reshapes a write's response, so this is always the row.
- */
+/** The public row a generated create or update route answers with. */
 export type PublicRowFor<R, K> = WireOutput<PublicRowOf<R, K>>;
 
 /** The envelope a generated list route answers with. */
