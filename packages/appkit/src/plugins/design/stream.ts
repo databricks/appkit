@@ -437,8 +437,11 @@ async function publishedNow() {
 let mounted = false;
 let root;
 let loads = 0;
+// Imports can finish out of order: only the latest one's outcome counts.
+let latest = 0;
 async function mount() {
   if (mounted) return;
+  const mine = ++latest;
   const wasPublished = published;
   let page;
   let ok = true;
@@ -453,7 +456,7 @@ async function mount() {
       throw error;
     };
   }
-  if (mounted) return;
+  if (mounted || mine !== latest) return;
   mounted = ok;
   root ??= createRoot(rootEl);
   // A new Host after a failed version: a fresh DesignPage, without the error.

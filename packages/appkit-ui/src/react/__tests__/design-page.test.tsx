@@ -470,6 +470,39 @@ describe("stream page", () => {
     expect(shell().hasAttribute("data-design-rendered")).toBe(false);
   });
 
+  test("only the latest publish's import counts, whichever finishes first", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const later = () => {
+      let resolve!: (m: { default: ComponentType }) => void;
+      let reject!: (e: Error) => void;
+      const promise = new Promise<{ default: ComponentType }>((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      return { promise, resolve, reject };
+    };
+    const finish = (done: () => void) =>
+      act(async () => {
+        done();
+        await new Promise((r) => setTimeout(r, 0));
+      });
+    // Three versions' imports in flight, the newest finishing first.
+    const first = later();
+    const second = later();
+    const third = later();
+    const stream = await streamPage(true, first.promise);
+    await stream.publish(second.promise);
+    await stream.publish(third.promise);
+    await finish(() => third.reject(new Error("draft 3 failed")));
+    expect(errorText()).toBe("Design page failed to render: draft 3 failed");
+    // The older ones, a failure then a success, change nothing.
+    await finish(() => first.reject(new Error("draft 1 failed")));
+    expect(errorText()).toBe("Design page failed to render: draft 3 failed");
+    await finish(() => second.resolve({ default: () => <h1>Draft 2</h1> }));
+    expect(errorText()).toBe("Design page failed to render: draft 3 failed");
+    expect(screen.queryByRole("heading")).toBeNull();
+  });
+
   test("rendered, then a broken update keeps the last good frame, then a fixed update renders again", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const draft = hotDraft("Trips");
