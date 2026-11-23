@@ -145,15 +145,30 @@ export function FilesPage() {
     )
       .then(({ volumes: list }) => {
         setVolumes(list);
-        if (!volumeKey || !list.includes(volumeKey)) {
-          const first = list[0];
-          if (first) {
-            setVolumeKey(first);
-            localStorage.setItem('appkit:files:volumeKey', first);
-          }
+        if (volumeKey && list.includes(volumeKey)) return volumeKey;
+        const first = list[0];
+        if (first) {
+          setVolumeKey(first);
+          localStorage.setItem('appkit:files:volumeKey', first);
         }
+        return first;
       })
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : String(err));
+        return undefined;
+      });
+  };
+
+  // Until the volume list loads, the saved volume may no longer exist, so check
+  // it again first. A new volume loads its root through the effect below.
+  const retry = () => {
+    if (volumes.length) {
+      void loadDirectory(currentPath);
+      return;
+    }
+    void loadVolumes().then((key) => {
+      if (key === volumeKey) void loadDirectory(currentPath);
+    });
   };
 
   const loadVolumesForKey = useEffectEvent(() => {
@@ -362,9 +377,7 @@ export function FilesPage() {
           error={error}
           onEntryClick={handleEntryClick}
           onNavigateToParent={navigateToParent}
-          onRetry={() =>
-            void (volumeKey ? loadDirectory(currentPath) : loadVolumes())
-          }
+          onRetry={retry}
           isAtRoot={isAtRoot}
           selectedPath={selectedFile}
           resolveEntryPath={resolveEntryPath}
