@@ -96,17 +96,6 @@ export function AgentChat() {
     skills: activeSkills.map((s) => s.name),
   });
 
-  // Mirror the streaming `content` into the pending assistant message so
-  // tool-call rows interleave correctly with deltas.
-  useEffect(() => {
-    if (!pendingAssistantId) return;
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.id === pendingAssistantId ? { ...m, content } : m,
-      ),
-    );
-  }, [content, pendingAssistantId]);
-
   // Auto-scroll to bottom when messages or the streaming assistant
   // content change — keeps the newest line in view during a long reply.
   useEffect(() => {
@@ -120,16 +109,17 @@ export function AgentChat() {
 
     setInput('');
 
+    // The pending assistant message renders the hook's streaming `content`;
+    // save that reply into its message before `send` resets it for this turn.
     const assistantId = `a-${Date.now()}`;
     setMessages((prev) => [
-      ...prev,
+      ...prev.map((m) => (m.id === pendingAssistantId ? { ...m, content } : m)),
       { id: `u-${Date.now()}`, role: 'user', content: message },
       { id: assistantId, role: 'assistant', content: '' },
     ]);
     setPendingAssistantId(assistantId);
 
     await send(message);
-    setPendingAssistantId(null);
   };
 
   return (
@@ -137,7 +127,7 @@ export function AgentChat() {
       <div>
         <h2 className="text-2xl font-bold text-foreground">Chat</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          You're talking to <code className="mx-1">planner</code>, a
+          You’re talking to <code className="mx-1">planner</code>, a
           markdown agent at
           <code className="mx-1">server/agents/planner/agent.md</code>.
           For computational actions it delegates to its sub-agent
@@ -155,9 +145,9 @@ export function AgentChat() {
         >
           {messages.length === 0 && (
             <p className="text-sm text-muted-foreground text-center mt-8">
-              Try "help me plan a feature" for a planning conversation,
-              or "what time is it?" / "count the words in: the quick
-              brown fox" to watch planner delegate to{' '}
+              Try “help me plan a feature” for a planning conversation,
+              or “what time is it?” / “count the words in: the quick
+              brown fox” to watch planner delegate to{' '}
               <code>agent-helper</code>.
             </p>
           )}
@@ -186,14 +176,18 @@ export function AgentChat() {
                   {m.role}
                 </div>
                 <div className="whitespace-pre-wrap text-sm">
-                  {m.content || (isStreaming ? '…' : '')}
+                  {(m.id === pendingAssistantId ? content : m.content) ||
+                    (isStreaming ? '…' : '')}
                 </div>
               </div>
             );
           })}
         </CardContent>
 
-        <form onSubmit={handleSubmit} className="p-3 border-t flex gap-2">
+        <form
+          onSubmit={(e) => void handleSubmit(e)}
+          className="p-3 border-t flex gap-2"
+        >
           {activeSkills.length > 0 && (
             <select
               className="text-sm border rounded-md px-2 bg-background text-foreground shrink-0"

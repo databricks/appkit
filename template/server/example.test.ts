@@ -1,6 +1,7 @@
 import { Plugin, type PluginManifest, toPlugin } from '@databricks/appkit';
 import { createTestApp, createTestPluginContext, expectStream } from '@databricks/appkit/testing';
 import { describe, expect, test } from 'vitest';
+import { z } from 'zod';
 
 /**
  * Example test using the AppKit testing kit (`@databricks/appkit/testing`).
@@ -25,14 +26,16 @@ import { describe, expect, test } from 'vitest';
  * instance itself.
  */
 
+const GreetBody = z.object({ name: z.string() });
+
 // A tiny example plugin: it registers one route and streams two events.
 class GreeterPlugin extends Plugin {
-  static manifest = {
+  static manifest: PluginManifest<'greeter'> = {
     name: 'greeter',
     displayName: 'Greeter',
     description: 'Example plugin for the testing-kit demo',
     resources: { required: [], optional: [] },
-  } as PluginManifest<'greeter'>;
+  };
 
   setup() {
     // Routes registered here are captured by createTestPluginContext().routes.
@@ -55,8 +58,12 @@ class GreeterPlugin extends Plugin {
       method: 'post',
       path: '/greet',
       handler: (req, res) => {
-        const { name } = req.body as { name: string };
-        res.json({ message: `Hello, ${name}!` });
+        const body = GreetBody.safeParse(req.body);
+        if (!body.success) {
+          res.status(400).json({ error: 'name is required' });
+          return Promise.resolve();
+        }
+        res.json({ message: `Hello, ${body.data.name}!` });
         return Promise.resolve();
       },
     });
