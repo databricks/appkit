@@ -138,8 +138,10 @@ const TYPES_PAGE =
   'import { type Trip } from "../mock";\n\nexport default function Page() {\n  const trip: Trip | null = null;\n  return <h1>Trips {String(trip)}</h1>;\n}\n';
 const MOCK_PAGE =
   'import { trips } from "../mock";\n\nexport default function Page() {\n  return <h1>{trips.length} trips</h1>;\n}\n';
-const published = (sent: { data: { name: string; done?: boolean } }[]) =>
-  sent.filter((m) => m.data?.name === "dash");
+const published = (
+  sent: { data: { name: string; done?: boolean } }[],
+  name = "dash",
+) => sent.filter((m) => m.data?.name === name);
 
 test("a page that imports ../mock is published only once mock.ts exists", async () => {
   const { root, watcher, sent, streamHtml } = start();
@@ -245,4 +247,41 @@ test("a finished page shown in an earlier version gets its hot update once mock.
   });
   // With mock.ts there, Vite's own update of the page goes through.
   expect(await hotUpdate(page, [mod])).toBeUndefined();
+});
+
+test("a finished page never streamed, first seen by its stream page, is published when mock.ts lands", async () => {
+  const { root, watcher, sent, streamHtml } = start();
+  // No staging draft and no watcher event: only the stream page is opened.
+  fs.writeFileSync(path.join(root, "src/design/pages/dash.tsx"), MOCK_PAGE);
+  expect(await streamHtml("dash")).toContain('<div id="root"></div>');
+
+  const mock = path.join(root, "src/design/mock.ts");
+  fs.writeFileSync(mock, "export const trips = [{ id: 1 }];\n");
+  watcher.emit("add", mock);
+  await until(() => published(sent).length > 0);
+  expect(published(sent)).toMatchObject([
+    { data: { name: "dash", done: true } },
+  ]);
+  expect(await streamHtml("dash")).toContain(
+    '<div id="root" data-published></div>',
+  );
+});
+
+test("a finished page first seen as a hot update is updated when mock.ts lands", async () => {
+  const { root, watcher, sent, modules, reloaded, hotUpdate } = start();
+  // A page shown at /design/kpis (never streamed) starts using the mock.
+  const page = path.join(root, "src/design/pages/kpis.tsx");
+  const mod = { importers: new Set([{}]), isSelfAccepting: true };
+  modules.set(page, [mod]);
+  fs.writeFileSync(page, MOCK_PAGE);
+  expect(await hotUpdate(page, [mod])).toEqual([]);
+
+  const mock = path.join(root, "src/design/mock.ts");
+  fs.writeFileSync(mock, "export const trips = [{ id: 1 }];\n");
+  watcher.emit("add", mock);
+  await until(() => published(sent, "kpis").length > 0);
+  expect(reloaded).toEqual([mod]);
+  expect(published(sent, "kpis")).toMatchObject([
+    { data: { name: "kpis", done: true } },
+  ]);
 });

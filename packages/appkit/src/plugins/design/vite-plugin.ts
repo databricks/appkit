@@ -675,7 +675,10 @@ export function designVitePlugin({
     (await usesMock(code, file)) &&
     // Again: it may have landed while compiling.
     !fs.existsSync(finalFile("mock"));
-  /** Whether the finished page exists and is published (it doesn't wait for mock.ts). */
+  /**
+   * Whether the finished page exists and is published: one that waits for
+   * mock.ts (streamed or not) is published when it lands.
+   */
   const finalReady = async (name: string) => {
     let code: string;
     try {
@@ -683,7 +686,9 @@ export function designVitePlugin({
     } catch {
       return false;
     }
-    return !(await waitsForMock(code, finalFile(name)));
+    if (!(await waitsForMock(code, finalFile(name)))) return true;
+    waiting.add(name);
+    return false;
   };
   /** Publishes the renderable version of a staging file, if it changed. */
   const publish = async (name: string) => {
@@ -882,8 +887,8 @@ export function designVitePlugin({
         }
         return [];
       }
-      // A finished page waiting for mock.ts would fail to load (and then lose
-      // its update): onFinal sends it once mock.ts lands.
+      // A finished page waiting for mock.ts (streamed or not) would fail to
+      // load, and then lose its update: onFinal sends it once mock.ts lands.
       if (
         type !== "delete" &&
         name &&
@@ -894,6 +899,7 @@ export function designVitePlugin({
           file,
         ))
       ) {
+        waiting.add(name);
         return [];
       }
       // Nothing imports it yet: no boundary, Vite would reload every page.
