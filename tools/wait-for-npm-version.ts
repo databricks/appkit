@@ -1,0 +1,51 @@
+import { execFile } from "node:child_process";
+import { setTimeout as sleep } from "node:timers/promises";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Waits until the npm registry serves `name@version` for every name. A
+ * just-published version takes minutes to reach the registry's packument and
+ * CDN cache, so installing it right away fails with ETARGET.
+ */
+export async function waitForNpmVersion(
+  names: string[],
+  version: string,
+  {
+    cwd = process.cwd(),
+    timeoutMs = 10 * 60_000,
+    delayMs = 5_000,
+    maxDelayMs = 30_000,
+  } = {},
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (const name of names) {
+    for (let delay = delayMs; ; delay = Math.min(delay * 2, maxDelayMs)) {
+      // --prefer-online: revalidate npm's local cache, which would keep serving
+      // the packument from before the publish.
+      const { stdout, stderr } = await execFileAsync(
+        "npm",
+        ["view", `${name}@${version}`, "version", "--prefer-online"],
+        { cwd },
+      ).catch((error) => ({
+        stdout: "",
+        stderr: String(error.stderr ?? error),
+      }));
+      if (stdout.trim() === version) {
+        console.log(`✓ ${name}@${version} is on the npm registry`);
+        break;
+      }
+      if (Date.now() + delay > deadline) {
+        throw new Error(
+          `${name}@${version} is still not on the npm registry after ${Math.round(timeoutMs / 1000)}s. ` +
+            `Last npm view output:\n${stderr.trim() || stdout.trim()}`,
+        );
+      }
+      console.warn(
+        `${name}@${version} is not on the npm registry yet, checking again in ${delay / 1000}s...`,
+      );
+      await sleep(delay);
+    }
+  }
+}

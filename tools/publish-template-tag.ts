@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 /**
- * Syncs the template to the given version (with retry), then commits, tags
- * template-vX.X.X, and pushes.
+ * Waits until npm serves the given version, syncs the template to it (with
+ * retry), then commits, tags template-vX.X.X, and pushes.
  *
  * Used by the private secure release repo during the template-sync step.
  * Changes here affect the release pipeline.
@@ -10,6 +10,8 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
+import { waitForNpmVersion } from "./wait-for-npm-version";
 
 const ROOT = process.cwd();
 const version = process.argv[2];
@@ -34,12 +36,13 @@ function run(
 // 1. Update template package.json
 const templatePath = join(ROOT, "template", "package.json");
 const templateJson = JSON.parse(readFileSync(templatePath, "utf-8"));
+// The packages this release just published.
+const pinned = ["@databricks/appkit", "@databricks/appkit-ui"].filter(
+  (name) => name in (templateJson.dependencies ?? {}),
+);
 if (templateJson.dependencies) {
-  if ("@databricks/appkit" in templateJson.dependencies) {
-    templateJson.dependencies["@databricks/appkit"] = version;
-  }
-  if ("@databricks/appkit-ui" in templateJson.dependencies) {
-    templateJson.dependencies["@databricks/appkit-ui"] = version;
+  for (const name of pinned) {
+    templateJson.dependencies[name] = version;
   }
   writeFileSync(templatePath, `${JSON.stringify(templateJson, null, 2)}\n`);
   console.log(`✓ template/package.json → ${version}`);
@@ -97,9 +100,20 @@ if (npmConfig.status !== 0 || npmConfig.stdout.trim() === "undefined") {
   process.exit(1);
 }
 
-// 2a. npm → package-lock.json
+// Install only once the registry serves the new version; the retries below
+// are too short to outlast registry propagation.
+await waitForNpmVersion(pinned, version, { cwd: templateDir }).catch(
+  (error: Error) => {
+    console.error(error.message);
+    process.exit(1);
+  },
+);
+
+// 2a. npm → package-lock.json (--prefer-online: a stale cached packument
+// would otherwise fail every attempt with ETARGET)
 const npmExit = await runInstallWithRetry("npm install", "npm", [
   "install",
+  "--prefer-online",
   `--min-release-age=${RELEASE_AGE_DAYS}`,
   `--min-release-age-exclude=${RELEASE_AGE_EXCLUDE}`,
 ]);
@@ -144,6 +158,9 @@ if (pnpmExit !== 0) {
 console.log("✓ template/pnpm-lock.yaml updated (pnpm install)");
 
 // 3. Git add, commit, tag, push
+const branch = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+  encoding: "utf-8",
+}).stdout.trim();
 const commands: [string, string[]][] = [
   [
     "git",
@@ -158,8 +175,14 @@ const commands: [string, string[]][] = [
     "git",
     ["commit", "-s", "-m", `chore: sync template to v${version} [skip ci]`],
   ],
+  // The branch may have moved while we waited for the registry.
+  ["git", ["pull", "--rebase", "origin", branch]],
   ["git", ["tag", "-a", `template-v${version}`, "-m", `Template v${version}`]],
-  ["git", ["push", "origin", "HEAD", "--follow-tags"]],
+  // --atomic: never leave the tag pushed without the commit (or the reverse).
+  [
+    "git",
+    ["push", "--atomic", "origin", "HEAD", `refs/tags/template-v${version}`],
+  ],
 ];
 
 for (const [command, args] of commands) {
