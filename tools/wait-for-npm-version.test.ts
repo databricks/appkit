@@ -17,18 +17,20 @@ const requests = new Map<string, number>();
 /**
  * A registry that serves `name@VERSION` only from request `servedFrom[name]`
  * on; before that it returns the pre-publish packument, cacheable like npm's.
+ * A "stall" package gets no answer at all.
  */
-async function fakeRegistry(servedFrom: Record<string, number>) {
+async function fakeRegistry(servedFrom: Record<string, number | "stall">) {
   server = createServer((req, res) => {
     const name = decodeURIComponent(req.url?.slice(1) ?? "");
     const count = (requests.get(name) ?? 0) + 1;
     requests.set(name, count);
-    if (!(name in servedFrom)) {
+    const from = servedFrom[name];
+    if (from === "stall") return;
+    if (from === undefined) {
       res.writeHead(404).end();
       return;
     }
-    const versions =
-      count >= servedFrom[name] ? ["0.103.0", VERSION] : ["0.103.0"];
+    const versions = count >= from ? ["0.103.0", VERSION] : ["0.103.0"];
     res.writeHead(200, {
       "content-type": "application/json",
       "cache-control": "public, max-age=300",
@@ -65,6 +67,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  server?.closeAllConnections();
   server?.close();
   requests.clear();
   vi.unstubAllEnvs();
@@ -115,5 +118,27 @@ test(
     ).rejects.toThrow(
       `@databricks/appkit-ui@${VERSION} is still not on the npm registry`,
     );
+  },
+);
+
+test(
+  "a registry that never answers still ends the wait on time",
+  { timeout: 60_000 },
+  async () => {
+    await fakeRegistry({ "@databricks/appkit": "stall" });
+    const started = Date.now();
+
+    await expect(
+      waitForNpmVersion(["@databricks/appkit"], VERSION, {
+        cwd: directory,
+        timeoutMs: 2_000,
+        ...fast,
+      }),
+    ).rejects.toThrow(
+      `@databricks/appkit@${VERSION} is still not on the npm registry after 2s. ` +
+        "Last npm view output:\nnpm view did not answer in time",
+    );
+    // npm alone would wait out its 5-minute fetch timeout.
+    expect(Date.now() - started).toBeLessThan(10_000);
   },
 );

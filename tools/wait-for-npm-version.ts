@@ -3,6 +3,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+// npm's own fetch timeout (5 min, retried) could outlast the whole wait.
+const PROBE_TIMEOUT_MS = 60_000;
 
 /**
  * Waits until the npm registry serves `name@version` for every name. A
@@ -27,10 +29,18 @@ export async function waitForNpmVersion(
       const { stdout, stderr } = await execFileAsync(
         "npm",
         ["view", `${name}@${version}`, "version", "--prefer-online"],
-        { cwd },
+        {
+          cwd,
+          timeout: Math.max(
+            1,
+            Math.min(PROBE_TIMEOUT_MS, deadline - Date.now()),
+          ),
+        },
       ).catch((error) => ({
         stdout: "",
-        stderr: String(error.stderr ?? error),
+        stderr: error.killed
+          ? "npm view did not answer in time"
+          : String(error.stderr || error.message),
       }));
       if (stdout.trim() === version) {
         console.log(`✓ ${name}@${version} is on the npm registry`);
