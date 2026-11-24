@@ -22,8 +22,8 @@ export async function waitForNpmVersion(
   const deadline = Date.now() + timeoutMs;
   for (const name of names) {
     for (let delay = delayMs; ; delay = Math.min(delay * 2, maxDelayMs)) {
-      // --prefer-online: revalidate npm's local cache, which would keep serving
-      // the packument from before the publish.
+      // npm view already revalidates its cache by default; --prefer-online
+      // keeps it that way if a config default changes.
       const { stdout, stderr } = await execFileAsync(
         "npm",
         ["view", `${name}@${version}`, "version", "--prefer-online"],
