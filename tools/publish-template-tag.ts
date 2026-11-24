@@ -11,6 +11,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { pushTemplateTag } from "./push-template-tag";
 import { waitForNpmVersion } from "./wait-for-npm-version";
 
 const ROOT = process.cwd();
@@ -158,37 +159,17 @@ if (pnpmExit !== 0) {
 console.log("✓ template/pnpm-lock.yaml updated (pnpm install)");
 
 // 3. Git add, commit, tag, push
-const branch = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-  encoding: "utf-8",
-}).stdout.trim();
-const commands: [string, string[]][] = [
+const pushed = pushTemplateTag(
+  version,
   [
-    "git",
-    [
-      "add",
-      "template/package.json",
-      "template/package-lock.json",
-      "template/pnpm-lock.yaml",
-    ],
+    "template/package.json",
+    "template/package-lock.json",
+    "template/pnpm-lock.yaml",
   ],
-  [
-    "git",
-    ["commit", "-s", "-m", `chore: sync template to v${version} [skip ci]`],
-  ],
-  // The branch may have moved while we waited for the registry.
-  ["git", ["pull", "--rebase", "origin", branch]],
-  ["git", ["tag", "-a", `template-v${version}`, "-m", `Template v${version}`]],
-  // --atomic: never leave the tag pushed without the commit (or the reverse).
-  [
-    "git",
-    ["push", "--atomic", "origin", "HEAD", `refs/tags/template-v${version}`],
-  ],
-];
-
-for (const [command, args] of commands) {
-  if (run(command, args) !== 0) {
-    process.exit(1);
-  }
+  ROOT,
+);
+if (!pushed) {
+  process.exit(1);
 }
 
 console.log(`✓ template tag template-v${version} pushed`);
