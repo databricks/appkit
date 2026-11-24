@@ -232,6 +232,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.104.1](https://github.com/databricks/appkit/compare/v0.104.0...v0.104.1) (2026-11-24)
+
+### appkit
+
+* **appkit:** publish a streamed design page only once its mock is final ([#746](https://github.com/databricks/appkit/issues/746)) ([dc20841](https://github.com/databricks/appkit/commit/dc2084134b563e4bf157c6295e61d6e709a8f642))
+
+
 ## [0.104.0](https://github.com/databricks/appkit/compare/v0.103.0...v0.104.0) (2026-11-23)
 
 ### template
