@@ -3,6 +3,8 @@
  * `.staging/<name>.tsx` is served as `pages/<name>.tsx` and hot-swapped in place.
  */
 
+import path from "node:path";
+
 type Frame =
   | { k: "brace" | "paren" | "bracket" | "tpl" | "tplExpr" | "jsxExpr" }
   | { k: "tag" | "el"; name: string };
@@ -279,13 +281,7 @@ const MAX_CUTS = 60;
 export async function renderablePartial(
   source: string,
   isValid: IsValid,
-  {
-    page = true,
-    complete = false,
-  }: {
-    page?: boolean;
-    complete?: boolean;
-  } = {},
+  { complete = false }: { complete?: boolean } = {},
 ): Promise<string | null> {
   const src = stripFence(source);
   if (complete && (await isValid(src))) return src;
@@ -294,67 +290,48 @@ export async function renderablePartial(
   let end = lines.length - 1;
   for (let tries = 0; end > 0 && tries < MAX_CUTS; end--, tries++) {
     const cut = lines.slice(0, end).join("\n");
-    if (page && !/export\s+default\b/.test(cut)) return null;
+    if (!/export\s+default\b/.test(cut)) return null;
     const closed = closeOpen(cut);
     if (closed === null) continue;
-    const code = page ? stubComponents(closed) : closed;
+    const code = stubComponents(closed);
     if (await isValid(code)) return code;
   }
   return null;
 }
 
-/** Value names a page imports from `../<mock>` (type-only imports excluded). */
-export function mockImports(page: string, mock = "mock"): string[] {
-  const names: string[] = [];
-  for (const m of page.matchAll(
-    /import\s*\{([^}]*)\}\s*from\s*["']\.\.\/([\w-]+?)(?:\.ts)?["']/g,
-  )) {
-    if (m[2] !== mock) continue;
-    for (const spec of m[1].split(",")) {
-      const s = spec.trim();
-      if (!s || s.startsWith("type ")) continue;
-      names.push(s.split(/\s+as\s+/)[0]);
-    }
-  }
-  return names;
-}
-
-/** Stands in for mock values not written yet: never throws, renders as nothing. */
-const DRAFT_VALUE = `const __draftValue: any = (() => {
-  const target: any = function () {};
-  const value: any = new Proxy(target, {
-    get: (_t, key) =>
-      key === Symbol.toPrimitive
-        ? (hint: string) => (hint === "number" ? 0 : "")
-        : key === Symbol.iterator
-          ? function* () {}
-          : key === "then"
-            ? undefined
-            : value,
-    apply: () => value,
-    construct: () => value,
-  });
-  return value;
-})();`;
+const MODULE_NODES = new Set([
+  "ImportDeclaration",
+  "ExportNamedDeclaration",
+  "ExportAllDeclaration",
+  "ImportExpression",
+]);
 
 /**
- * The partial mock plus a placeholder for each value a page imports from it that
- * isn't defined yet (a missing named export would be a SyntaxError).
+ * Whether a compiled page (the ESTree program of the JS Vite serves for
+ * `pages/<name>.tsx`, types already stripped) imports `src/design/mock`.
  *
  * @internal
  */
-export function stubMock(mock: string, imported: Iterable<string>): string {
-  const exported = new Set(
-    [
-      ...mock
-        .replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")
-        .matchAll(/export\s+(?:const|let|var|function|class|enum)\s+([\w$]+)/g),
-    ].map((m) => m[1]),
-  );
-  const stubs = [...new Set(imported)].filter((name) => !exported.has(name));
-  return stubs.length === 0
-    ? mock
-    : `${mock}\n${DRAFT_VALUE}\n${stubs.map((name) => `export const ${name}: any = __draftValue;`).join("\n")}\n`;
+export function importsMock(program: unknown): boolean {
+  const walk = (node: unknown): boolean => {
+    if (!node || typeof node !== "object") return false;
+    if (Array.isArray(node)) return node.some(walk);
+    const { type, source } = node as {
+      type?: string;
+      source?: { value?: unknown };
+    };
+    if (
+      MODULE_NODES.has(type as string) &&
+      typeof source?.value === "string" &&
+      /^\/src\/design\/mock(?:\.[jt]sx?)?$/.test(
+        path.posix.resolve("/src/design/pages", source.value),
+      )
+    ) {
+      return true;
+    }
+    return Object.values(node).some(walk);
+  };
+  return walk(program);
 }
 
 /**
@@ -396,7 +373,7 @@ class Host extends Component {
   render() {
     return createElement(
       DesignPage,
-      { onError: this.onError, resetKey: this.state.reset, errorFallback: () => null },
+      { onError: this.onError, resetKey: this.state.reset },
       createElement(this.props.page, { key: this.state.generation }),
     );
   }
@@ -421,18 +398,50 @@ import.meta.hot?.on("vite:afterUpdate", () => {
   setTimeout(() => host?.retry(), 50);
 });
 
+// Whether a version exists: before one, a failed import is still pending.
+let published = rootEl.hasAttribute("data-published");
+// This HTML can predate a publish whose event came before the listener below:
+// ask the server again (served afresh, it says whether a version is out now).
+async function publishedNow() {
+  try {
+    const html = await (await fetch(location.href)).text();
+    const page = new DOMParser().parseFromString(html, "text/html");
+    return page.getElementById("root")?.hasAttribute("data-published") ?? false;
+  } catch {
+    return false;
+  }
+}
 let mounted = false;
+let root;
+let loads = 0;
+// Imports can finish out of order: only the latest one's outcome counts.
+let latest = 0;
 async function mount() {
   if (mounted) return;
+  const mine = ++latest;
+  const wasPublished = published;
+  let page;
+  let ok = true;
   try {
-    const mod = await import(/* @vite-ignore */ "/src/design/pages/" + NAME + ".tsx?t=" + Date.now());
-    if (mounted) return;
-    mounted = true;
-    createRoot(rootEl).render(createElement(Host, { page: mod.default }));
-  } catch {}
+    page = (await import(/* @vite-ignore */ "/src/design/pages/" + NAME + ".tsx?t=" + Date.now())).default;
+  } catch (error) {
+    if (!wasPublished && !(await publishedNow())) return;
+    published = true;
+    // A version that doesn't load or evaluate: DesignPage shows the error.
+    ok = false;
+    page = () => {
+      throw error;
+    };
+  }
+  if (mounted || mine !== latest) return;
+  mounted = ok;
+  root ??= createRoot(rootEl);
+  // A new Host after a failed version: a fresh DesignPage, without the error.
+  root.render(createElement(Host, { key: ++loads, page }));
 }
 import.meta.hot?.on("appkit:stream", (data) => {
   if (data?.name !== NAME) return;
+  published = true;
   if (data.done) {
     final = true;
     remount(1000);

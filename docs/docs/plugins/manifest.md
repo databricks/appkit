@@ -14,16 +14,15 @@ This page documents the **v2.0** manifest contract. JSON Schema is published at 
 
 ## Recommended pattern
 
-Author the manifest as JSON, import it into the plugin module, and assert the type:
+Author the manifest as JSON, import it into the plugin module, and pass it through `defineManifest`, which validates it against the schema and keeps the plugin name's literal type:
 
 ```typescript
 // packages/my-plugin/src/index.ts
-import { Plugin, toPlugin } from "@databricks/appkit";
-import type { PluginManifest } from "@databricks/appkit";
+import { defineManifest, Plugin, toPlugin } from "@databricks/appkit";
 import manifest from "./manifest.json";
 
 class MyPlugin extends Plugin {
-  static manifest = manifest as PluginManifest<"my-plugin">;
+  static manifest = defineManifest<"my-plugin">(manifest);
   // ...
 }
 

@@ -7,49 +7,84 @@ import {
   CardTitle,
 } from '@databricks/appkit-ui/react';
 import { useId, useRef, useState } from 'react';
-import { fetchOrThrow } from '../../lib/fetch-or-throw';
+import { z } from 'zod';
+import { fetchJson, fetchOrThrow } from '../../lib/fetch-or-throw';
 
 const MAX_STREAM_LOG = 500;
 
-interface Run {
-  runId: number;
-  state?: { lifeCycleState?: string; resultState?: string };
-  startTime?: number;
-  endTime?: number;
-}
+const Run = z.object({
+  runId: z.number(),
+  state: z
+    .object({
+      lifeCycleState: z.string().optional(),
+      resultState: z.string().optional(),
+    })
+    .optional(),
+  startTime: z.number().optional(),
+  endTime: z.number().optional(),
+});
+type Run = z.infer<typeof Run>;
+
+const JobStatus = z.object({
+  status: z.string().nullable(),
+  run: Run.nullable(),
+});
+type JobStatus = z.infer<typeof JobStatus>;
+
+const RunList = z.object({ runs: z.array(Run).optional() });
 
 function formatTime(ts?: number) {
   if (!ts) return '\u2014';
   return new Date(ts).toLocaleString();
 }
 
-function stateColor(state?: string) {
+function stateDotColor(state: string) {
   switch (state) {
     case 'SUCCESS':
-      return 'text-green-600';
+      return 'bg-success';
     case 'RUNNING':
     case 'PENDING':
-      return 'text-yellow-600';
+      return 'bg-warning';
     case 'FAILED':
     case 'TIMEDOUT':
     case 'SKIPPED':
     case 'INTERNAL_ERROR':
-      return 'text-red-600';
+      return 'bg-destructive';
     default:
-      return 'text-muted-foreground';
+      return 'bg-muted-foreground';
   }
 }
 
-const bodyText = (res: Response) => res.text();
+// The state's color is a dot, not the text: the warning color is too light for text on a light card.
+function RunState({
+  state,
+  fallback,
+}: {
+  state: string | null | undefined;
+  fallback: string;
+}) {
+  if (!state) return <>{fallback}</>;
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        aria-hidden
+        className={`size-2 rounded-full ${stateDotColor(state)}`}
+      />
+      {state}
+    </span>
+  );
+}
+
+const httpError = (res: Response) => `HTTP ${res.status}: ${res.statusText}`;
 
 async function listRuns(jobKey: string): Promise<Run[]> {
-  const res = await fetchOrThrow(
+  const { runs } = await fetchJson(
     `/api/jobs/${jobKey}/runs?limit=10`,
     undefined,
-    bodyText,
+    RunList,
+    httpError,
   );
-  const data = (await res.json()) as { runs?: Run[] };
-  return data.runs ?? [];
+  return runs ?? [];
 }
 
 async function readStreamData(
@@ -77,10 +112,7 @@ export function JobsPage() {
   const inputId = useId();
   const [jobKey, setJobKey] = useState('default');
   const [runs, setRuns] = useState<Run[]>([]);
-  const [status, setStatus] = useState<{
-    status: string | null;
-    run: Run | null;
-  } | null>(null);
+  const [status, setStatus] = useState<JobStatus | null>(null);
   const [loading, setLoading] = useState('');
   const [error, setError] = useState<string | null>(null);
   const streamIdRef = useRef(0);
@@ -92,12 +124,14 @@ export function JobsPage() {
     setLoading('status');
     setError(null);
     try {
-      const res = await fetchOrThrow(
-        `/api/jobs/${jobKey}/status`,
-        undefined,
-        bodyText,
+      setStatus(
+        await fetchJson(
+          `/api/jobs/${jobKey}/status`,
+          undefined,
+          JobStatus,
+          httpError,
+        ),
       );
-      setStatus(await res.json());
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -124,7 +158,7 @@ export function JobsPage() {
       const res = await fetchOrThrow(
         `/api/jobs/${jobKey}/run?stream=true`,
         { method: 'POST', headers: { 'Content-Type': 'application/json' } },
-        bodyText,
+        httpError,
       );
       await readStreamData(res, (payloads) => {
         const newEntries = payloads.map((text) => ({
@@ -150,7 +184,7 @@ export function JobsPage() {
       await fetchOrThrow(
         `/api/jobs/${jobKey}/runs/${runId}`,
         { method: 'DELETE' },
-        bodyText,
+        httpError,
       );
       await fetchRuns();
     } catch (e) {
@@ -182,16 +216,20 @@ export function JobsPage() {
           className="rounded-md border border-input bg-background px-3 py-1.5 text-sm w-full sm:w-48"
         />
         <Button
-          onClick={fetchStatus}
+          onClick={() => void fetchStatus()}
           variant="outline"
           disabled={!!loading}
         >
           {loading === 'status' ? 'Loading...' : 'Get Status'}
         </Button>
-        <Button onClick={fetchRuns} variant="outline" disabled={!!loading}>
+        <Button
+          onClick={() => void fetchRuns()}
+          variant="outline"
+          disabled={!!loading}
+        >
           {loading === 'runs' ? 'Loading...' : 'List Runs'}
         </Button>
-        <Button onClick={triggerRun} disabled={!!loading}>
+        <Button onClick={() => void triggerRun()} disabled={!!loading}>
           {loading === 'run' ? 'Running...' : 'Trigger Run'}
         </Button>
       </div>
@@ -210,10 +248,8 @@ export function JobsPage() {
           <CardContent>
             <p>
               <span className="text-muted-foreground">State: </span>
-              <span
-                className={`font-medium ${stateColor(status.status ?? undefined)}`}
-              >
-                {status.status ?? 'No runs'}
+              <span className="font-medium">
+                <RunState state={status.status} fallback="No runs" />
               </span>
             </p>
             {status.run && (
@@ -247,15 +283,17 @@ export function JobsPage() {
                   {runs.map((run) => (
                     <tr key={run.runId} className="border-b last:border-0">
                       <td className="py-2 pr-4 font-mono">{run.runId}</td>
-                      <td
-                        className={`py-2 pr-4 ${stateColor(run.state?.lifeCycleState)}`}
-                      >
-                        {run.state?.lifeCycleState ?? '\u2014'}
+                      <td className="py-2 pr-4">
+                        <RunState
+                          state={run.state?.lifeCycleState}
+                          fallback={'\u2014'}
+                        />
                       </td>
-                      <td
-                        className={`py-2 pr-4 ${stateColor(run.state?.resultState)}`}
-                      >
-                        {run.state?.resultState ?? '\u2014'}
+                      <td className="py-2 pr-4">
+                        <RunState
+                          state={run.state?.resultState}
+                          fallback={'\u2014'}
+                        />
                       </td>
                       <td className="py-2 pr-4 text-muted-foreground">
                         {formatTime(run.startTime)}
@@ -265,7 +303,7 @@ export function JobsPage() {
                           <Button
                             variant="destructive"
                             size="sm"
-                            onClick={() => cancelRun(run.runId)}
+                            onClick={() => void cancelRun(run.runId)}
                           >
                             Cancel
                           </Button>

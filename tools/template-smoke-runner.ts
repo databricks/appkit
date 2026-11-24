@@ -5,6 +5,7 @@ import {
   globSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -19,7 +20,15 @@ import { parse } from "yaml";
 
 import { NEUTRAL_DATABASE_TYPES } from "../packages/appkit/src/type-generator/database/generate";
 import { generateMetricTypeDeclarations } from "../packages/appkit/src/type-generator/mv-registry/render-types";
-import { checkTemplateLint } from "./template-lint-fixtures";
+import { convertToQueryType } from "../packages/appkit/src/type-generator/query-registry";
+import { generateQueryTypeDeclarations } from "../packages/appkit/src/type-generator/render-query-types";
+import type { DatabricksStatementExecutionResponse } from "../packages/appkit/src/type-generator/types";
+import {
+  checkTemplateLint,
+  lintApp,
+  ownGitRoot,
+  ruleOf,
+} from "./template-lint-fixtures";
 
 export type PackageManager = "npm" | "pnpm";
 
@@ -73,9 +82,18 @@ async function freePort(): Promise<number> {
   return address.port;
 }
 
-export async function runTemplateSmoke(
+interface InstalledApp {
+  env: NodeJS.ProcessEnv;
+  run: (command: string, args: string[]) => void;
+  /** Workspace API calls the app made that the fake workspace doesn't answer. */
+  unexpectedRequests: string[];
+}
+
+/** Installs the scaffold with `pm` against a fake workspace, then hands it to `use`. */
+async function withInstalledApp(
   appDir: string,
   pm: PackageManager,
+  use: (app: InstalledApp) => Promise<void>,
 ): Promise<void> {
   const guardDir = mkdtempSync(join(tmpdir(), "appkit-smoke-pm-"));
   const unexpectedRequests: string[] = [];
@@ -179,103 +197,7 @@ export async function runTemplateSmoke(
       }
     }
     run(process.execPath, ["--input-type=commonjs", "-e", nativeCheck]);
-    checkTemplateLint(appDir, env);
-    run(pm, ["run", "build"]);
-    // The build ran typegen. Add the declarations it writes for an app with no database schema
-    // or metric views (empty registry interfaces), then lint the app as a user would get it.
-    const typesDir = join(appDir, "shared/appkit-types");
-    mkdirSync(typesDir, { recursive: true });
-    for (const [file, content] of [
-      ["database.d.ts", NEUTRAL_DATABASE_TYPES],
-      ["metric-views.d.ts", generateMetricTypeDeclarations([])],
-    ]) {
-      if (!existsSync(join(typesDir, file)))
-        writeFileSync(join(typesDir, file), content);
-    }
-    run(pm, ["run", "lint"]);
-    const html = readFileSync(join(appDir, "client/dist/index.html"), "utf-8");
-    assert(readFileSync(join(appDir, "dist/server.js"), "utf-8").length > 0);
-    const manifest = parse(readFileSync(join(appDir, "app.yaml"), "utf-8"));
-    assert.deepEqual(manifest.command, [pm, "run", "start"]);
-    const port = await freePort();
-    env.DATABRICKS_APP_PORT = String(port);
-    const child = spawn(manifest.command[0], manifest.command.slice(1), {
-      cwd: appDir,
-      env,
-      stdio: "inherit",
-      detached: true,
-    });
-    let startError: Error | undefined;
-    child.once("error", (error) => {
-      startError = error;
-    });
-    try {
-      const deadline = Date.now() + 30_000;
-      let ready = false;
-      while (Date.now() < deadline) {
-        if (startError) throw startError;
-        assert(
-          child.exitCode === null && child.signalCode === null,
-          "App exited before becoming ready",
-        );
-        try {
-          const response = await fetch(`http://127.0.0.1:${port}/health`, {
-            signal: AbortSignal.timeout(1000),
-          });
-          if (response.ok) {
-            assert.deepEqual(await response.json(), { status: "ok" });
-            ready = true;
-            break;
-          }
-        } catch (error) {
-          if (!(error instanceof TypeError) && !(error instanceof DOMException))
-            throw error;
-        }
-        await delay(200);
-      }
-      assert(ready, "App did not become healthy within 30 seconds");
-      const response = await fetch(`http://127.0.0.1:${port}/`, {
-        signal: AbortSignal.timeout(5000),
-      });
-      assert.equal(response.status, 200);
-      // AppKit injects runtime configuration into the built HTML.
-      const servedHtml = await response.text();
-      assert(servedHtml.includes('<div id="root"></div>'));
-      const assetPath = html.match(/src="(\/assets\/[^"]+\.js)"/)?.[1];
-      assert(assetPath, "Built HTML must reference a client bundle");
-      assert(servedHtml.includes(assetPath));
-      const assetResponse = await fetch(
-        `http://127.0.0.1:${port}${assetPath}`,
-        {
-          signal: AbortSignal.timeout(5000),
-        },
-      );
-      assert.equal(assetResponse.status, 200);
-      assert.equal(
-        await assetResponse.text(),
-        readFileSync(join(appDir, "client/dist", assetPath), "utf-8"),
-      );
-      assert.deepEqual(unexpectedRequests, []);
-      console.log(`${pm}: full build, health check, and client serving passed`);
-    } finally {
-      if (child.pid) {
-        const pid = child.pid;
-        const signal = (name: NodeJS.Signals | 0): boolean => {
-          try {
-            process.kill(-pid, name);
-            return true;
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
-            return false;
-          }
-        };
-        if (signal("SIGTERM")) {
-          for (let attempt = 0; attempt < 50 && signal(0); attempt++)
-            await delay(100);
-          signal("SIGKILL");
-        }
-      }
-    }
+    await use({ env, run, unexpectedRequests });
   } finally {
     workspace.closeAllConnections();
     await new Promise<void>((resolve, reject) =>
@@ -283,4 +205,186 @@ export async function runTemplateSmoke(
     );
     rmSync(guardDir, { recursive: true, force: true });
   }
+}
+
+/** Installs the scaffold, then builds, lints and serves it. */
+export function runTemplateSmoke(
+  appDir: string,
+  pm: PackageManager,
+): Promise<void> {
+  return withInstalledApp(
+    appDir,
+    pm,
+    async ({ env, run, unexpectedRequests }) => {
+      checkTemplateLint(appDir, env);
+      run(pm, ["run", "build"]);
+      // The build ran typegen. Add the declarations it writes for an app with no database schema
+      // or metric views (empty registry interfaces), then lint the app as a user would get it.
+      const typesDir = join(appDir, "shared/appkit-types");
+      mkdirSync(typesDir, { recursive: true });
+      for (const [file, content] of [
+        ["database.d.ts", NEUTRAL_DATABASE_TYPES],
+        ["metric-views.d.ts", generateMetricTypeDeclarations([])],
+      ]) {
+        if (!existsSync(join(typesDir, file)))
+          writeFileSync(join(typesDir, file), content);
+      }
+      run(pm, ["run", "lint"]);
+      const html = readFileSync(
+        join(appDir, "client/dist/index.html"),
+        "utf-8",
+      );
+      assert(readFileSync(join(appDir, "dist/server.js"), "utf-8").length > 0);
+      const manifest = parse(readFileSync(join(appDir, "app.yaml"), "utf-8"));
+      assert.deepEqual(manifest.command, [pm, "run", "start"]);
+      const port = await freePort();
+      env.DATABRICKS_APP_PORT = String(port);
+      const child = spawn(manifest.command[0], manifest.command.slice(1), {
+        cwd: appDir,
+        env,
+        stdio: "inherit",
+        detached: true,
+      });
+      let startError: Error | undefined;
+      child.once("error", (error) => {
+        startError = error;
+      });
+      try {
+        const deadline = Date.now() + 30_000;
+        let ready = false;
+        while (Date.now() < deadline) {
+          if (startError) throw startError;
+          assert(
+            child.exitCode === null && child.signalCode === null,
+            "App exited before becoming ready",
+          );
+          try {
+            const response = await fetch(`http://127.0.0.1:${port}/health`, {
+              signal: AbortSignal.timeout(1000),
+            });
+            if (response.ok) {
+              assert.deepEqual(await response.json(), { status: "ok" });
+              ready = true;
+              break;
+            }
+          } catch (error) {
+            if (
+              !(error instanceof TypeError) &&
+              !(error instanceof DOMException)
+            )
+              throw error;
+          }
+          await delay(200);
+        }
+        assert(ready, "App did not become healthy within 30 seconds");
+        const response = await fetch(`http://127.0.0.1:${port}/`, {
+          signal: AbortSignal.timeout(5000),
+        });
+        assert.equal(response.status, 200);
+        // AppKit injects runtime configuration into the built HTML.
+        const servedHtml = await response.text();
+        assert(servedHtml.includes('<div id="root"></div>'));
+        const assetPath = html.match(/src="(\/assets\/[^"]+\.js)"/)?.[1];
+        assert(assetPath, "Built HTML must reference a client bundle");
+        assert(servedHtml.includes(assetPath));
+        const assetResponse = await fetch(
+          `http://127.0.0.1:${port}${assetPath}`,
+          {
+            signal: AbortSignal.timeout(5000),
+          },
+        );
+        assert.equal(assetResponse.status, 200);
+        assert.equal(
+          await assetResponse.text(),
+          readFileSync(join(appDir, "client/dist", assetPath), "utf-8"),
+        );
+        assert.deepEqual(unexpectedRequests, []);
+        console.log(
+          `${pm}: full build, health check, and client serving passed`,
+        );
+      } finally {
+        if (child.pid) {
+          const pid = child.pid;
+          const signal = (name: NodeJS.Signals | 0): boolean => {
+            try {
+              process.kill(-pid, name);
+              return true;
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== "ESRCH")
+                throw error;
+              return false;
+            }
+          };
+          if (signal("SIGTERM")) {
+            for (let attempt = 0; attempt < 50 && signal(0); attempt++)
+              await delay(100);
+            signal("SIGKILL");
+          }
+        }
+      }
+    },
+  );
+}
+
+// ponytail: hand-listed result columns; typegen reads them with DESCRIBE QUERY on a warehouse.
+const TEMPLATE_QUERY_COLUMNS: Record<string, [name: string, type: string][]> = {
+  hello_world: [["value", "STRING"]],
+  mocked_sales: [
+    ["month", "STRING"],
+    ["month_num", "INT"],
+    ["revenue", "INT"],
+    ["expenses", "INT"],
+    ["customers", "INT"],
+  ],
+};
+
+/** Writes the query types typegen generates for the app's SQL files once a warehouse describes them. */
+function writeQueryTypes(appDir: string): void {
+  const queriesDir = join(appDir, "config/queries");
+  const files = readdirSync(queriesDir).filter((file) => file.endsWith(".sql"));
+  const names = files.map((file) => file.replace(/\.sql$/, ""));
+  assert.deepEqual(
+    [...names].sort(),
+    Object.keys(TEMPLATE_QUERY_COLUMNS).sort(),
+    "List the result columns of every template query in TEMPLATE_QUERY_COLUMNS",
+  );
+  const schemas = names.map((name, i) => {
+    const describe = {
+      result: { dataArray: TEMPLATE_QUERY_COLUMNS[name] },
+    } as DatabricksStatementExecutionResponse;
+    const sql = readFileSync(join(queriesDir, files[i]), "utf-8");
+    return { name, type: convertToQueryType(describe, sql, name).type };
+  });
+  const typesDir = join(appDir, "shared/appkit-types");
+  mkdirSync(typesDir, { recursive: true });
+  writeFileSync(
+    join(typesDir, "analytics.d.ts"),
+    generateQueryTypeDeclarations(schemas),
+  );
+}
+
+// AI Search results have no ID and are replaced on every search, so they are keyed by rank.
+const ALL_PLUGINS_LINT_FINDINGS = [
+  "client/src/pages/ai-search/AiSearchPage.tsx react/no-array-index-key",
+];
+
+/** Installs a scaffold that keeps every plugin's code, then typechecks and lints it. */
+export function checkAllPluginsTemplate(
+  appDir: string,
+  pm: PackageManager,
+): Promise<void> {
+  return withInstalledApp(appDir, pm, async ({ env, run }) => {
+    writeQueryTypes(appDir);
+    run(pm, ["run", "typecheck"]);
+    ownGitRoot(appDir, env);
+    assert.deepEqual(
+      lintApp(appDir, env)
+        .map(({ code, filename }) => `${filename} ${ruleOf(code)}`)
+        .sort(),
+      ALL_PLUGINS_LINT_FINDINGS,
+      "oxlint findings in the scaffold with every plugin",
+    );
+    run(pm, ["run", "lint:ast-grep"]);
+    console.log(`${pm}: every plugin's code typechecks and lints`);
+  });
 }

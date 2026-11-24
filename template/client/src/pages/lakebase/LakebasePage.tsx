@@ -10,14 +10,16 @@ import {
 } from '@databricks/appkit-ui/react';
 import { useState, useEffect } from 'react';
 import { Check, X } from 'lucide-react';
-import { fetchOrThrow } from '../../lib/fetch-or-throw';
+import { z } from 'zod';
+import { fetchJson, fetchOrThrow } from '../../lib/fetch-or-throw';
 
-interface Todo {
-  id: number;
-  title: string;
-  completed: boolean;
-  created_at: string;
-}
+const Todo = z.object({
+  id: z.number(),
+  title: z.string(),
+  completed: z.boolean(),
+  created_at: z.string(),
+});
+type Todo = z.infer<typeof Todo>;
 
 export function LakebasePage() {
   const [todos, setTodos] = useState<Todo[]>([]);
@@ -27,11 +29,12 @@ export function LakebasePage() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    fetch('/api/lakebase/todos')
-      .then((res) => {
-        if (!res.ok) throw new Error(`Failed to fetch todos: ${res.statusText}`);
-        return res.json() as Promise<Todo[]>;
-      })
+    fetchJson(
+      '/api/lakebase/todos',
+      undefined,
+      z.array(Todo),
+      (r) => `Failed to fetch todos: ${r.statusText}`,
+    )
       .then(setTodos)
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load todos'))
       .finally(() => setLoading(false));
@@ -44,16 +47,16 @@ export function LakebasePage() {
 
     setSubmitting(true);
     try {
-      const res = await fetchOrThrow(
+      const created = await fetchJson(
         '/api/lakebase/todos',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ title }),
         },
+        Todo,
         (r) => `Failed to create todo: ${r.statusText}`,
       );
-      const created = (await res.json()) as Todo;
       setTodos((prev) => [created, ...prev]);
       setNewTitle('');
     } catch (err) {
@@ -64,12 +67,12 @@ export function LakebasePage() {
 
   const toggleTodo = async (id: number) => {
     try {
-      const res = await fetchOrThrow(
+      const updated = await fetchJson(
         `/api/lakebase/todos/${id}`,
         { method: 'PATCH' },
+        Todo,
         (r) => `Failed to update todo: ${r.statusText}`,
       );
-      const updated = (await res.json()) as Todo;
       setTodos((prev) => prev.map((t) => (t.id === id ? updated : t)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update todo');
@@ -102,7 +105,7 @@ export function LakebasePage() {
             A simple CRUD example powered by Databricks Lakebase (PostgreSQL).
           </p>
 
-          <form onSubmit={addTodo} className="flex gap-2 mb-6">
+          <form onSubmit={(e) => void addTodo(e)} className="flex gap-2 mb-6">
             <Input
               placeholder="What needs to be done?"
               value={newTitle}
@@ -147,7 +150,7 @@ export function LakebasePage() {
                 >
                   <button
                     type="button"
-                    onClick={() => toggleTodo(todo.id)}
+                    onClick={() => void toggleTodo(todo.id)}
                     className={`h-5 w-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
                       todo.completed
                         ? 'bg-primary border-primary text-primary-foreground'
@@ -165,7 +168,7 @@ export function LakebasePage() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => deleteTodo(todo.id)}
+                    onClick={() => void deleteTodo(todo.id)}
                     className="text-muted-foreground hover:text-destructive shrink-0"
                     aria-label="Delete todo"
                   >

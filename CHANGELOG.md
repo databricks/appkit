@@ -228,6 +228,33 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+# Changelog
+
+## [0.104.1](https://github.com/databricks/appkit/compare/v0.104.0...v0.104.1) (2026-11-24)
+
+### appkit
+
+* **appkit:** publish a streamed design page only once its mock is final ([#746](https://github.com/databricks/appkit/issues/746)) ([dc20841](https://github.com/databricks/appkit/commit/dc2084134b563e4bf157c6295e61d6e709a8f642))
+
+
+## [0.104.0](https://github.com/databricks/appkit/compare/v0.103.0...v0.104.0) (2026-11-23)
+
+### template
+
+* **template:** lint every plugin's code and ban type escape hatches ([#743](https://github.com/databricks/appkit/issues/743)) ([11c2c56](https://github.com/databricks/appkit/commit/11c2c5640e653d1137eeafe5ff9cc74c67aa2940))
+
+
+## [0.103.0](https://github.com/databricks/appkit/compare/v0.102.0...v0.103.0) (2026-11-23)
+
+### appkit
+
+* **appkit:** design pages report render failures and success ([#745](https://github.com/databricks/appkit/issues/745)) ([fda3830](https://github.com/databricks/appkit/commit/fda383040aad839892fd6836b7045a54f1ce18e8))
+
+
 ## [0.102.0](https://github.com/databricks/appkit/compare/v0.101.0...v0.102.0) (2026-11-20)
 
 ### appkit-ui

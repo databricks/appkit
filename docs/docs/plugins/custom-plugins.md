@@ -48,11 +48,11 @@ Author the manifest as JSON, import it, and attach it to a [`Plugin`](../api/app
 
 ```typescript
 // my-plugin/index.ts
-import { Plugin, toPlugin, type PluginManifest } from "@databricks/appkit";
+import { defineManifest, Plugin, toPlugin } from "@databricks/appkit";
 import manifest from "./manifest.json";
 
 class MyPlugin extends Plugin {
-  static manifest = manifest as PluginManifest<"my-plugin">;
+  static manifest = defineManifest<"my-plugin">(manifest);
 
   async setup() {
     // Initialize your plugin
