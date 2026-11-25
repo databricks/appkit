@@ -63,7 +63,11 @@ let journalTrusted: boolean;
 let tagged: boolean;
 let keptInPublic: string[];
 let ownedOutside: string[];
-let blockers: { database: string; count: number }[];
+let blockers: {
+  kind: "owned" | "granted";
+  database: string;
+  count: number;
+}[];
 const queries: string[] = [];
 const pool = {
   query: vi.fn(async (text: string) => {
@@ -978,7 +982,34 @@ describe("runInit — hand-off failures", () => {
     );
   });
 
-  test("a failed role delete lists what blocks it", async () => {
+  test("an extension the owner has is named with the manual command, and nothing is deleted", async () => {
+    const lakebase = project();
+    ownedOutside = ["extension pgcrypto"];
+
+    await expect(init(appOn(lakebase))).rejects.toThrow(
+      `what else it owns on this branch: extension pgcrypto. .env already points at the branch. Reassign or drop them, or take them all with \`databricks postgres delete-role ${DEV}/roles/dbrx-apps-${SP} --reassign-owned-to ${DEV}/roles/alice\`, then rerun \`appkit db init\`.`,
+    );
+    expect(lakebase.calls.some((call) => call.startsWith("deleteRole"))).toBe(
+      false,
+    );
+  });
+
+  test("an owner with objects in another database is refused before the delete, which cannot reassign them", async () => {
+    const lakebase = project();
+    blockers = [
+      { kind: "owned", database: "analytics", count: 3 },
+      { kind: "granted", database: "databricks_postgres", count: 2 },
+    ];
+
+    await expect(init(appOn(lakebase))).rejects.toThrow(
+      `Refusing to hand schema app in database databricks_postgres on ${devBranchId(USER)} to you: role "${SP}" also owns objects in other databases on this branch, which deleting it cannot reassign: database analytics (3). .env already points at the branch. Reassign or drop them in those databases, then rerun \`appkit db init\`.`,
+    );
+    expect(lakebase.calls.some((call) => call.startsWith("deleteRole"))).toBe(
+      false,
+    );
+  });
+
+  test("a failed role delete lists the shared objects the owner has apart from its privileges", async () => {
     const lakebase = project();
     lakebase.deleteRoleError = new LakebaseApiError(
       "delete role",
@@ -986,16 +1017,27 @@ describe("runInit — hand-off failures", () => {
       { statusCode: 500 },
     );
     blockers = [
-      { database: "analytics", count: 3 },
-      { database: "databricks_postgres", count: 1 },
+      { kind: "owned", database: "", count: 1 },
+      { kind: "granted", database: "analytics", count: 2 },
+      { kind: "granted", database: "databricks_postgres", count: 1 },
     ];
 
     await expect(init(appOn(lakebase))).rejects.toThrow(
-      `These objects and privileges of "${SP}" block the delete: database analytics (3), database databricks_postgres (1). .env already points at the branch. Drop them or reassign them to you, then rerun \`appkit db init\`.`,
+      `failed (Lakebase: delete role failed: INTERNAL_ERROR). "${SP}" still owns shared objects (1), which block the delete. Privileges granted to "${SP}": database analytics (2), database databricks_postgres (1). .env already points at the branch. Reassign or drop what it owns and revoke its privileges, then rerun \`appkit db init\`.`,
     );
     expect(pool.query).toHaveBeenCalledWith(
       expect.stringContaining("pg_shdepend"),
       [SP],
+    );
+  });
+
+  test("a failed role delete with only privileges says to revoke them", async () => {
+    const lakebase = project();
+    lakebase.deleteRoleError = new Error("timeout");
+    blockers = [{ kind: "granted", database: "analytics", count: 2 }];
+
+    await expect(init(appOn(lakebase))).rejects.toThrow(
+      `failed (timeout). Privileges granted to "${SP}": database analytics (2). .env already points at the branch. Revoke its privileges, then rerun \`appkit db init\`.`,
     );
   });
 
