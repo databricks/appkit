@@ -686,4 +686,41 @@ targets:
       readBundle(noHost, {})?.targets.map((target) => target.host),
     ).toEqual([null]);
   });
+
+  test.each([
+    [
+      "an absolute path, which stays as it is",
+      "/Workspace/Shared/shop",
+      { kind: "resolved", name: "/Workspace/Shared/shop" },
+    ],
+    [
+      "a relative path, which is relative to the included file",
+      "../app",
+      { kind: "resolved", name: "app" },
+    ],
+    [
+      "nothing, which stays unresolved as written",
+      undefined,
+      { kind: "unresolved", written: "${var.source}" },
+    ],
+  ])(
+    "an included file's source_code_path whose variable resolves to %s",
+    (_label, source, expected) => {
+      const root = tempApp({
+        "databricks.yml": `include:
+  - resources/*.yml
+${source === undefined ? "" : `variables:\n  source:\n    default: ${source}\n`}`,
+        "resources/app.yml": `resources:
+  apps:
+    app:
+      name: shop
+      source_code_path: \${var.source}
+`,
+      });
+
+      expect(readBundle(root, {})?.targets[0]?.apps[0]?.sourceCodePath).toEqual(
+        expected,
+      );
+    },
+  );
 });

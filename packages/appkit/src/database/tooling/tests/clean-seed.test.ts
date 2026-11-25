@@ -305,6 +305,26 @@ describe("deleteSessionBranch", () => {
   });
 });
 
+test.each([
+  ["clean", runClean],
+  ["seed", runSeed],
+])(
+  "%s keeps the import error of a schema.ts that fails to import, for the CLI to show",
+  async (_command, run) => {
+    const root = tempApp({
+      [SEED_FILE]: "select 1;",
+      "config/database/schema.ts": "export const schema = (",
+    });
+    writableEnvBranch.mockResolvedValue(devBranch);
+
+    const error = (await run(fakeContext({ root })).catch(
+      (caught: unknown) => caught,
+    )) as Error;
+
+    expect((error.cause as Error).message).toMatch(/schema\.ts:\d+:\d+/);
+  },
+);
+
 describe("runSeed", () => {
   test("runs config/database/seed.sql in one transaction on your branch, app schema first", async () => {
     const sql =

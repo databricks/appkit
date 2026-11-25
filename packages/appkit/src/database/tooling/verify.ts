@@ -144,6 +144,7 @@ async function verifyLocal(ctx: DbContext): Promise<LocalVerifyReport> {
   const branch = env.branch.name;
   const schema = await loadDatabaseSchema(
     path.join(ctx.root, DEFAULT_SCHEMA_FILE),
+    { showImportError: true },
   );
   return withBranchPool(ctx, async (pool) => {
     const client = await pool.connect();
@@ -238,9 +239,9 @@ async function readApp(
       return null;
     }
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Could not read app ${name}: ${shown(message)}`, {
-      cause: error,
-    });
+    // No cause: the CLI prints a cause's message as is, and this one is the
+    // API's raw text.
+    throw new Error(`Could not read app ${name}: ${shown(message)}`);
   }
 }
 

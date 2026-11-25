@@ -90,8 +90,23 @@ export interface DeployTarget {
 
 type Yaml = Record<string, unknown> | undefined;
 
+/**
+ * An included file's source_code_path as written, with that file's folder
+ * relative to databricks.yml's: the CLI resolves the path against the file
+ * that declares it, after its references. Merged as a single value.
+ */
+class IncludedSourcePath {
+  constructor(
+    readonly folder: string,
+    readonly written: string,
+  ) {}
+}
+
 function record(value: unknown): Yaml {
-  return value && typeof value === "object" && !Array.isArray(value)
+  return value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    !(value instanceof IncludedSourcePath)
     ? (value as Record<string, unknown>)
     : undefined;
 }
@@ -405,6 +420,24 @@ function declaredValue(
   };
 }
 
+/** An app's source_code_path, relative to databricks.yml's folder once resolved; an absolute one stays as it is. */
+function sourcePathValue(
+  written: unknown,
+  resolve: (value: unknown) => string | null,
+): BundleValue | null {
+  if (!(written instanceof IncludedSourcePath)) {
+    return declaredValue(written, resolve);
+  }
+  const value = declaredValue(written.written, resolve);
+  if (value?.kind !== "resolved" || path.posix.isAbsolute(value.name)) {
+    return value;
+  }
+  return {
+    kind: "resolved",
+    name: path.posix.join(written.folder, value.name),
+  };
+}
+
 /** A `${…}` where only a deploy puts a structure: the files cannot say what it binds. */
 function unresolvedAt(at: string, written: unknown): PostgresBinding {
   return {
@@ -457,7 +490,7 @@ function bundleApps(
       key,
       declaredName: typeof declared === "string" && declared ? declared : null,
       name: resolve(declared),
-      sourceCodePath: declaredValue(app?.source_code_path, resolve),
+      sourceCodePath: sourcePathValue(app?.source_code_path, resolve),
       postgres: appPostgres(
         `resources.apps.${key}.resources`,
         app?.resources,
@@ -505,8 +538,8 @@ export function readDeployTarget(
 }
 
 /**
- * An included file's app source_code_paths, made relative to databricks.yml's
- * folder: the CLI resolves a path against the file that declares it.
+ * An included file's app source_code_paths, kept with the file's folder so
+ * they resolve against it once their references are resolved.
  */
 function rebaseSourcePaths(
   file: Record<string, unknown>,
@@ -517,12 +550,8 @@ function rebaseSourcePaths(
     for (const app of Object.values(record(record(resources)?.apps) ?? {})) {
       const declared = record(app);
       const source = declared?.source_code_path;
-      if (
-        declared &&
-        typeof source === "string" &&
-        !path.posix.isAbsolute(source)
-      ) {
-        declared.source_code_path = path.posix.join(
+      if (declared && typeof source === "string") {
+        declared.source_code_path = new IncludedSourcePath(
           folder.split(path.sep).join("/"),
           source,
         );

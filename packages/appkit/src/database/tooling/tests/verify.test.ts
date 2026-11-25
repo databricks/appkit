@@ -19,6 +19,7 @@ vi.mock("../guard", async (importOriginal) => ({
   resolveEnvBranch,
 }));
 
+import { fail } from "../../../../../shared/src/cli/commands/db/output";
 import type { WorkspaceRequest } from "../../../workspace-client";
 import type { DbContext } from "../context";
 import { devBranchId, sessionBranchId } from "../naming";
@@ -670,6 +671,21 @@ describe("runVerify", () => {
     await expect(runVerify(ctx)).rejects.toThrow(
       "No config/database/schema.ts yet, so there is nothing to verify. Run `appkit db introspect` to write it from the branch's tables, or create it.",
     );
+    expect(withBranchPool).not.toHaveBeenCalled();
+  });
+
+  test("a schema.ts that fails to import keeps the import error for the CLI to show", async () => {
+    const ctx = app();
+    fs.writeFileSync(
+      path.join(ctx.root, "config/database/schema.ts"),
+      "export const schema = (",
+    );
+
+    const error = (await runVerify(ctx).catch(
+      (caught: unknown) => caught,
+    )) as Error;
+
+    expect((error.cause as Error).message).toMatch(/schema\.ts:\d+:\d+/);
     expect(withBranchPool).not.toHaveBeenCalled();
   });
 });
@@ -1806,6 +1822,29 @@ describe("runVerify --deployed", () => {
 
     await expect(runVerify(ctx, DEPLOYED)).rejects.toThrow(
       "Could not read app my-app: Forbidden",
+    );
+  });
+
+  test("the CLI prints an apps API error with its control characters escaped", async () => {
+    const { ctx } = deployedApp({
+      app: Object.assign(new Error("Forbidden\u001b[2J"), { statusCode: 403 }),
+    });
+    const caught = await runVerify(ctx, DEPLOYED).catch(
+      (thrown: unknown) => thrown,
+    );
+    const printed = vi.spyOn(console, "error").mockImplementation(() => {});
+    let printedLines: unknown[][];
+    try {
+      fail(caught);
+      printedLines = printed.mock.calls;
+    } finally {
+      printed.mockRestore();
+      process.exitCode = undefined;
+    }
+
+    expect(printedLines).toHaveLength(1);
+    expect(String(printedLines[0])).toMatch(
+      /Could not read app my-app: Forbidden\\u001b\[2J$/,
     );
   });
 

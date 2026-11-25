@@ -649,6 +649,16 @@ describe("runIntrospect", () => {
     },
   );
 
+  test("a schema.ts that fails to import keeps the import error for the CLI to show", async () => {
+    const root = tempApp({ [SCHEMA]: "export const schema = ;\n" });
+
+    const error = await refusal(root);
+
+    expect(((error.cause as Error).cause as Error).message).toMatch(
+      /schema\.ts:\d+:\d+/,
+    );
+  });
+
   test.each([
     ["schema.ts", SCHEMA, previousSchema],
     ["schema.ts.bak", `${SCHEMA}.bak`, "// an older backup\n"],
