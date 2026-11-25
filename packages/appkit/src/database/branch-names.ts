@@ -3,13 +3,13 @@
 // tooling/, which runtime code may not import.
 
 /** Lakebase's limit on a branch id. */
-const MAX_BRANCH_ID = 63;
-const DEV_PREFIX = "dev-";
-const SESSION_PREFIX = "session-";
+export const MAX_BRANCH_ID = 63;
+export const DEV_PREFIX = "dev-";
+export const SESSION_PREFIX = "session-";
 /** Hex characters of the user's name hash in both shapes. */
-const HASH_LENGTH = 6;
+export const HASH_LENGTH = 6;
 /** The longest session id that keeps session-<hash6>-<id> within MAX_BRANCH_ID. */
-const SESSION_ID_LENGTH =
+export const SESSION_ID_LENGTH =
   MAX_BRANCH_ID - SESSION_PREFIX.length - HASH_LENGTH - 1;
 
 const DEVELOPMENT_BRANCH_SHAPES = {
