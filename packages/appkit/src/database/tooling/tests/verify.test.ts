@@ -225,6 +225,12 @@ beforeEach(() => {
   });
 });
 
+/** Classify the next .env branch as resolveEnvBranch does, through the Lakebase API and current user app() fakes. */
+async function classifyThroughApi(): Promise<void> {
+  const guard = await vi.importActual<typeof import("../guard")>("../guard");
+  resolveEnvBranch.mockImplementationOnce(guard.resolveEnvBranch);
+}
+
 afterEach(() => {
   for (const root of roots.splice(0)) {
     fs.rmSync(root, { recursive: true, force: true });
@@ -402,6 +408,8 @@ describe("runVerify", () => {
       schemaOwner: "deployed-sp",
     });
 
+    await classifyThroughApi();
+
     expect(await runVerify(ctx)).toMatchObject({
       forkCopy: expect.stringContaining(
         `${devBranchId(USER)} still holds the rows the fork copied`,
@@ -421,6 +429,8 @@ describe("runVerify", () => {
       recorded: recordedAs(ctx, two),
       schemaOwner: "bob",
     });
+
+    await classifyThroughApi();
 
     expect(await runVerify(ctx)).toMatchObject({ forkCopy: null, ok: true });
   });
