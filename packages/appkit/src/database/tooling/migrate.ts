@@ -106,6 +106,24 @@ class UnappliedMigrationError extends Error implements MigrationWarnings {
   }
 }
 
+/**
+ * An interrupted `appkit db introspect` leaves its migration written but not
+ * recorded, and running it fails on what the branch already has.
+ */
+function withIntrospectRecovery(error: unknown): unknown {
+  if (
+    !(error instanceof MigrationApplyError) ||
+    !error.failed ||
+    !/^\d{4}_introspect$/.test(error.failed)
+  ) {
+    return error;
+  }
+  return new Error(
+    `${error.message} If an interrupted \`appkit db introspect\` wrote ${error.failed}, the branch already has what it does: rerun \`appkit db introspect\` to record it.`,
+    { cause: error },
+  );
+}
+
 /** Why migrations must not be applied to the `.env` branch; undefined when they may. */
 async function applyBlocker(ctx: DbContext): Promise<string | undefined> {
   const env = await resolveEnvBranch(ctx);
@@ -176,7 +194,7 @@ async function migrateHolding(
   try {
     outcome = await applyToEnvBranch(ctx, lock.folder, schema);
   } catch (error) {
-    if (!generated) throw error;
+    if (!generated) throw withIntrospectRecovery(error);
     const file = path.relative(ctx.root, generated.file);
     // A failed migration left in the journal runs first on every later try, so a
     // fix in schema.ts would stack behind it and never apply.
@@ -191,7 +209,12 @@ async function migrateHolding(
         { cause: error },
       );
     }
-    throw new UnappliedMigrationError(ctx.root, generated, warnings, error);
+    throw new UnappliedMigrationError(
+      ctx.root,
+      generated,
+      warnings,
+      withIntrospectRecovery(error),
+    );
   }
   return {
     generated,
