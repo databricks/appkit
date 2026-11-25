@@ -1036,6 +1036,20 @@ describe("runInit — schema start", () => {
     );
   });
 
+  test("a failed install on a new fork leaves the copy tagged, so the next init rebuilds it", async () => {
+    const ctx = appOn(project(), {}, { files: { "package.json": "{}" } });
+
+    await expect(
+      runInit(ctx, {
+        runCommand: () => {
+          throw new Error("ENOTFOUND registry");
+        },
+      }),
+    ).rejects.toThrow(/^Installing drizzle-kit failed\./);
+    expect(tagWrites()).toEqual(["insert"]);
+    expect(cleanHolding).not.toHaveBeenCalled();
+  });
+
   test("clean drops the schema, then applies the committed migrations without generating", async () => {
     const ctx = appOn(project(), {}, { files: { "package.json": "{}" } });
 
