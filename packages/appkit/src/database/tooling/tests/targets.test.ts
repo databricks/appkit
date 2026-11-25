@@ -490,7 +490,7 @@ describe("readDeployTarget", () => {
         "projects/p/branches/production/databases/databricks-postgres",
       ),
     });
-    expect(readDeployTarget(root)).toEqual({
+    expect(readDeployTarget(root, {})).toEqual({
       branch: "projects/p/branches/production",
       database: "projects/p/branches/production/databases/databricks-postgres",
     });
@@ -506,7 +506,7 @@ targets:
     default: true
 `,
     });
-    expect(readDeployTarget(root)).toEqual({
+    expect(readDeployTarget(root, {})).toEqual({
       branch: "projects/p/branches/main",
       database: null,
     });
@@ -524,8 +524,30 @@ targets:
       }),
     });
 
-    expect(readDeployTarget(root)).toEqual({
+    expect(readDeployTarget(root, {})).toEqual({
       branch: "projects/q/branches/staging",
+      database: "projects/q/branches/staging/databases/staging-db",
+    });
+  });
+
+  test("a BUNDLE_VAR_ value wins over variable-overrides.json, as it does for a deploy from this shell", () => {
+    const root = tempApp({
+      "databricks.yml": databricksYml(
+        "projects/p/branches/production",
+        "projects/p/branches/production/databases/db",
+      ),
+      ".databricks/bundle/default/variable-overrides.json": JSON.stringify({
+        postgres_branch: "projects/q/branches/staging",
+        postgres_database: "projects/q/branches/staging/databases/staging-db",
+      }),
+    });
+
+    expect(
+      readDeployTarget(root, {
+        BUNDLE_VAR_postgres_branch: "projects/q/branches/qa",
+      }),
+    ).toEqual({
+      branch: "projects/q/branches/qa",
       database: "projects/q/branches/staging/databases/staging-db",
     });
   });
@@ -541,13 +563,16 @@ targets:
       }),
     });
 
-    expect(readDeployTarget(root)).toBeNull();
+    expect(readDeployTarget(root, {})).toBeNull();
   });
 
   test("null without databricks.yml or without a postgres binding", () => {
-    expect(readDeployTarget(tempApp())).toBeNull();
+    expect(readDeployTarget(tempApp(), {})).toBeNull();
     expect(
-      readDeployTarget(tempApp({ "databricks.yml": "bundle:\n  name: x\n" })),
+      readDeployTarget(
+        tempApp({ "databricks.yml": "bundle:\n  name: x\n" }),
+        {},
+      ),
     ).toBeNull();
   });
 });

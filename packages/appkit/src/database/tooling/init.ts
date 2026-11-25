@@ -667,7 +667,7 @@ async function initHolding(
 
   const configured = {
     local: readLocalTarget(ctx.env),
-    deploy: readDeployTarget(ctx.root),
+    deploy: readDeployTarget(ctx.root, ctx.env),
   };
   const project = resolveProject(configured.local, configured.deploy);
   const { local, deploy } = scopeToProject(
@@ -690,7 +690,7 @@ async function initHolding(
       identity,
       session: local.session,
       ttl,
-      boundary: readDeployBoundary(ctx.root),
+      boundary: readDeployBoundary(ctx.root, ctx.env),
       envFile,
       deploy,
       onStep,

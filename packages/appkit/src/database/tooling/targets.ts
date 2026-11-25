@@ -436,17 +436,21 @@ function bundleApps(
 /**
  * The branch and database the default target deploys to from this checkout:
  * its first app binding the files resolve, else its postgres_branch and
- * postgres_database variables, with the checkout's variable-overrides.json
- * applied as a deploy would. null without databricks.yml or a branch the
- * files resolve.
+ * postgres_database variables, with env's BUNDLE_VAR_ variables and the
+ * checkout's variable-overrides.json applied as a deploy would. null without
+ * databricks.yml or a branch the files resolve.
  */
-export function readDeployTarget(root: string): DeployTarget | null {
-  const targets = readBundle(root)?.targets ?? [];
+export function readDeployTarget(
+  root: string,
+  env: NodeJS.ProcessEnv,
+): DeployTarget | null {
+  const targets = readBundle(root, env)?.targets ?? [];
   const target =
     targets.find((candidate) => candidate.isDefault) ??
     targets.find((candidate) => candidate.name === "default");
   if (!target) return null;
-  const bindings: TargetBindings = target.overridden ?? target;
+  const bindings: TargetBindings =
+    target.environment ?? target.overridden ?? target;
   const resolved = (value: BundleValue | null) =>
     value?.kind === "resolved" ? value.name : null;
   const binding = bindings.apps
