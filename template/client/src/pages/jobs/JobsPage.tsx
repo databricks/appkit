@@ -6,36 +6,105 @@ import {
   CardHeader,
   CardTitle,
 } from '@databricks/appkit-ui/react';
-import { useCallback, useId, useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
+import { z } from 'zod';
+import { fetchJson, fetchOrThrow } from '../../lib/fetch-or-throw';
 
 const MAX_STREAM_LOG = 500;
 
-interface Run {
-  runId: number;
-  state?: { lifeCycleState?: string; resultState?: string };
-  startTime?: number;
-  endTime?: number;
-}
+const Run = z.object({
+  runId: z.number(),
+  state: z
+    .object({
+      lifeCycleState: z.string().optional(),
+      resultState: z.string().optional(),
+    })
+    .optional(),
+  startTime: z.number().optional(),
+  endTime: z.number().optional(),
+});
+type Run = z.infer<typeof Run>;
+
+const JobStatus = z.object({
+  status: z.string().nullable(),
+  run: Run.nullable(),
+});
+type JobStatus = z.infer<typeof JobStatus>;
+
+const RunList = z.object({ runs: z.array(Run).optional() });
 
 function formatTime(ts?: number) {
   if (!ts) return '\u2014';
   return new Date(ts).toLocaleString();
 }
 
-function stateColor(state?: string) {
+function stateDotColor(state: string) {
   switch (state) {
     case 'SUCCESS':
-      return 'text-green-600';
+      return 'bg-success';
     case 'RUNNING':
     case 'PENDING':
-      return 'text-yellow-600';
+      return 'bg-warning';
     case 'FAILED':
     case 'TIMEDOUT':
     case 'SKIPPED':
     case 'INTERNAL_ERROR':
-      return 'text-red-600';
+      return 'bg-destructive';
     default:
-      return 'text-muted-foreground';
+      return 'bg-muted-foreground';
+  }
+}
+
+// The state's color is a dot, not the text: the warning color is too light for text on a light card.
+function RunState({
+  state,
+  fallback,
+}: {
+  state: string | null | undefined;
+  fallback: string;
+}) {
+  if (!state) return <>{fallback}</>;
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        aria-hidden
+        className={`size-2 rounded-full ${stateDotColor(state)}`}
+      />
+      {state}
+    </span>
+  );
+}
+
+const httpError = (res: Response) => `HTTP ${res.status}: ${res.statusText}`;
+
+async function listRuns(jobKey: string): Promise<Run[]> {
+  const { runs } = await fetchJson(
+    `/api/jobs/${jobKey}/runs?limit=10`,
+    undefined,
+    RunList,
+    httpError,
+  );
+  return runs ?? [];
+}
+
+async function readStreamData(
+  res: Response,
+  onData: (payloads: string[]) => void,
+): Promise<void> {
+  const reader = res.body?.getReader();
+  if (!reader) return;
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    const payloads = lines
+      .filter((line) => line.startsWith('data: '))
+      .map((line) => line.slice(6));
+    if (payloads.length > 0) onData(payloads);
   }
 }
 
@@ -43,10 +112,7 @@ export function JobsPage() {
   const inputId = useId();
   const [jobKey, setJobKey] = useState('default');
   const [runs, setRuns] = useState<Run[]>([]);
-  const [status, setStatus] = useState<{
-    status: string | null;
-    run: Run | null;
-  } | null>(null);
+  const [status, setStatus] = useState<JobStatus | null>(null);
   const [loading, setLoading] = useState('');
   const [error, setError] = useState<string | null>(null);
   const streamIdRef = useRef(0);
@@ -54,96 +120,77 @@ export function JobsPage() {
     [],
   );
 
-  const fetchStatus = useCallback(async () => {
+  const fetchStatus = async () => {
     setLoading('status');
     setError(null);
     try {
-      const res = await fetch(`/api/jobs/${jobKey}/status`);
-      if (!res.ok) throw new Error(await res.text());
-      setStatus(await res.json());
+      setStatus(
+        await fetchJson(
+          `/api/jobs/${jobKey}/status`,
+          undefined,
+          JobStatus,
+          httpError,
+        ),
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading('');
     }
-  }, [jobKey]);
+    setLoading('');
+  };
 
-  const fetchRuns = useCallback(async () => {
+  const fetchRuns = async () => {
     setLoading('runs');
     setError(null);
     try {
-      const res = await fetch(`/api/jobs/${jobKey}/runs?limit=10`);
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      setRuns(data.runs ?? []);
+      setRuns(await listRuns(jobKey));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading('');
     }
-  }, [jobKey]);
+    setLoading('');
+  };
 
-  const triggerRun = useCallback(async () => {
+  const triggerRun = async () => {
     setLoading('run');
     setError(null);
     setStreamLog([]);
     streamIdRef.current = 0;
     try {
-      const res = await fetch(`/api/jobs/${jobKey}/run?stream=true`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetchOrThrow(
+        `/api/jobs/${jobKey}/run?stream=true`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' } },
+        httpError,
+      );
+      await readStreamData(res, (payloads) => {
+        const newEntries = payloads.map((text) => ({
+          id: ++streamIdRef.current,
+          text,
+        }));
+        setStreamLog((prev) => {
+          const next = [...prev, ...newEntries];
+          return next.length > MAX_STREAM_LOG
+            ? next.slice(next.length - MAX_STREAM_LOG)
+            : next;
+        });
       });
-      if (!res.ok) throw new Error(await res.text());
-
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-      if (!reader) return;
-
-      let buffer = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-        const newEntries: Array<{ id: number; text: string }> = [];
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const id = ++streamIdRef.current;
-            newEntries.push({ id, text: line.slice(6) });
-          }
-        }
-        if (newEntries.length > 0) {
-          setStreamLog((prev) => {
-            const next = [...prev, ...newEntries];
-            return next.length > MAX_STREAM_LOG
-              ? next.slice(next.length - MAX_STREAM_LOG)
-              : next;
-          });
-        }
-      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading('');
     }
-  }, [jobKey]);
+    setLoading('');
+  };
 
-  const cancelRun = useCallback(
-    async (runId: number) => {
-      setError(null);
-      try {
-        const res = await fetch(`/api/jobs/${jobKey}/runs/${runId}`, {
-          method: 'DELETE',
-        });
-        if (!res.ok && res.status !== 204) throw new Error(await res.text());
-        await fetchRuns();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    },
-    [jobKey, fetchRuns],
-  );
+  const cancelRun = async (runId: number) => {
+    setError(null);
+    try {
+      await fetchOrThrow(
+        `/api/jobs/${jobKey}/runs/${runId}`,
+        { method: 'DELETE' },
+        httpError,
+      );
+      await fetchRuns();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   return (
     <div className="space-y-6 w-full max-w-4xl mx-auto">
@@ -169,16 +216,20 @@ export function JobsPage() {
           className="rounded-md border border-input bg-background px-3 py-1.5 text-sm w-full sm:w-48"
         />
         <Button
-          onClick={fetchStatus}
+          onClick={() => void fetchStatus()}
           variant="outline"
           disabled={!!loading}
         >
           {loading === 'status' ? 'Loading...' : 'Get Status'}
         </Button>
-        <Button onClick={fetchRuns} variant="outline" disabled={!!loading}>
+        <Button
+          onClick={() => void fetchRuns()}
+          variant="outline"
+          disabled={!!loading}
+        >
           {loading === 'runs' ? 'Loading...' : 'List Runs'}
         </Button>
-        <Button onClick={triggerRun} disabled={!!loading}>
+        <Button onClick={() => void triggerRun()} disabled={!!loading}>
           {loading === 'run' ? 'Running...' : 'Trigger Run'}
         </Button>
       </div>
@@ -197,10 +248,8 @@ export function JobsPage() {
           <CardContent>
             <p>
               <span className="text-muted-foreground">State: </span>
-              <span
-                className={`font-medium ${stateColor(status.status ?? undefined)}`}
-              >
-                {status.status ?? 'No runs'}
+              <span className="font-medium">
+                <RunState state={status.status} fallback="No runs" />
               </span>
             </p>
             {status.run && (
@@ -234,15 +283,17 @@ export function JobsPage() {
                   {runs.map((run) => (
                     <tr key={run.runId} className="border-b last:border-0">
                       <td className="py-2 pr-4 font-mono">{run.runId}</td>
-                      <td
-                        className={`py-2 pr-4 ${stateColor(run.state?.lifeCycleState)}`}
-                      >
-                        {run.state?.lifeCycleState ?? '\u2014'}
+                      <td className="py-2 pr-4">
+                        <RunState
+                          state={run.state?.lifeCycleState}
+                          fallback={'\u2014'}
+                        />
                       </td>
-                      <td
-                        className={`py-2 pr-4 ${stateColor(run.state?.resultState)}`}
-                      >
-                        {run.state?.resultState ?? '\u2014'}
+                      <td className="py-2 pr-4">
+                        <RunState
+                          state={run.state?.resultState}
+                          fallback={'\u2014'}
+                        />
                       </td>
                       <td className="py-2 pr-4 text-muted-foreground">
                         {formatTime(run.startTime)}
@@ -252,7 +303,7 @@ export function JobsPage() {
                           <Button
                             variant="destructive"
                             size="sm"
-                            onClick={() => cancelRun(run.runId)}
+                            onClick={() => void cancelRun(run.runId)}
                           >
                             Cancel
                           </Button>

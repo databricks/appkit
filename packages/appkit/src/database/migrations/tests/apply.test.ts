@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { MIGRATION_HISTORY_REWRITE } from "shared";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
@@ -450,8 +451,10 @@ describe("applyPendingMigrations", () => {
 
     expect(error).toBeInstanceOf(MigrationHistoryError);
     expect(error).toMatchObject({ refusal: { stranded: ["0001_parallel"] } });
-    expect((error as Error).message).toMatch(
-      /^Migration 0001_parallel is older than 0002_b, which schema "app" already recorded, and was never applied/,
+    expect((error as Error).message).toBe(
+      'Migration 0001_parallel is older than 0002_b, which schema "app" already recorded, and was never applied, so it would never run. ' +
+        `This happens when migrations from parallel branches merge. ${MIGRATION_HISTORY_REWRITE} ` +
+        "No migration was applied.",
     );
     expect(steps(client.statements)).toEqual(["journal table?", "recorded?"]);
   });
@@ -703,7 +706,7 @@ describe("applyPendingMigrations", () => {
       expect(state.recorded).toHaveLength(2);
     });
 
-    test("the same history without the option refuses as stranded, with the regenerate runbook", async () => {
+    test("the same history without the option refuses as stranded, with the history rewrite and no advice to delete main's migration", async () => {
       const { folder, recorded } = strandedBehindABranch();
       const { pool } = fakePool({ recorded });
 
@@ -714,8 +717,10 @@ describe("applyPendingMigrations", () => {
       expect(error).toBeInstanceOf(MigrationHistoryError);
       expect(error).toMatchObject({ refusal: { stranded: ["0001_main"] } });
       expect((error as Error).message).toMatch(
-        /^Migration 0001_main is older than the migration recorded at 1970-01-01T00:00:01\.500Z, which schema "app" already recorded, and was never applied, so it would never run\. .*Delete its \.sql file, snapshot and journal entry, generate the migration again from schema\.ts/,
+        /^Migration 0001_main is older than the migration recorded at 1970-01-01T00:00:01\.500Z, which schema "app" already recorded, and was never applied, so it would never run\. /,
       );
+      expect((error as Error).message).toContain(MIGRATION_HISTORY_REWRITE);
+      expect((error as Error).message).not.toMatch(/delete/i);
     });
 
     test("recorded migrations this checkout lacks with nothing pending (a code rollback) only warn", async () => {

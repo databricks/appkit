@@ -1,11 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import {
-  DEFAULT_SCHEMA_FILE,
-  loadDefaultDatabaseSchema,
-} from "../../../plugins/database/load-schema";
-import { writeDatabaseTypes } from "../../../type-generator/database";
+import { DEFAULT_SCHEMA_FILE } from "../../../plugins/database/load-schema";
+import { loadDatabaseSchema } from "../../../type-generator/database";
 import {
   editedReason,
   markMigrationsApplied,
@@ -18,7 +15,7 @@ import { type DbContext, NO_ENV_BRANCH, withBranchPool } from "../context";
 import { refuseSymlink, SymlinkRefusedError, writeFileAtomic } from "../files";
 import { notYourBranch, resolveEnvBranch, takesWrites } from "../guard";
 import { type HistoryLock, withHistoryLock } from "../history-lock";
-import { DATABASE_TYPES_PATH } from "../migrate";
+import { generatedTypesOf, writeGeneratedTypes } from "../migrate";
 import {
   breakingStatements,
   discardMigrationFiles,
@@ -68,6 +65,7 @@ export interface IntrospectReport {
   /** Tags recorded as applied: the migration, and any an interrupted run wrote but did not record. */
   readonly recorded: readonly string[];
   readonly typesFile: string;
+  readonly operationsTypesFile: string;
 }
 
 /** Introspect would record history the branch or the deployed app contradicts. */
@@ -156,7 +154,7 @@ function refuseDropsOfUnexpressed(
 async function readPreviousSchema(root: string): Promise<Schema | null> {
   if (!fs.existsSync(path.join(root, DEFAULT_SCHEMA_FILE))) return null;
   try {
-    return await loadDefaultDatabaseSchema(root, { showImportError: true });
+    return await loadDatabaseSchema(path.join(root, DEFAULT_SCHEMA_FILE));
   } catch (error) {
     throw new IntrospectRefusedError(
       `Refusing to introspect: ${DEFAULT_SCHEMA_FILE} does not load, so introspect cannot keep the columns it marks private. Fix it, then rerun.`,
@@ -172,9 +170,8 @@ async function readPreviousSchema(root: string): Promise<Schema | null> {
  * that brings history up to the database, and record it as applied. A column
  * the previous schema.ts marks private stays private. Runs only on your dev or
  * session branch, and only when the branch records exactly the committed
- * migrations. A failure puts back schema.ts, the backup,
- * database.d.ts and the migrations folder. One command at a time owns the
- * checkout's history.
+ * migrations. A failure puts back schema.ts, the backup, the generated types
+ * and the migrations folder. One command at a time owns the checkout's history.
  */
 export async function runIntrospect(
   ctx: DbContext,
@@ -291,10 +288,12 @@ export async function introspectHolding(
       );
     }
     const backupFile = `${schemaFile}.bak`;
-    const typesFile = path.join(ctx.root, DATABASE_TYPES_PATH);
+    const generatedTypes = generatedTypesOf(ctx.root);
     const previous = readIfExists(schemaFile);
     const previousBackup = readIfExists(backupFile);
-    const previousTypes = readIfExists(typesFile);
+    const previousTypes = Object.values(generatedTypes).map(
+      (file) => [file, readIfExists(file)] as const,
+    );
     const backsUp = previous !== null && previous !== rendered.source;
     let migration: GeneratedMigration | null = null;
     let recorded: string[] = [];
@@ -302,11 +301,9 @@ export async function introspectHolding(
       if (backsUp) writeFileAtomic(backupFile, previous);
       fs.mkdirSync(path.dirname(schemaFile), { recursive: true });
       writeFileAtomic(schemaFile, rendered.source);
-      let schema: Awaited<ReturnType<typeof loadDefaultDatabaseSchema>>;
+      let schema: Schema;
       try {
-        schema = await loadDefaultDatabaseSchema(ctx.root, {
-          showImportError: true,
-        });
+        schema = await loadDatabaseSchema(schemaFile);
       } catch (error) {
         throw new Error(
           `The schema.ts introspect generated does not load. This is a bug in \`appkit db introspect\`; please report it with the catalog of schema "${schemaName}".`,
@@ -350,7 +347,7 @@ export async function introspectHolding(
           );
         }
       }
-      await writeDatabaseTypes(schema, typesFile);
+      await writeGeneratedTypes(ctx.root, schema);
       // The database already holds what the migrations describe; recording is the last step.
       recorded = recordAsApplied
         ? [...unrecorded, ...(migration ? [migration.tag] : [])]
@@ -361,8 +358,10 @@ export async function introspectHolding(
     } catch (error) {
       writeOrRemove(schemaFile, previous);
       if (backsUp) writeOrRemove(backupFile, previousBackup);
-      writeOrRemove(typesFile, previousTypes);
-      if (migration) discardMigrationFiles(lock, migration);
+      for (const [file, contents] of previousTypes) {
+        writeOrRemove(file, contents);
+      }
+      if (migration) await discardMigrationFiles(lock, migration);
       if (error instanceof IntrospectRefusedError) throw error;
       throw new Error(
         `Introspect changed nothing: ${error instanceof Error ? error.message : String(error)}`,
@@ -393,7 +392,8 @@ export async function introspectHolding(
       approximated: rendered.approximated,
       migration,
       recorded,
-      typesFile,
+      typesFile: generatedTypes.typesFile,
+      operationsTypesFile: generatedTypes.operationsTypesFile,
     };
   });
 }

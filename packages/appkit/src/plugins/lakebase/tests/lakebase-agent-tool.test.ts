@@ -156,6 +156,29 @@ test("LakebasePlugin permits a separate host when using native password authenti
   expect(createLakebasePool).toHaveBeenCalled();
 });
 
+describe("LakebasePlugin - SP pool size", () => {
+  beforeEach(async () => {
+    const { createLakebasePool } = await import("../../../connectors/lakebase");
+    vi.mocked(createLakebasePool).mockClear();
+  });
+
+  test("defaults the SP pool to 105 connections", async () => {
+    const { createLakebasePool } = await import("../../../connectors/lakebase");
+    await makePlugin({}).setup();
+    expect(createLakebasePool).toHaveBeenCalledWith(
+      expect.objectContaining({ max: 105 }),
+    );
+  });
+
+  test("respects an explicit pool.max", async () => {
+    const { createLakebasePool } = await import("../../../connectors/lakebase");
+    await makePlugin({ pool: { max: 20 } }).setup();
+    expect(createLakebasePool).toHaveBeenCalledWith(
+      expect.objectContaining({ max: 20 }),
+    );
+  });
+});
+
 describe("LakebasePlugin - readOnly enforcement", () => {
   let plugin: LakebasePlugin;
 

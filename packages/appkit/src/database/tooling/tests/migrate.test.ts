@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 
@@ -42,6 +43,13 @@ import { runMigrate } from "../migrate";
 const builder = path.resolve(
   import.meta.dirname,
   "../../schema-builder/index.ts",
+);
+const operationsModule = path.resolve(
+  import.meta.dirname,
+  "../../../plugins/database/operations.ts",
+);
+const zodPackage = path.dirname(
+  createRequire(import.meta.url).resolve("zod/package.json"),
 );
 const roots: string[] = [];
 
@@ -159,6 +167,37 @@ describe("runMigrate", () => {
       'Did not apply: dev-alice-3f9a2c still holds the rows the fork copied into schema "app", which "app-sp" still owns. Run `appkit db init` to rebuild it from the committed migrations, or `appkit db init --schema migrate` to keep them.',
     );
     expect(applyPendingMigrations).not.toHaveBeenCalled();
+  });
+
+  test("regenerates database-operations.d.ts from server/database/routes", async () => {
+    const ctx = app(`notes: table("notes", { id: id(), body: text() })`);
+    fs.mkdirSync(path.join(ctx.root, "node_modules"));
+    fs.symlinkSync(zodPackage, path.join(ctx.root, "node_modules/zod"), "dir");
+    const routes = path.join(ctx.root, "server/database/routes");
+    fs.mkdirSync(routes, { recursive: true });
+    fs.writeFileSync(
+      path.join(routes, "notes.ts"),
+      `import { z } from "zod";
+       import { defineOperation } from ${JSON.stringify(operationsModule)};
+       export const getNote = defineOperation({
+         name: "notes.get",
+         method: "GET",
+         input: z.object({ id: z.number() }),
+         output: z.object({ id: z.number(), body: z.string().nullable() }),
+         authorize: () => true,
+         execute: ({ input, db }) => db.notes.find(input.id),
+       });`,
+    );
+    resolveEnvBranch.mockResolvedValue(null);
+
+    const report = await runMigrate(ctx, { interactive: false });
+
+    expect(report.operationsTypesFile).toBe(
+      path.join(ctx.root, "shared/appkit-types/database-operations.d.ts"),
+    );
+    expect(fs.readFileSync(report.operationsTypesFile, "utf-8")).toContain(
+      '"notes.get"',
+    );
   });
 
   test("does not apply when the implicit app schema would shadow tables left in public", async () => {
@@ -509,7 +548,9 @@ describe("runMigrate", () => {
       (caught: unknown) => caught,
     )) as Error;
 
-    expect(error.message).toBe("Could not load config/database/schema.ts.");
+    expect(error.message).toMatch(
+      /^Database schema ".*config\/database\/schema\.ts" threw while loading$/,
+    );
     expect((error.cause as Error).message).toMatch(/schema\.ts:\d+:\d+/);
     expect(resolveEnvBranch).not.toHaveBeenCalled();
   });

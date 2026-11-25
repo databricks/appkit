@@ -123,16 +123,26 @@ export type {
 export * from "./plugins/beta-exports.generated";
 export { database } from "./plugins/database";
 export type {
-  DatabaseApiConfig,
-  DatabaseApiWriteOperation,
-  DatabaseApiWritesConfig,
   DatabaseExports,
-  EntityHooks,
-  EntityMutationHooks,
-  HookApp,
-  HookContext,
   IDatabaseConfig,
-  ReadSerializer,
-  ReadSerializerContext,
   TransactionClient,
 } from "./plugins/database";
+export type {
+  DatabaseOperationContract,
+  DatabricksAppKitDatabaseOperations,
+} from "shared";
+export {
+  type Actor,
+  type DatabaseRoutes,
+  defineOperation,
+  definePolicy,
+  type OperationContext,
+  type OperationDefinition,
+  type OperationMethod,
+  type OperationWireInput,
+  type OperationWireOutput,
+  type Policy,
+  type PolicyContext,
+  type PolicyDecision,
+  type PolicyDenial,
+} from "./plugins/database/operations";

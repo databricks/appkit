@@ -569,12 +569,12 @@ import { describe, expect, test } from "vitest";
 
 // A small plugin that registers a route and streams two events.
 class GreeterPlugin extends Plugin {
-  static manifest = {
+  static manifest: PluginManifest<"greeter"> = {
     name: "greeter",
     displayName: "Greeter",
     description: "Example plugin",
     resources: { required: [], optional: [] },
-  } as PluginManifest<"greeter">;
+  };
 
   async setup() {
     this.context?.addRoute("get", "/hello", (_req, res) => res.end());

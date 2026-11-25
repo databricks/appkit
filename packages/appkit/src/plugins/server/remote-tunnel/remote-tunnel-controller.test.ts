@@ -34,6 +34,7 @@ describe("RemoteTunnelController", () => {
     vi.clearAllMocks();
     process.env = { ...originalEnv };
     delete process.env.DEBUG_REMOTE_TUNNEL;
+    delete process.env.DISABLE_REMOTE_SERVING;
   });
 
   afterEach(() => {
@@ -76,9 +77,75 @@ describe("RemoteTunnelController", () => {
     expect(RemoteTunnelManager).not.toHaveBeenCalled();
   });
 
-  test("initializes manager on demand for dev query and calls devModeMiddleware", async () => {
+  test("a deployed app ignores ?dev until it sets DISABLE_REMOTE_SERVING=false", async () => {
+    // What every deployed app looks like: production plus the platform-injected secret.
     process.env.NODE_ENV = "production";
     process.env.DATABRICKS_CLIENT_SECRET = "x";
+
+    const ctrl = new RemoteTunnelController({} as any);
+    const next = vi.fn();
+
+    await ctrl.middleware(
+      { query: { dev: "" }, originalUrl: "/?dev", method: "GET" } as any,
+      {} as any,
+      next,
+    );
+    await ctrl.middleware(
+      { query: {}, originalUrl: "/@vite/client", method: "GET" } as any,
+      {} as any,
+      next,
+    );
+
+    expect(next).toHaveBeenCalledTimes(2);
+    expect(RemoteTunnelManager).not.toHaveBeenCalled();
+    expect(ctrl.isAllowedByEnv()).toBe(false);
+    expect(ctrl.isActive()).toBe(false);
+  });
+
+  test("only DISABLE_REMOTE_SERVING=false opts in; other values keep it off", async () => {
+    delete process.env.NODE_ENV;
+    process.env.DATABRICKS_CLIENT_SECRET = "x";
+
+    for (const value of ["true", "False", "0", ""]) {
+      process.env.DISABLE_REMOTE_SERVING = value;
+      const ctrl = new RemoteTunnelController({} as any);
+      const next = vi.fn();
+
+      await ctrl.middleware(
+        { query: { dev: "" }, originalUrl: "/?dev", method: "GET" } as any,
+        {} as any,
+        next,
+      );
+
+      expect(next).toHaveBeenCalled();
+      expect(ctrl.isActive()).toBe(false);
+    }
+    expect(RemoteTunnelManager).not.toHaveBeenCalled();
+  });
+
+  test("a production app ignores ?dev even with DISABLE_REMOTE_SERVING=false", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.DATABRICKS_CLIENT_SECRET = "x";
+    process.env.DISABLE_REMOTE_SERVING = "false";
+
+    const ctrl = new RemoteTunnelController({} as any);
+    const next = vi.fn();
+
+    await ctrl.middleware(
+      { query: { dev: "" }, originalUrl: "/?dev", method: "GET" } as any,
+      {} as any,
+      next,
+    );
+
+    expect(next).toHaveBeenCalled();
+    expect(RemoteTunnelManager).not.toHaveBeenCalled();
+    expect(ctrl.isAllowedByEnv()).toBe(false);
+  });
+
+  test("initializes manager on demand for dev query and calls devModeMiddleware", async () => {
+    delete process.env.NODE_ENV;
+    process.env.DATABRICKS_CLIENT_SECRET = "x";
+    process.env.DISABLE_REMOTE_SERVING = "false";
 
     const ctrl = new RemoteTunnelController({} as any);
     const next = vi.fn();
@@ -101,8 +168,9 @@ describe("RemoteTunnelController", () => {
   });
 
   test("initializes manager on demand for asset request and calls assetMiddleware", async () => {
-    process.env.NODE_ENV = "production";
+    delete process.env.NODE_ENV;
     process.env.DATABRICKS_CLIENT_SECRET = "x";
+    process.env.DISABLE_REMOTE_SERVING = "false";
 
     const ctrl = new RemoteTunnelController({} as any);
     const next = vi.fn();
@@ -124,8 +192,9 @@ describe("RemoteTunnelController", () => {
   });
 
   test("setServer before init hooks websocket after init", async () => {
-    process.env.NODE_ENV = "production";
+    delete process.env.NODE_ENV;
     process.env.DATABRICKS_CLIENT_SECRET = "x";
+    process.env.DISABLE_REMOTE_SERVING = "false";
 
     const ctrl = new RemoteTunnelController({} as any);
     const server = {} as any;
@@ -147,8 +216,9 @@ describe("RemoteTunnelController", () => {
   });
 
   test("cleanup calls manager.cleanup and resets state", async () => {
-    process.env.NODE_ENV = "production";
+    delete process.env.NODE_ENV;
     process.env.DATABRICKS_CLIENT_SECRET = "x";
+    process.env.DISABLE_REMOTE_SERVING = "false";
 
     const ctrl = new RemoteTunnelController({} as any);
 

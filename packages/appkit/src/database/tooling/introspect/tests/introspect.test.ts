@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -48,6 +49,14 @@ const { writeDatabaseTypes } = await vi.importActual<
 const SCHEMA = "config/database/schema.ts";
 const MIGRATIONS = "config/database/migrations";
 const TYPES = "shared/appkit-types/database.d.ts";
+const OPERATION_TYPES = "shared/appkit-types/database-operations.d.ts";
+const OPERATIONS_MODULE = path.resolve(
+  import.meta.dirname,
+  "../../../../plugins/database/operations.ts",
+);
+const ZOD_PACKAGE = path.dirname(
+  createRequire(import.meta.url).resolve("zod/package.json"),
+);
 const DEV = "projects/p/branches/dev-alice-3f9a2c";
 const PRODUCTION = "projects/p/branches/production";
 
@@ -331,6 +340,31 @@ describe("runIntrospect", () => {
     await expect(loadDefaultDatabaseSchema(root)).resolves.toMatchObject({
       $schemaName: "app",
     });
+  });
+
+  test("regenerates database-operations.d.ts from server/database/routes", async () => {
+    const root = tempApp({
+      [SCHEMA]: declaredSchema,
+      "server/database/routes/authors.ts": `import { z } from "zod";
+        import { defineOperation } from ${JSON.stringify(OPERATIONS_MODULE)};
+        export const getAuthor = defineOperation({
+          name: "authors.get",
+          method: "GET",
+          input: z.object({ id: z.number() }),
+          output: z.object({ id: z.number() }),
+          authorize: () => true,
+          execute: ({ input, db }) => db.authors.find(input.id),
+        });`,
+    });
+    fs.mkdirSync(path.join(root, "node_modules"));
+    fs.symlinkSync(ZOD_PACKAGE, path.join(root, "node_modules/zod"), "dir");
+
+    const report = await introspect(root);
+
+    expect(report.operationsTypesFile).toBe(path.join(root, OPERATION_TYPES));
+    expect(fs.readFileSync(report.operationsTypesFile, "utf-8")).toContain(
+      '"authors.get"',
+    );
   });
 
   test.each([
@@ -1038,7 +1072,7 @@ export const schema = defineSchema(
       "disk full",
     ],
   ])(
-    "when %s fails, schema.ts, its backup, database.d.ts and the migrations are put back, so a rerun records",
+    "when %s fails, schema.ts, its backup, the generated types and the migrations are put back, so a rerun records",
     async (_label, failOnce, message) => {
       const root = tempApp({
         [SCHEMA]: declaredSchema,
@@ -1053,6 +1087,7 @@ export const schema = defineSchema(
       expect(tree(root)).toEqual(before);
       expect(fs.existsSync(path.join(root, MIGRATIONS))).toBe(false);
       expect(fs.existsSync(path.join(root, TYPES))).toBe(false);
+      expect(fs.existsSync(path.join(root, OPERATION_TYPES))).toBe(false);
       expect(recorded).toEqual([]);
 
       const report = await introspect(root);

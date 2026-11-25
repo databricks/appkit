@@ -395,15 +395,32 @@ async function sendWithRetry(
       response.statusCode === 429 ||
       TRANSIENT_ERROR_MESSAGES.some((m) => text.includes(m));
     const waitMs = Math.min(attempt * 1000 + 50 + Math.random() * 700, 10_000);
-    if (
-      !retryable ||
-      request.signal?.aborted ||
-      Date.now() + waitMs > deadline
-    ) {
+    if (!retryable || Date.now() + waitMs > deadline) {
       return { ...response, body: new Response(body).body };
     }
-    await new Promise((resolve) => setTimeout(resolve, waitMs));
+    await abortableWait(waitMs, request.signal);
   }
+}
+
+// Waits `ms`, or rejects with `signal.reason` as soon as `signal` aborts, like
+// the SDK's own retry sleep, so a cancel or timeout ends the backoff and still
+// reaches the caller as that abort.
+function abortableWait(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /** A raw REST call against the workspace host. */

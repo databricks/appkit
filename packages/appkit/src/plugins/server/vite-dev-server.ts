@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type express from "express";
-import type { ViteDevServer as ViteDevServerType } from "vite";
+import type { PluginOption, ViteDevServer as ViteDevServerType } from "vite";
 
 import { ServerError } from "../../errors";
 import { createLogger } from "../../logging/logger";
@@ -11,6 +11,7 @@ import { appKitTypesPlugin } from "../../type-generator/vite-plugin";
 import { mergeConfigDedup } from "../../utils";
 import { BaseServer } from "./base-server";
 import { reactSourceLocPlugin } from "./react-source-loc-vite-plugin";
+import { typecheckPlugin } from "./typecheck-vite-plugin";
 import type { PluginClientConfigs, PluginEndpoints } from "./utils";
 
 const logger = createLogger("server:vite");
@@ -34,6 +35,7 @@ export class ViteDevServer extends BaseServer {
     app: express.Application,
     endpoints: PluginEndpoints = {},
     pluginConfigs: PluginClientConfigs = {},
+    private readonly extraPlugins: PluginOption[] = [],
   ) {
     super(app, endpoints, pluginConfigs);
     this.vite = null;
@@ -86,8 +88,10 @@ export class ViteDevServer extends BaseServer {
       plugins: [
         react.default(),
         reactSourceLocPlugin({ projectRoot }),
+        typecheckPlugin({ projectRoot }),
         appKitTypesPlugin(),
         appKitServingTypesPlugin(),
+        ...this.extraPlugins,
       ],
       appType: "custom",
     };

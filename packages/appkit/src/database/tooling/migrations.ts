@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 
+import { writeIfChanged } from "../../type-generator/database";
 import {
   type Journal,
   type JournalEntry,
@@ -15,7 +16,7 @@ import {
 } from "../migrations/paths";
 import type { Schema } from "../schema-builder";
 import { drizzleKitImports } from "./drizzle-exports";
-import { writeFileAtomic } from "./files";
+import { refuseSymlink } from "./files";
 import type { HistoryLock } from "./history-lock";
 
 /**
@@ -531,7 +532,8 @@ export async function generateMigrationFiles(
   );
   fs.writeFileSync(file, statements.join(BREAKPOINT));
   // The journal is written last: it is what makes the migration visible.
-  writeFileAtomic(journalPath, JSON.stringify(next, null, 2));
+  refuseSymlink(journalPath);
+  await writeIfChanged(journalPath, JSON.stringify(next, null, 2));
   return { tag, file, statements, journalBefore };
 }
 
@@ -539,10 +541,10 @@ export async function generateMigrationFiles(
  * Remove a migration generateMigrationFiles wrote under the same lock and put
  * back the journal it replaced (none: the folders it created go too).
  */
-export function discardMigrationFiles(
+export async function discardMigrationFiles(
   lock: HistoryLock,
   migration: GeneratedMigration,
-): void {
+): Promise<void> {
   lock.assertHeld();
   const { folder } = lock;
   // The journal goes back first, as it is what names the migration: a crash
@@ -550,7 +552,8 @@ export function discardMigrationFiles(
   if (migration.journalBefore === null) {
     fs.rmSync(journalFile(folder), { force: true });
   } else {
-    writeFileAtomic(journalFile(folder), migration.journalBefore);
+    refuseSymlink(journalFile(folder));
+    await writeIfChanged(journalFile(folder), migration.journalBefore);
   }
   fs.rmSync(migration.file, { force: true });
   fs.rmSync(snapshotFile(folder, Number.parseInt(migration.tag, 10)), {

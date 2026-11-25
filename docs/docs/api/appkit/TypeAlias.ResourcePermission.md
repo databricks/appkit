@@ -6,6 +6,7 @@ type ResourcePermission =
   | JobPermission
   | SqlWarehousePermission
   | ServingEndpointPermission
+  | ModelServicePermission
   | VolumePermission
   | VectorSearchIndexPermission
   | UcFunctionPermission

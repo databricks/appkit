@@ -7,6 +7,7 @@ export enum ResourceType {
   JOB = "job",
   SQL_WAREHOUSE = "sql_warehouse",
   SERVING_ENDPOINT = "serving_endpoint",
+  MODEL_SERVICE = "model_service",
   VOLUME = "volume",
   VECTOR_SEARCH_INDEX = "vector_search_index",
   UC_FUNCTION = "uc_function",
@@ -32,6 +33,9 @@ export type SqlWarehousePermission = "CAN_USE" | "CAN_MANAGE";
 
 /** Permissions for SERVING_ENDPOINT resources */
 export type ServingEndpointPermission = "CAN_VIEW" | "CAN_QUERY" | "CAN_MANAGE";
+
+/** Permissions for MODEL_SERVICE resources */
+export type ModelServicePermission = "EXECUTE";
 
 /** Permissions for VOLUME resources */
 export type VolumePermission = "READ_VOLUME" | "WRITE_VOLUME";
@@ -70,6 +74,7 @@ export type ResourcePermission =
   | JobPermission
   | SqlWarehousePermission
   | ServingEndpointPermission
+  | ModelServicePermission
   | VolumePermission
   | VectorSearchIndexPermission
   | UcFunctionPermission
@@ -89,6 +94,7 @@ export const PERMISSION_HIERARCHY_BY_TYPE: Record<
   [ResourceType.JOB]: ["CAN_VIEW", "CAN_MANAGE_RUN", "CAN_MANAGE"],
   [ResourceType.SQL_WAREHOUSE]: ["CAN_USE", "CAN_MANAGE"],
   [ResourceType.SERVING_ENDPOINT]: ["CAN_VIEW", "CAN_QUERY", "CAN_MANAGE"],
+  [ResourceType.MODEL_SERVICE]: ["EXECUTE"],
   [ResourceType.VOLUME]: ["READ_VOLUME", "WRITE_VOLUME"],
   [ResourceType.VECTOR_SEARCH_INDEX]: ["SELECT"],
   [ResourceType.UC_FUNCTION]: ["EXECUTE"],

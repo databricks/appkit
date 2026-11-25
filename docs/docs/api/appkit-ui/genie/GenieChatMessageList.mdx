@@ -16,7 +16,7 @@ Scrollable message list that renders Genie chat messages with auto-scroll, skele
 | Prop | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
 | `messages` | `GenieMessageItem[]` | ✓ | - | Array of messages to display |
-| `status` | `enum` | ✓ | - | Current chat status (controls loading indicators and skeleton placeholders) |
+| `status` | `"idle" \| "error" \| "loading-history" \| "loading-older" \| "streaming"` | ✓ | - | Current chat status (controls loading indicators and skeleton placeholders) |
 | `className` | `string` |  | - | Additional CSS class for the scroll area |
 | `hasPreviousPage` | `boolean` |  | `false` | Whether a previous page of older messages exists |
 | `onFetchPreviousPage` | `(() => void)` |  | - | Callback to fetch the previous page of messages |

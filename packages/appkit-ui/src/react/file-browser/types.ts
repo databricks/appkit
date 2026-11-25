@@ -4,7 +4,8 @@ export interface DirectoryEntry {
   path?: string;
   is_directory?: boolean;
   file_size?: number;
-  last_modified?: string;
+  /** Last modification time in milliseconds since unix epoch, as the files plugin sends it. */
+  last_modified?: number;
 }
 
 /** Metadata and content preview for a selected file */
