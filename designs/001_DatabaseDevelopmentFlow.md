@@ -372,9 +372,10 @@ and `clean --delete-branch` take none. A second `appkit db` command that needs t
 says who holds it. `init` holds one lock for its whole run, so no other command that takes the lock runs between its
 clean and its migrate. `init --schema none` changes no migration history and takes no lock.
 
-A command releases the lock when it finishes, when it exits, and on SIGINT or SIGTERM. Only a kill the process cannot
-catch, such as SIGKILL, leaves the file behind. The next command fails the same way and says whether the holder's pid
-still runs on this machine. AppKit never takes over or deletes a lock it does not hold. Once no
+A command releases the lock when it finishes or exits, and on SIGINT or SIGTERM when nothing else in the process handles
+the signal. When another handler keeps the process running, the command keeps the lock until it exits. A command that
+ends any other way, such as SIGKILL, can leave the file behind. The next command fails the same way, reports the lock as
+stale, and says whether the holder's pid still runs on this machine. AppKit never takes over or deletes a lock it does not hold. Once no
 `appkit db` command runs in the checkout, the developer deletes the file and reruns the command. The template's
 `.gitignore` lists the file.
 
