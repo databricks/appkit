@@ -5,6 +5,7 @@ import {
 } from "../../database/migrations/tables-left-in-public";
 import type { DataPath } from "../../database/runtime";
 import type { Schema } from "../../database/schema-builder";
+import { schemaNameIsExplicit } from "../../database/schema-builder/define-schema";
 import type { MigrateOnStartDecision } from "./migrate-on-start";
 
 interface CatalogColumn {
@@ -94,7 +95,7 @@ export async function assertSchemaMatchesDatabase(
   if (problems.length > 0) {
     const absent = tableNames.filter((name) => !found.has(name));
     const advice =
-      (await inPublicInstead(dataPath, schemaName, absent)) ??
+      (await inPublicInstead(dataPath, schema, absent)) ??
       migrationAdvice(migration);
     throw databaseSetupFailed(
       `the declared schema does not match the database: ${problems.join("; ")}. ${advice}`,
@@ -104,15 +105,17 @@ export async function assertSchemaMatchesDatabase(
 
 /**
  * Apps from before the default schema moved to `app` keep their tables in
- * `public`. Name that case when every absent table is there; the migration
- * guard in database/migrations/tables-left-in-public.ts refuses it up front.
+ * `public`. Name that case when the schema name is the default and every
+ * absent table is there; the migration guard in
+ * database/migrations/tables-left-in-public.ts refuses it up front.
  */
 async function inPublicInstead(
   dataPath: DataPath,
-  schemaName: string,
+  schema: Schema,
   absent: readonly string[],
 ): Promise<string | undefined> {
-  if (schemaName === "public" || absent.length === 0) return undefined;
+  if (schemaNameIsExplicit(schema) || absent.length === 0) return undefined;
+  const schemaName = schema.$schemaName;
   const { inPublic } = await locateTables(dataPath.raw, schemaName, absent);
   if (inPublic.length < absent.length) return undefined;
   return `Schema public has ${absent.length === 1 ? "that table" : "those tables"}, but ${keepInPublicAdvice(schemaName)}`;
