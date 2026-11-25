@@ -4,6 +4,7 @@ import {
   isReservedTableName,
 } from "../../schema-builder/define-schema";
 import type { AppKitTable, Schema } from "../../schema-builder/types";
+import type { SchemaObject } from "../migrations";
 import type {
   IntrospectedColumn,
   IntrospectedForeignKey,
@@ -22,15 +23,10 @@ export interface Skip {
 }
 
 /**
- * Something the branch has that schema.ts leaves out, by raw catalog name. A
- * migration that drops it must not be recorded as applied: the branch keeps it.
+ * Something the branch has that schema.ts leaves out. A migration that drops
+ * it must not be recorded as applied: the branch keeps it.
  */
-export interface Unexpressed {
-  readonly kind: "table" | "column" | "default" | "constraint" | "type";
-  /** The table, or the enum type for "type". */
-  readonly name: string;
-  /** The column for "column" and "default", the constraint for "constraint". */
-  readonly member?: string;
+export interface Unexpressed extends SchemaObject {
   readonly reason: string;
 }
 

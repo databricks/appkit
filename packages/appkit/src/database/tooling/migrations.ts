@@ -30,8 +30,24 @@ interface GenerateOptions {
   readonly tag?: string;
   /** false: an ambiguous rename throws instead of prompting. */
   readonly interactive: boolean;
-  /** Sees the SQL before anything is written; throwing writes nothing. */
-  readonly beforeWrite?: (statements: readonly string[]) => void;
+  /** Sees the migration before anything is written; throwing writes nothing. */
+  readonly beforeWrite?: (migration: PlannedMigration) => void;
+}
+
+/** An object of the app schema, by raw catalog name. */
+export interface SchemaObject {
+  readonly kind: "table" | "column" | "default" | "constraint" | "type";
+  /** The table, or the enum type for "type". */
+  readonly name: string;
+  /** The column for "column" and "default", the constraint for "constraint". */
+  readonly member?: string;
+}
+
+/** A migration generateMigrationFiles is about to write. */
+export interface PlannedMigration {
+  readonly statements: readonly string[];
+  /** Whether it removes the object: the latest snapshot has it and the new one does not. */
+  removes(object: SchemaObject): boolean;
 }
 
 export interface GeneratedMigration {
@@ -83,9 +99,53 @@ const TAG_NAME = /^[a-z0-9_]+$/;
 /** The parts of a drizzle-kit PostgreSQL snapshot this module reads. */
 interface Snapshot {
   id: string;
-  tables: Record<string, { columns: Record<string, unknown> }>;
+  /** Keyed "<schema>.<table>", public included. */
+  tables: Record<string, SnapshotTable>;
+  /** Keyed "<schema>.<type>", public included. */
   enums: Record<string, unknown>;
   [key: string]: unknown;
+}
+
+interface SnapshotTable {
+  columns: Record<string, { default?: unknown }>;
+  foreignKeys?: Record<string, unknown>;
+  uniqueConstraints?: Record<string, unknown>;
+  checkConstraints?: Record<string, unknown>;
+  compositePrimaryKeys?: Record<string, unknown>;
+}
+
+function snapshotHas(
+  snapshot: Snapshot,
+  schemaName: string,
+  object: SchemaObject,
+): boolean {
+  const key = `${schemaName}.${object.name}`;
+  if (object.kind === "type") return Object.hasOwn(snapshot.enums, key);
+  const table = Object.hasOwn(snapshot.tables, key)
+    ? snapshot.tables[key]
+    : undefined;
+  if (!table) return false;
+  const member = object.member ?? "";
+  const column = Object.hasOwn(table.columns, member)
+    ? table.columns[member]
+    : undefined;
+  switch (object.kind) {
+    case "table":
+      return true;
+    case "column":
+      return column !== undefined;
+    case "default":
+      return column?.default !== undefined;
+    case "constraint":
+      return [
+        table.foreignKeys,
+        table.uniqueConstraints,
+        table.checkConstraints,
+        table.compositePrimaryKeys,
+      ].some(
+        (constraints) => !!constraints && Object.hasOwn(constraints, member),
+      );
+  }
 }
 
 /** drizzle-kit's empty starting snapshot (its `dryPg`). */
@@ -365,7 +425,13 @@ export async function generateMigrationFiles(
     cur as unknown as KitSnapshot,
   );
   if (statements.length === 0) return null;
-  options.beforeWrite?.(statements);
+  const schemaName = options.schema.$schemaName;
+  options.beforeWrite?.({
+    statements,
+    removes: (object) =>
+      snapshotHas(prev, schemaName, object) &&
+      !snapshotHas(cur, schemaName, object),
+  });
 
   const entries = journal?.entries ?? [];
   const last = entries.at(-1);

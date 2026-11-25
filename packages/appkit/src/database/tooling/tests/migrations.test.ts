@@ -380,7 +380,7 @@ describe("generateMigrationFiles", () => {
       folder,
       schema: blog(),
       interactive: false,
-      beforeWrite: (statements) => {
+      beforeWrite: ({ statements }) => {
         seen.push([...statements]);
         throw new Error("refused");
       },

@@ -24,6 +24,7 @@ import {
   discardMigrationFiles,
   type GeneratedMigration,
   generateMigrationFiles,
+  type PlannedMigration,
 } from "../migrations";
 import { resourceId } from "../targets";
 import { readCatalog, readUnreadObjects } from "./catalog";
@@ -99,24 +100,20 @@ function refuseSymlinkedDestination(root: string, file: string): void {
 const plural = (count: number, word: string) =>
   `${count} ${word}${count === 1 ? "" : "s"}`;
 
-/** The statement drizzle-kit 0.31 writes to remove it. */
-function dropStatement(item: Unexpressed, schemaName: string): string {
-  // drizzle-kit leaves the public schema out of the name.
-  const named =
-    schemaName === "public"
-      ? `"${item.name}"`
-      : `"${schemaName}"."${item.name}"`;
+/** How a refusal names it. */
+function described(item: Unexpressed, schemaName: string): string {
+  const table = `${schemaName}.${item.name}`;
   switch (item.kind) {
     case "table":
-      return `DROP TABLE ${named} CASCADE;`;
+      return `table ${table}`;
     case "column":
-      return `ALTER TABLE ${named} DROP COLUMN "${item.member}";`;
+      return `column ${table}.${item.member}`;
     case "default":
-      return `ALTER TABLE ${named} ALTER COLUMN "${item.member}" DROP DEFAULT;`;
+      return `the default of ${table}.${item.member}`;
     case "constraint":
-      return `ALTER TABLE ${named} DROP CONSTRAINT "${item.member}";`;
+      return `constraint ${item.member} of ${table}`;
     case "type":
-      return `DROP TYPE ${named};`;
+      return `type ${table}`;
   }
 }
 
@@ -126,26 +123,21 @@ function dropStatement(item: Unexpressed, schemaName: string): string {
  * recorded falsely here, and would remove it from every deployed database.
  */
 function refuseDropsOfUnexpressed(
-  statements: readonly string[],
+  migration: PlannedMigration,
   unexpressed: readonly Unexpressed[],
   schemaName: string,
 ): void {
-  const reasons = new Map(
-    unexpressed.map((item) => [dropStatement(item, schemaName), item.reason]),
-  );
-  const refused = statements
-    .map((statement) => statement.trim())
-    .filter((statement) => reasons.has(statement));
+  const refused = unexpressed.filter((item) => migration.removes(item));
   if (refused.length === 0) return;
   throw new IntrospectRefusedError(
     `Refusing to write a migration that drops what the branch still has but schema.ts cannot express: ${refused
       .map(
-        (statement) =>
-          `${shown(statement)} (${shown(reasons.get(statement) ?? "")})`,
+        (item) =>
+          `${shown(described(item, schemaName))} (${shown(item.reason)})`,
       )
       .join(
-        " ",
-      )}. The deployed app would run ${refused.length === 1 ? "it" : "them"} on start.`,
+        "; ",
+      )}. The deployed app would drop ${refused.length === 1 ? "it" : "them"} on start.`,
   );
 }
 
@@ -305,9 +297,9 @@ async function introspectHolding(
         interactive: options.interactive,
         ...(hasHistory
           ? {
-              beforeWrite: (statements: readonly string[]) =>
+              beforeWrite: (planned: PlannedMigration) =>
                 refuseDropsOfUnexpressed(
-                  statements,
+                  planned,
                   rendered.unexpressed,
                   schemaName,
                 ),
