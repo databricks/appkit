@@ -809,6 +809,20 @@ export const schema = defineSchema(({ table }) => ({
     ]);
   });
 
+  test("the warning about statements that break the previous release escapes catalog names", async () => {
+    const root = tempApp({
+      [SCHEMA]: previousSchema.replace("email: text()", '"e\\u2028x": text()'),
+    });
+    await commitMigration(root);
+    catalog = authorsOnly();
+
+    const report = await introspect(root);
+
+    expect(report.warnings).toEqual([
+      '0001_introspect breaks instances still running the previous release, which keep serving while the new one migrates on start: ALTER TABLE "app"."authors" DROP COLUMN "e\\u2028x";',
+    ]);
+  });
+
   test("objects introspect does not read are named in a warning", async () => {
     catalog = catalogResponder(undefined, [
       "trigger audit on authors",
