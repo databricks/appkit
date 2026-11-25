@@ -346,7 +346,7 @@ async function introspectHolding(
     const breaking = breakingStatements(migration?.statements ?? []);
     if (migration && breaking.length > 0) {
       warnings.push(
-        `${migration.tag} breaks instances still running the previous release, which keep serving while the new one migrates on start: ${breaking.join(" ")}`,
+        `${migration.tag} breaks instances still running the previous release, which keep serving while the new one migrates on start: ${breaking.map(shown).join(" ")}`,
       );
     }
     return {

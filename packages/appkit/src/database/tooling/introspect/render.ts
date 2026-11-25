@@ -122,7 +122,7 @@ const INT32 = { min: -2147483648, max: 2147483647 };
  * shows. JSON.stringify keeps both.
  */
 const UNSAFE_IN_SOURCE =
-  /[\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+  /[\u061c\u2028\u2029\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
 const escaped = (char: string) =>
   `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`;
 const q = (value: string) =>
