@@ -1,51 +1,10 @@
-import path from "node:path";
-
-import ts from "typescript";
 import { expect, test, vi } from "vitest";
 
-const packageRoot =
-  path.basename(process.cwd()) === "appkit-ui"
-    ? process.cwd()
-    : path.join(process.cwd(), "packages", "appkit-ui");
+import { compileTypeProbe } from "./type-probe";
 
-// Each probe type-checks the package with the TypeScript compiler, which can
-// exceed Vitest's 5s default on CI's 2-core runners.
+// Each probe runs the tsc binary over the package, which can exceed
+// Vitest's 5s default on CI's 2-core runners.
 vi.setConfig({ testTimeout: 30_000 });
-
-function compileTypeProbe(source: string): string[] {
-  const configPath = path.join(packageRoot, "tsconfig.json");
-  const config = ts.readConfigFile(configPath, ts.sys.readFile);
-  const parsed = ts.parseJsonConfigFileContent(
-    config.config,
-    ts.sys,
-    packageRoot,
-  );
-  const filename = path.join(packageRoot, "__type-tests__", "database.ts");
-  const host = ts.createCompilerHost(parsed.options);
-  const getSourceFile = host.getSourceFile.bind(host);
-
-  host.fileExists = (candidate) =>
-    candidate === filename || ts.sys.fileExists(candidate);
-  host.readFile = (candidate) =>
-    candidate === filename ? source : ts.sys.readFile(candidate);
-  host.getSourceFile = (candidate, languageVersion, onError, shouldCreate) =>
-    candidate === filename
-      ? ts.createSourceFile(
-          candidate,
-          source,
-          languageVersion,
-          true,
-          ts.ScriptKind.TS,
-        )
-      : getSourceFile(candidate, languageVersion, onError, shouldCreate);
-
-  const program = ts.createProgram([filename], parsed.options, host);
-  return ts
-    .getPreEmitDiagnostics(program)
-    .map((diagnostic) =>
-      ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
-    );
-}
 
 // Entries as `appkit generate-types` renders them (trusted facets omitted: the
 // browser reads only `publicRow`, `includes`, and `api`), bound the same way.

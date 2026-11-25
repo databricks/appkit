@@ -1,11 +1,12 @@
+import { writeFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 
-import ts from "typescript";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
+import { typecheckProject } from "../../../../../../tools/typecheck-project";
 import { generateDatabaseTypes } from "../../../type-generator/database/generate";
 
 const appkitRoot = path.resolve(import.meta.dirname, "../../../..");
@@ -501,13 +502,13 @@ defineOperation({
   authorize: () => true,
   execute: () => null,
 });
-// @ts-expect-error TS2769 there is no separate action
 defineOperation({
   name: "posts.get",
   method: "GET",
   input: idInput,
   authorize: () => true,
   execute: () => null,
+  // @ts-expect-error TS2769 there is no separate action
   action: "read",
 });
 defineOperation({
@@ -762,7 +763,6 @@ const DIRECTIVE = /\/\/ @ts-expect-error (TS\d+) /g;
 
 let root = "";
 let declaration = "";
-const parsed = new Map<string, ts.SourceFile>();
 
 beforeAll(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), "appkit-operations-"));
@@ -781,78 +781,51 @@ function typecheck(consumers: Record<string, string>): string[] {
       createRequire(import.meta.url).resolve("@types/node/package.json"),
     ),
   );
-  const { options, errors } = ts.parseJsonConfigFileContent(
-    {
-      compilerOptions: {
-        strict: true,
-        noEmit: true,
-        target: "ES2022",
-        module: "ESNext",
-        moduleResolution: "Bundler",
-        esModuleInterop: true,
-        resolveJsonModule: true,
-        skipLibCheck: false,
-        types: ["node"],
-        typeRoots: [nodeTypes],
-        lib: ["ES2022"],
-        baseUrl: root,
-        paths: {
-          "@databricks/appkit": [path.join(sourceRoot, "index.ts")],
-          "@databricks/appkit/beta": [path.join(sourceRoot, "beta.ts")],
-          shared: [path.join(sharedRoot, "index.ts")],
-          "shared/*": [path.join(sharedRoot, "*")],
-          "@databricks/lakebase": [
-            path.resolve(appkitRoot, "../lakebase/src/index.ts"),
-          ],
-          zod: [zodRoot],
-        },
+  for (const [name, text] of Object.entries(consumers)) {
+    writeFileSync(path.join(root, name), text);
+  }
+  const files = [
+    declaration,
+    ...Object.keys(consumers).map((name) => path.join(root, name)),
+  ];
+  return typecheckProject(root, {
+    compilerOptions: {
+      strict: true,
+      noEmit: true,
+      rootDir: path.parse(root).root,
+      target: "ES2022",
+      module: "ESNext",
+      moduleResolution: "Bundler",
+      esModuleInterop: true,
+      resolveJsonModule: true,
+      skipLibCheck: false,
+      types: ["node"],
+      typeRoots: [nodeTypes],
+      lib: ["ES2022"],
+      paths: {
+        "@databricks/appkit": [path.join(sourceRoot, "index.ts")],
+        "@databricks/appkit/beta": [path.join(sourceRoot, "beta.ts")],
+        shared: [path.join(sharedRoot, "index.ts")],
+        "shared/*": [path.join(sharedRoot, "*")],
+        "@databricks/lakebase": [
+          path.resolve(appkitRoot, "../lakebase/src/index.ts"),
+        ],
+        zod: [zodRoot],
       },
     },
-    ts.sys,
-    root,
-  );
-  expect(errors).toEqual([]);
-  const virtual = new Map(
-    Object.entries(consumers).map(([name, text]) => [
-      path.join(root, name),
-      text,
-    ]),
-  );
-  const host = ts.createCompilerHost(options);
-  const readFile = host.readFile.bind(host);
-  const getSourceFile = host.getSourceFile.bind(host);
-  host.readFile = (file) => virtual.get(file) ?? readFile(file);
-  host.getSourceFile = (file, language, ...rest) => {
-    const text = virtual.get(file);
-    if (text !== undefined) return ts.createSourceFile(file, text, language);
-    if (!parsed.has(file)) {
-      const source = getSourceFile(file, language, ...rest);
-      if (source) parsed.set(file, source);
-    }
-    return parsed.get(file);
-  };
-  const files = [declaration, ...virtual.keys()];
-  const program = ts.createProgram(files, options, host);
-  const diagnostics = [
-    ...program.getOptionsDiagnostics(),
-    ...program.getGlobalDiagnostics(),
-    ...files.flatMap((file) => {
-      const source = program.getSourceFile(file);
-      if (!source) throw new Error(`Missing consumer source ${file}`);
-      return [
-        ...program.getSyntacticDiagnostics(source),
-        ...program.getSemanticDiagnostics(source),
-      ];
-    }),
-  ];
-  return diagnostics.map((diagnostic) => {
-    const line = diagnostic.file
-      ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start ?? 0)
-          .line + 1
-      : 0;
-    const file = diagnostic.file ? path.basename(diagnostic.file.fileName) : "";
-    return `${file}:${line} TS${diagnostic.code} ${ts.flattenDiagnosticMessageText(diagnostic.messageText, " ")}`;
-  });
+    files,
+    include: [],
+  })
+    .filter(
+      ({ file }) =>
+        file === null ||
+        files.includes(file) ||
+        file === path.join(root, "tsconfig.json"),
+    )
+    .map(({ file, line, code, message }) => {
+      const name = file ? path.basename(file) : "";
+      return `${name}:${line} ${code} ${message}`;
+    });
 }
 
 const byLine = (a: string, b: string) =>

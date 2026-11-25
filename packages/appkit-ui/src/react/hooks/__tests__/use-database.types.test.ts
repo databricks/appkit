@@ -1,53 +1,10 @@
-import path from "node:path";
-
-import ts from "typescript";
 import { expect, test, vi } from "vitest";
 
-const packageRoot =
-  path.basename(process.cwd()) === "appkit-ui"
-    ? process.cwd()
-    : path.join(process.cwd(), "packages", "appkit-ui");
+import { compileTypeProbe } from "./type-probe";
 
-// Each probe type-checks the package with the TypeScript compiler, which can
-// exceed Vitest's 5s default on CI's 2-core runners.
+// Each probe runs the tsc binary over the package, which can exceed
+// Vitest's 5s default on CI's 2-core runners.
 vi.setConfig({ testTimeout: 30_000 });
-
-const PROBE = path.join(packageRoot, "__type-tests__", "database.ts");
-
-/**
- * Compile `source` as the only consumer in its own program, so a fixture's
- * global augmentation never reaches another probe or the package itself.
- * Returns every diagnostic as `line TScode message`.
- */
-function compileTypeProbe(source: string): string[] {
-  const config = ts.readConfigFile(
-    path.join(packageRoot, "tsconfig.json"),
-    ts.sys.readFile,
-  );
-  const parsed = ts.parseJsonConfigFileContent(
-    config.config,
-    ts.sys,
-    packageRoot,
-  );
-  const host = ts.createCompilerHost(parsed.options);
-  const getSourceFile = host.getSourceFile.bind(host);
-  host.fileExists = (file) => file === PROBE || ts.sys.fileExists(file);
-  host.readFile = (file) => (file === PROBE ? source : ts.sys.readFile(file));
-  host.getSourceFile = (file, language, onError, shouldCreate) =>
-    file === PROBE
-      ? ts.createSourceFile(file, source, language, true, ts.ScriptKind.TS)
-      : getSourceFile(file, language, onError, shouldCreate);
-
-  const program = ts.createProgram([PROBE], parsed.options, host);
-  return ts.getPreEmitDiagnostics(program).map((diagnostic) => {
-    const where =
-      diagnostic.file?.fileName === PROBE
-        ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start ?? 0)
-            .line + 1
-        : (diagnostic.file?.fileName ?? "global");
-    return `${where} TS${diagnostic.code} ${ts.flattenDiagnosticMessageText(diagnostic.messageText, " ")}`;
-  });
-}
 
 const DIRECTIVE = /\/\/ @ts-expect-error (TS\d+) /g;
 
@@ -226,7 +183,7 @@ export async function Rejected() {
   useDatabaseQuery("notes.get", { id: 1 }, { keepPreviousData: true });
   // @ts-expect-error TS2532 data is undefined until it arrives
   useDatabaseQuery("notes.get", { id: 1 }).data.body;
-  // @ts-expect-error TS2345 required write fields stay required
+  // @ts-expect-error TS2741 required write fields stay required
   useDatabaseMutation("notes.create").mutate({ board_id: 1 });
   // @ts-expect-error TS2353 an undeclared write field is refused
   useDatabaseMutation("notes.create").mutate({ board_id: 1, body: "x", id: 9 });

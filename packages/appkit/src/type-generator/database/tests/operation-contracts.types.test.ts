@@ -3,9 +3,9 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 
-import ts from "typescript";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
+import { typecheckProject } from "../../../../../../tools/typecheck-project";
 import { generateDatabaseTypes } from "../generate";
 import { generateDatabaseOperations } from "../generate-operations";
 
@@ -271,25 +271,13 @@ function diagnose(
   files: readonly string[],
   compilerOptions: Record<string, unknown>,
 ): string[] {
-  const { options, errors } = ts.parseJsonConfigFileContent(
-    { compilerOptions },
-    ts.sys,
-    root,
-  );
-  expect(errors).toEqual([]);
-  const program = ts.createProgram(
-    files.map((file) => path.join(root, file)),
-    options,
-  );
-  return ts.getPreEmitDiagnostics(program).map((diagnostic) => {
-    const file = diagnostic.file
-      ? path.relative(root, diagnostic.file.fileName)
-      : "";
-    const line = diagnostic.file
-      ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start ?? 0)
-          .line + 1
-      : 0;
-    return `${file}:${line} TS${diagnostic.code} ${ts.flattenDiagnosticMessageText(diagnostic.messageText, " ")}`;
+  return typecheckProject(root, {
+    compilerOptions: { ...compilerOptions, rootDir: path.parse(root).root },
+    files,
+    include: [],
+  }).map(({ file, line, code, message }) => {
+    const relative = file ? path.relative(root, file) : "";
+    return `${relative}:${line} ${code} ${message}`;
   });
 }
 
@@ -319,7 +307,6 @@ describe("generated operation contracts", () => {
           skipLibCheck: true,
           types: ["node"],
           typeRoots: [nodeTypes],
-          baseUrl: root,
           paths: {
             "@databricks/appkit": [path.join(sourceRoot, "index.ts")],
             "@databricks/appkit/beta": [path.join(sourceRoot, "beta.ts")],

@@ -1,4 +1,5 @@
 import { createLakebasePool } from "@databricks/appkit";
+import type { IAppRouter } from "@databricks/appkit";
 import { count, desc, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import {
@@ -10,7 +11,6 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import type { Pool } from "pg";
-import type { IAppRouter } from "shared";
 
 /**
  * Drizzle ORM example with type-safe schema definitions.
