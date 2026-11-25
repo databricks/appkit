@@ -99,14 +99,24 @@ describe("decideMigrateOnStart", () => {
       "a deployed app without the flag",
       { DATABRICKS_APP_NAME: "my-app", ...credentials },
     ],
-    [
-      "a flag other than true",
-      { APPKIT_DB_MIGRATE_ON_START: "1", ...credentials },
-    ],
+    ["an empty flag", { APPKIT_DB_MIGRATE_ON_START: "", ...credentials }],
     ["nothing set", {}],
   ] as const)("%s: off, with nothing to say", (_label, env) => {
     expect(decideMigrateOnStart(env)).toEqual({ kind: "off" });
   });
+
+  test.each(["1", "TRUE", "true ", "yes"])(
+    "a flag of %j is not true: off, naming the value it ignored",
+    (value) => {
+      expect(
+        decideMigrateOnStart({
+          APPKIT_DB_MIGRATE_ON_START: value,
+          ...credentials,
+          PGUSER: "sp-client-id",
+        }),
+      ).toEqual({ kind: "off", ignored: value });
+    },
+  );
 
   test.each([
     [
@@ -233,6 +243,33 @@ describe("migrateOnStart", () => {
 
     expect(applyPendingMigrations).toHaveBeenCalled();
   });
+
+  test.each([
+    ["unset", undefined, "LAKEBASE_ENDPOINT is not set"],
+    [
+      "not an endpoint path",
+      "ep-abc.database.cloud.databricks.com",
+      'LAKEBASE_ENDPOINT is "ep-abc.database.cloud.databricks.com"',
+    ],
+  ])(
+    "a LAKEBASE_ENDPOINT that names no branch (%s) is refused: the branch cannot be checked",
+    async (_label, endpoint, named) => {
+      const error = await migrateOnStart(
+        pool,
+        schema,
+        appRootWithMigrations(),
+        { ...deployEnv, LAKEBASE_ENDPOINT: endpoint },
+      ).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(DatabasePluginError);
+      expect(error).toMatchObject({ category: "SETUP_FAILED", phase: "setup" });
+      expect((error as Error).message).toContain(
+        `${named}, so migrate on start cannot tell which branch it would migrate. ` +
+          "Set it to the app's endpoint, projects/<project>/branches/<branch>/endpoints/<endpoint>, as its database resource does.",
+      );
+      expect(applyPendingMigrations).not.toHaveBeenCalled();
+    },
+  );
 
   test("a pooled endpoint is refused: the migration lock would not hold", async () => {
     const error = await migrateOnStart(pool, schema, appRootWithMigrations(), {

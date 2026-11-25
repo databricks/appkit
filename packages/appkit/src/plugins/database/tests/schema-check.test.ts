@@ -27,7 +27,7 @@ type CatalogRow = {
 
 const OFF = { kind: "off" } as const;
 
-/** Answer the catalog query with the given tables and columns, and the lookup in public with `inPublic`. */
+/** Answer the catalog query with the given tables and columns, on a schema the role may use, and the lookup in public with `inPublic`. */
 function catalog(
   tables: Record<string, string[]>,
   kinds: Record<string, string> = {},
@@ -50,9 +50,11 @@ function catalog(
           })),
   );
   const raw = vi.fn(async (strings: TemplateStringsArray) =>
-    strings.join("?").includes("'public'")
-      ? inPublic.map((table_name) => ({ schema_name: "public", table_name }))
-      : rows,
+    strings.join("?").includes("has_schema_privilege")
+      ? [{ owner: "app-sp", current_user: "app-sp", usage: true }]
+      : strings.join("?").includes("'public'")
+        ? inPublic.map((table_name) => ({ schema_name: "public", table_name }))
+        : rows,
   );
   return { raw, path: { raw } as unknown as DataPath };
 }
@@ -195,8 +197,8 @@ describe("assertSchemaMatchesDatabase", () => {
 
     await assertSchemaMatchesDatabase(path, scoped, OFF);
 
-    expect(raw).toHaveBeenCalledTimes(1);
-    const [strings, ...values] = raw.mock.calls[0] as unknown as [
+    expect(raw).toHaveBeenCalledTimes(2);
+    const [strings, ...values] = raw.mock.calls[1] as unknown as [
       TemplateStringsArray,
       ...unknown[],
     ];
