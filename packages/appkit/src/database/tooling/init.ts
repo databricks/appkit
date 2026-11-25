@@ -715,14 +715,22 @@ async function initHolding(
       start: { kind: "cancelled", schemaName },
     };
   }
+  const onBranch = <T>(
+    work: (client: Pick<PoolClient, "query">) => Promise<T>,
+  ) => withBranchPool(branchCtx, work);
+  if (
+    plan.tag &&
+    !(await onBranch((client) => tagForkCopy(client, schemaName)))
+  ) {
+    onWarning(
+      `Could not mark schema ${schemaName} ${on} as the fork's copy. It has no journal table, or one owned by a role init does not trust. If this run stops before the rebuild finishes, the next \`appkit db init\` will see a schema that looks like your working branch and keep the copied rows. Run \`appkit db init --schema clean\` then.`,
+    );
+  }
   const installed = ensureDrizzleKit(
     ctx.root,
     options.runCommand ?? runCommand,
     onStep,
   );
-  const onBranch = <T>(
-    work: (client: Pick<PoolClient, "query">) => Promise<T>,
-  ) => withBranchPool(branchCtx, work);
 
   const introspect = (recordAsApplied: boolean) => {
     onStep(`Writing schema.ts from schema ${schemaName} ${on}`);
@@ -737,14 +745,6 @@ async function initHolding(
     introspected = await introspect(false);
   }
 
-  if (
-    plan.tag &&
-    !(await onBranch((client) => tagForkCopy(client, schemaName)))
-  ) {
-    onWarning(
-      `Could not mark schema ${schemaName} ${on} as the fork's copy. It has no journal table, or one owned by a role init does not trust. If this run stops before the rebuild finishes, the next \`appkit db init\` will see a schema that looks like your working branch and keep the copied rows. Run \`appkit db init --schema clean\` then.`,
-    );
-  }
   const handedOff = plan.handOff
     ? await handOffAppSchema(branchCtx, {
         branch: branch.name,
