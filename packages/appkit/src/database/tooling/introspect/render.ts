@@ -363,8 +363,9 @@ function mirrored(target: BaseType): string {
 /**
  * Render pg_catalog tables as a `defineSchema` source the builder accepts.
  * What the builder cannot express is left out with an `// appkit: skipped …`
- * comment; what it declares differently (a timestamp without its precision,
- * say) is listed in `approximated`. A column `previous` declares keeps its
+ * comment; a CHECK, EXCLUDE or index it cannot declare is a warning; what it
+ * declares differently (a timestamp without its precision, say) is listed in
+ * `approximated`. A column `previous` declares keeps its
  * `.private()`.
  */
 export function renderSchemaSource(
@@ -623,8 +624,9 @@ export function renderSchemaSource(
       ["index", "indexes", table.indexes],
     ] as const) {
       if (names.length > 0) {
-        tableApproximated.push(
-          `${qualified(table.name)}: ${names.length === 1 ? `${one} ${names[0]} is` : `${many} ${list(names)} are`} not declared`,
+        const single = names.length === 1;
+        warnings.push(
+          `${qualified(table.name)}: ${single ? `${one} ${names[0]} is` : `${many} ${list(names)} are`} not in schema.ts, so a database the migrations create will not have ${single ? "it" : "them"}.`,
         );
       }
     }
