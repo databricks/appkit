@@ -20,8 +20,8 @@ vi.mock("@databricks/appkit/beta/database-tooling", () => ({
   runVerify,
 }));
 
+import { MIGRATION_HISTORY_REWRITE } from "../../../database";
 import { dbCommand } from "./index";
-import { REWRITE } from "./output";
 
 let log: MockInstance;
 let error: MockInstance;
@@ -219,13 +219,17 @@ describe("appkit db verify", () => {
     );
     const printed = output(error);
     expect(printed).toContain(
-      `dev-alice-3f9a2c does not match config/database/schema.ts and the committed migrations. ${REWRITE}`,
+      `dev-alice-3f9a2c does not match config/database/schema.ts and the committed migrations. ${MIGRATION_HISTORY_REWRITE}`,
     );
-    expect(REWRITE).toContain("Save any SQL you wrote by hand");
-    expect(REWRITE).toContain("Merge main");
-    expect(REWRITE).toContain("config/database/migrations");
-    expect(REWRITE).toContain("`appkit db clean` and `appkit db migrate`");
-    expect(REWRITE).toContain("Add the saved SQL back");
+    expect(MIGRATION_HISTORY_REWRITE).toContain(
+      "Save any SQL you wrote by hand",
+    );
+    expect(MIGRATION_HISTORY_REWRITE).toContain("Merge main");
+    expect(MIGRATION_HISTORY_REWRITE).toContain("config/database/migrations");
+    expect(MIGRATION_HISTORY_REWRITE).toContain(
+      "`appkit db clean` and `appkit db migrate`",
+    );
+    expect(MIGRATION_HISTORY_REWRITE).toContain("Add the saved SQL back");
     expect(printed).not.toMatch(/delete/i);
     expect(process.exitCode).toBe(1);
   });

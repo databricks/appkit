@@ -3,6 +3,7 @@ import process from "node:process";
 
 import pc from "picocolors";
 
+import { MIGRATION_HISTORY_REWRITE } from "../../../database";
 import type {
   CheckReport,
   CleanReport,
@@ -120,13 +121,6 @@ export function printCleanReport(report: CleanReport): void {
 const REBUILD =
   "`appkit db clean` and then `appkit db migrate` rebuild the branch from this checkout's migrations, in order";
 
-/**
- * The recovery for a migration history main cannot run in order: the
- * stranded migration is often main's own, so deleting it is never the fix.
- */
-export const REWRITE =
-  "Save any SQL you wrote by hand in your migration, such as a backfill. Merge main, reset config/database/migrations to main's (for example `git restore --source main --staged --worktree config/database/migrations`), then run `appkit db clean` and `appkit db migrate`, which writes your schema change again after main's migrations. Add the saved SQL back to the migration it writes and review it before you commit.";
-
 /** The one next step for a failed local verify, most fundamental gap first. */
 function localVerifyHint(report: LocalVerifyReport): string {
   // Tables left in public: migrating would create empty copies in the app schema.
@@ -137,7 +131,7 @@ function localVerifyHint(report: LocalVerifyReport): string {
   if (report.unknownMigrations > 0) {
     return `${REBUILD}. If the branch ran migrations you have not pulled yet, pull them instead.`;
   }
-  if (report.strandedMigrations.length > 0) return REWRITE;
+  if (report.strandedMigrations.length > 0) return MIGRATION_HISTORY_REWRITE;
   // Pending migrations explain the gap; without them, schema.ts changed or the branch was edited.
   return report.pendingMigrations.length > 0
     ? "Run `appkit db migrate` to apply the pending migrations."

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { MIGRATION_HISTORY_REWRITE } from "shared";
 import { z } from "zod";
 
 import {
@@ -28,22 +29,19 @@ export interface CheckReport {
   readonly ok: boolean;
 }
 
-const REWRITE =
-  "Save any SQL you wrote by hand in your migration. Merge the base branch, reset the migrations to its own (for example `git restore --source origin/main --staged --worktree config/database/migrations`), then run `appkit db clean` and `appkit db migrate`, which writes your schema change again after the base branch's migrations and applies them all to your rebuilt branch. Add the saved SQL back to the regenerated migration and review its SQL before you commit.";
-
 /** Entries numbered or ordered in a way the migrator or drizzle-kit misreads. */
 function orderProblems(entries: readonly JournalEntry[]): string[] {
   const problems: string[] = [];
   entries.forEach((entry, index) => {
     if (entry.idx !== index) {
       problems.push(
-        `${entry.tag} is entry ${index} of meta/_journal.json, but its idx is ${entry.idx}, so drizzle-kit reads another snapshot for it. ${REWRITE}`,
+        `${entry.tag} is entry ${index} of meta/_journal.json, but its idx is ${entry.idx}, so drizzle-kit reads another snapshot for it. ${MIGRATION_HISTORY_REWRITE}`,
       );
     }
     // The journal is parsed, not validated, so `when` can hold anything.
     if (!Number.isSafeInteger(entry.when)) {
       problems.push(
-        `The when of ${entry.tag} in meta/_journal.json is ${JSON.stringify(entry.when) ?? "missing"}, not an integer timestamp, so the migrator never runs it. ${REWRITE}`,
+        `The when of ${entry.tag} in meta/_journal.json is ${JSON.stringify(entry.when) ?? "missing"}, not an integer timestamp, so the migrator never runs it. ${MIGRATION_HISTORY_REWRITE}`,
       );
       return;
     }
@@ -54,7 +52,7 @@ function orderProblems(entries: readonly JournalEntry[]): string[] {
       entry.when <= before.when
     ) {
       problems.push(
-        `${entry.tag} is listed after ${before.tag} but was generated before it, so a branch that ran ${before.tag} never runs ${entry.tag}. ${REWRITE}`,
+        `${entry.tag} is listed after ${before.tag} but was generated before it, so a branch that ran ${before.tag} never runs ${entry.tag}. ${MIGRATION_HISTORY_REWRITE}`,
       );
     }
   });
@@ -125,7 +123,7 @@ function chainProblems(
           ? "after a snapshot that is not committed"
           : `after ${entries[parent]?.tag ?? "an earlier snapshot"}`;
     problems.push(
-      `${entry.tag} was generated ${after}, not after ${entries[index - 1]?.tag}: they were written on parallel branches, so ${entry.tag} lacks the other's changes. ${REWRITE}`,
+      `${entry.tag} was generated ${after}, not after ${entries[index - 1]?.tag}: they were written on parallel branches, so ${entry.tag} lacks the other's changes. ${MIGRATION_HISTORY_REWRITE}`,
     );
   });
   return problems;
@@ -178,7 +176,7 @@ export async function runCheck(ctx: DbContext): Promise<CheckReport> {
     : [];
   for (const name of unlisted) {
     problems.push(
-      `${shown(path.join(folder, name))} is not in meta/_journal.json, so no deploy runs it. ${REWRITE}`,
+      `${shown(path.join(folder, name))} is not in meta/_journal.json, so no deploy runs it. ${MIGRATION_HISTORY_REWRITE}`,
     );
   }
   problems.push(...chainProblems(entries, links));
