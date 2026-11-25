@@ -31,6 +31,9 @@ const ENV = {
   LAKEBASE_ENDPOINT: `${BRANCH}/endpoints/primary`,
   PGUSER: USER,
 };
+const SESSION = `projects/p/branches/${sessionBranchId(USER, "abc12345")}`;
+const OTHER_USERS = `projects/p/branches/${devBranchId("bob@example.com")}`;
+const PRODUCTION = "projects/p/branches/production";
 const MIGRATIONS = "config/database/migrations";
 const roots: string[] = [];
 
@@ -77,15 +80,26 @@ function app(
       );
     }
   }
+  // The .env branch is classified through the API, as you: your dev and
+  // session branches, another user's dev branch, and the default branch.
+  const lakebase = new FakeLakebase();
+  lakebase.addBranch(BRANCH);
+  lakebase.addBranch(SESSION);
+  lakebase.addBranch(OTHER_USERS);
+  lakebase.addBranch(PRODUCTION, { default: true });
   return {
     root,
     env,
-    workspace: () => {
-      throw new Error("no workspace calls expected");
-    },
-    api: () => {
-      throw new Error("no Lakebase API calls expected");
-    },
+    workspace: () => ({
+      request: async () => {
+        throw new Error("no raw API calls expected");
+      },
+      currentUser: { me: async () => ({ userName: USER }) },
+      getHost: async () => {
+        throw new Error("no host lookup expected");
+      },
+    }),
+    api: () => lakebase.api(),
   };
 }
 
@@ -350,6 +364,38 @@ describe("runVerify", () => {
     });
   });
 
+  test("your dev branch is yours by the identity you run as, not by PGUSER: without it the fork's copy is still reported", async () => {
+    const { PGUSER: _, ...withoutUser } = ENV;
+    const ctx = app(two, withoutUser);
+    branch({
+      columns: { notes: ["id", "body"] },
+      recorded: recordedAs(ctx, two),
+      schemaOwner: "deployed-sp",
+    });
+
+    expect(await runVerify(ctx)).toMatchObject({
+      forkCopy: expect.stringContaining(
+        `${devBranchId(USER)} still holds the rows the fork copied`,
+      ),
+      ok: false,
+    });
+  });
+
+  test("a PGUSER naming another user does not make their dev branch yours", async () => {
+    const ctx = app(two, {
+      ...ENV,
+      LAKEBASE_ENDPOINT: `${OTHER_USERS}/endpoints/primary`,
+      PGUSER: "bob@example.com",
+    });
+    branch({
+      columns: { notes: ["id", "body"] },
+      recorded: recordedAs(ctx, two),
+      schemaOwner: "bob",
+    });
+
+    expect(await runVerify(ctx)).toMatchObject({ forkCopy: null, ok: true });
+  });
+
   test("on a fork's copy, a migration from another git branch still counts as unknown", async () => {
     const ctx = app(two);
     branch({
@@ -369,10 +415,11 @@ describe("runVerify", () => {
   });
 
   test("on your session branch, the fork's copy is reported as on your dev branch", async () => {
-    const session = `projects/p/branches/${sessionBranchId(USER, "abc12345")}`;
+    const session = SESSION;
     const ctx = app(two, {
       ...ENV,
       LAKEBASE_ENDPOINT: `${session}/endpoints/primary`,
+      APPKIT_DB_SESSION: "abc12345",
     });
     branch({
       columns: { notes: ["id", "body"] },
@@ -409,7 +456,7 @@ describe("runVerify", () => {
   });
 
   test("on another user's dev branch, the schema they own is not a fork copy, and the other checks still decide", async () => {
-    const other = `projects/p/branches/${devBranchId("bob@example.com")}`;
+    const other = OTHER_USERS;
     const ctx = app(two, {
       ...ENV,
       LAKEBASE_ENDPOINT: `${other}/endpoints/primary`,
@@ -500,7 +547,6 @@ describe("runVerify", () => {
   });
 });
 
-const PRODUCTION = "projects/p/branches/production";
 const DATABASE = `${PRODUCTION}/databases/db-1`;
 const SP = "11111111-2222-3333-4444-555555555555";
 const HOST = "https://acme.cloud.databricks.com";
