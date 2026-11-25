@@ -1,4 +1,8 @@
 import { databaseSetupFailed } from "../../database/errors";
+import {
+  INSUFFICIENT_PRIVILEGE,
+  ownershipHint,
+} from "../../database/migrations/ownership";
 import type { DataPath } from "../../database/runtime";
 import type { Schema } from "../../database/schema-builder";
 import type { MigrateOnStartDecision } from "./migrate-on-start";
@@ -7,6 +11,37 @@ interface CatalogColumn {
   readonly table_name: string;
   readonly column_name: string | null;
   readonly relation_kind: string;
+}
+
+interface SchemaAccess {
+  readonly owner: string;
+  readonly current_user: string;
+  readonly usage: boolean;
+}
+
+/**
+ * pg_catalog lists the tables of a schema the role has no USAGE on, so the
+ * check below would pass and every request would fail with 42501.
+ */
+async function assertSchemaUsable(
+  dataPath: DataPath,
+  schemaName: string,
+): Promise<void> {
+  const [access] = await dataPath.raw<SchemaAccess>`
+    select pg_catalog.pg_get_userbyid(n.nspowner)::text as owner,
+      current_user::text as current_user,
+      pg_catalog.has_schema_privilege(n.oid, 'USAGE') as usage
+    from pg_catalog.pg_namespace n
+    where n.nspname::text = ${schemaName}`;
+  if (!access || access.usage) return;
+  const hint = ownershipHint(INSUFFICIENT_PRIVILEGE, {
+    schemaName,
+    owner: access.owner,
+    currentUser: access.current_user,
+  });
+  throw databaseSetupFailed(
+    `role "${access.current_user}" has no USAGE on schema "${schemaName}". ${hint}`,
+  );
 }
 
 function migrationAdvice(migration: MigrateOnStartDecision): string {
@@ -35,6 +70,7 @@ export async function assertSchemaMatchesDatabase(
   const tables = Object.values(schema.$tables);
   if (tables.length === 0) return;
   const schemaName = schema.$schemaName;
+  await assertSchemaUsable(dataPath, schemaName);
   const tableNames = tables.map((table) => table.$name);
   // Include non-tables so setup can report their kind instead of claiming they are absent.
   const rows = await dataPath.raw<CatalogColumn>`
