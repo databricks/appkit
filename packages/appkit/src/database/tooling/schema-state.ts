@@ -9,6 +9,7 @@ import {
 import { schemaOwnership } from "../migrations/ownership";
 import { MIGRATIONS_TABLE } from "../migrations/paths";
 import { readKeptObjects } from "./clean";
+import { shown } from "./introspect/render";
 import { resourceId } from "./targets";
 
 export type SchemaStart = "migrate" | "introspect" | "clean" | "none";
@@ -169,7 +170,7 @@ export function forkCopyRefusal(
   }
   const holds =
     state.kind === "copy"
-      ? `which "${state.owner}" still owns`
+      ? `which "${shown(state.owner)}" still owns`
       : "and its rebuild did not finish";
   return `${resourceId(branch)} still holds the rows the fork copied into schema "${schemaName}", ${holds}. Run \`appkit db init\` to rebuild it from the committed migrations, or \`appkit db init --schema ${keep}\` to keep them.`;
 }

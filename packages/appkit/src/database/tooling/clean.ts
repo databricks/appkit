@@ -7,6 +7,7 @@ import { runInTransaction } from "./branch-sql";
 import { type DbContext, NO_ENV_BRANCH, withBranchPool } from "./context";
 import { notYourBranch, resolveEnvBranch, writableEnvBranch } from "./guard";
 import { type HistoryLock, withHistoryLock } from "./history-lock";
+import { shown } from "./introspect/render";
 import { requireSchemaFile } from "./migrate";
 import { resourceId } from "./targets";
 
@@ -171,7 +172,7 @@ export async function readCascadeDependents(
     schemaName,
     schemaName === "public",
   ]);
-  return rows.map((row) => row.label);
+  return rows.map((row) => shown(row.label));
 }
 
 /**
@@ -211,7 +212,7 @@ export async function readKeptObjects(
 ): Promise<string[]> {
   if (schemaName !== "public") return [];
   const { rows } = await client.query<{ label: string }>(KEPT_SQL);
-  return rows.map((row) => row.label);
+  return rows.map((row) => shown(row.label));
 }
 
 export interface CleanReport {
@@ -247,7 +248,7 @@ async function refuseUntouchedCopy(
   );
   if (owner === null || owner === currentUser) return;
   throw new Error(
-    `Refusing to clean: ${resourceId(target.branch)} still holds the rows the fork copied into schema "${target.schemaName}", which "${owner}" still owns, so your role cannot drop it. Run \`appkit db init\` to take it over and rebuild it from the committed migrations.`,
+    `Refusing to clean: ${resourceId(target.branch)} still holds the rows the fork copied into schema "${target.schemaName}", which "${shown(owner)}" still owns, so your role cannot drop it. Run \`appkit db init\` to take it over and rebuild it from the committed migrations.`,
   );
 }
 

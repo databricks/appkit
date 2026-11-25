@@ -2,6 +2,7 @@ import type { PoolClient } from "pg";
 
 import { schemaOwnership } from "../migrations/ownership";
 import { type DbContext, withBranchPool } from "./context";
+import { shown } from "./introspect/render";
 import type { LakebaseRole } from "./lakebase-api";
 import { resourceId } from "./targets";
 
@@ -44,7 +45,7 @@ export async function readRoleDependencies(
   const of = (kind: "owned" | "granted") =>
     rows
       .filter((row) => row.kind === kind)
-      .map(({ database, count }) => ({ database, count }));
+      .map(({ database, count }) => ({ database: shown(database), count }));
   return { owned: of("owned"), granted: of("granted") };
 }
 
@@ -78,7 +79,7 @@ export async function readOwnedOutsideSchema(
     role,
     schemaName,
   ]);
-  return rows.map((row) => row.label);
+  return rows.map((row) => shown(row.label));
 }
 
 function describe(dependents: readonly Dependents[]): string {
@@ -109,9 +110,8 @@ interface HandOff {
  * while the app schema is all it owns here: the reassign would hand over its
  * other objects too, so those are listed and the delete is refused. Objects
  * it owns in another database of the branch are refused too, since the
- * reassign cannot reach them. Returns the owner; null when you already own the
- * schema or it does not exist.
- * Schema public is never handed off: it belongs to the database
+ * reassign cannot reach them. Returns the owner, escaped for display; null
+ * when you already own the schema or it does not exist. Schema public is never handed off: it belongs to the database
  * (pg_database_owner on PostgreSQL 15 and later, the bootstrap superuser
  * before), never to an app, so AppKit never deletes its owner or reassigns its
  * objects.
@@ -136,26 +136,27 @@ export async function handOffAppSchema(
   if (!found) return null;
 
   const { owner, ownedOutside, dependencies } = found;
+  const ownerName = shown(owner);
   const where = `schema ${input.schemaName} in database ${input.database} on ${resourceId(input.branch)}`;
   const role = input.roles.find((r) => r.status?.postgres_role === owner);
   if (!role) {
     throw new Error(
-      `Cannot hand ${where} to you: it belongs to "${owner}", which is not a Lakebase-managed role, and no Postgres role can hand it to you. .env already points at the branch. Set another schemaName in schema.ts, then rerun \`appkit db init\`.`,
+      `Cannot hand ${where} to you: it belongs to "${ownerName}", which is not a Lakebase-managed role, and no Postgres role can hand it to you. .env already points at the branch. Set another schemaName in schema.ts, then rerun \`appkit db init\`.`,
     );
   }
   if (ownedOutside.length > 0) {
     throw new Error(
-      `Refusing to hand ${where} to you: deleting role "${owner}" would also give you what else it owns on this branch: ${ownedOutside.join(", ")}. .env already points at the branch. Reassign or drop them, or take them all with \`databricks postgres delete-role ${role.name} --reassign-owned-to ${input.developer.name}\`, then rerun \`appkit db init\`.`,
+      `Refusing to hand ${where} to you: deleting role "${ownerName}" would also give you what else it owns on this branch: ${ownedOutside.join(", ")}. .env already points at the branch. Reassign or drop them, or take them all with \`databricks postgres delete-role ${role.name} --reassign-owned-to ${input.developer.name}\`, then rerun \`appkit db init\`.`,
     );
   }
   const inOtherDatabases = dependencies.owned.filter((d) => d.database);
   if (inOtherDatabases.length > 0) {
     throw new Error(
-      `Refusing to hand ${where} to you: role "${owner}" also owns objects in other databases on this branch, which deleting it cannot reassign: ${describe(inOtherDatabases)}. .env already points at the branch. Reassign or drop them in those databases, then rerun \`appkit db init\`.`,
+      `Refusing to hand ${where} to you: role "${ownerName}" also owns objects in other databases on this branch, which deleting it cannot reassign: ${describe(inOtherDatabases)}. .env already points at the branch. Reassign or drop them in those databases, then rerun \`appkit db init\`.`,
     );
   }
   input.onStep(
-    `Handing ${where} to you: deleting this branch's copy of role ${owner}, which owns it, with its objects reassigned to you`,
+    `Handing ${where} to you: deleting this branch's copy of role ${ownerName}, which owns it, with its objects reassigned to you`,
   );
   try {
     await ctx
@@ -172,18 +173,20 @@ export async function handOffAppSchema(
           : "Revoke its privileges";
     const details = [
       ...(owned.length > 0
-        ? [`"${owner}" still owns ${describe(owned)}, which block the delete.`]
+        ? [
+            `"${ownerName}" still owns ${describe(owned)}, which block the delete.`,
+          ]
         : []),
       ...(granted.length > 0
-        ? [`Privileges granted to "${owner}": ${describe(granted)}.`]
+        ? [`Privileges granted to "${ownerName}": ${describe(granted)}.`]
         : []),
     ];
     throw new Error(
       details.length > 0
-        ? `Could not hand ${where} to you: deleting role "${owner}" failed (${reason}). ${details.join(" ")} .env already points at the branch. ${fix}, then rerun \`appkit db init\`.`
-        : `Could not hand ${where} to you: deleting role "${owner}" failed (${reason}). .env already points at the branch; rerun \`appkit db init\` to retry.`,
+        ? `Could not hand ${where} to you: deleting role "${ownerName}" failed (${reason}). ${details.join(" ")} .env already points at the branch. ${fix}, then rerun \`appkit db init\`.`
+        : `Could not hand ${where} to you: deleting role "${ownerName}" failed (${reason}). .env already points at the branch; rerun \`appkit db init\` to retry.`,
       { cause: error },
     );
   }
-  return owner;
+  return ownerName;
 }
