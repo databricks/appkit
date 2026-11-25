@@ -409,6 +409,29 @@ describe("runIntrospect", () => {
     expect(markMigrationsApplied).not.toHaveBeenCalled();
   });
 
+  test("a pending introspect migration someone edited after introspect wrote it is refused, and nothing changes", async () => {
+    const root = tempApp({ [SCHEMA]: previousSchema });
+    await commitMigration(root);
+    // A teammate introspected their branch, then edited 0001_introspect before committing it.
+    await introspect(root);
+    recorded = recorded.slice(0, 1);
+    fs.appendFileSync(
+      path.join(root, MIGRATIONS, "0001_introspect.sql"),
+      `--> statement-breakpoint\nUPDATE "app"."posts" SET "status" = 'closed';`,
+    );
+    markMigrationsApplied.mockClear();
+    const before = tree(root);
+
+    const error = await refusal(root);
+
+    expect(error).toBeInstanceOf(IntrospectRefusedError);
+    expect(error.message).toBe(
+      'Refusing to introspect dev-alice-3f9a2c: it has not applied 0001_introspect in schema "app". Its SQL is not what introspect would write for the branch now, so recording it without running it could skip a change. Run `appkit db migrate` first.',
+    );
+    expect(tree(root)).toEqual(before);
+    expect(markMigrationsApplied).not.toHaveBeenCalled();
+  });
+
   test("without schema.ts it reads the app schema and creates the file", async () => {
     const root = tempApp();
 
