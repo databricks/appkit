@@ -3,8 +3,8 @@
  *
  * Builds a fixture app with the template's `appkitServerConfig()` preset,
  * moves every `.ts` source away, and runs the output under plain Node. The
- * fixture's entry loads the generated `databaseRoutes` registry, its schema,
- * and each operation module. No database or workspace is contacted.
+ * fixture discovers the generated registry without importing it, then loads its
+ * schema and operation modules. No database or workspace is contacted.
  *
  * Run after `pnpm build`: `pnpm exec tsx tools/verify-database-bundle.ts`
  */
@@ -13,6 +13,7 @@ import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 import { generateDatabaseOperations } from "../packages/appkit/src/type-generator/database/generate-operations";
@@ -64,7 +65,9 @@ export const countNotes = defineOperation({
   execute: ({ db }) => db.notes.count(),
 });
 `,
-  "server/server.ts": `import { databaseRoutes } from "./database/routes.gen";
+  "server/server.ts": `import { loadDefaultDatabaseRoutes } from ${JSON.stringify(pathToFileURL(path.join(appkit, "dist/plugins/database/load-routes.js")).href)};
+const databaseRoutes = await loadDefaultDatabaseRoutes();
+if (!databaseRoutes) throw new Error("Default database operations were not discovered");
 const { schema } = await databaseRoutes.schema();
 const operations: string[] = [];
 for (const module of databaseRoutes.modules) {

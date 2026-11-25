@@ -1,6 +1,6 @@
 // Annotations a reviewer leaves on a saved dashboard, plus an audit trail table
-// for them. Three tables is enough to exercise a two-edge include;
-// the DatabasePlugin does not create them, so the app expects them to exist.
+// for them. The operations in server/database/routes/ are the only HTTP access.
+// The DatabasePlugin does not create these tables, so the app expects them to exist.
 
 import {
   defineSchema,
