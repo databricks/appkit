@@ -262,7 +262,7 @@ describe("appkit db init", () => {
     expect(printed).toContain("Applied 0000_migration to the .env branch");
   });
 
-  test("a rebuild without --schema says the copied rows went and how to keep them; with --schema clean it does not", async () => {
+  test("a rebuild without --schema says the copied rows went; with --schema clean it does not", async () => {
     const rebuilt = (reason: "fork-copy" | "requested") => ({
       ...report,
       start: {
@@ -280,8 +280,9 @@ describe("appkit db init", () => {
     tooling.runInit.mockResolvedValue(rebuilt("fork-copy"));
     await init();
     expect(output(log)).toContain(
-      "The branch still held the rows the fork copied: the app schema was rebuilt from the committed migrations. `appkit db init --schema migrate` keeps them.",
+      "The branch still held the rows the fork copied, so the app schema was rebuilt from the committed migrations without them.",
     );
+    expect(output(log)).not.toContain("keeps them");
 
     log.mockClear();
     resetOptionValues();
@@ -333,7 +334,7 @@ describe("appkit db init", () => {
     );
   });
 
-  test("an introspect start with a rebuild prints what introspect wrote, the drop, the migrations, and names --schema introspect to keep the rows", async () => {
+  test("an introspect start with a rebuild prints what introspect wrote, the drop, the migrations, and that the copied rows went", async () => {
     tooling.runInit.mockResolvedValue({
       ...report,
       start: {
@@ -371,8 +372,9 @@ describe("appkit db init", () => {
 
     const printed = output(log);
     expect(printed).toContain(
-      "`appkit db init --schema introspect` keeps them",
+      "The branch still held the rows the fork copied, so the app schema was rebuilt from the committed migrations without them.",
     );
+    expect(printed).not.toContain("keeps them");
     expect(printed).toContain(
       "Wrote config/database/schema.ts from schema app",
     );

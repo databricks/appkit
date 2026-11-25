@@ -17,6 +17,34 @@ function writeLock(root: string, contents: string): void {
   fs.writeFileSync(path.join(root, LOCK), contents);
 }
 
+/**
+ * Run a process that takes the lock in root and waits; resolves once it holds
+ * the lock, with a promise of the signal that ended it.
+ */
+async function holderProcess(root: string) {
+  const script = `
+    const { withHistoryLock } = await import(${JSON.stringify(path.resolve(import.meta.dirname, "../history-lock.ts"))});
+    await withHistoryLock(${JSON.stringify(root)}, "migrate", async () => {
+      process.stdout.write("held\\n");
+      await new Promise(() => setInterval(() => undefined, 1000));
+    });`;
+  const child = spawn(
+    process.execPath,
+    ["--import", "tsx", "--input-type=module", "-e", script],
+    { cwd: import.meta.dirname, stdio: ["ignore", "pipe", "inherit"] },
+  );
+  const ended = new Promise<NodeJS.Signals | null>((resolve) =>
+    child.once("exit", (_code, signal) => resolve(signal)),
+  );
+  await new Promise<void>((resolve, reject) => {
+    child.stdout.on("data", (chunk: Buffer) => {
+      if (chunk.toString().includes("held")) resolve();
+    });
+    ended.then(() => reject(new Error("the holder exited before holding")));
+  });
+  return { child, ended };
+}
+
 async function failure(promise: Promise<unknown>): Promise<Error> {
   return promise.then(
     () => {
@@ -130,6 +158,38 @@ describe("withHistoryLock", () => {
       fs.writeFileSync(path.join(root, LOCK), replaced);
     });
 
+    expect(fs.readFileSync(path.join(root, LOCK), "utf-8")).toBe(replaced);
+  });
+
+  test.each(["SIGINT", "SIGTERM"] as const)(
+    "%s releases the lock, then ends the process with that signal",
+    async (signal) => {
+      const root = tempApp();
+      const { child, ended } = await holderProcess(root);
+      expect(fs.existsSync(path.join(root, LOCK))).toBe(true);
+
+      child.kill(signal);
+
+      await expect(ended).resolves.toBe(signal);
+      expect(fs.existsSync(path.join(root, LOCK))).toBe(false);
+    },
+  );
+
+  test("a signal leaves a lock another holder wrote in its place", async () => {
+    const root = tempApp();
+    const { child, ended } = await holderProcess(root);
+    const replaced = JSON.stringify({
+      pid: process.pid,
+      host: os.hostname(),
+      command: "introspect",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      token: "theirs",
+    });
+    fs.writeFileSync(path.join(root, LOCK), replaced);
+
+    child.kill("SIGTERM");
+
+    await expect(ended).resolves.toBe("SIGTERM");
     expect(fs.readFileSync(path.join(root, LOCK), "utf-8")).toBe(replaced);
   });
 });

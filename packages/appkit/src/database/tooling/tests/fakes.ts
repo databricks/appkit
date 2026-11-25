@@ -34,6 +34,8 @@ export class FakeLakebase {
     this.branches.set(name, branch);
     this.endpoints.set(name, [this.endpoint(name, "primary")]);
     this.roles.set(name, []);
+    // Every Lakebase branch has it.
+    this.addDatabase(name, "databricks-postgres", "databricks_postgres");
     return branch;
   }
 

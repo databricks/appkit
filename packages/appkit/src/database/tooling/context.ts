@@ -70,6 +70,14 @@ export function createDbContext(
   return ctx;
 }
 
+/** The workspace host a Databricks config profile names, as the SDK resolves it; no API call. */
+export function profileHost(profile: string): Promise<string> {
+  return createWorkspaceClient({
+    profile,
+    clientOptions: getClientOptions(),
+  }).getHost();
+}
+
 /**
  * The guard checks the branch named by LAKEBASE_ENDPOINT, but the pool connects
  * to PGHOST. The runtime only warns when it cannot verify that PGHOST serves that
@@ -110,6 +118,29 @@ export function hasEnvBranch(env: NodeJS.ProcessEnv): boolean {
   return Boolean(env.PGHOST && env.PGDATABASE && env.LAKEBASE_ENDPOINT);
 }
 
+const UNVERIFIED_SSL_MODES: ReadonlySet<string> = new Set([
+  "prefer",
+  "disable",
+  "allow",
+]);
+
+/**
+ * The pool's TLS mode for PGSSLMODE. Of the modes createLakebasePool takes,
+ * only require verifies the server's certificate. Unset is passed as require
+ * too: createLakebasePool would read process.env.PGSSLMODE instead.
+ */
+function verifyingSslMode(
+  mode: string | undefined,
+): LakebasePoolConfig["sslMode"] {
+  if (mode === undefined || mode === "") return "require";
+  if (UNVERIFIED_SSL_MODES.has(mode)) {
+    throw new Error(
+      `PGSSLMODE=${mode} does not verify the server's certificate, so it did not connect. Set PGSSLMODE to require, or unset it.`,
+    );
+  }
+  return mode as LakebasePoolConfig["sslMode"];
+}
+
 /**
  * The pool is created directly: initializeLakebasePool would look the endpoint
  * and the user up a second time.
@@ -119,19 +150,19 @@ async function openBranchPool(ctx: DbContext): Promise<Pool> {
   if (!PGHOST || !PGDATABASE || !LAKEBASE_ENDPOINT) {
     throw new Error(`Did not connect: ${NO_ENV_BRANCH}.`);
   }
+  const sslMode = verifyingSslMode(ctx.env.PGSSLMODE);
   const [user] = await Promise.all([
     ctx.env.PGUSER || currentIdentity(ctx).then(({ userName }) => userName),
     assertHostServesEndpoint(ctx, LAKEBASE_ENDPOINT, PGHOST),
   ]);
   const port = ctx.env.PGPORT ? Number(ctx.env.PGPORT) : undefined;
-  const sslMode = ctx.env.PGSSLMODE as LakebasePoolConfig["sslMode"];
   return createLakebasePool({
     host: PGHOST,
     database: PGDATABASE,
     endpoint: LAKEBASE_ENDPOINT,
     user,
     ...(port ? { port } : {}),
-    ...(sslMode ? { sslMode } : {}),
+    sslMode,
     workspaceClient: ctx.workspace(),
     // One-shot CLI pools: a small cap, and no lingering idle connections.
     max: 2,

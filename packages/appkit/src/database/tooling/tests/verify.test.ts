@@ -38,6 +38,9 @@ const ENV = {
   LAKEBASE_ENDPOINT: `${BRANCH}/endpoints/primary`,
   PGUSER: USER,
 };
+const SESSION = `projects/p/branches/${sessionBranchId(USER, "abc12345")}`;
+const OTHER_USERS = `projects/p/branches/${devBranchId("bob@example.com")}`;
+const PRODUCTION = "projects/p/branches/production";
 const MIGRATIONS = "config/database/migrations";
 const roots: string[] = [];
 
@@ -84,15 +87,26 @@ function app(
       );
     }
   }
+  // The .env branch is classified through the API, as you: your dev and
+  // session branches, another user's dev branch, and the default branch.
+  const lakebase = new FakeLakebase();
+  lakebase.addBranch(BRANCH);
+  lakebase.addBranch(SESSION);
+  lakebase.addBranch(OTHER_USERS);
+  lakebase.addBranch(PRODUCTION, { default: true });
   return {
     root,
     env,
-    workspace: () => {
-      throw new Error("no workspace calls expected");
-    },
-    api: () => {
-      throw new Error("no Lakebase API calls expected");
-    },
+    workspace: () => ({
+      request: async () => {
+        throw new Error("no raw API calls expected");
+      },
+      currentUser: { me: async () => ({ userName: USER }) },
+      getHost: async () => {
+        throw new Error("no host lookup expected");
+      },
+    }),
+    api: () => lakebase.api(),
   };
 }
 
@@ -347,6 +361,19 @@ describe("runVerify", () => {
     });
   });
 
+  test("the owner the catalog reports for a fork's copy is printed with control characters escaped", async () => {
+    const ctx = app(two);
+    branch({
+      columns: { notes: ["id", "body"] },
+      recorded: recordedAs(ctx, two),
+      schemaOwner: "deployed\nsp",
+    });
+
+    expect(await runVerify(ctx)).toMatchObject({
+      forkCopy: expect.stringContaining('which "deployed\\u000asp" still owns'),
+    });
+  });
+
   test("a fork's copy whose rebuild did not finish is reported as one, and its tag is not an unknown migration", async () => {
     const ctx = app(two);
     branch({
@@ -364,6 +391,38 @@ describe("runVerify", () => {
       forkCopy: `${devBranchId(USER)} still holds the rows the fork copied into schema "app", and its rebuild did not finish. Run \`appkit db init\` to rebuild it from the committed migrations, or \`appkit db init --schema migrate\` to keep them.`,
       ok: false,
     });
+  });
+
+  test("your dev branch is yours by the identity you run as, not by PGUSER: without it the fork's copy is still reported", async () => {
+    const { PGUSER: _, ...withoutUser } = ENV;
+    const ctx = app(two, withoutUser);
+    branch({
+      columns: { notes: ["id", "body"] },
+      recorded: recordedAs(ctx, two),
+      schemaOwner: "deployed-sp",
+    });
+
+    expect(await runVerify(ctx)).toMatchObject({
+      forkCopy: expect.stringContaining(
+        `${devBranchId(USER)} still holds the rows the fork copied`,
+      ),
+      ok: false,
+    });
+  });
+
+  test("a PGUSER naming another user does not make their dev branch yours", async () => {
+    const ctx = app(two, {
+      ...ENV,
+      LAKEBASE_ENDPOINT: `${OTHER_USERS}/endpoints/primary`,
+      PGUSER: "bob@example.com",
+    });
+    branch({
+      columns: { notes: ["id", "body"] },
+      recorded: recordedAs(ctx, two),
+      schemaOwner: "bob",
+    });
+
+    expect(await runVerify(ctx)).toMatchObject({ forkCopy: null, ok: true });
   });
 
   test("on a fork's copy, a migration from another git branch still counts as unknown", async () => {
@@ -385,10 +444,11 @@ describe("runVerify", () => {
   });
 
   test("on your session branch, the fork's copy is reported as on your dev branch", async () => {
-    const session = `projects/p/branches/${sessionBranchId(USER, "abc12345")}`;
+    const session = SESSION;
     const ctx = app(two, {
       ...ENV,
       LAKEBASE_ENDPOINT: `${session}/endpoints/primary`,
+      APPKIT_DB_SESSION: "abc12345",
     });
     branch({
       columns: { notes: ["id", "body"] },
@@ -437,7 +497,7 @@ describe("runVerify", () => {
   });
 
   test("on another user's dev branch, the schema they own is not a fork copy, and the other checks still decide", async () => {
-    const other = `projects/p/branches/${devBranchId("bob@example.com")}`;
+    const other = OTHER_USERS;
     const ctx = app(two, {
       ...ENV,
       LAKEBASE_ENDPOINT: `${other}/endpoints/primary`,
@@ -604,7 +664,6 @@ describe("runVerify", () => {
   });
 });
 
-const PRODUCTION = "projects/p/branches/production";
 const DATABASE = `${PRODUCTION}/databases/db-1`;
 const SP = "11111111-2222-3333-4444-555555555555";
 const HOST = "https://acme.cloud.databricks.com";
@@ -851,6 +910,38 @@ describe("runVerify --deployed", () => {
     );
   });
 
+  test("SQL that differs only in line endings still fails, says so, and does not ask for a new migration", async () => {
+    const migrations = [
+      { tag: "0000_migration", when: 1000 },
+      { tag: "0001_migration", when: 2000 },
+    ];
+    const { ctx } = deployedApp({
+      migrations,
+      deployedSql: {
+        "0000_migration": "-- 0000_migration\r\nselect 1;\r\n",
+        "0001_migration": "-- 0001_migration\r\nselect 2;\r\n",
+      },
+    });
+
+    const report = await runVerify(ctx, DEPLOYED);
+    expect(report).toMatchObject({
+      migrations: {
+        evidence: "differs",
+        missing: [],
+        changed: ["0001_migration"],
+        lineEndings: ["0000_migration"],
+        unknown: [],
+      },
+      ok: false,
+    });
+    if (report.kind !== "deploy") throw new Error("expected a deploy report");
+    const [changed, lineEndings] = report.problems;
+    expect(changed).toContain("put the change in a new migration");
+    expect(lineEndings).toBe(
+      "app my-app's active deployment has 0000_migration with the same SQL as this checkout commits, but other line endings (CRLF or LF). The app's start treats either line ending as the same file, but verify compares bytes: check it out with the line endings that were deployed, or run `databricks apps deploy` to deploy it as committed",
+    );
+  });
+
   const JOURNAL = `${SNAPSHOT}/${MIGRATIONS}/meta/_journal.json`;
   test.each([
     [
@@ -1043,6 +1134,28 @@ describe("runVerify --deployed", () => {
     });
   });
 
+  test("tags and texts from the deployed journal and the apps API are printed with control characters escaped", async () => {
+    const migrations = [{ tag: "0000_migration", when: 1000 }];
+    const { ctx } = deployedApp({
+      migrations,
+      deployedJournal: [...migrations, { tag: "0001_\u001b[2Jx", when: 2000 }],
+      app: runningApp({
+        app_status: { state: "CRASHED", message: "boom\nfake: line" },
+      }),
+    });
+
+    const problems = await deployProblems(ctx);
+    expect(problems).toContain(
+      "app my-app's active deployment has 0001_\\u001b[2Jx, which this checkout does not commit: pull it, then run verify again",
+    );
+    expect(problems).toContain(
+      "app my-app is crashed: boom\\u000afake: line. `databricks apps logs` shows why; a migration that fails stops the app on start",
+    );
+    expect(
+      Array.from(problems.join("")).some((char) => char.charCodeAt(0) < 0x20),
+    ).toBe(false);
+  });
+
   test.each([
     [
       "lists a tag twice",
@@ -1151,6 +1264,60 @@ describe("runVerify --deployed", () => {
     });
   });
 
+  test("an app declared in an included file reads the deployed migrations relative to its source_code_path there", async () => {
+    const migrations = [{ tag: "0000_migration", when: 1000 }];
+    const yml = ymlWithHost();
+    const { ctx, requests } = deployedApp({
+      migrations,
+      yml: yml.replace(
+        /resources:\n {2}apps:\n(?: {4}.*\n)+/,
+        "include:\n  - resources/*.yml\n",
+      ),
+    });
+    const app = /resources:\n {2}apps:\n(?: {4}.*\n)+/.exec(yml)?.[0] ?? "";
+    fs.mkdirSync(path.join(ctx.root, "resources"));
+    fs.writeFileSync(
+      path.join(ctx.root, "resources/app.yml"),
+      app.replace("source_code_path: ./", "source_code_path: .."),
+    );
+
+    expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+      migrations: { evidence: "verified" },
+      ok: true,
+    });
+    expect(requests).toContain(
+      `workspace.export ${SNAPSHOT}/${MIGRATIONS}/0000_migration.sql`,
+    );
+  });
+
+  test.each([
+    [
+      "./server",
+      `${MIGRATIONS} is not inside source_code_path ./server of app my-app in databricks.yml, so no deployment of it has the committed migrations`,
+    ],
+    [
+      "${var.app_source}",
+      'source_code_path of app my-app in databricks.yml is "${var.app_source}", which this checkout\'s files do not resolve to a folder',
+    ],
+  ])(
+    "with source_code_path %s, the deployed migrations are unavailable and no snapshot file is read",
+    async (source, reason) => {
+      const { ctx, requests } = deployedApp({
+        migrations: [{ tag: "0000_migration", when: 1000 }],
+        yml: ymlWithHost().replace(
+          "source_code_path: ./",
+          `source_code_path: ${source}`,
+        ),
+      });
+
+      expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+        migrations: { evidence: "unavailable", reason },
+        ok: false,
+      });
+      expect(requests.filter((r) => r.startsWith("workspace."))).toEqual([]);
+    },
+  );
+
   test("--target checks that target's app, branch and host", async () => {
     const staging = "projects/p/branches/staging";
     const { ctx, lakebase } = deployedApp({
@@ -1213,6 +1380,67 @@ describe("runVerify --deployed", () => {
     expect(lakebase.calls).toEqual([]);
   });
 
+  describe("a target with workspace.profile and no host", () => {
+    const STAGING = "https://staging.cloud.databricks.com";
+    const ymlWithProfile = (profile: string) =>
+      `${databricksYml(PRODUCTION, DATABASE)}    workspace:\n      profile: ${profile}\n`;
+
+    beforeEach(() => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "appkit-db-cfg-"));
+      roots.push(dir);
+      const config = path.join(dir, ".databrickscfg");
+      fs.writeFileSync(
+        config,
+        `[acme]\nhost = ${HOST}\n\n[staging]\nhost = ${STAGING}/\n`,
+      );
+      vi.stubEnv("DATABRICKS_CONFIG_FILE", config);
+      vi.stubEnv("DATABRICKS_HOST", "");
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    test("is checked against that profile's host from the Databricks config", async () => {
+      const { ctx } = deployedApp({ yml: ymlWithProfile("acme") });
+
+      expect(await runVerify(ctx, DEPLOYED)).toMatchObject({ ok: true });
+    });
+
+    test("is refused before any API call when this shell is authenticated against another workspace", async () => {
+      const { ctx, lakebase, requests } = deployedApp({
+        yml: ymlWithProfile("staging"),
+      });
+
+      await expect(runVerify(ctx, DEPLOYED)).rejects.toThrow(
+        `Target default deploys with profile staging to ${STAGING}, but this shell is authenticated against ${HOST}. Set DATABRICKS_CONFIG_PROFILE=staging, then rerun.`,
+      );
+      expect(requests).toEqual([]);
+      expect(lakebase.calls).toEqual([]);
+    });
+
+    test("is refused when the Databricks config has no such profile", async () => {
+      const { ctx, requests } = deployedApp({ yml: ymlWithProfile("gone") });
+
+      await expect(runVerify(ctx, DEPLOYED)).rejects.toThrow(
+        /^Target default deploys with profile gone, which this machine's Databricks config does not resolve to a workspace host: .*profile not found.*\. Add the profile, or set workspace\.host in target default, then rerun\.$/,
+      );
+      expect(requests).toEqual([]);
+    });
+  });
+
+  test("a target with neither workspace.host nor workspace.profile runs against this shell's workspace", async () => {
+    const { ctx } = deployedApp({
+      yml: databricksYml(PRODUCTION, DATABASE),
+      authenticatedHost: "https://other.cloud.databricks.com",
+    });
+
+    expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+      host: null,
+      ok: true,
+    });
+  });
+
   test("a branch that only variable-overrides.json sets is the one verify checks, as a deploy from this checkout uses it", async () => {
     // The target gives the variables no value; only the overrides file does.
     const yml = `${databricksYml(PRODUCTION, DATABASE).replace(
@@ -1268,6 +1496,29 @@ describe("runVerify --deployed", () => {
       problems: expect.arrayContaining([
         `app my-app uses branch ${PRODUCTION}, not ${staging} from ${source}: \`databricks apps deploy\` applies ${source}`,
       ]),
+      ok: false,
+    });
+  });
+
+  test("a branch a BUNDLE_VAR_ variable sets wins over variable-overrides.json, as a deploy from this shell uses it", async () => {
+    const qa = "projects/p/branches/qa";
+    const { ctx } = deployedApp();
+    const overrides = path.join(
+      ctx.root,
+      ".databricks/bundle/default/variable-overrides.json",
+    );
+    fs.mkdirSync(path.dirname(overrides), { recursive: true });
+    fs.writeFileSync(
+      overrides,
+      JSON.stringify({ postgres_branch: "projects/p/branches/staging" }),
+    );
+    ctx.env.BUNDLE_VAR_postgres_branch = qa;
+    const source =
+      "databricks.yml with .databricks/bundle/default/variable-overrides.json and BUNDLE_VAR_postgres_branch";
+
+    expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+      branch: qa,
+      problems: [`${source} deploys to ${qa}, which does not exist`],
       ok: false,
     });
   });
