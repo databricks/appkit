@@ -1,11 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { DEFAULT_SCHEMA_FILE } from "../../../plugins/database/load-schema";
 import {
-  DEFAULT_SCHEMA_FILE,
-  loadDefaultDatabaseSchema,
-} from "../../../plugins/database/load-schema";
-import { writeDatabaseTypes } from "../../../type-generator/database";
+  loadDatabaseSchema,
+  writeDatabaseTypes,
+} from "../../../type-generator/database";
 import {
   editedReason,
   markMigrationsApplied,
@@ -150,7 +150,7 @@ function refuseDropsOfUnexpressed(
 async function readPreviousSchema(root: string): Promise<Schema | null> {
   if (!fs.existsSync(path.join(root, DEFAULT_SCHEMA_FILE))) return null;
   try {
-    return await loadDefaultDatabaseSchema(root, { showImportError: true });
+    return await loadDatabaseSchema(path.join(root, DEFAULT_SCHEMA_FILE));
   } catch (error) {
     throw new IntrospectRefusedError(
       `Refusing to introspect: ${DEFAULT_SCHEMA_FILE} does not load, so introspect cannot keep the columns it marks private. Fix it, then rerun.`,
@@ -280,11 +280,9 @@ async function introspectHolding(
       if (backsUp) writeFileAtomic(backupFile, previous);
       fs.mkdirSync(path.dirname(schemaFile), { recursive: true });
       writeFileAtomic(schemaFile, rendered.source);
-      let schema: Awaited<ReturnType<typeof loadDefaultDatabaseSchema>>;
+      let schema: Schema;
       try {
-        schema = await loadDefaultDatabaseSchema(ctx.root, {
-          showImportError: true,
-        });
+        schema = await loadDatabaseSchema(schemaFile);
       } catch (error) {
         throw new Error(
           `The schema.ts introspect generated does not load. This is a bug in \`appkit db introspect\`; please report it with the catalog of schema "${schemaName}".`,
@@ -338,7 +336,7 @@ async function introspectHolding(
       writeOrRemove(schemaFile, previous);
       if (backsUp) writeOrRemove(backupFile, previousBackup);
       writeOrRemove(typesFile, previousTypes);
-      if (migration) discardMigrationFiles(lock, migration);
+      if (migration) await discardMigrationFiles(lock, migration);
       if (error instanceof IntrospectRefusedError) throw error;
       throw new Error(
         `Introspect changed nothing: ${error instanceof Error ? error.message : String(error)}`,
