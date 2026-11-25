@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { sql } from "shared";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 let lastConnectArgs: any = null;
@@ -276,6 +277,45 @@ describe("useAnalyticsQuery", () => {
     rerender({ limit: 10 });
     rerender({ limit: 10 });
     rerender({ limit: 10 });
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not refetch when sql.* params are recreated each render", () => {
+    const { rerender } = renderHook(
+      ({ status }: { status: string }) =>
+        useAnalyticsQuery(
+          "test_query" as any,
+          {
+            status: sql.string(status),
+          } as any,
+        ),
+      { initialProps: { status: "active" } },
+    );
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+
+    rerender({ status: "active" });
+    rerender({ status: "active" });
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not refetch when the same params arrive in another key order", () => {
+    const { rerender } = renderHook(
+      ({ reversed }: { reversed: boolean }) =>
+        useAnalyticsQuery(
+          "test_query" as any,
+          (reversed
+            ? { end: sql.string("b"), start: sql.string("a") }
+            : { start: sql.string("a"), end: sql.string("b") }) as any,
+        ),
+      { initialProps: { reversed: false } },
+    );
+
+    expect(mockConnectSSE).toHaveBeenCalledTimes(1);
+
+    rerender({ reversed: true });
 
     expect(mockConnectSSE).toHaveBeenCalledTimes(1);
   });

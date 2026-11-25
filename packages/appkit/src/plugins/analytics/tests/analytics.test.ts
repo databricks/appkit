@@ -23,6 +23,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { runInCallerContext } from "../../../context";
 import { ServiceContext } from "../../../context/service-context";
+import { IdentityExpiredError } from "../../../errors";
 import { createMockWorkspaceClient } from "../../../testing";
 import { useTestCache } from "../../../testing/test-cache";
 import { AnalyticsPlugin, analytics, writeChunk } from "../analytics";
@@ -728,6 +729,43 @@ describe("Analytics Plugin", () => {
       });
     });
 
+    test("/query/:query_key converts JSON_ARRAY numeric and BOOLEAN cells to match the generated query types", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+      // Connector output for a real JSON_ARRAY response: every cell a string,
+      // plus the manifest names/types the connector attaches.
+      (plugin as any).SQLClient.executeStatement = vi.fn().mockResolvedValue({
+        result: {
+          data: [
+            { trips: "42", fare: "12.50", ok: "true", zip: "10001", r: "NaN" },
+          ],
+          columnNames: ["trips", "fare", "ok", "zip", "r"],
+          columnTypes: ["LONG", "DECIMAL", "BOOLEAN", "STRING", "DOUBLE"],
+        },
+      });
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockRes = createMockResponse();
+      await handler(
+        createMockRequest({
+          params: { query_key: "test_query" },
+          body: { parameters: {} },
+        }),
+        mockRes,
+      );
+
+      expect(mockRes.write).toHaveBeenCalledWith(
+        expect.stringContaining(
+          '"data":[{"trips":42,"fare":12.5,"ok":true,"zip":"10001","r":"NaN"}]',
+        ),
+      );
+    });
+
     test("/query/:query_key falls back ARROW_STREAM INLINE→EXTERNAL_LINKS and streams the preserved links in-context", async () => {
       const plugin = new AnalyticsPlugin(config);
       const { router, getHandler } = createMockRouter();
@@ -917,6 +955,37 @@ describe("Analytics Plugin", () => {
       expect(mockRes.status).toHaveBeenCalledWith(503);
       expect(mockRes.json).toHaveBeenCalledWith(
         expect.objectContaining({ errorCode: "WAREHOUSE_UNAVAILABLE" }),
+      );
+    });
+
+    test("ARROW_STREAM: a rejected user token returns 401 IDENTITY_EXPIRED", async () => {
+      const plugin = new AnalyticsPlugin(config);
+      const { router, getHandler } = createMockRouter();
+
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+      (plugin as any).SQLClient.ensureWarehouseRunning = vi
+        .fn()
+        .mockResolvedValue(undefined);
+      (plugin as any).SQLClient.executeStatement = vi
+        .fn()
+        .mockRejectedValue(new IdentityExpiredError());
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/query/:query_key");
+      const mockReq = createMockRequest({
+        params: { query_key: "test_query" },
+        body: { parameters: {}, format: "ARROW_STREAM" },
+      });
+      const mockRes = createMockResponse();
+
+      await handler(mockReq, mockRes);
+
+      expect(mockRes.status).toHaveBeenCalledWith(401);
+      expect(mockRes.json).toHaveBeenCalledWith(
+        expect.objectContaining({ errorCode: "IDENTITY_EXPIRED" }),
       );
     });
 

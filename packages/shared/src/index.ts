@@ -3,6 +3,7 @@ export * from "./cache";
 export * from "./database";
 export {
   createDevOboIdentityProvider,
+  isServicePrincipalUser,
   loadDevOboIdentity,
   loadDevOboIdentityFromEnvironment,
 } from "./dev-obo";

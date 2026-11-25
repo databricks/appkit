@@ -13,36 +13,74 @@ describe("remote-tunnel/gate", () => {
     expect(isLocalDev({ NODE_ENV: "production" } as any)).toBe(false);
   });
 
-  test("isRemoteTunnelAllowedByEnv requires secret, not disabled, and not local dev", () => {
-    expect(
-      isRemoteTunnelAllowedByEnv({
-        NODE_ENV: "development",
-        DATABRICKS_CLIENT_SECRET: "x",
-      } as any),
-    ).toBe(false);
-
-    expect(
-      isRemoteTunnelAllowedByEnv({
-        NODE_ENV: "production",
-        DATABRICKS_CLIENT_SECRET: "",
-      } as any),
-    ).toBe(false);
-
+  test("isRemoteTunnelAllowedByEnv is off by default in a deployed app", () => {
+    // A deployed app: production, with the platform-injected client secret.
     expect(
       isRemoteTunnelAllowedByEnv({
         NODE_ENV: "production",
         DATABRICKS_CLIENT_SECRET: "x",
-        DISABLE_REMOTE_SERVING: "true",
       } as any),
     ).toBe(false);
 
+    // NODE_ENV unset (e.g. an app started without npm start) is also off.
+    expect(
+      isRemoteTunnelAllowedByEnv({ DATABRICKS_CLIENT_SECRET: "x" } as any),
+    ).toBe(false);
+
+    // DISABLE_REMOTE_SERVING defaults to true: only the exact string "false"
+    // opts in, so typos and other spellings fail closed.
+    for (const value of ["true", "False", "FALSE", "0", "no", "off", ""]) {
+      expect(
+        isRemoteTunnelAllowedByEnv({
+          DATABRICKS_CLIENT_SECRET: "x",
+          DISABLE_REMOTE_SERVING: value,
+        } as any),
+      ).toBe(false);
+    }
+  });
+
+  test("isRemoteTunnelAllowedByEnv never runs in production, even with DISABLE_REMOTE_SERVING=false", () => {
     expect(
       isRemoteTunnelAllowedByEnv({
         NODE_ENV: "production",
         DATABRICKS_CLIENT_SECRET: "x",
         DISABLE_REMOTE_SERVING: "false",
       } as any),
+    ).toBe(false);
+  });
+
+  test("isRemoteTunnelAllowedByEnv requires DISABLE_REMOTE_SERVING=false, a secret, and neither production nor local dev", () => {
+    // NODE_ENV unset: the start command for a deployed app that uses the bridge.
+    expect(
+      isRemoteTunnelAllowedByEnv({
+        DATABRICKS_CLIENT_SECRET: "x",
+        DISABLE_REMOTE_SERVING: "false",
+      } as any),
     ).toBe(true);
+
+    // Any other non-production, non-development value also works.
+    expect(
+      isRemoteTunnelAllowedByEnv({
+        NODE_ENV: "staging",
+        DATABRICKS_CLIENT_SECRET: "x",
+        DISABLE_REMOTE_SERVING: "false",
+      } as any),
+    ).toBe(true);
+
+    expect(
+      isRemoteTunnelAllowedByEnv({
+        NODE_ENV: "development",
+        DATABRICKS_CLIENT_SECRET: "x",
+        DISABLE_REMOTE_SERVING: "false",
+      } as any),
+    ).toBe(false);
+
+    expect(
+      isRemoteTunnelAllowedByEnv({
+        DATABRICKS_CLIENT_SECRET: "",
+        DISABLE_REMOTE_SERVING: "false",
+      } as any),
+    ).toBe(false);
   });
 
   test("hasDevQuery returns true for ?dev (blank) and ?dev=true and ?dev=<id>", () => {

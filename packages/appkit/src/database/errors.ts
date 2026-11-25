@@ -9,7 +9,7 @@ import { createLogger } from "../logging/logger";
 
 // The category vocabulary is shared with the browser client, which reads the
 // same statuses back into the same categories.
-export type { DatabaseErrorCategory, DatabaseErrorDetail } from "shared";
+export type { DatabaseErrorCategory } from "shared";
 
 const logger = createLogger("database");
 
@@ -25,6 +25,10 @@ const definitions: Record<
   DatabaseErrorCategory,
   { readonly message: string; readonly statusCode: number }
 > = {
+  UNAUTHENTICATED: {
+    message: "Database request is not authenticated",
+    statusCode: 401,
+  },
   INVALID_REQUEST: { message: "Invalid database request", statusCode: 400 },
   VALIDATION_FAILED: {
     message: "Database request failed validation",
@@ -42,7 +46,7 @@ const definitions: Record<
     statusCode: 415,
   },
   PAYLOAD_TOO_LARGE: {
-    message: "Database response is too large",
+    message: "Database payload is too large",
     statusCode: 413,
   },
   INTERNAL: { message: "Database operation failed", statusCode: 500 },
