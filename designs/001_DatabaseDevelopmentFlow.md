@@ -782,13 +782,15 @@ start and the schema check passes. Keep the expand and contract migration checks
 1. **Design.** Land this doc. Done when the Apps, Lakebase and CLI reviewers have answered the open questions marked
    for them.
 2. **Runtime, dark.** Land #654 and #655 with the flag, the per-migration transactions, the reconcile states and the
-   bounded lock. Done when a real-Postgres test suite passes in CI, and the dev-playground deployed with the flag on
-   applies `0000` and then `0001`.
-3. **Commands, hidden.** Land #666 to #674. Done when a developer on the dev-playground runs `init`, `migrate` and
-   `verify` on their own branch, and the deployed app applies the migration.
+   bounded lock. Done when a real-Postgres test suite passes in CI, and a throwaway app scaffolded from the template,
+   with the plugin and the flag added by hand, deploys and applies `0000` and then `0001`.
+3. **Commands, hidden.** Land #666 to #674. Done when a developer on a throwaway app scaffolded from the template runs
+   `init`, `migrate` and `verify` on their own branch, and the deployed app applies the migration.
 4. **Template and docs, hidden.** Land #675, then #678 (`appkit db check`). #675 keeps the plugin `hidden: true` and out
-   of `template/appkit.plugins.json`, and keeps `appkit db` hidden from `appkit --help`. Done when two people on the
-   dev-playground add migrations on parallel git branches, `appkit db check` fails a merge that keeps both, and the
+   of `template/appkit.plugins.json`, and keeps `appkit db` hidden from `appkit --help`. Its `process.exit(1)` on a
+   failed start applies to every app the template scaffolds, with or without the plugin, so any app whose startup
+   fails stops instead of serving without its routes. Done when two people on a throwaway app scaffolded from the
+   template add migrations on parallel git branches, `appkit db check` fails a merge that keeps both, and the
    documented fix passes.
 5. **Reveal.** A later, separate change offers the plugin in `apps init`, moves the `database` export from `beta.ts`
    into the generated barrel, and shows `appkit db` in `appkit --help`. Until a CLI release runs `appkit db init`, the
