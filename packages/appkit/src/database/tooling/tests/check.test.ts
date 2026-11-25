@@ -389,6 +389,29 @@ describe("runCheck", () => {
     },
   );
 
+  test("a snapshot left with merge conflict markers fails as not drizzle-kit's, and the other problems still show", async () => {
+    const ctx = app(withTags);
+    await generate(migrations(ctx), notes);
+    await generate(migrations(ctx), withTags);
+    const file = path.join(migrations(ctx), "meta/0000_snapshot.json");
+    const snapshot = fs.readFileSync(file, "utf-8");
+    fs.writeFileSync(
+      file,
+      `<<<<<<< HEAD\n${snapshot}\n=======\n${snapshot}\n>>>>>>> feature\n`,
+    );
+    fs.writeFileSync(
+      path.join(migrations(ctx), "0001_parallel.sql"),
+      "CREATE TABLE x ();",
+    );
+
+    expect((await runCheck(ctx)).problems).toEqual([
+      `${path.join("config/database/migrations/meta/0000_snapshot.json")}, the snapshot of 0000_migration, is not a drizzle-kit snapshot. Restore it from version control.`,
+      expect.stringContaining(
+        `${path.join("config/database/migrations/0001_parallel.sql")} is not in meta/_journal.json, so no deploy runs it.`,
+      ),
+    ]);
+  });
+
   test("without schema.ts it points to introspect", async () => {
     const ctx = app({});
     fs.rmSync(path.join(ctx.root, "config/database/schema.ts"));
