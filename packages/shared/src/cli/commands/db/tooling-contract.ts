@@ -18,6 +18,7 @@ export interface MigrateReport {
   readonly dataDependent?: readonly string[];
   readonly notApplied?: string;
   readonly typesFile: string;
+  readonly operationsTypesFile: string;
 }
 
 export interface Skip {

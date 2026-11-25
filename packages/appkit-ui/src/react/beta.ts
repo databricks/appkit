@@ -17,61 +17,36 @@ export {
   useAiSearchQuery,
 } from "./hooks/use-ai-search-query";
 
-// Database read and write hooks. Track the `database` plugin, which ships at
-// beta from '@databricks/appkit/beta'. The client and the registry binding live
-// in '@databricks/appkit-ui/js/beta'; the types the hooks mention are
-// re-exported.
+// Database operation query and mutation hooks. Track the `database` plugin,
+// which ships at beta from '@databricks/appkit/beta'. The client lives in
+// '@databricks/appkit-ui/js/beta'; the types the hooks mention are re-exported.
 export {
   DatabaseApiError,
   type DatabaseApiErrorCode,
-  type DatabaseEntity,
   type DatabaseErrorDetail,
-  type DatabaseId,
-  type DatabaseInsert,
-  type DatabaseKeyedEntity,
-  type DatabaseListPage,
-  type DatabaseListParams,
-  type DatabaseListRow,
-  type DatabaseRecordParams,
-  type DatabaseRecordRow,
-  type DatabaseRow,
-  type DatabaseUpdate,
+  type DatabaseMutationName,
+  type DatabaseOperationInput,
+  type DatabaseOperationName,
+  type DatabaseOperationOutput,
+  type DatabaseQueryName,
 } from "@/js/beta";
-export { invalidateDatabaseReads } from "./hooks/database-request-store";
 export {
-  type UseDatabaseCreateOptions,
-  type UseDatabaseCreateResult,
-  useDatabaseCreate,
-} from "./hooks/use-database-create";
+  type DatabaseMutationOutcome,
+  type UseDatabaseMutationResult,
+  useDatabaseMutation,
+} from "./hooks/use-database-mutation";
 export {
-  type UseDatabaseDeleteOptions,
-  type UseDatabaseDeleteResult,
-  useDatabaseDelete,
-} from "./hooks/use-database-delete";
+  type UseDatabaseQueryOptions,
+  type UseDatabaseQueryResult,
+  useDatabaseQuery,
+  skipToken,
+} from "./hooks/use-database-query";
+
+// For pages of the dev-only `design` plugin ('@databricks/appkit/beta').
+export { useDesignReady } from "./hooks/use-design-ready";
 export {
-  type UseDatabaseListOptions,
-  type UseDatabaseListResult,
-  useDatabaseList,
-} from "./hooks/use-database-list";
-export {
-  type DatabaseRowShape,
-  type DatabaseShape,
-  serialized,
-  type UseDatabaseReadOptions,
-  type UseDatabaseReadResult,
-} from "./hooks/use-database-read";
-export {
-  type UseDatabaseRecordOptions,
-  type UseDatabaseRecordResult,
-  useDatabaseRecord,
-} from "./hooks/use-database-record";
-export {
-  type UseDatabaseUpdateOptions,
-  type UseDatabaseUpdateResult,
-  useDatabaseUpdate,
-} from "./hooks/use-database-update";
-export type {
-  DatabaseInvalidation,
-  UseDatabaseWriteOptions,
-  UseDatabaseWriteState,
-} from "./hooks/use-database-write";
+  DesignPage,
+  type DesignPageProps,
+  DraftPlaceholder,
+  type DraftPlaceholderKind,
+} from "./design-page";

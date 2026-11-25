@@ -1,84 +1,46 @@
 import type {
-  DatabaseApiEntityFor,
-  IdFor,
-  InsertFor,
-  KeyedEntityFor,
-  ListParamsFor,
-  ListRowFor,
-  PublicRowFor,
-  RecordParamsFor,
-  RecordRowFor,
-  UpdateFor,
+  DatabaseOperationMethod,
+  DatabricksAppKitDatabaseOperations,
 } from "shared";
 
-import type { DatabaseRegistry } from "./registry";
+type Operations = DatabricksAppKitDatabaseOperations;
 
-/** Entity names the generated registry binds, or `never` before typegen runs. */
-export type DatabaseEntity = DatabaseApiEntityFor<DatabaseRegistry>;
+/** Names of the generated database operations, or `never` before generation. */
+export type DatabaseOperationName = Extract<keyof Operations, string>;
+
+type NamesWithMethod<M extends DatabaseOperationMethod> = {
+  [N in DatabaseOperationName]: Operations[N] extends { readonly method: M }
+    ? N
+    : never;
+}[DatabaseOperationName];
+
+/** GET operations, the names `useDatabaseQuery` reads. */
+export type DatabaseQueryName = NamesWithMethod<"GET">;
+
+/** POST, PATCH, PUT, and DELETE operations, the names `useDatabaseMutation` runs. */
+export type DatabaseMutationName = NamesWithMethod<
+  Exclude<DatabaseOperationMethod, "GET">
+>;
+
+/** The JSON input operation `N` accepts, as generation rendered it. */
+export type DatabaseOperationInput<N extends DatabaseOperationName> =
+  Operations[N] extends { readonly input: infer Input } ? Input : never;
 
 /**
- * Entities with a path-decodable public key, the only ones with a detail route.
- * Private, missing, boolean, and JSON keys do not address generated HTTP routes.
+ * The JSON a successful call of `N` answers with, as generation rendered it.
+ * `void` when the operation answers without a body.
  */
-export type DatabaseKeyedEntity = KeyedEntityFor<DatabaseRegistry>;
+export type DatabaseOperationOutput<N extends DatabaseOperationName> =
+  Operations[N] extends { readonly output: infer Output } ? Output : never;
 
-/** The public primary key value that addresses one row of `K`. */
-export type DatabaseId<K extends DatabaseKeyedEntity> = IdFor<
-  DatabaseRegistry,
-  K
->;
+/** @internal Call arguments: parameterless operations may omit their input. */
+export type DatabaseOperationInputArgs<Input> = [Input] extends [void]
+  ? [input?: Input]
+  : [input: Input];
 
-/**
- * The public query `GET /api/database/<entity>` accepts: filters and ordering
- * over queryable columns, projection over public columns, and includes over
- * relations, each checked against the target's own public facets.
- */
-export type DatabaseListParams<K extends DatabaseEntity> = ListParamsFor<
-  DatabaseRegistry,
-  K
->;
-
-/**
- * One list row as JSON carries it: the public row, narrowed by `select` and
- * widened by `include`, with bigint columns as decimal strings.
- */
-export type DatabaseListRow<
-  K extends DatabaseEntity,
-  P = Record<never, never>,
-> = ListRowFor<DatabaseRegistry, K, P>;
-
-/** The public query `GET /api/database/<entity>/:id` accepts: `select` and `include`. */
-export type DatabaseRecordParams<K extends DatabaseEntity> = RecordParamsFor<
-  DatabaseRegistry,
-  K
->;
-
-/** One detail row as JSON carries it; projection follows the list rules. */
-export type DatabaseRecordRow<
-  K extends DatabaseEntity,
-  P = Record<never, never>,
-> = RecordRowFor<DatabaseRegistry, K, P>;
-
-/**
- * The body `POST /api/database/<entity>` accepts: public columns the server
- * does not generate, with bigint columns as a decimal string or safe integer.
- */
-export type DatabaseInsert<K extends DatabaseEntity> = InsertFor<
-  DatabaseRegistry,
-  K
->;
-
-/**
- * The body `PATCH /api/database/<entity>/:id` accepts: every field optional,
- * and no key, generated, or default-stamped column.
- */
-export type DatabaseUpdate<K extends DatabaseEntity> = UpdateFor<
-  DatabaseRegistry,
-  K
->;
-
-/** The public row a create or update answers with, as JSON carries it. */
-export type DatabaseRow<K extends DatabaseEntity> = PublicRowFor<
-  DatabaseRegistry,
-  K
->;
+/** @internal Call arguments with a fixed options position after the input. */
+export type DatabaseOperationArgs<Input, Options, Skipped = never> = [
+  Input,
+] extends [void]
+  ? [input?: Input | Skipped, options?: Options]
+  : [input: Input | Skipped, options?: Options];

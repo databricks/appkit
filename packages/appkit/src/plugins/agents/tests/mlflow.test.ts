@@ -4,7 +4,8 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { SpanKind } from "@opentelemetry/api";
+import { ROOT_CONTEXT, SpanKind, TraceFlags, trace } from "@opentelemetry/api";
+import { BasicTracerProvider } from "@opentelemetry/sdk-trace-base";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { GatedMlflowSpanProcessor } from "../mlflow";
@@ -694,6 +695,94 @@ describe("GatedMlflowSpanProcessor", () => {
 
     expect(inner.onEnd).toHaveBeenCalledWith(agentRoot); // exported
     expect(popTrace).not.toHaveBeenCalled();
+  });
+
+  // Deployed apps: the Apps proxy forwards `traceparent`, so the request's first
+  // span has a remote parent. mlflow must still see it as the trace root.
+  const REMOTE_PARENT = {
+    traceId: "tr-deployed",
+    spanId: "proxy",
+    traceFlags: TraceFlags.NONE,
+    isRemote: true,
+  };
+
+  test("exports a deployed agent turn whose request span has a remote parent", () => {
+    const { inner, popTrace, gated } = mkGated();
+    gated.ready();
+    const requestRoot = mkSpan({
+      kind: SpanKind.SERVER,
+      parentSpanContext: REMOTE_PARENT,
+      attributes: { [SPAN_TYPE_KEY]: '"UNKNOWN"' },
+      traceId: "tr-deployed",
+    });
+    const agentChild = mkSpan({
+      attributes: { [SPAN_TYPE_KEY]: '"AGENT"' },
+      traceId: "tr-deployed",
+    });
+
+    gated.onStart(requestRoot as any, {} as any);
+    gated.onStart(agentChild as any, {} as any);
+    gated.onEnd(agentChild as any);
+    gated.onEnd(requestRoot as any);
+
+    // mlflow gets one parentless view of the root, at start and at end...
+    const rootView = inner.onStart.mock.calls[0][0];
+    expect(rootView.parentSpanContext).toBeUndefined();
+    expect(rootView.spanContext().traceId).toBe("tr-deployed");
+    expect(inner.onEnd.mock.calls.at(-1)?.[0]).toBe(rootView); // exported
+    expect(popTrace).not.toHaveBeenCalled();
+    // ...while the real span keeps its remote parent for OTLP.
+    expect(requestRoot.parentSpanContext).toBe(REMOTE_PARENT);
+  });
+
+  test("discards a deployed plain request (remote parent) rather than leaving it unrooted", () => {
+    const { inner, popTrace, gated } = mkGated();
+    gated.ready();
+    const requestRoot = mkSpan({
+      kind: SpanKind.SERVER,
+      parentSpanContext: REMOTE_PARENT,
+      attributes: { [SPAN_TYPE_KEY]: '"UNKNOWN"' },
+      traceId: "tr-deployed",
+    });
+    const dbChild = mkSpan({
+      kind: SpanKind.CLIENT,
+      attributes: { [SPAN_TYPE_KEY]: '"UNKNOWN"' },
+      traceId: "tr-deployed",
+    });
+
+    gated.onStart(requestRoot as any, {} as any);
+    gated.onStart(dbChild as any, {} as any);
+    gated.onEnd(dbChild as any);
+    gated.onEnd(requestRoot as any);
+
+    expect(popTrace).toHaveBeenCalledExactlyOnceWith("tr-deployed");
+    expect(inner.onEnd).toHaveBeenCalledExactlyOnceWith(dbChild); // child only
+  });
+
+  test("the remote-root view writes through to the real SDK span and reads it live", () => {
+    const { inner, gated } = mkGated();
+    gated.ready();
+    // What mlflow does with the root it is handed: tag it in onStart.
+    inner.onStart.mockImplementation((s: any) =>
+      s.setAttribute("mlflow.traceRequestId", '"tr-x"'),
+    );
+    const tracer = new BasicTracerProvider({
+      spanProcessors: [gated],
+    }).getTracer("t");
+    const remote = trace.setSpanContext(ROOT_CONTEXT, {
+      traceId: "0af7651916cd43dd8448eb211c80319c",
+      spanId: "b7ad6b7169203331",
+      traceFlags: TraceFlags.SAMPLED, // the default ParentBased sampler needs it
+      isRemote: true,
+    });
+    const span = tracer.startSpan("POST", { kind: SpanKind.SERVER }, remote);
+    span.end();
+
+    const view = inner.onStart.mock.calls[0][0];
+    expect(view.parentSpanContext).toBeUndefined();
+    expect((span as any).parentSpanContext.isRemote).toBe(true);
+    expect((span as any).attributes["mlflow.traceRequestId"]).toBe('"tr-x"');
+    expect(view.ended).toBe(true); // live state, not a snapshot from onStart
   });
 
   test("drops the exporters' own outbound spans (parentless CLIENT) — breaks the loop", () => {

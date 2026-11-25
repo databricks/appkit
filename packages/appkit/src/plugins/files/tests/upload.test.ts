@@ -184,4 +184,31 @@ describe("FilesPlugin upload", () => {
       expect(del).toHaveBeenCalled();
     });
   });
+
+  describe("Upload body already consumed", () => {
+    test("returns 500 instead of uploading an empty file", async () => {
+      const plugin = new FilesPlugin(VOLUMES_CONFIG);
+      const handler = getRouteHandler(plugin, "post", "/upload");
+      const res = mockRes();
+
+      const req = mockUploadReq("uploads", [Buffer.from('{"a":1}')], {
+        query: { path: "/Volumes/catalog/schema/uploads/data.json" },
+      });
+      // Drain the body the way a body parser running first would
+      for await (const _ of req);
+
+      const connector = (plugin as any).volumeConnectors.uploads;
+      const upload = vi.spyOn(connector, "upload");
+
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          error: expect.stringContaining("already consumed"),
+        }),
+      );
+      expect(upload).not.toHaveBeenCalled();
+    });
+  });
 });

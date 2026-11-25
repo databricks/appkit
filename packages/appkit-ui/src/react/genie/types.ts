@@ -24,6 +24,10 @@ export interface GenieMessageItem {
   attachments: GenieAttachmentResponse[];
   queryResults: Map<string, GenieStatementResponse>;
   error?: string;
+  /** Agent mode: the agent's reasoning steps, in order. */
+  reasoning?: string[];
+  /** Image URL of each visualization attachment, keyed by attachment ID. */
+  visualizationUrls?: Record<string, string>;
 }
 
 export interface UseGenieChatOptions {

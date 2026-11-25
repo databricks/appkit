@@ -1,12 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { DEFAULT_SCHEMA_FILE } from "../../plugins/database/load-schema";
 import {
-  DEFAULT_SCHEMA_FILE,
-  loadDefaultDatabaseSchema,
-} from "../../plugins/database/load-schema";
-import {
+  DATABASE_OPERATIONS_TYPES_FILE,
   DATABASE_TYPES_FILE,
+  generateDatabaseOperations,
+  loadDatabaseSchema,
   writeDatabaseTypes,
 } from "../../type-generator/database";
 import {
@@ -43,10 +43,9 @@ function requireSchemaFile(root: string): void {
   );
 }
 
-export const DATABASE_TYPES_PATH = path.join(
-  "shared/appkit-types",
-  DATABASE_TYPES_FILE,
-);
+const TYPES_DIR = "shared/appkit-types";
+
+export const DATABASE_TYPES_PATH = path.join(TYPES_DIR, DATABASE_TYPES_FILE);
 
 export interface MigrateReport {
   /** The migration written by this run; null when schema.ts matches the latest snapshot. */
@@ -61,6 +60,7 @@ export interface MigrateReport {
   /** Why nothing was applied, when applying was skipped. */
   readonly notApplied?: string;
   readonly typesFile: string;
+  readonly operationsTypesFile: string;
 }
 
 export interface MigrateOptions {
@@ -173,8 +173,9 @@ async function applyToEnvBranch(
 
 /**
  * `appkit db migrate`: generate a migration when schema.ts changed, regenerate
- * database.d.ts, and apply pending migrations to the `.env` branch (only AppKit
- * dev/session branches). One command at a time owns the checkout's history.
+ * database.d.ts and database-operations.d.ts, and apply pending migrations to
+ * the `.env` branch (only AppKit dev/session branches). One command at a time
+ * owns the checkout's history.
  */
 export async function runMigrate(
   ctx: DbContext,
@@ -191,18 +192,28 @@ async function migrateHolding(
   lock: HistoryLock,
   options: MigrateOptions,
 ): Promise<MigrateReport> {
-  const schema = await loadDefaultDatabaseSchema(ctx.root, {
-    showImportError: true,
-  });
+  const schema = await loadDatabaseSchema(
+    path.join(ctx.root, DEFAULT_SCHEMA_FILE),
+  );
   const generated = await generateMigrationFiles(lock, {
     schema,
     interactive: options.interactive,
   });
   const warnings = migrationWarnings(generated);
 
-  // The types follow schema.ts alone, so they are current even if applying fails.
-  const typesFile = path.join(ctx.root, DATABASE_TYPES_PATH);
+  // The types follow schema.ts and server/database/routes alone, so they are
+  // current even if applying fails.
+  const typesFile = path.join(ctx.root, TYPES_DIR, DATABASE_TYPES_FILE);
   await writeDatabaseTypes(schema, typesFile);
+  const operationsTypesFile = path.join(
+    ctx.root,
+    TYPES_DIR,
+    DATABASE_OPERATIONS_TYPES_FILE,
+  );
+  await generateDatabaseOperations({
+    appRoot: ctx.root,
+    outFile: operationsTypesFile,
+  });
 
   let outcome: ApplyOutcome;
   try {
@@ -212,7 +223,7 @@ async function migrateHolding(
     // Nothing ran. A kept migration would create the empty copies the refusal
     // warns about, and the next run would diff schema.ts against it.
     if (error instanceof TablesLeftInPublicError) {
-      discardMigrationFiles(lock, generated);
+      await discardMigrationFiles(lock, generated);
       throw error;
     }
     const file = path.relative(ctx.root, generated.file);
@@ -224,7 +235,7 @@ async function migrateHolding(
       error.code &&
       !RETRYABLE_AS_WRITTEN.has(error.code)
     ) {
-      discardMigrationFiles(lock, generated);
+      await discardMigrationFiles(lock, generated);
       throw new Error(
         `${error.message} Removed ${file}, so the next run writes it again from ${DEFAULT_SCHEMA_FILE}. Change ${DEFAULT_SCHEMA_FILE} or the branch's data, then rerun \`appkit db migrate\`.`,
         { cause: error },
@@ -245,5 +256,6 @@ async function migrateHolding(
       : {}),
     ...outcome,
     typesFile,
+    operationsTypesFile,
   };
 }

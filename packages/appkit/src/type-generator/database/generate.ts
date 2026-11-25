@@ -9,8 +9,11 @@ import { walkSchema } from "./walk-schema";
 
 /** Safe diagnostic raised when database declarations cannot be generated. */
 export class DatabaseTypegenError extends Error {
-  constructor(message = "Database schema generation failed") {
-    super(message);
+  constructor(
+    message = "Database schema generation failed",
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
     this.name = "DatabaseTypegenError";
   }
 }
@@ -26,7 +29,8 @@ function schemaLabel(schemaFile: string): string {
   return path.relative(process.cwd(), schemaFile) || schemaFile;
 }
 
-function importFailureReason(error: unknown): string {
+/** A bounded reason for a failed import; the raw error text never leaves. */
+export function importFailureReason(error: unknown): string {
   if (error instanceof SyntaxError) return "could not be parsed";
   let code: unknown;
   try {
@@ -53,8 +57,8 @@ declare module "@databricks/appkit" {
 `;
 
 /**
- * Bind the schema to AppKit and to a global interface the optional UI package
- * extends. Server-only apps need not install appkit-ui or enable skipLibCheck.
+ * Bind the schema to AppKit. Browser code reads operation contracts instead,
+ * so server-only apps need not install appkit-ui or enable skipLibCheck.
  */
 function render(schema: Schema): string {
   const entries = walkSchema(schema)
@@ -70,8 +74,6 @@ function render(schema: Schema): string {
     api: {
       insert: ${entry.api.insert};
       update: ${entry.api.update};
-      filters: ${entry.api.filters};
-      orderable: ${entry.api.orderable};
       key: ${entry.api.key};
     };
   };`,
@@ -92,15 +94,14 @@ ${entries}
 declare module "@databricks/appkit" {
   interface DatabaseRegistry extends GeneratedDatabaseRegistry {}
 }
-
-declare global {
-  interface DatabricksAppKitDatabaseRegistry extends GeneratedDatabaseRegistry {}
-}
 `;
 }
 
 /** Atomically replace generated output only when its content changes. */
-async function writeIfChanged(outFile: string, content: string): Promise<void> {
+export async function writeIfChanged(
+  outFile: string,
+  content: string,
+): Promise<void> {
   if (
     fsSync.existsSync(outFile) &&
     (await fs.readFile(outFile, "utf8")) === content
@@ -133,6 +134,35 @@ async function importSchema(schemaFile: string): Promise<unknown> {
   return createJiti(import.meta.url, { moduleCache: false }).import(schemaFile);
 }
 
+/** Load the named, finalized `schema` export; every failure is a safe diagnostic. */
+export async function loadDatabaseSchema(schemaFile: string): Promise<Schema> {
+  let module: unknown;
+  try {
+    module = await importSchema(schemaFile);
+  } catch (error) {
+    // The message stays bounded; only a caller that prints causes, the local
+    // `appkit db` CLI, shows the import error to the developer.
+    throw new DatabaseTypegenError(
+      `Database schema "${schemaLabel(schemaFile)}" ${importFailureReason(error)}`,
+      { cause: error },
+    );
+  }
+  if (typeof module !== "object" || module === null || !("schema" in module)) {
+    throw new DatabaseTypegenError(
+      `Database schema module "${schemaLabel(schemaFile)}" must export a named "schema"`,
+    );
+  }
+  const { schema } = module;
+  try {
+    assertFinalizedSchema(schema);
+  } catch {
+    throw new DatabaseTypegenError(
+      `Database schema "${schemaLabel(schemaFile)}" is not a finalized AppKit schema`,
+    );
+  }
+  return schema;
+}
+
 /** Generate current registry types or neutralize them when loading fails. */
 export async function generateDatabaseTypes(
   options: GenerateDatabaseTypesOptions,
@@ -142,22 +172,10 @@ export async function generateDatabaseTypes(
     return;
   }
   try {
-    const module = (await importSchema(options.schemaFile)) as {
-      schema?: Schema;
-    };
-    if (!("schema" in module)) {
-      throw new DatabaseTypegenError(
-        `Database schema module "${schemaLabel(options.schemaFile)}" must export a named "schema"`,
-      );
-    }
-    try {
-      assertFinalizedSchema(module.schema);
-    } catch {
-      throw new DatabaseTypegenError(
-        `Database schema "${schemaLabel(options.schemaFile)}" is not a finalized AppKit schema`,
-      );
-    }
-    await writeIfChanged(options.outFile, render(module.schema));
+    await writeIfChanged(
+      options.outFile,
+      render(await loadDatabaseSchema(options.schemaFile)),
+    );
   } catch (error) {
     // A failed run must not leave stale entities visible to TypeScript.
     await writeIfChanged(options.outFile, NEUTRAL_DATABASE_TYPES);
