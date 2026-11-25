@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 
+import { developmentBranchKind } from "../../branch-names";
 import { devBranchId, isValidSessionId, sessionBranchId } from "../naming";
 
 const BRANCH_ID = /^[a-z][a-z0-9-]{0,62}$/;
@@ -53,5 +54,21 @@ describe("branch naming", () => {
     expect(sessionBranchId("alice@example.com", "abc")).not.toBe(
       sessionBranchId("bob@example.com", "abc"),
     );
+  });
+
+  test("the deployed app's refusal recognizes every id init generates", () => {
+    for (const user of [
+      "Alice.Smith@example.com",
+      `${"x".repeat(80)}@example.com`,
+      "__@example.com",
+      "11111111-2222-3333-4444-555555555555",
+    ]) {
+      expect(developmentBranchKind(devBranchId(user))).toBe("dev");
+      for (const session of ["a", "k2x9q0ab", "a".repeat(48)]) {
+        expect(developmentBranchKind(sessionBranchId(user, session))).toBe(
+          "session",
+        );
+      }
+    }
   });
 });

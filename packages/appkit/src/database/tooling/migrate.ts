@@ -124,12 +124,26 @@ function withIntrospectRecovery(error: unknown): unknown {
   );
 }
 
+/**
+ * SQLSTATEs where another session or a cancel, not the migration, made it fail:
+ * lock_not_available and query_canceled. The same migration can apply later.
+ */
+const RETRYABLE_AS_WRITTEN: ReadonlySet<string> = new Set(["55P03", "57014"]);
+
+/** Applying was refused before anything ran: a migration would shadow tables left in public. */
+class TablesLeftInPublicError extends Error {
+  constructor(reason: string) {
+    super(`Did not apply: ${reason}`);
+    this.name = "TablesLeftInPublicError";
+  }
+}
+
 /** Why migrations must not be applied to the `.env` branch; undefined when they may. */
 async function applyBlocker(ctx: DbContext): Promise<string | undefined> {
   const env = await resolveEnvBranch(ctx);
   if (!env) return NO_ENV_BRANCH;
   if (takesWrites(env.kind)) return undefined;
-  return `${notYourBranch(env)}. Migrations are applied only to branches \`appkit db init\` created for you; the deployed app applies committed migrations to its own branch`;
+  return `${notYourBranch(env)}. Migrations are applied only to branches \`appkit db init\` created for you; the deployed app applies committed migrations to its own branch. The check for tables left in public was skipped too; the deployed app runs it before it migrates`;
 }
 
 /** Apply pending migrations to the `.env` branch, or say why they were not. */
@@ -148,7 +162,7 @@ async function applyToEnvBranch(
       catalogSqlOf(pool),
       schema,
     );
-    if (leftInPublic) throw new Error(`Did not apply: ${leftInPublic}`);
+    if (leftInPublic) throw new TablesLeftInPublicError(leftInPublic);
     const { applied, adopted } = await applyPendingMigrations(pool, {
       migrationsFolder: folder,
       schemaName: schema.$schemaName,
@@ -195,13 +209,20 @@ async function migrateHolding(
     outcome = await applyToEnvBranch(ctx, lock.folder, schema);
   } catch (error) {
     if (!generated) throw withIntrospectRecovery(error);
+    // Nothing ran. A kept migration would create the empty copies the refusal
+    // warns about, and the next run would diff schema.ts against it.
+    if (error instanceof TablesLeftInPublicError) {
+      discardMigrationFiles(lock, generated);
+      throw error;
+    }
     const file = path.relative(ctx.root, generated.file);
     // A failed migration left in the journal runs first on every later try, so a
     // fix in schema.ts would stack behind it and never apply.
     if (
       error instanceof MigrationApplyError &&
       error.failed === generated.tag &&
-      error.code
+      error.code &&
+      !RETRYABLE_AS_WRITTEN.has(error.code)
     ) {
       discardMigrationFiles(lock, generated);
       throw new Error(

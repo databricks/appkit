@@ -1,16 +1,55 @@
 import { databaseSetupFailed } from "../../database/errors";
 import {
+  INSUFFICIENT_PRIVILEGE,
+  ownershipHint,
+} from "../../database/migrations/ownership";
+import {
   keepInPublicAdvice,
   locateTables,
 } from "../../database/migrations/tables-left-in-public";
 import type { DataPath } from "../../database/runtime";
 import type { Schema } from "../../database/schema-builder";
+import { schemaNameIsExplicit } from "../../database/schema-builder/define-schema";
 import type { MigrateOnStartDecision } from "./migrate-on-start";
 
 interface CatalogColumn {
   readonly table_name: string;
   readonly column_name: string | null;
   readonly relation_kind: string;
+}
+
+interface SchemaAccess {
+  readonly owner: string;
+  readonly current_user: string;
+  readonly usage: boolean;
+  readonly can_create: boolean;
+}
+
+/**
+ * pg_catalog lists the tables of a schema the role has no USAGE on, so the
+ * check below would pass and every request would fail with 42501.
+ */
+async function assertSchemaUsable(
+  dataPath: DataPath,
+  schemaName: string,
+): Promise<void> {
+  const [access] = await dataPath.raw<SchemaAccess>`
+    select pg_catalog.pg_get_userbyid(n.nspowner)::text as owner,
+      current_user::text as current_user,
+      pg_catalog.has_schema_privilege(n.oid, 'USAGE') as usage,
+      pg_catalog.has_schema_privilege(n.oid, 'CREATE') as can_create
+    from pg_catalog.pg_namespace n
+    where n.nspname::text = ${schemaName}`;
+  if (!access || access.usage) return;
+  const hint = ownershipHint(INSUFFICIENT_PRIVILEGE, {
+    schemaName,
+    owner: access.owner,
+    currentUser: access.current_user,
+    canCreate: access.can_create,
+  });
+  throw databaseSetupFailed(
+    `role "${access.current_user}" has no USAGE on schema "${schemaName}". ${hint}`,
+  );
 }
 
 function migrationAdvice(migration: MigrateOnStartDecision): string {
@@ -39,6 +78,7 @@ export async function assertSchemaMatchesDatabase(
   const tables = Object.values(schema.$tables);
   if (tables.length === 0) return;
   const schemaName = schema.$schemaName;
+  await assertSchemaUsable(dataPath, schemaName);
   const tableNames = tables.map((table) => table.$name);
   // Include non-tables so setup can report their kind instead of claiming they are absent.
   const rows = await dataPath.raw<CatalogColumn>`
@@ -94,7 +134,7 @@ export async function assertSchemaMatchesDatabase(
   if (problems.length > 0) {
     const absent = tableNames.filter((name) => !found.has(name));
     const advice =
-      (await inPublicInstead(dataPath, schemaName, absent)) ??
+      (await inPublicInstead(dataPath, schema, absent)) ??
       migrationAdvice(migration);
     throw databaseSetupFailed(
       `the declared schema does not match the database: ${problems.join("; ")}. ${advice}`,
@@ -104,15 +144,17 @@ export async function assertSchemaMatchesDatabase(
 
 /**
  * Apps from before the default schema moved to `app` keep their tables in
- * `public`. Name that case when every absent table is there; the migration
- * guard in database/migrations/tables-left-in-public.ts refuses it up front.
+ * `public`. Name that case when the schema name is the default and every
+ * absent table is there; the migration guard in
+ * database/migrations/tables-left-in-public.ts refuses it up front.
  */
 async function inPublicInstead(
   dataPath: DataPath,
-  schemaName: string,
+  schema: Schema,
   absent: readonly string[],
 ): Promise<string | undefined> {
-  if (schemaName === "public" || absent.length === 0) return undefined;
+  if (schemaNameIsExplicit(schema) || absent.length === 0) return undefined;
+  const schemaName = schema.$schemaName;
   const { inPublic } = await locateTables(dataPath.raw, schemaName, absent);
   if (inPublic.length < absent.length) return undefined;
   return `Schema public has ${absent.length === 1 ? "that table" : "those tables"}, but ${keepInPublicAdvice(schemaName)}`;

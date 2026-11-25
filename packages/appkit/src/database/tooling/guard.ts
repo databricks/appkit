@@ -35,14 +35,20 @@ function deployRefusal(
 ): string | null {
   if (boundary.unresolved.length > 0) {
     const references = boundary.unresolved
-      .map(
-        ({ target, at, written, file }) =>
-          `${at} in target ${target}${file ? ` with ${file}` : ""} (${written ? JSON.stringify(written) : "no value"})`,
-      )
+      .map(({ target, at, written, file, environment }) => {
+        const values = [file, environment].filter(Boolean).join(" and ");
+        return `${at} in target ${target}${values ? ` with ${values}` : ""} (${written ? JSON.stringify(written) : "no value"})`;
+      })
       .join(", ");
-    const where = boundary.unresolved.some(({ file }) => file)
-      ? "databricks.yml or the variable-overrides.json named"
-      : "databricks.yml";
+    const where = [
+      "databricks.yml",
+      ...(boundary.unresolved.some(({ file }) => file)
+        ? ["the variable-overrides.json named"]
+        : []),
+      ...(boundary.unresolved.some(({ environment }) => environment)
+        ? ["the BUNDLE_VAR_ variable named"]
+        : []),
+    ].join(" or ");
     return `databricks.yml may deploy to it: the files do not resolve ${references}; give ${boundary.unresolved.length > 1 ? "them values" : "it a value"} in ${where}`;
   }
   return boundary.branches.has(branch)
@@ -106,7 +112,7 @@ export async function resolveEnvBranch(
   const local = readLocalTarget(ctx.env);
   const name = parseResourceName(local.endpoint ?? undefined)?.branch;
   if (!name || !hasEnvBranch(ctx.env)) return null;
-  const boundary = readDeployBoundary(ctx.root);
+  const boundary = readDeployBoundary(ctx.root, ctx.env);
   const [branch, { userName }] = await Promise.all([
     ctx.api().getBranch(name),
     currentIdentity(ctx),

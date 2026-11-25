@@ -55,6 +55,19 @@ function writeSchema(root: string, tables: string): void {
   );
 }
 
+/** Every file under the migrations folder, by relative path, with its contents. */
+function historyFiles(folder: string): Record<string, string> {
+  return Object.fromEntries(
+    fs
+      .readdirSync(folder, { recursive: true, encoding: "utf-8" })
+      .filter((entry) => fs.statSync(path.join(folder, entry)).isFile())
+      .map((entry) => [
+        entry,
+        fs.readFileSync(path.join(folder, entry), "utf-8"),
+      ]),
+  );
+}
+
 function app(tables: string): DbContext {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "appkit-db-migrate-"));
   roots.push(root);
@@ -142,6 +155,28 @@ describe("runMigrate", () => {
       expect.objectContaining({ $schemaName: "app" }),
     );
     expect(applyPendingMigrations).not.toHaveBeenCalled();
+    expect(
+      fs.existsSync(path.join(ctx.root, "config/database/migrations")),
+    ).toBe(false);
+  });
+
+  test("refusing for tables left in public leaves the migration history as it was", async () => {
+    const ctx = app(`notes: table("notes", { id: id() })`);
+    resolveEnvBranch.mockResolvedValue(null);
+    await runMigrate(ctx, { interactive: false });
+    const folder = path.join(ctx.root, "config/database/migrations");
+    const before = historyFiles(folder);
+
+    writeSchema(ctx.root, `notes: table("notes", { id: id(), body: text() })`);
+    resolveEnvBranch.mockResolvedValue(devBranch);
+    detectTablesLeftInPublic.mockResolvedValue(
+      'none of the declared tables exist in schema "app", but public has notes.',
+    );
+
+    await expect(runMigrate(ctx, { interactive: false })).rejects.toThrow(
+      /^Did not apply: none of the declared tables exist in schema "app", but public has notes\.$/,
+    );
+    expect(historyFiles(folder)).toEqual(before);
   });
 
   test("generates, regenerates types, and applies to the .env branch with the app schema", async () => {
@@ -210,7 +245,7 @@ describe("runMigrate", () => {
     expect(withBranchPool).not.toHaveBeenCalled();
     expect(applyPendingMigrations).not.toHaveBeenCalled();
     expect(report.notApplied).toBe(
-      "production is not your dev or session branch (it is the project's default branch). Migrations are applied only to branches `appkit db init` created for you; the deployed app applies committed migrations to its own branch",
+      "production is not your dev or session branch (it is the project's default branch). Migrations are applied only to branches `appkit db init` created for you; the deployed app applies committed migrations to its own branch. The check for tables left in public was skipped too; the deployed app runs it before it migrates",
     );
     expect(fs.existsSync(report.typesFile)).toBe(true);
   });
@@ -298,6 +333,51 @@ describe("runMigrate", () => {
       fs.readFileSync(path.join(folder, "meta/_journal.json"), "utf-8"),
     ).toBe(journal);
   });
+
+  test.each([
+    [
+      "55P03",
+      "Another session held a lock on a table this migration changes for over 5s, 3 times. Deploy again once the long-running query or transaction finishes.",
+    ],
+    ["57014", undefined],
+  ])(
+    "when the migration this run wrote fails with SQLSTATE %s, neither schema.ts nor the data is at fault, so it stays",
+    async (code, hint) => {
+      const ctx = app(`notes: table("notes", { id: id() })`);
+      resolveEnvBranch.mockResolvedValue(null);
+      await runMigrate(ctx, { interactive: false });
+      writeSchema(
+        ctx.root,
+        `notes: table("notes", { id: id(), body: text() })`,
+      );
+      resolveEnvBranch.mockResolvedValue(devBranch);
+      const failure = new MigrationApplyError({
+        step: "Applying migrations",
+        failed: "0001_migration",
+        pending: ["0001_migration"],
+        hint,
+        cause: Object.assign(new Error("canceling statement"), { code }),
+      });
+      applyPendingMigrations.mockRejectedValue(failure);
+
+      const error = (await runMigrate(ctx, { interactive: false }).catch(
+        (caught: unknown) => caught,
+      )) as Error;
+
+      expect(error.message).toBe(
+        `Wrote ${path.join("config/database/migrations", "0001_migration.sql")}, but did not apply it: ${failure.message}`,
+      );
+      expect(error.message).not.toContain("Change config/database/schema.ts");
+      if (hint) expect(error.message).toContain(hint);
+      expect(error.cause).toBe(failure);
+      expect(error).toMatchObject({ generated: { tag: "0001_migration" } });
+      expect(
+        fs.existsSync(
+          path.join(ctx.root, "config/database/migrations/0001_migration.sql"),
+        ),
+      ).toBe(true);
+    },
+  );
 
   test("when an earlier migration fails, the one this run wrote stays for the next try", async () => {
     const ctx = app(`notes: table("notes", { id: id() })`);
