@@ -85,7 +85,16 @@ export async function migrateOnStart(
 ): Promise<void> {
   const folder = migrationsFolder(root);
   const branch = endpointBranch(env.LAKEBASE_ENDPOINT);
-  const kind = branch && developmentBranchKind(branch);
+  if (!branch) {
+    const value = env.LAKEBASE_ENDPOINT
+      ? `LAKEBASE_ENDPOINT is ${JSON.stringify(env.LAKEBASE_ENDPOINT)}`
+      : "LAKEBASE_ENDPOINT is not set";
+    throw databaseSetupFailed(
+      `${value}, so migrate on start cannot tell which branch it would migrate. ` +
+        "Set it to the app's endpoint, projects/<project>/branches/<branch>/endpoints/<endpoint>, as its database resource does.",
+    );
+  }
+  const kind = developmentBranchKind(branch);
   if (kind) {
     const owner = DEVELOPMENT_BRANCH_OWNERS[kind];
     throw databaseSetupFailed(
