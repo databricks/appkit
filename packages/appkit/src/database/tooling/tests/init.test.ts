@@ -806,6 +806,54 @@ describe("runInit — session branch", () => {
     expect(afterFork.branches.has(DEV)).toBe(false);
   });
 
+  test("a --session run that stopped after the fork is resumed by a plain init, from a .env that still points elsewhere", async () => {
+    schemaOwner = USER;
+    const lakebase = project();
+    lakebase.addBranch(session("k2x9q0ab"), {
+      expire_time: "2099-01-01T00:00:00Z",
+    });
+    const ctx = appOn(lakebase, { APPKIT_DB_SESSION: "k2x9q0ab" });
+
+    const { report } = await init(ctx, { schema: "none" });
+
+    expect(report).toMatchObject({
+      mode: "session",
+      branch: session("k2x9q0ab"),
+      created: false,
+    });
+    expect(lakebase.branches.has(DEV)).toBe(false);
+  });
+
+  test("a .env that points at your dev branch stays on it, even with a session id whose branch exists", async () => {
+    schemaOwner = USER;
+    const lakebase = project();
+    lakebase.addBranch(DEV);
+    lakebase.addBranch(session("k2x9q0ab"), {
+      expire_time: "2099-01-01T00:00:00Z",
+    });
+    const ctx = appOn(lakebase, {
+      APPKIT_DB_SESSION: "k2x9q0ab",
+      LAKEBASE_ENDPOINT: `${DEV}/endpoints/primary`,
+    });
+
+    const { report } = await init(ctx, { schema: "none" });
+
+    expect(report).toMatchObject({ mode: "dev", branch: DEV });
+  });
+
+  test("a failed session run says to rerun with --session, since a plain rerun can pick the dev branch", async () => {
+    const lakebase = project();
+    lakebase.createBranchError = forbidden();
+    const ctx = appOn(lakebase);
+
+    await expect(init(ctx, { mode: "session" })).rejects.toThrow(
+      `needs CAN MANAGE on ${P}. Ask a project owner for it, then rerun \`appkit db init --session\`.`,
+    );
+    await expect(init(ctx)).rejects.toThrow(
+      `needs CAN MANAGE on ${P}. Ask a project owner for it, then rerun \`appkit db init\`.`,
+    );
+  });
+
   test("an expired session branch, or a 409 for one that is gone, gets a fresh session id", async () => {
     const lakebase = project();
     lakebase.addBranch(session("k2x9q0ab"), {
