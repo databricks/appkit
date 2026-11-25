@@ -4,10 +4,8 @@ import path from "node:path";
 import { MIGRATION_HISTORY_REWRITE } from "shared";
 import { z } from "zod";
 
-import {
-  DEFAULT_SCHEMA_FILE,
-  loadDefaultDatabaseSchema,
-} from "../../plugins/database/load-schema";
+import { DEFAULT_SCHEMA_FILE } from "../../plugins/database/load-schema";
+import { loadDatabaseSchema } from "../../type-generator/database";
 import {
   type JournalEntry,
   MigrationFilesError,
@@ -183,9 +181,9 @@ export async function runCheck(ctx: DbContext): Promise<CheckReport> {
 
   // drizzle-kit diffs from the latest snapshot, which must exist.
   if (entries.length === 0 || links.at(-1)) {
-    const schema = await loadDefaultDatabaseSchema(ctx.root, {
-      showImportError: true,
-    });
+    const schema = await loadDatabaseSchema(
+      path.join(ctx.root, DEFAULT_SCHEMA_FILE),
+    );
     if (await hasUnmigratedChanges(folder, schema)) {
       const last = entries.at(-1)?.tag;
       problems.push(
