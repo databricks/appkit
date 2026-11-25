@@ -75,6 +75,8 @@ const CONNECTION_CHECK_INTERVAL = "10s";
 
 /** lock_not_available: a table lock was not granted within the lock timeout. */
 const LOCK_NOT_AVAILABLE = "55P03";
+/** SQLSTATE classes of failures the existing rows cause: data_exception and integrity_constraint_violation. */
+const DATA_FAILURE_CLASSES = ["22", "23"];
 
 /**
  * A step of applying migrations failed. Each migration commits in its own
@@ -1016,6 +1018,10 @@ export async function applyPendingMigrations(
         () => undefined,
       );
       hint = ownershipHint(code, ownership);
+    } else if (code && DATA_FAILURE_CLASSES.includes(code.slice(0, 2))) {
+      hint =
+        "It failed on rows already in the database, not on its SQL. Repair those rows, then apply the same migration again. " +
+        "On the deploy branch, repair them as a role with the DATABRICKS_SUPERUSER membership, which someone with CAN USE on the Lakebase project creates, and deploy again.";
     }
     throw new MigrationApplyError({
       step,
