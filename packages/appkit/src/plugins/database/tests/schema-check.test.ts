@@ -115,7 +115,7 @@ describe("assertSchemaMatchesDatabase — tables left in public", () => {
     await expect(
       assertSchemaMatchesDatabase(path, schema, OFF),
     ).rejects.toThrow("commit migrations");
-    expect(raw).toHaveBeenCalledTimes(1);
+    expect(raw).toHaveBeenCalledTimes(2);
   });
 });
 

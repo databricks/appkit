@@ -22,6 +22,7 @@ interface SchemaAccess {
   readonly owner: string;
   readonly current_user: string;
   readonly usage: boolean;
+  readonly can_create: boolean;
 }
 
 /**
@@ -35,7 +36,8 @@ async function assertSchemaUsable(
   const [access] = await dataPath.raw<SchemaAccess>`
     select pg_catalog.pg_get_userbyid(n.nspowner)::text as owner,
       current_user::text as current_user,
-      pg_catalog.has_schema_privilege(n.oid, 'USAGE') as usage
+      pg_catalog.has_schema_privilege(n.oid, 'USAGE') as usage,
+      pg_catalog.has_schema_privilege(n.oid, 'CREATE') as can_create
     from pg_catalog.pg_namespace n
     where n.nspname::text = ${schemaName}`;
   if (!access || access.usage) return;
@@ -43,6 +45,7 @@ async function assertSchemaUsable(
     schemaName,
     owner: access.owner,
     currentUser: access.current_user,
+    canCreate: access.can_create,
   });
   throw databaseSetupFailed(
     `role "${access.current_user}" has no USAGE on schema "${schemaName}". ${hint}`,
