@@ -544,10 +544,17 @@ copy of the branch. A table needs a single-column primary key and a name AppKit 
 supported type, and an identity column is written only as the primary key. Generated columns, columns of unsupported
 types and identity columns other than the primary key are left out, and an unsupported default is dropped from its
 column. A foreign key is written with `fk()` only when one column references the primary key or a single-column unique
-key of another table in the same schema. Composite, cross-schema and self-referencing foreign keys, one that would
-close a cycle, and a few other shapes the builder cannot type are left out, and their column stays when it is otherwise
-supported. What is left out is marked with an `// appkit: skipped …` comment in `schema.ts` and a warning from the
-command.
+key of another table in the same schema. Composite, cross-schema and self-referencing foreign keys, one that would close
+a cycle, and a few other shapes the builder cannot type are left out, and their column stays when it is otherwise
+supported. What introspect leaves out is reported in three ways. A table, column, default, multi-column unique
+constraint or foreign key it cannot write gets an `// appkit: skipped …` comment in `schema.ts` and a `Skipped` line
+from the command, plus a warning when inserts would then fail. CHECK and EXCLUDE constraints and indexes, which the
+builder cannot declare, get a warning and no comment, and so do the views, triggers, policies, functions, standalone
+sequences and types introspect does not read. None of these reach `schema.ts` or the baseline, so a branch
+`appkit db init` rebuilds from the migrations lacks them. The deploy branch keeps them, because the app adopts
+`0000_baseline` without running it. What the builder declares differently from the database, such as a timestamp's
+precision, DEFERRABLE, MATCH FULL, an always-identity key, sequence options or partitioning, is listed as `Approximated`
+information. Comments, collations, `NOT VALID` and storage options are neither read nor reported.
 
 Introspect keeps the `.private()` an existing `schema.ts` declares, because the server entity client omits private
 columns from its reads by default. Every other column it writes is public. When `schema.ts` does not load, introspect
