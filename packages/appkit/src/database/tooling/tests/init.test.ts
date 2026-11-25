@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import dotenv from "dotenv";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const { cleanHolding, introspectHolding, migrateHolding, withBranchPool } =
@@ -32,6 +33,7 @@ import type { DbContext } from "../context";
 import type { HistoryLock } from "../history-lock";
 import { type InitOptions, runInit } from "../init";
 import { IntrospectRefusedError } from "../introspect";
+import { shown } from "../introspect/render";
 import { LakebaseApiError } from "../lakebase-api";
 import { runMigrate } from "../migrate";
 import { DRIZZLE_KIT_VERSION } from "../migrations";
@@ -1255,6 +1257,18 @@ describe("runInit — schema start", () => {
     expect(report.start).toEqual({ kind: "none" });
   });
 
+  test("a schema.ts that fails to import keeps the import error for the CLI to show", async () => {
+    const ctx = appOn(
+      project(),
+      {},
+      { files: { "config/database/schema.ts": "export const schema = (" } },
+    );
+
+    const error = (await init(ctx).catch((caught: unknown) => caught)) as Error;
+
+    expect((error.cause as Error).message).toMatch(/schema\.ts:\d+:\d+/);
+  });
+
   test.each(["migrate", "clean"] as const)(
     "%s without schema.ts fails before any change",
     async (start) => {
@@ -1686,6 +1700,34 @@ describe("runInit — .env", () => {
 
     const same = await init(appOn(project()), { schema: "none" });
     expect(same.warnings).toEqual([]);
+  });
+
+  test("a database name with a control character is escaped on the terminal and kept as is in .env", async () => {
+    const bound = "app\u001b[31mdb";
+    const lakebase = project();
+    lakebase.addDatabase(PRODUCTION, "databricks-postgres", bound);
+    const ctx = appOn(lakebase, { PGDATABASE: "scratch\u0007" });
+
+    const { report, events } = await init(ctx);
+
+    expect(report.database).toBe(shown(bound));
+    expect(
+      dotenv.parse(fs.readFileSync(path.join(ctx.root, ".env"))).PGDATABASE,
+    ).toBe(bound);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        `Setting PGDATABASE=${shown(bound)} in .env: it was ${shown("scratch\u0007")}, and databricks.yml binds ${shown(bound)}`,
+        `Pointing .env at ${devBranchId(USER)}, database ${shown(bound)}`,
+        expect.stringContaining(
+          `Handing schema app in database ${shown(bound)} on `,
+        ),
+      ]),
+    );
+    expect(
+      events.filter(
+        (event) => event.includes("\u001b") || event.includes("\u0007"),
+      ),
+    ).toEqual([]);
   });
 
   test("the profile init authenticated with wins over the host", async () => {

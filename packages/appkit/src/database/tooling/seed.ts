@@ -32,8 +32,11 @@ export async function runSeed(ctx: DbContext): Promise<SeedReport> {
   }
   const branch = await writableEnvBranch(ctx, "seed");
   const schemaName = hasSchemaFile(ctx.root)
-    ? (await loadDatabaseSchema(path.join(ctx.root, DEFAULT_SCHEMA_FILE)))
-        .$schemaName
+    ? (
+        await loadDatabaseSchema(path.join(ctx.root, DEFAULT_SCHEMA_FILE), {
+          showImportError: true,
+        })
+      ).$schemaName
     : DEFAULT_SCHEMA_NAME;
   const searchPath =
     schemaName === "public"

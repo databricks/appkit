@@ -251,6 +251,21 @@ describe("migrateOnStart", () => {
       "ep-abc.database.cloud.databricks.com",
       'LAKEBASE_ENDPOINT is "ep-abc.database.cloud.databricks.com"',
     ],
+    [
+      "an endpoint path inside other text",
+      "https://host/projects/p/branches/production/endpoints/primary",
+      'LAKEBASE_ENDPOINT is "https://host/projects/p/branches/production/endpoints/primary"',
+    ],
+    [
+      "an endpoint path with a suffix",
+      "projects/p/branches/production/endpoints/primary/extra",
+      'LAKEBASE_ENDPOINT is "projects/p/branches/production/endpoints/primary/extra"',
+    ],
+    [
+      "a branches segment without the project and endpoint",
+      "x/branches/production/y",
+      'LAKEBASE_ENDPOINT is "x/branches/production/y"',
+    ],
   ])(
     "a LAKEBASE_ENDPOINT that names no branch (%s) is refused: the branch cannot be checked",
     async (_label, endpoint, named) => {

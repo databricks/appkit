@@ -232,6 +232,7 @@ async function cleanTarget(ctx: DbContext) {
   const branch = await writableEnvBranch(ctx, "clean");
   const schema = await loadDatabaseSchema(
     path.join(ctx.root, DEFAULT_SCHEMA_FILE),
+    { showImportError: true },
   );
   return { branch: branch.name, schemaName: schema.$schemaName };
 }
