@@ -5,6 +5,11 @@ import { tableFromIPC } from "apache-arrow";
 import pc from "picocolors";
 
 import { createLogger } from "../logging/logger";
+import {
+  extractParameters,
+  getProtectedRanges,
+  isInsideProtectedRange,
+} from "../utils/sql-parameters";
 import { CACHE_VERSION, hashSQL, loadCache, saveCache } from "./cache";
 import {
   classifyBlockingFailure,
@@ -26,33 +31,19 @@ import {
   sqlTypeToMarker,
 } from "./types";
 import {
+  describeStatusTimeout,
+  describeWaitTimeout,
   getWarehouseState,
+  remainingWaitMs,
+  resolveWarehouseWaitTimeoutMs,
   startWarehouse,
+  statusRequestTimeoutMs,
+  WarehouseStatusTimeoutError,
+  WarehouseWaitTimeoutError,
   waitUntilRunning,
 } from "./warehouse-status";
 
 const logger = createLogger("type-generator:query-registry");
-
-/**
- * Upper bound on how long a `blocking`-mode preflight will wait for a starting
- * warehouse to reach RUNNING before giving up (~5 min). Generous enough to ride
- * out a cold start without hanging an interactive CLI invocation indefinitely.
- */
-const PREFLIGHT_WAIT_MAX_MS = 300_000;
-
-/**
- * Regex breakdown:
- *   '(?:[^']|'')*'   — matches a SQL string literal, including escaped '' pairs
- *   |                 — alternation: whichever branch matches first at a position wins
- *   --[^\n]*          — matches a single-line SQL comment
- *
- * Because the regex engine scans left-to-right, a `'` is consumed as a string
- * literal before any `--` inside it could match as a comment — giving us
- * correct single-pass ordering without a manual state machine.
- *
- * V1: no block-comment support (deferred to next PR).
- */
-const PROTECTED_RANGE_RE = /'(?:[^']|'')*'|--[^\n]*/g;
 
 /**
  * Numeric-context patterns for positional type inference.
@@ -69,21 +60,6 @@ const NUMERIC_PATTERNS: RegExp[] = [
   /[+\-*/]\s*:([a-zA-Z_]\w*)/g,
   /:([a-zA-Z_]\w*)\s*[+\-*/]/g,
 ];
-
-export function getProtectedRanges(sql: string): Array<[number, number]> {
-  const ranges: Array<[number, number]> = [];
-  for (const m of sql.matchAll(PROTECTED_RANGE_RE)) {
-    ranges.push([m.index, m.index + m[0].length]);
-  }
-  return ranges;
-}
-
-function isInsideProtectedRange(
-  offset: number,
-  ranges: Array<[number, number]>,
-): boolean {
-  return ranges.some(([start, end]) => offset >= start && offset < end);
-}
 
 /**
  * Parse a raw API/SDK error into a structured code + message.
@@ -108,25 +84,7 @@ function parseError(raw: string): { code?: string; message: string } {
   return { message: raw };
 }
 
-/**
- * Extract parameters from a SQL query
- * @param sql - the SQL query to extract parameters from
- * @returns an array of parameter names
- */
-export function extractParameters(
-  sql: string,
-  ranges?: Array<[number, number]>,
-): string[] {
-  const protectedRanges = ranges ?? getProtectedRanges(sql);
-  const matches = sql.matchAll(/(?<!:):([a-zA-Z_]\w*)/g);
-  const params = new Set<string>();
-  for (const match of matches) {
-    if (!isInsideProtectedRange(match.index, protectedRanges)) {
-      params.add(match[1]);
-    }
-  }
-  return Array.from(params);
-}
+export { extractParameters, getProtectedRanges };
 
 // parameters that are injected by the server
 export const SERVER_INJECTED_PARAMS = ["workspaceId"];
@@ -540,6 +498,11 @@ export function inferParameterTypes(
  *   immediately), "blocking" waits for a starting warehouse and starts (then
  *   waits for) a stopped one, treating only a deleted/deleting warehouse as
  *   fatal. Defaults to "non-blocking".
+ * @param options.waitTimeoutMs - "blocking" only: how long to wait for the
+ *   warehouse to reach RUNNING. Defaults to {@link resolveWarehouseWaitTimeoutMs}
+ *   (`APPKIT_TYPEGEN_WAIT_TIMEOUT` seconds, else 5 min). When it runs out the
+ *   run degrades like any environmental failure and reports the timeout in
+ *   `environmentalDetail`.
  * @returns an array of query schemas
  */
 export async function generateQueriesFromDescribe(
@@ -549,6 +512,9 @@ export async function generateQueriesFromDescribe(
     noCache?: boolean;
     concurrency?: number;
     mode?: PreflightMode;
+    waitTimeoutMs?: number;
+    /** Internal: epoch-ms deadline shared with the metric-view wait. */
+    waitDeadline?: number;
   } = {},
 ): Promise<QueryGenerationResult> {
   const {
@@ -556,6 +522,7 @@ export async function generateQueriesFromDescribe(
     concurrency: rawConcurrency = 10,
     mode = "non-blocking",
   } = options;
+  const waitTimeoutMs = resolveWarehouseWaitTimeoutMs(options.waitTimeoutMs);
   const concurrency =
     typeof rawConcurrency === "number" && Number.isFinite(rawConcurrency)
       ? Math.max(1, Math.floor(rawConcurrency))
@@ -693,6 +660,9 @@ export async function generateQueriesFromDescribe(
   // gate's warning can say why generation fell back to committed types.
   let hadEnvironmentalFailure = false;
   let environmentalCause: "auth" | "unreachable" | "unavailable" | undefined;
+  // Human-readable reason for the environmental failure, when there is a more
+  // specific one than the coarse cause (e.g. the wait limit ran out).
+  let environmentalDetail: string | undefined;
 
   if (uncachedQueries.length > 0) {
     // One-time warehouse preflight (before issuing any DESCRIBE). A single
@@ -714,7 +684,11 @@ export async function generateQueriesFromDescribe(
       decision = "degradeAll";
     } else {
       try {
-        const state = await getWarehouseState(client, warehouseId);
+        const state = await getWarehouseState(client, warehouseId, {
+          timeoutMs: statusRequestTimeoutMs(
+            remainingWaitMs(waitTimeoutMs, options.waitDeadline),
+          ),
+        });
         decision = decidePreflight(state, mode);
         if (decision === "fatal") {
           // DELETED/DELETING is state-based and environmental.
@@ -727,10 +701,15 @@ export async function generateQueriesFromDescribe(
           // poll to RUNNING. treatStoppedAsTransient rides out the stale
           // pre-start STOPPED/STOPPING reading the start hasn't propagated past
           // yet — only DELETED/DELETING (or the deadline) ends the wait early.
-          await startWarehouse(client, warehouseId);
+          await startWarehouse(client, warehouseId, {
+            timeoutMs: statusRequestTimeoutMs(
+              remainingWaitMs(waitTimeoutMs, options.waitDeadline),
+            ),
+          });
           const final = await waitUntilRunning(client, warehouseId, {
-            maxMs: PREFLIGHT_WAIT_MAX_MS,
+            maxMs: remainingWaitMs(waitTimeoutMs, options.waitDeadline),
             treatStoppedAsTransient: true,
+            lastKnownState: state,
           });
           if (final === "RUNNING") {
             decision = "proceed";
@@ -743,7 +722,8 @@ export async function generateQueriesFromDescribe(
         }
         if (decision === "waitThenProceed") {
           const final = await waitUntilRunning(client, warehouseId, {
-            maxMs: PREFLIGHT_WAIT_MAX_MS,
+            maxMs: remainingWaitMs(waitTimeoutMs, options.waitDeadline),
+            lastKnownState: state,
           });
           if (final === "RUNNING") {
             decision = "proceed";
@@ -755,7 +735,21 @@ export async function generateQueriesFromDescribe(
           }
         }
       } catch (err) {
-        if (isConnectivityError(err)) {
+        if (err instanceof WarehouseWaitTimeoutError) {
+          // The wait limit ran out with the warehouse still not RUNNING. This is
+          // environmental: the has-types gate falls back to committed types or
+          // fails with this detail.
+          decision = "degradeAll";
+          isEnvironmental = true;
+          environmentalCause = "unavailable";
+          environmentalDetail = describeWaitTimeout(err, waitTimeoutMs);
+        } else if (err instanceof WarehouseStatusTimeoutError) {
+          // The warehouse API itself didn't answer in time: same handling.
+          decision = "degradeAll";
+          isEnvironmental = true;
+          environmentalCause = "unavailable";
+          environmentalDetail = describeStatusTimeout(err);
+        } else if (isConnectivityError(err)) {
           // Warehouse unreachable (transient outage): degrade rather than fail —
           // never fail a build on a blip. Still environmental, so the caller's
           // has-types gate decides warn-and-fall-back (committed types present)
@@ -1121,6 +1115,9 @@ export async function generateQueriesFromDescribe(
     hadEnvironmentalFailure,
     environmentalCause: hadEnvironmentalFailure
       ? environmentalCause
+      : undefined,
+    environmentalDetail: hadEnvironmentalFailure
+      ? environmentalDetail
       : undefined,
   };
 }

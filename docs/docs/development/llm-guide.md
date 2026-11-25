@@ -44,7 +44,7 @@ If your `tsconfig.json` uses `"verbatimModuleSyntax": true`, **always use `impor
 
 ```ts
 import type { ReactNode } from "react";
-import { useMemo } from "react";
+import { useState } from "react";
 ```
 
 ## API documentation
@@ -72,6 +72,7 @@ Examples:
 - `tsx` is in devDependencies for dev server
 - `dev` script uses `NODE_ENV=development tsx watch server/server.ts`
 - `client/index.html` exists with `<div id="root"></div>` and script pointing to `client/src/main.tsx`
+- `typecheck` script passes. The dev server keeps serving an app with type errors, but logs them as `[appkit:server:typecheck]`, and deployment validation fails until they are fixed
 
 ### Backend
 
@@ -83,7 +84,7 @@ Examples:
 
 ### Frontend
 
-- `useMemo` wraps parameters objects
+- Parameters objects are passed inline (the hook compares them by value; no `useMemo`)
 - Loading/error/empty states are explicit
 - Charts use `format="auto"` unless you have a reason to force `"json"`/`"arrow"`
 - Charts use props (`xKey`, `yKey`, `colors`) NOT children (they're ECharts-based, not Recharts)

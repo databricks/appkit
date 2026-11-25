@@ -106,7 +106,7 @@ await createApp({
   plugins: [
     lakebase({
       pool: {
-        max: 10,                      // Max pool connections (default: 10)
+        max: 105,                     // Max pool connections (default: 105)
         connectionTimeoutMillis: 5000, // Connection timeout ms (default: 10000)
         idleTimeoutMillis: 30000,      // Idle connection timeout ms (default: 30000)
       },
@@ -114,6 +114,12 @@ await createApp({
   ],
 });
 ```
+
+The default `max` of 105 is the whole direct-connection budget of a 0.5 CU
+compute. The SP pool, the legacy per-user OBO pools (3 connections each), a
+`database()` pool, every replica of the app, and any other client share that
+budget. Lower `max` until the sum fits the compute. When callers queue because
+every connection is in use, the plugin logs a warning at most once a minute.
 
 ## On-Behalf-Of (OBO) {#on-behalf-of-obo--per-user-connections}
 

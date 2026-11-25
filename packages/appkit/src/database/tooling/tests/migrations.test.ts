@@ -488,7 +488,7 @@ describe("discardMigrationFiles", () => {
         interactive: false,
       });
       expect(migration?.journalBefore).toBeNull();
-      discardMigrationFiles(lock, migration as never);
+      await discardMigrationFiles(lock, migration as never);
     });
 
     expect(fs.existsSync(folder)).toBe(false);
@@ -508,7 +508,7 @@ describe("discardMigrationFiles", () => {
         interactive: false,
       });
       expect(listFiles(folder)).not.toEqual(filesBefore);
-      discardMigrationFiles(lock, migration as never);
+      await discardMigrationFiles(lock, migration as never);
     });
 
     expect(listFiles(folder)).toEqual(filesBefore);
@@ -530,9 +530,9 @@ describe("discardMigrationFiles", () => {
         if (target === migration?.file) throw new Error("killed");
         return rm(target, options);
       });
-      expect(() => discardMigrationFiles(lock, migration as never)).toThrow(
-        "killed",
-      );
+      await expect(
+        discardMigrationFiles(lock, migration as never),
+      ).rejects.toThrow("killed");
     });
   }
 
@@ -571,9 +571,9 @@ describe("discardMigrationFiles", () => {
     );
     const filesBefore = listFiles(folder);
 
-    expect(() =>
+    await expect(
       discardMigrationFiles(released as never, migration as never),
-    ).toThrow(/lock .* was released/);
+    ).rejects.toThrow(/lock .* was released/);
     expect(listFiles(folder)).toEqual(filesBefore);
   });
 });

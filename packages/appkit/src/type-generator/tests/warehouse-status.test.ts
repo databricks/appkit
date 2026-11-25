@@ -2,8 +2,16 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import type { WorkspaceClient } from "../../workspace-client";
 import {
+  DEFAULT_WAREHOUSE_WAIT_TIMEOUT_MS,
+  describeWaitTimeout,
   getWarehouseState,
+  resolveWarehouseWaitTimeoutMs,
+  startWarehouse,
+  statusRequestTimeoutMs,
+  WAREHOUSE_WAIT_TIMEOUT_ENV,
   type WarehouseState,
+  WarehouseStatusTimeoutError,
+  WarehouseWaitTimeoutError,
   waitUntilRunning,
 } from "../warehouse-status";
 
@@ -147,6 +155,249 @@ describe("waitUntilRunning", () => {
     await settled;
   });
 
+  test("times out with a WarehouseWaitTimeoutError naming the warehouse, state and limit", async () => {
+    const get = vi.fn().mockResolvedValue(stateResponse("STARTING"));
+    const client = makeClient(get);
+
+    const promise = waitUntilRunning(client, "wh-1", { maxMs: 3000 });
+    const settled = promise.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(10000);
+
+    const error = await settled;
+    expect(error).toBeInstanceOf(WarehouseWaitTimeoutError);
+    expect(error).toMatchObject({
+      code: "warehouse_unavailable",
+      warehouseId: "wh-1",
+      lastState: "STARTING",
+      timeoutMs: 3000,
+    });
+    expect(describeWaitTimeout(error as WarehouseWaitTimeoutError)).toBe(
+      "warehouse_unavailable: warehouse wh-1 is still STARTING after the 3s wait limit",
+    );
+  });
+
+  test("never sleeps past the deadline: checks once more at the limit, then gives up", async () => {
+    const get = vi.fn().mockResolvedValue(stateResponse("STARTING"));
+    const client = makeClient(get);
+
+    // Backoff would sleep 1000ms then 2000ms; with a 1500ms limit the second
+    // sleep is cut to 500ms so the wait ends at the limit, not at 3000ms.
+    const promise = waitUntilRunning(client, "wh-1", { maxMs: 1500 });
+    let rejected = false;
+    promise.catch(() => {
+      rejected = true;
+    });
+
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(rejected).toBe(true);
+    // t=0, t=1000 and a final check at t=1500.
+    expect(get).toHaveBeenCalledTimes(3);
+  });
+
+  /** A warehouses.get stub whose answer arrives `ms` later, like a real API. */
+  const answersAfter = (ms: number, state: WarehouseState) => () =>
+    new Promise((resolve) =>
+      setTimeout(() => resolve(stateResponse(state)), ms),
+    );
+
+  test("a warehouse that comes up on the final check at the limit still resolves RUNNING", async () => {
+    // The final poll is made at the deadline (t=500) and its answer takes 1s.
+    // It still gets the 5s request floor, so RUNNING is accepted instead of
+    // being cut off at the limit.
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce(stateResponse("STARTING"))
+      .mockImplementationOnce(answersAfter(1_000, "RUNNING"));
+    const client = makeClient(get);
+
+    const promise = waitUntilRunning(client, "wh-1", { maxMs: 500 });
+    let outcome: string | undefined;
+    promise.then(
+      (state) => {
+        outcome = state;
+      },
+      () => {
+        outcome = "rejected";
+      },
+    );
+    await vi.advanceTimersByTimeAsync(1_499);
+    expect(outcome).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(outcome).toBe("RUNNING");
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+
+  test("a slow answer to the last poll after a long backoff is still accepted", async () => {
+    // Jorge's case: backoff 1s, 2s, 4s, 8s puts a poll right at a 15s limit;
+    // the warehouse turned RUNNING during that last backoff and the API takes
+    // 2s to say so.
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce(stateResponse("STARTING"))
+      .mockResolvedValueOnce(stateResponse("STARTING"))
+      .mockResolvedValueOnce(stateResponse("STARTING"))
+      .mockResolvedValueOnce(stateResponse("STARTING"))
+      .mockImplementationOnce(answersAfter(2_000, "RUNNING"));
+    const client = makeClient(get);
+
+    const promise = waitUntilRunning(client, "wh-1", { maxMs: 15_000 });
+    const settled = promise.then(
+      (state) => state,
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(17_000);
+
+    expect(await settled).toBe("RUNNING");
+    expect(get).toHaveBeenCalledTimes(5);
+  });
+
+  test("a status request that never answers can't hold the wait past the limit", async () => {
+    // The reviewer's repro: STARTING once, then warehouses.get hangs forever.
+    let pendingSignal: AbortSignal | undefined;
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce(stateResponse("STARTING"))
+      .mockImplementation(
+        (_req: unknown, options?: { signal?: AbortSignal }) => {
+          pendingSignal = options?.signal;
+          return new Promise(() => {});
+        },
+      );
+    const client = makeClient(get);
+
+    const promise = waitUntilRunning(client, "wh-1", {
+      maxMs: 20,
+      pollMs: 5,
+    });
+    let rejected = false;
+    const settled = promise.then(
+      () => undefined,
+      (error: unknown) => {
+        rejected = true;
+        return error;
+      },
+    );
+    // The hung poll (made at t=5) gets the 5s request floor, so the wait ends
+    // at t≈5005: past the 20ms limit by at most that floor, never unbounded.
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(rejected).toBe(false);
+    await vi.advanceTimersByTimeAsync(10);
+
+    const error = await settled;
+    expect(error).toBeInstanceOf(WarehouseWaitTimeoutError);
+    expect(error).toMatchObject({ lastState: "STARTING", timeoutMs: 20 });
+    expect(get).toHaveBeenCalledTimes(2);
+    // The hung request was cancelled, not left running.
+    expect(pendingSignal?.aborted).toBe(true);
+  });
+
+  test("a poll that stalls at its 30s cap doesn't end the wait early: it polls again until the limit", async () => {
+    // Reviewer's repro: 60s limit, STARTING once, then every poll hangs. The
+    // first hung poll is cut off at its 30s cap with 30s of budget left; the
+    // wait must keep going and only give up once the 60s limit has passed.
+    let rejectedAt: number | undefined;
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce(stateResponse("STARTING"))
+      .mockImplementation(() => new Promise(() => {}));
+    const client = makeClient(get);
+
+    const start = Date.now();
+    const settled = waitUntilRunning(client, "wh-repro", {
+      maxMs: 60_000,
+    }).then(
+      () => undefined,
+      (error: unknown) => {
+        rejectedAt = Date.now();
+        return error;
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(rejectedAt).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(5_100);
+
+    const error = (await settled) as WarehouseWaitTimeoutError;
+    expect(error).toBeInstanceOf(WarehouseWaitTimeoutError);
+    const elapsed = (rejectedAt as number) - start;
+    expect(elapsed).toBeGreaterThanOrEqual(60_000);
+    expect(elapsed).toBeLessThanOrEqual(65_000);
+    expect(describeWaitTimeout(error)).toBe(
+      "warehouse_unavailable: warehouse wh-repro is still STARTING after the 60s wait limit",
+    );
+    // t=0 STARTING, a poll at ~1s cut off at 30s, then more polls until the end.
+    expect(get.mock.calls.length).toBeGreaterThanOrEqual(3);
+  });
+
+  test("a stalled poll followed by an answer still resolves RUNNING", async () => {
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce(stateResponse("STARTING"))
+      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockResolvedValueOnce(stateResponse("RUNNING"));
+    const client = makeClient(get);
+
+    const settled = waitUntilRunning(client, "wh-1", { maxMs: 60_000 }).then(
+      (state) => state,
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(32_000);
+
+    expect(await settled).toBe("RUNNING");
+    expect(get).toHaveBeenCalledTimes(3);
+  });
+
+  test("first poll never answers: reports the caller's last known state", async () => {
+    const get = vi.fn().mockImplementation(() => new Promise(() => {}));
+    const client = makeClient(get);
+
+    const settled = waitUntilRunning(client, "wh-1", {
+      maxMs: 50,
+      lastKnownState: "STARTING",
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    const error = (await settled) as WarehouseWaitTimeoutError;
+    expect(error).toBeInstanceOf(WarehouseWaitTimeoutError);
+    expect(describeWaitTimeout(error)).toBe(
+      "warehouse_unavailable: warehouse wh-1 is still STARTING after the 50ms wait limit",
+    );
+  });
+
+  test("no state ever observed: says the status request didn't answer", async () => {
+    const get = vi.fn().mockImplementation(() => new Promise(() => {}));
+    const client = makeClient(get);
+
+    const settled = waitUntilRunning(client, "wh-1", { maxMs: 50 }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(
+      describeWaitTimeout((await settled) as WarehouseWaitTimeoutError),
+    ).toBe(
+      "warehouse_unavailable: warehouse wh-1 did not answer a status request after the 50ms wait limit",
+    );
+  });
+
+  test("maxMs 0 checks once and does not wait", async () => {
+    const get = vi.fn().mockResolvedValue(stateResponse("STARTING"));
+    const client = makeClient(get);
+
+    await expect(
+      waitUntilRunning(client, "wh-1", { maxMs: 0 }),
+    ).rejects.toBeInstanceOf(WarehouseWaitTimeoutError);
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+
   test("stops immediately when the signal is already aborted", async () => {
     const get = vi.fn().mockResolvedValue(stateResponse("STARTING"));
     const client = makeClient(get);
@@ -191,5 +442,99 @@ describe("waitUntilRunning", () => {
 
     await settled;
     expect(get).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("bounded warehouse API calls", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  test("getWarehouseState with timeoutMs rejects and aborts a request that never answers", async () => {
+    let signal: AbortSignal | undefined;
+    const get = vi.fn((_req: unknown, options?: { signal?: AbortSignal }) => {
+      signal = options?.signal;
+      return new Promise(() => {});
+    });
+    const settled = getWarehouseState(makeClient(get), "wh-1", {
+      timeoutMs: 1000,
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(1000);
+
+    const error = await settled;
+    expect(error).toBeInstanceOf(WarehouseStatusTimeoutError);
+    expect(error).toMatchObject({ warehouseId: "wh-1", request: "status" });
+    expect(signal?.aborted).toBe(true);
+  });
+
+  test("getWarehouseState with timeoutMs returns an answer that arrives in time", async () => {
+    const get = vi.fn().mockResolvedValue(stateResponse("RUNNING"));
+    await expect(
+      getWarehouseState(makeClient(get), "wh-1", { timeoutMs: 1000 }),
+    ).resolves.toBe("RUNNING");
+  });
+
+  test("startWarehouse with timeoutMs rejects a start request that never answers", async () => {
+    const start = vi.fn(() => new Promise(() => {}));
+    const client = {
+      warehouses: { startWarehouse: start },
+    } as unknown as WorkspaceClient;
+    const settled = startWarehouse(client, "wh-1", { timeoutMs: 1000 }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(await settled).toMatchObject({
+      name: "WarehouseStatusTimeoutError",
+      request: "start",
+    });
+  });
+
+  test("statusRequestTimeoutMs keeps any warehouse request between 5s and 30s", () => {
+    expect(statusRequestTimeoutMs(-100)).toBe(5_000);
+    expect(statusRequestTimeoutMs(0)).toBe(5_000);
+    expect(statusRequestTimeoutMs(20_000)).toBe(20_000);
+    expect(statusRequestTimeoutMs(300_000)).toBe(30_000);
+  });
+});
+
+describe("resolveWarehouseWaitTimeoutMs", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  test("defaults to 5 minutes", () => {
+    vi.stubEnv(WAREHOUSE_WAIT_TIMEOUT_ENV, "");
+    expect(resolveWarehouseWaitTimeoutMs()).toBe(300_000);
+    expect(DEFAULT_WAREHOUSE_WAIT_TIMEOUT_MS).toBe(300_000);
+  });
+
+  test("reads the env var in seconds", () => {
+    vi.stubEnv(WAREHOUSE_WAIT_TIMEOUT_ENV, "90");
+    expect(resolveWarehouseWaitTimeoutMs()).toBe(90_000);
+  });
+
+  test("an explicit value wins over the env var", () => {
+    vi.stubEnv(WAREHOUSE_WAIT_TIMEOUT_ENV, "90");
+    expect(resolveWarehouseWaitTimeoutMs(5_000)).toBe(5_000);
+    expect(resolveWarehouseWaitTimeoutMs(0)).toBe(0);
+  });
+
+  test("ignores an invalid env value, reports it, and uses the default", () => {
+    const onInvalid = vi.fn();
+    vi.stubEnv(WAREHOUSE_WAIT_TIMEOUT_ENV, "five minutes");
+    expect(resolveWarehouseWaitTimeoutMs(undefined, onInvalid)).toBe(300_000);
+    expect(onInvalid).toHaveBeenCalledWith("five minutes");
+
+    vi.stubEnv(WAREHOUSE_WAIT_TIMEOUT_ENV, "-1");
+    expect(resolveWarehouseWaitTimeoutMs()).toBe(300_000);
   });
 });

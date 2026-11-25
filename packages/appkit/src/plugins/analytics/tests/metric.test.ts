@@ -713,6 +713,42 @@ describe("analytics metric route", () => {
       expect(mockRes.end).toHaveBeenCalled();
     });
 
+    test("keeps JSON_ARRAY string cells (metric rows are typed string | null)", async () => {
+      const plugin = pluginForDir(
+        config,
+        registryDir({
+          revenue: {
+            key: "revenue",
+            source: "cat.sch.revenue_metrics",
+            lane: "sp",
+          },
+        }),
+      );
+      const { router, getHandler } = createMockRouter();
+      (plugin as any).SQLClient.executeStatement = vi.fn().mockResolvedValue({
+        result: {
+          data: [{ arr: "1234" }],
+          columnNames: ["arr"],
+          columnTypes: ["LONG"],
+        },
+      });
+
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/metric/:key");
+      const mockRes = createMockResponse();
+      await handler(
+        createMockRequest({
+          params: { key: "revenue" },
+          body: { measures: ["arr"] },
+        }),
+        mockRes,
+      );
+
+      expect(mockRes.write).toHaveBeenCalledWith(
+        expect.stringContaining('"data":[{"arr":"1234"}]'),
+      );
+    });
+
     test("emits warehouse_status before result", async () => {
       const plugin = pluginForDir(
         config,

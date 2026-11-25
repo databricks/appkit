@@ -1,41 +1,18 @@
 import { DatabasePluginError } from "../../../database/errors";
-import type { Row } from "../../../database/runtime";
-import type { AppKitTable } from "../../../database/schema-builder";
 import { isPlainObject as hasPlainObjectPrototype } from "../../../utils/is-plain-object";
 import { MAX_SERIALIZED_DEPTH, MAX_SERIALIZED_NODES } from "../defaults";
-import { columnHttpCapabilities } from "./capabilities";
-import { type CompiledColumn, compileColumn, type JsonValue } from "./codecs";
 
-/** One relation edge wired to the contract of its target table. */
-export interface CrudRelation {
-  readonly cardinality: "toOne" | "toMany";
-  readonly target: CrudTable;
-}
-
-/** Private HTTP contract compiled once for one exposed table. */
-export interface CrudTable {
-  readonly name: string;
-  readonly primaryKey?: CompiledColumn;
-  readonly columns: ReadonlyMap<string, CompiledColumn>;
-  /** Public columns a request may project. */
-  readonly selectable: ReadonlySet<string>;
-  /** Public columns a request may filter or order by. */
-  readonly queryable: ReadonlySet<string>;
-  /** Public columns a create body may set, including a caller-chosen key. */
-  readonly creatable: ReadonlySet<string>;
-  /** Public columns an update body may set; a key or a stamp is never one. */
-  readonly updatable: ReadonlySet<string>;
-  readonly relations: ReadonlyMap<string, CrudRelation>;
-  projectPublicRow(row: Row): JsonValue;
-  sanitizeSerializedRow(row: unknown): JsonValue;
-}
-
-type MutableCrudTable = Omit<CrudTable, "relations"> & {
-  readonly relations: Map<string, CrudRelation>;
-};
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
 
 interface SanitizeState {
   nodes: number;
+  readonly maxNodes: number;
   readonly ancestors: Set<object>;
 }
 
@@ -49,16 +26,14 @@ export function isPlainObject(
   return hasPlainObjectPrototype(value);
 }
 
-/** A serializer that breaks its contract is trusted code failing, not input. */
-function serializerFault(): never {
-  throw new DatabasePluginError("INTERNAL", "read");
+function rejectUnboundedJson(): never {
+  throw new DatabasePluginError("INVALID_REQUEST", "write");
 }
 
-/** Charge one value against the output budget before descending into it. */
 function countNode(depth: number, state: SanitizeState): void {
   state.nodes += 1;
-  if (state.nodes > MAX_SERIALIZED_NODES || depth > MAX_SERIALIZED_DEPTH) {
-    serializerFault();
+  if (state.nodes > state.maxNodes || depth > MAX_SERIALIZED_DEPTH) {
+    rejectUnboundedJson();
   }
 }
 
@@ -68,7 +43,7 @@ function enterObject<T>(
   state: SanitizeState,
   visit: () => T,
 ): T {
-  if (state.ancestors.has(value)) serializerFault();
+  if (state.ancestors.has(value)) rejectUnboundedJson();
   state.ancestors.add(value);
   try {
     return visit();
@@ -77,7 +52,7 @@ function enterObject<T>(
   }
 }
 
-/** Accept a serializer's own added value only where it is already JSON. */
+/** Accept caller JSON only where it is already a finite JSON value. */
 function sanitizeJson(
   value: unknown,
   depth: number,
@@ -92,7 +67,7 @@ function sanitizeJson(
     return value;
   }
   if (typeof value === "number") {
-    if (!Number.isFinite(value)) serializerFault();
+    if (!Number.isFinite(value)) rejectUnboundedJson();
     return value;
   }
   if (Array.isArray(value)) {
@@ -100,7 +75,7 @@ function sanitizeJson(
       value.map((item) => sanitizeJson(item, depth + 1, state)),
     );
   }
-  if (!isPlainObject(value)) serializerFault();
+  if (!isPlainObject(value)) rejectUnboundedJson();
   return enterObject(value, state, () => {
     // A null prototype keeps `__proto__` an ordinary key instead of a setter.
     const out: Record<string, JsonValue> = Object.create(null);
@@ -112,132 +87,10 @@ function sanitizeJson(
   });
 }
 
-/** Keep an included row under its own table's policy, one row or many. */
-function sanitizeRelation(
-  target: CrudTable,
+/** Copy finite acyclic JSON, bounded by depth and node count. */
+export function boundedJson(
   value: unknown,
-  depth: number,
-  state: SanitizeState,
+  maxNodes: number = MAX_SERIALIZED_NODES,
 ): JsonValue {
-  if (value === null) return null;
-  if (!Array.isArray(value)) return sanitizeRow(target, value, depth, state);
-  countNode(depth, state);
-  return enterObject(value, state, () =>
-    value.map((row) => sanitizeRow(target, row, depth + 1, state)),
-  );
-}
-
-/** Re-apply the private-column policy wherever the output stays contracted. */
-function sanitizeRow(
-  table: CrudTable,
-  row: unknown,
-  depth: number,
-  state: SanitizeState,
-): JsonValue {
-  countNode(depth, state);
-  if (!isPlainObject(row)) serializerFault();
-  return enterObject(row, state, () => {
-    const out: Record<string, JsonValue> = {};
-    for (const [key, child] of Object.entries(row)) {
-      if (child === undefined) continue;
-      if (table.columns.get(key)?.meta.isPrivate) continue;
-      const relation = table.relations.get(key);
-      out[key] = relation
-        ? sanitizeRelation(relation.target, child, depth + 1, state)
-        : sanitizeJson(child, depth + 1, state);
-    }
-    return out;
-  });
-}
-
-/** The budget a caller's own JSON has to fit, same as the one going back out. */
-export function boundedJson(value: unknown): JsonValue {
-  return sanitizeJson(value, 0, { nodes: 0, ancestors: new Set() });
-}
-
-/** Project an included row through its own table; absent to-one reads null. */
-function projectRelation(target: CrudTable, value: unknown): JsonValue {
-  if (value === null || value === undefined) return null;
-  return Array.isArray(value)
-    ? value.map((row) => target.projectPublicRow(row as Row))
-    : target.projectPublicRow(value as Row);
-}
-
-/** Build the public JSON for one driver row, dropping anything uncontracted. */
-function projectRow(table: CrudTable, row: Row): JsonValue {
-  const out: Record<string, JsonValue> = {};
-  for (const [key, value] of Object.entries(row)) {
-    const column = table.columns.get(key);
-    if (column) {
-      // Whatever the driver returned, only public contracted columns ship.
-      if (!column.meta.isPrivate) out[key] = column.encode(value);
-      continue;
-    }
-    const relation = table.relations.get(key);
-    if (relation) out[key] = projectRelation(relation.target, value);
-  }
-  return out;
-}
-
-/** Compile one table's allowlists and codecs from its finalized metadata. */
-function compileTable(table: AppKitTable): MutableCrudTable {
-  const columns = new Map<string, CompiledColumn>();
-  const selectable = new Set<string>();
-  const queryable = new Set<string>();
-  const creatable = new Set<string>();
-  const updatable = new Set<string>();
-  let primaryKey: CompiledColumn | undefined;
-
-  for (const meta of Object.values(table.$columns)) {
-    const column = compileColumn(meta);
-    columns.set(meta.columnName, column);
-    // Type generation reads the same predicates for the browser's types.
-    const can = columnHttpCapabilities(meta);
-    if (can.publicKey) primaryKey = column;
-    if (can.selectable) selectable.add(meta.columnName);
-    if (can.queryable) queryable.add(meta.columnName);
-    if (can.creatable) creatable.add(meta.columnName);
-    if (can.updatable) updatable.add(meta.columnName);
-  }
-
-  const compiled: MutableCrudTable = {
-    name: table.$name,
-    primaryKey,
-    columns,
-    selectable,
-    queryable,
-    creatable,
-    updatable,
-    relations: new Map(),
-    projectPublicRow: (row) => projectRow(compiled, row),
-    sanitizeSerializedRow: (row) =>
-      sanitizeRow(compiled, row, 0, { nodes: 0, ancestors: new Set() }),
-  };
-  return compiled;
-}
-
-/**
- * Compile the HTTP contract for every exposed table and wire the relations
- * they share. A relation whose target is not exposed stays unreachable, so
- * enabling one table never widens another table's public surface.
- */
-export function compileCrudTables(
-  tables: Record<string, AppKitTable>,
-): Map<string, CrudTable> {
-  const compiled = new Map<string, MutableCrudTable>();
-  for (const table of Object.values(tables)) {
-    compiled.set(table.$name, compileTable(table));
-  }
-  for (const table of Object.values(tables)) {
-    const entry = compiled.get(table.$name);
-    for (const relation of table.$relations) {
-      const target = compiled.get(relation.targetTable);
-      if (!entry || !target) continue;
-      entry.relations.set(relation.name, {
-        cardinality: relation.cardinality,
-        target,
-      });
-    }
-  }
-  return compiled as Map<string, CrudTable>;
+  return sanitizeJson(value, 0, { nodes: 0, maxNodes, ancestors: new Set() });
 }

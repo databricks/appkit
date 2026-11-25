@@ -35,7 +35,7 @@ async function runDbMigrate(): Promise<void> {
 
 export const dbMigrateCommand = new Command("migrate")
   .description(
-    "Generate a migration from config/database/schema.ts, apply pending migrations to the .env branch, and regenerate database.d.ts",
+    "Generate a migration from config/database/schema.ts, apply pending migrations to the .env branch, and regenerate database.d.ts and database-operations.d.ts",
   )
   .addHelpText(
     "after",

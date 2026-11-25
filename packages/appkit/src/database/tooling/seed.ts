@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { loadDefaultDatabaseSchema } from "../../plugins/database/load-schema";
+import { DEFAULT_SCHEMA_FILE } from "../../plugins/database/load-schema";
+import { loadDatabaseSchema } from "../../type-generator/database";
 import { quoteIdentifier } from "../migrations/apply";
 import { DEFAULT_SCHEMA_NAME } from "../schema-builder/define-schema";
 import { runInTransaction } from "./branch-sql";
@@ -31,7 +32,7 @@ export async function runSeed(ctx: DbContext): Promise<SeedReport> {
   }
   const branch = await writableEnvBranch(ctx, "seed");
   const schemaName = hasSchemaFile(ctx.root)
-    ? (await loadDefaultDatabaseSchema(ctx.root, { showImportError: true }))
+    ? (await loadDatabaseSchema(path.join(ctx.root, DEFAULT_SCHEMA_FILE)))
         .$schemaName
     : DEFAULT_SCHEMA_NAME;
   const searchPath =

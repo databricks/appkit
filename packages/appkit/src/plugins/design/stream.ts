@@ -1,0 +1,453 @@
+/**
+ * Streamed TSX drafts (SPIKE, KIT-40): the latest renderable version of
+ * `.staging/<name>.tsx` is served as `pages/<name>.tsx` and hot-swapped in place.
+ */
+
+import path from "node:path";
+
+type Frame =
+  | { k: "brace" | "paren" | "bracket" | "tpl" | "tplExpr" | "jsxExpr" }
+  | { k: "tag" | "el"; name: string };
+
+const CLOSER: Record<string, string> = {
+  brace: "}",
+  tplExpr: "}",
+  jsxExpr: "}",
+  paren: ")",
+  bracket: "]",
+  tpl: "`",
+};
+
+/** A `<` after one of these (or at the start) opens JSX rather than comparing. */
+const JSX_AFTER = new Set([
+  "",
+  "(",
+  ",",
+  "=",
+  ":",
+  "?",
+  "[",
+  "{",
+  "!",
+  "&",
+  "|",
+  ">",
+  ";",
+  "}",
+]);
+const JSX_AFTER_WORD = /(?:^|[^\w$])(?:return|yield|default|case)$/;
+
+/**
+ * Closes the brackets, template literals and JSX still open at the end of `src`;
+ * null when it ends inside a string or comment, or has a stray closer.
+ *
+ * @internal
+ */
+export function closeOpen(src: string): string | null {
+  const stack: Frame[] = [];
+  const top = () => stack[stack.length - 1];
+  // Last non-space character (or keyword) seen in code, to tell JSX from `<`.
+  let prev = "";
+  let i = 0;
+  const n = src.length;
+
+  const skipString = (q: string) => {
+    for (i++; i < n; i++) {
+      if (src[i] === "\\") i++;
+      else if (src[i] === q) return true;
+      else if (src[i] === "\n") return false;
+    }
+    return false;
+  };
+  const readName = () => {
+    const m = /^[\w$.:-]*/.exec(src.slice(i));
+    i += m?.[0].length ?? 0;
+    return m?.[0] ?? "";
+  };
+
+  while (i < n) {
+    const c = src[i];
+    const f = top();
+    const mode = f?.k ?? "brace";
+
+    if (mode === "tpl") {
+      if (c === "\\") i += 2;
+      else if (c === "`") {
+        stack.pop();
+        prev = "`";
+        i++;
+      } else if (c === "$" && src[i + 1] === "{") {
+        stack.push({ k: "tplExpr" });
+        prev = "{";
+        i += 2;
+      } else i++;
+      continue;
+    }
+
+    if (mode === "tag") {
+      if (c === '"' || c === "'") {
+        if (!skipString(c)) return null;
+        i++;
+      } else if (c === "{") {
+        stack.push({ k: "jsxExpr" });
+        prev = "{";
+        i++;
+      } else if (c === "/" && src[i + 1] === ">") {
+        stack.pop();
+        prev = ">";
+        i += 2;
+      } else if (c === ">") {
+        const tag = stack.pop() as { name: string };
+        stack.push({ k: "el", name: tag.name });
+        i++;
+      } else i++;
+      continue;
+    }
+
+    if (mode === "el") {
+      if (c === "{") {
+        stack.push({ k: "jsxExpr" });
+        prev = "{";
+        i++;
+      } else if (c === "<" && src[i + 1] === "/") {
+        const end = src.indexOf(">", i);
+        if (end === -1) return null;
+        stack.pop();
+        prev = ">";
+        i = end + 1;
+      } else if (c === "<") {
+        i++;
+        stack.push({ k: "tag", name: readName() });
+      } else i++;
+      continue;
+    }
+
+    // Code (top level, brackets, ${...} and JSX {...}).
+    if (c === "/" && src[i + 1] === "/") {
+      const end = src.indexOf("\n", i);
+      i = end === -1 ? n : end;
+      continue;
+    }
+    if (c === "/" && src[i + 1] === "*") {
+      const end = src.indexOf("*/", i + 2);
+      if (end === -1) return null;
+      i = end + 2;
+      continue;
+    }
+    if (/\s/.test(c)) {
+      i++;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      if (!skipString(c)) return null;
+      prev = c;
+      i++;
+      continue;
+    }
+    if (c === "`") {
+      stack.push({ k: "tpl" });
+      i++;
+      continue;
+    }
+    if (c === "/" && JSX_AFTER.has(prev) && prev !== ">" && prev !== "}") {
+      // A regex literal.
+      for (i++; i < n && src[i] !== "/"; i++) {
+        if (src[i] === "\\") i++;
+        else if (src[i] === "\n") return null;
+      }
+      i++;
+      prev = "/";
+      continue;
+    }
+    if (
+      c === "<" &&
+      /[A-Za-z>]/.test(src[i + 1] ?? "") &&
+      (JSX_AFTER.has(prev) ||
+        JSX_AFTER_WORD.test(src.slice(Math.max(0, i - 12), i).trimEnd()))
+    ) {
+      // `<T extends X>(` / `<T,>(` is a generic arrow's type parameters, not a tag.
+      if (/^<[\w$]+\s*(?:\bextends\b|,)/.test(src.slice(i, i + 80))) {
+        let depth = 0;
+        for (; i < n; i++) {
+          if (src[i] === "<") depth++;
+          else if (src[i] === ">" && src[i - 1] !== "=" && --depth === 0) break;
+        }
+        if (i >= n) return null;
+        i++;
+        prev = ">";
+        continue;
+      }
+      i++;
+      stack.push({ k: "tag", name: readName() });
+      continue;
+    }
+    if (c === "{" || c === "(" || c === "[") {
+      stack.push({ k: c === "{" ? "brace" : c === "(" ? "paren" : "bracket" });
+      prev = c;
+      i++;
+      continue;
+    }
+    if (c === "}" || c === ")" || c === "]") {
+      const want =
+        c === "}"
+          ? ["brace", "tplExpr", "jsxExpr"]
+          : c === ")"
+            ? ["paren"]
+            : ["bracket"];
+      if (!f || !want.includes(f.k)) return null;
+      stack.pop();
+      prev = c;
+      i++;
+      continue;
+    }
+    if (/[\w$]/.test(c)) {
+      const m = /^[\w$]+/.exec(src.slice(i)) as RegExpExecArray;
+      prev = m[0];
+      i += m[0].length;
+      continue;
+    }
+    prev = c;
+    i++;
+  }
+
+  let out = src;
+  for (let j = stack.length - 1; j >= 0; j--) {
+    const fr = stack[j];
+    if (fr.k === "tag") out += " />";
+    else if (fr.k === "el") out += `</${(fr as { name: string }).name}>`;
+    else out += CLOSER[fr.k];
+  }
+  return out;
+}
+
+/** Strips a leading markdown fence (and a closing one), as writers sometimes add. */
+function stripFence(src: string): string {
+  return src.replace(/^\s*```[\w-]*\n/, "").replace(/\n```\s*$/, "\n");
+}
+
+const DECLARED =
+  /(?:function|class|const|let|var)\s+([A-Z][\w$]*)|import\s+([A-Z][\w$]*)|import\s*\{([^}]*)\}|import\s+\*\s+as\s+([A-Z][\w$]*)/g;
+
+/** The skeleton shape a stubbed component gets, from its name. */
+export function placeholderKind(
+  name: string,
+): "chart" | "table" | "card" | "generic" {
+  if (/Chart|Graph|Trend|Spark|Plot|Heatmap/.test(name)) return "chart";
+  if (/Table|List|Grid|Rows|Log|Board|Feed|Queue/.test(name)) return "table";
+  if (/Card|Kpi|KPI|Stat|Tile|Metric|Summary|Panel/.test(name)) return "card";
+  return "generic";
+}
+
+/** Undeclared JSX components (helpers not written yet), stubbed with DraftPlaceholder. */
+function stubComponents(code: string): string {
+  const declared = new Set<string>();
+  for (const m of code.matchAll(DECLARED)) {
+    for (const name of [m[1], m[2], m[4]]) if (name) declared.add(name);
+    for (const spec of m[3]?.split(",") ?? []) {
+      const local = spec
+        .trim()
+        .split(/\s+as\s+/)
+        .pop()
+        ?.replace(/^type\s+/, "");
+      if (local) declared.add(local);
+    }
+  }
+  const missing = new Set<string>();
+  for (const m of code.matchAll(
+    /(?<![\w$])<([A-Z][\w$]*)(?!\s*(?:extends\b|,))/g,
+  )) {
+    if (!declared.has(m[1])) missing.add(m[1]);
+  }
+  if (missing.size === 0) return code;
+  const stubs = [...missing].map(
+    (name) =>
+      `function ${name}() { return <__DraftPlaceholder kind="${placeholderKind(name)}" />; }`,
+  );
+  return `import { DraftPlaceholder as __DraftPlaceholder } from "@databricks/appkit-ui/react/beta";\n${code}\n${stubs.join("\n")}\n`;
+}
+
+/** Checks that a candidate parses; the dev server's own TSX transform. */
+type IsValid = (code: string) => Promise<boolean>;
+
+/** How many line cuts to try, newest first, before keeping the previous version. */
+const MAX_CUTS = 60;
+
+/**
+ * The longest renderable line-boundary cut of a streamed page, open constructs
+ * closed and undeclared components stubbed; null until one works.
+ *
+ * @internal
+ */
+export async function renderablePartial(
+  source: string,
+  isValid: IsValid,
+  { complete = false }: { complete?: boolean } = {},
+): Promise<string | null> {
+  const src = stripFence(source);
+  if (complete && (await isValid(src))) return src;
+  const lines = src.split("\n");
+  // The last line is unfinished unless the source ends with a newline.
+  let end = lines.length - 1;
+  for (let tries = 0; end > 0 && tries < MAX_CUTS; end--, tries++) {
+    const cut = lines.slice(0, end).join("\n");
+    if (!/export\s+default\b/.test(cut)) return null;
+    const closed = closeOpen(cut);
+    if (closed === null) continue;
+    const code = stubComponents(closed);
+    if (await isValid(code)) return code;
+  }
+  return null;
+}
+
+const MODULE_NODES = new Set([
+  "ImportDeclaration",
+  "ExportNamedDeclaration",
+  "ExportAllDeclaration",
+  "ImportExpression",
+]);
+
+/**
+ * Whether a compiled page (the ESTree program of the JS Vite serves for
+ * `pages/<name>.tsx`, types already stripped) imports `src/design/mock`.
+ *
+ * @internal
+ */
+export function importsMock(program: unknown): boolean {
+  const walk = (node: unknown): boolean => {
+    if (!node || typeof node !== "object") return false;
+    if (Array.isArray(node)) return node.some(walk);
+    const { type, source } = node as {
+      type?: string;
+      source?: { value?: unknown };
+    };
+    if (
+      MODULE_NODES.has(type as string) &&
+      typeof source?.value === "string" &&
+      /^\/src\/design\/mock(?:\.[jt]sx?)?$/.test(
+        path.posix.resolve("/src/design/pages", source.value),
+      )
+    ) {
+      return true;
+    }
+    return Object.values(node).some(walk);
+  };
+  return walk(program);
+}
+
+/**
+ * Browser entry of `/design/__stream/<name>`: renders each published version
+ * through DesignPage.
+ *
+ * @internal
+ */
+export function streamHostModule(name: string): string {
+  return `
+import { Component, createElement } from "react";
+import { createRoot } from "react-dom/client";
+import { DesignPage } from "@databricks/appkit-ui/react/beta";
+import.meta.glob("/src/index.css", { eager: true });
+
+const NAME = ${JSON.stringify(name)};
+const rootEl = document.getElementById("root");
+
+let host = null;
+class Host extends Component {
+  // reset retries after an error; generation remounts the page.
+  state = { reset: 0, generation: 0 };
+  failed = false;
+  componentDidMount() {
+    host = this;
+  }
+  onError = () => {
+    this.failed = true;
+  };
+  retry() {
+    if (!this.failed) return;
+    this.failed = false;
+    this.setState((s) => ({ reset: s.reset + 1 }));
+  }
+  remount() {
+    this.failed = false;
+    this.setState((s) => ({ reset: s.reset + 1, generation: s.generation + 1 }));
+  }
+  render() {
+    return createElement(
+      DesignPage,
+      { onError: this.onError, resetKey: this.state.reset },
+      createElement(this.props.page, { key: this.state.generation }),
+    );
+  }
+}
+
+// Removes Vite's error overlay: a version that doesn't build stays unpublished.
+new MutationObserver(() => document.querySelector("vite-error-overlay")?.remove()).observe(document.body, { childList: true });
+
+// The finished file mounts afresh, so kept chart state can't carry over.
+let final = false;
+let remountTimer;
+const remount = (ms) => {
+  clearTimeout(remountTimer);
+  remountTimer = setTimeout(() => {
+    final = false;
+    host?.remount();
+  }, ms);
+};
+import.meta.hot?.on("vite:afterUpdate", () => {
+  if (final) remount(100);
+  // Fast Refresh applies the update a moment later; then retry.
+  setTimeout(() => host?.retry(), 50);
+});
+
+// Whether a version exists: before one, a failed import is still pending.
+let published = rootEl.hasAttribute("data-published");
+// This HTML can predate a publish whose event came before the listener below:
+// ask the server again (served afresh, it says whether a version is out now).
+async function publishedNow() {
+  try {
+    const html = await (await fetch(location.href)).text();
+    const page = new DOMParser().parseFromString(html, "text/html");
+    return page.getElementById("root")?.hasAttribute("data-published") ?? false;
+  } catch {
+    return false;
+  }
+}
+let mounted = false;
+let root;
+let loads = 0;
+// Imports can finish out of order: only the latest one's outcome counts.
+let latest = 0;
+async function mount() {
+  if (mounted) return;
+  const mine = ++latest;
+  const wasPublished = published;
+  let page;
+  let ok = true;
+  try {
+    page = (await import(/* @vite-ignore */ "/src/design/pages/" + NAME + ".tsx?t=" + Date.now())).default;
+  } catch (error) {
+    if (!wasPublished && !(await publishedNow())) return;
+    published = true;
+    // A version that doesn't load or evaluate: DesignPage shows the error.
+    ok = false;
+    page = () => {
+      throw error;
+    };
+  }
+  if (mounted || mine !== latest) return;
+  mounted = ok;
+  root ??= createRoot(rootEl);
+  // A new Host after a failed version: a fresh DesignPage, without the error.
+  root.render(createElement(Host, { key: ++loads, page }));
+}
+import.meta.hot?.on("appkit:stream", (data) => {
+  if (data?.name !== NAME) return;
+  published = true;
+  if (data.done) {
+    final = true;
+    remount(1000);
+  }
+  mount();
+});
+mount();
+`;
+}

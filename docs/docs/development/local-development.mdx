@@ -18,4 +18,6 @@ npm run dev
 
 This command will start the development server with hot reload for both UI and backend code. Open the displayed URL in your browser to see the app. Modify the code in the `src/` directory to see the changes reflected in the browser.
 
+Hot reload doesn't type-check. If your `package.json` has a `typecheck` script, the development server runs it in the background at startup and after each TypeScript change, and logs any type errors. Deployment validation runs the same script, so fix these errors before you deploy.
+
 To see the other available commands, read the `README.md` file in the application root directory.
