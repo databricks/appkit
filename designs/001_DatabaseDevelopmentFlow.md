@@ -228,7 +228,9 @@ runs only when `APPKIT_DB_MIGRATE_ON_START=true` and the process connects as the
 with a bound database. So the plugin migrates only when `DATABRICKS_CLIENT_ID` and `DATABRICKS_CLIENT_SECRET` are set
 and `PGUSER` is set and equals `DATABRICKS_CLIENT_ID`. An unset
 `PGUSER` does not qualify, though the pool would then connect with the client ID. When the flag is set and the process
-does not qualify, the plugin logs why and does not migrate. The template's `app.yaml.tmpl` writes the flag for apps that
+does not qualify, the plugin logs why and does not migrate. A process that qualifies also needs `LAKEBASE_ENDPOINT` set
+to the endpoint's full resource name, `projects/<p>/branches/<b>/endpoints/<e>`, because the plugin reads the branch
+from it. When it is unset or has another form, startup fails and names the variable. The template's `app.yaml.tmpl` writes the flag for apps that
 select the plugin, which `apps init` offers only after the reveal. Until then, an app that adds the plugin by hand adds
 the flag to `app.yaml` too. `.env` never carries it.
 
@@ -241,7 +243,8 @@ deploy branch. This gap closes before the reveal.
 
 A deployed app bound to a branch with the exact shape of a dev or session branch, `dev-<user>-<hash6>` or
 `session-<hash6>-<id>`, refuses to start and names the branch. Only a developer migrates those branches. A deploy
-branch named `session-store` does not have that shape, so it migrates.
+branch named `session-store` does not have that shape, so it migrates. The refusal runs inside migrate on start, so it
+covers only a start that migrates. An app without the flag, or a process that does not qualify, starts on such a branch.
 
 Rejected alternatives:
 
