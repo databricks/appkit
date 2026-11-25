@@ -70,7 +70,9 @@ export function decideMigrateOnStart(
 
 /** The branch id in LAKEBASE_ENDPOINT (projects/<p>/branches/<b>/endpoints/<e>). */
 function endpointBranch(endpoint: string | undefined): string | undefined {
-  return endpoint?.match(/\/branches\/([^/]+)\//)?.[1];
+  return endpoint?.match(
+    /^projects\/[^/]+\/branches\/([^/]+)\/endpoints\/[^/]+$/,
+  )?.[1];
 }
 
 const DEVELOPMENT_BRANCH_OWNERS: Record<DevelopmentBranchKind, string> = {
