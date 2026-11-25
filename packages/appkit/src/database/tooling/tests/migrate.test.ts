@@ -55,6 +55,19 @@ function writeSchema(root: string, tables: string): void {
   );
 }
 
+/** Every file under the migrations folder, by relative path, with its contents. */
+function historyFiles(folder: string): Record<string, string> {
+  return Object.fromEntries(
+    fs
+      .readdirSync(folder, { recursive: true, encoding: "utf-8" })
+      .filter((entry) => fs.statSync(path.join(folder, entry)).isFile())
+      .map((entry) => [
+        entry,
+        fs.readFileSync(path.join(folder, entry), "utf-8"),
+      ]),
+  );
+}
+
 function app(tables: string): DbContext {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "appkit-db-migrate-"));
   roots.push(root);
@@ -142,6 +155,28 @@ describe("runMigrate", () => {
       expect.objectContaining({ $schemaName: "app" }),
     );
     expect(applyPendingMigrations).not.toHaveBeenCalled();
+    expect(
+      fs.existsSync(path.join(ctx.root, "config/database/migrations")),
+    ).toBe(false);
+  });
+
+  test("refusing for tables left in public leaves the migration history as it was", async () => {
+    const ctx = app(`notes: table("notes", { id: id() })`);
+    resolveEnvBranch.mockResolvedValue(null);
+    await runMigrate(ctx, { interactive: false });
+    const folder = path.join(ctx.root, "config/database/migrations");
+    const before = historyFiles(folder);
+
+    writeSchema(ctx.root, `notes: table("notes", { id: id(), body: text() })`);
+    resolveEnvBranch.mockResolvedValue(devBranch);
+    detectTablesLeftInPublic.mockResolvedValue(
+      'none of the declared tables exist in schema "app", but public has notes.',
+    );
+
+    await expect(runMigrate(ctx, { interactive: false })).rejects.toThrow(
+      /^Did not apply: none of the declared tables exist in schema "app", but public has notes\.$/,
+    );
+    expect(historyFiles(folder)).toEqual(before);
   });
 
   test("generates, regenerates types, and applies to the .env branch with the app schema", async () => {

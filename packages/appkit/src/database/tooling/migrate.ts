@@ -106,6 +106,14 @@ class UnappliedMigrationError extends Error implements MigrationWarnings {
   }
 }
 
+/** Applying was refused before anything ran: a migration would shadow tables left in public. */
+class TablesLeftInPublicError extends Error {
+  constructor(reason: string) {
+    super(`Did not apply: ${reason}`);
+    this.name = "TablesLeftInPublicError";
+  }
+}
+
 /** Why migrations must not be applied to the `.env` branch; undefined when they may. */
 async function applyBlocker(ctx: DbContext): Promise<string | undefined> {
   const env = await resolveEnvBranch(ctx);
@@ -130,7 +138,7 @@ async function applyToEnvBranch(
       catalogSqlOf(pool),
       schema,
     );
-    if (leftInPublic) throw new Error(`Did not apply: ${leftInPublic}`);
+    if (leftInPublic) throw new TablesLeftInPublicError(leftInPublic);
     const { applied, adopted } = await applyPendingMigrations(pool, {
       migrationsFolder: folder,
       schemaName: schema.$schemaName,
@@ -177,6 +185,12 @@ async function migrateHolding(
     outcome = await applyToEnvBranch(ctx, lock.folder, schema);
   } catch (error) {
     if (!generated) throw error;
+    // Nothing ran. A kept migration would create the empty copies the refusal
+    // warns about, and the next run would diff schema.ts against it.
+    if (error instanceof TablesLeftInPublicError) {
+      discardMigrationFiles(lock, generated);
+      throw error;
+    }
     const file = path.relative(ctx.root, generated.file);
     // A failed migration left in the journal runs first on every later try, so a
     // fix in schema.ts would stack behind it and never apply.
