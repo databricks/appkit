@@ -1253,6 +1253,18 @@ describe("runInit — schema start", () => {
     expect(report.start).toEqual({ kind: "none" });
   });
 
+  test("a schema.ts that fails to import keeps the import error for the CLI to show", async () => {
+    const ctx = appOn(
+      project(),
+      {},
+      { files: { "config/database/schema.ts": "export const schema = (" } },
+    );
+
+    const error = await init(ctx).catch((caught: Error) => caught);
+
+    expect((error.cause as Error).message).toMatch(/schema\.ts:\d+:\d+/);
+  });
+
   test.each(["migrate", "clean"] as const)(
     "%s without schema.ts fails before any change",
     async (start) => {

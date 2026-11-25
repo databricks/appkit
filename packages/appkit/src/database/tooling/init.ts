@@ -662,8 +662,11 @@ async function initHolding(
   const hasSchema = hasSchemaFile(ctx.root);
   const schemaName =
     hasSchema && request.kind === "locked"
-      ? (await loadDatabaseSchema(path.join(ctx.root, DEFAULT_SCHEMA_FILE)))
-          .$schemaName
+      ? (
+          await loadDatabaseSchema(path.join(ctx.root, DEFAULT_SCHEMA_FILE), {
+            showImportError: true,
+          })
+        ).$schemaName
       : DEFAULT_SCHEMA_NAME;
 
   const configured = {
