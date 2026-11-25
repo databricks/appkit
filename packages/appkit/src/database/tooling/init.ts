@@ -25,6 +25,7 @@ import {
   type IntrospectReport,
   IntrospectRefusedError,
 } from "./introspect";
+import { shown } from "./introspect/render";
 import {
   isAlreadyExists,
   isBranchLimit,
@@ -132,6 +133,7 @@ export interface InitReport {
   readonly endpoint: string;
   readonly endpointCreated: boolean;
   readonly host: string;
+  /** The Postgres database .env names, escaped for display. */
   readonly database: string;
   readonly user: string;
   readonly role: { readonly name: string; readonly action: RoleAction };
@@ -562,7 +564,7 @@ function chooseDatabase(
   if (bound === null) return local.database ?? DEFAULT_DATABASE;
   if (local.database && local.database !== bound) {
     onWarning(
-      `Setting PGDATABASE=${bound} in .env: it was ${local.database}, and databricks.yml binds ${bound}`,
+      `Setting PGDATABASE=${shown(bound)} in .env: it was ${shown(local.database)}, and databricks.yml binds ${shown(bound)}`,
     );
   }
   return bound;
@@ -740,7 +742,9 @@ async function initHolding(
         `Setting PGSSLMODE=${TLS_MODE} in .env: it was ${before.PGSSLMODE}, and only ${TLS_MODE} makes every connection use TLS and check the server's certificate`,
       );
     }
-    onStep(`Pointing .env at ${resourceId(branch.name)}, database ${database}`);
+    onStep(
+      `Pointing .env at ${resourceId(branch.name)}, database ${shown(database)}`,
+    );
     updateEnvFile(envFile, values);
     const branchCtx: DbContext = { ...ctx, env: { ...ctx.env, ...values } };
 
@@ -753,7 +757,7 @@ async function initHolding(
       endpoint: endpoint.name,
       endpointCreated,
       host,
-      database,
+      database: shown(database),
       user: identity.userName,
       role: { name: role.name, action },
       envFile,

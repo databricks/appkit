@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import dotenv from "dotenv";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const { cleanHolding, introspectHolding, migrateHolding, withBranchPool } =
@@ -32,6 +33,7 @@ import type { DbContext } from "../context";
 import type { HistoryLock } from "../history-lock";
 import { type InitOptions, runInit } from "../init";
 import { IntrospectRefusedError } from "../introspect";
+import { shown } from "../introspect/render";
 import { LakebaseApiError } from "../lakebase-api";
 import { runMigrate } from "../migrate";
 import { DRIZZLE_KIT_VERSION } from "../migrations";
@@ -1696,6 +1698,34 @@ describe("runInit — .env", () => {
 
     const same = await init(appOn(project()), { schema: "none" });
     expect(same.warnings).toEqual([]);
+  });
+
+  test("a database name with a control character is escaped on the terminal and kept as is in .env", async () => {
+    const bound = "app\u001b[31mdb";
+    const lakebase = project();
+    lakebase.addDatabase(PRODUCTION, "databricks-postgres", bound);
+    const ctx = appOn(lakebase, { PGDATABASE: "scratch\u0007" });
+
+    const { report, events } = await init(ctx);
+
+    expect(report.database).toBe(shown(bound));
+    expect(
+      dotenv.parse(fs.readFileSync(path.join(ctx.root, ".env"))).PGDATABASE,
+    ).toBe(bound);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        `Setting PGDATABASE=${shown(bound)} in .env: it was ${shown("scratch\u0007")}, and databricks.yml binds ${shown(bound)}`,
+        `Pointing .env at ${devBranchId(USER)}, database ${shown(bound)}`,
+        expect.stringContaining(
+          `Handing schema app in database ${shown(bound)} on `,
+        ),
+      ]),
+    );
+    expect(
+      events.filter(
+        (event) => event.includes("\u001b") || event.includes("\u0007"),
+      ),
+    ).toEqual([]);
   });
 
   test("the profile init authenticated with wins over the host", async () => {
