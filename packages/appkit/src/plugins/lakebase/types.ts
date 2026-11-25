@@ -48,6 +48,10 @@ export interface ILakebaseConfig extends BasePluginConfig {
    * All fields are optional and fall back to environment variables or defaults.
    *
    * Common overrides: `max` (pool size), `connectionTimeoutMillis`, `idleTimeoutMillis`.
+   *
+   * `max` defaults to 105, the whole connection budget of a 0.5 CU compute.
+   * Per-user OBO pools, a `database()` pool, replicas, and other clients share
+   * that budget, so lower it until the sum fits.
    */
   pool?: Partial<LakebasePoolConfig>;
   /**

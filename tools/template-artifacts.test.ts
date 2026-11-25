@@ -68,7 +68,7 @@ test("static variants retain both package managers for the final init", () => {
 });
 
 test.each(["npm", "pnpm"] as const)(
-  "%s prebuild runs sync and forwards --wait to AppKit",
+  "%s prebuild runs sync and generates types in production mode",
   (manager) => {
     const directory = scratch();
     const pkg = JSON.parse(
@@ -95,24 +95,32 @@ test.each(["npm", "pnpm"] as const)(
     mkdirSync(bin);
     writeFileSync(
       join(bin, "appkit"),
-      `#!${process.execPath}\nrequire('node:fs').appendFileSync(${JSON.stringify(calls)}, JSON.stringify(process.argv.slice(2))+'\\n');\n`,
+      `#!${process.execPath}\nrequire('node:fs').appendFileSync(${JSON.stringify(calls)}, JSON.stringify({args:process.argv.slice(2),nodeEnv:process.env.NODE_ENV??null})+'\\n');\n`,
       { mode: 0o755 },
     );
+    const env = {
+      ...process.env,
+      PATH: `${bin}${delimiter}${process.env.PATH}`,
+    };
+    delete env.NODE_ENV;
     execFileSync(manager, ["run", "build"], {
       cwd: directory,
-      env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` },
+      env,
       stdio: "pipe",
       timeout: 30_000,
     });
-    expect(
-      readFileSync(calls, "utf-8")
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line)),
-    ).toEqual([
+    const recorded: { args: string[]; nodeEnv: string | null }[] = readFileSync(
+      calls,
+      "utf-8",
+    )
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(recorded.map(({ args }) => args)).toEqual([
       ["plugin", "sync", "--write", "--silent"],
       ["generate-types", "--wait"],
     ]);
+    expect(recorded[1].nodeEnv).toBe("production");
   },
   35_000,
 );

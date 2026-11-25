@@ -31,7 +31,7 @@ Draggable handle for resizing panels
 | `onFocus` | `(() => void)` |  | - | - |
 | `onPointerDown` | `(() => void)` |  | - | - |
 | `onPointerUp` | `(() => void)` |  | - | - |
-| `tagName` | `enum` |  | - | - |
+| `tagName` | `keyof HTMLElementTagNameMap` |  | - | - |
 | `withHandle` | `boolean` |  | - | - |
 
 
@@ -67,7 +67,7 @@ Individual resizable panel within a panel group
 | `onExpand` | `PanelOnExpand` |  | - | - |
 | `onResize` | `PanelOnResize` |  | - | - |
 | `order` | `number` |  | - | - |
-| `tagName` | `enum` |  | - | - |
+| `tagName` | `keyof HTMLElementTagNameMap` |  | - | - |
 
 
 
@@ -93,12 +93,12 @@ Container for resizable panel layout
 | Prop | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
 | `autoSaveId` | `string \| null` |  | - | - |
-| `direction` | `enum` | ✓ | - | - |
+| `direction` | `"horizontal" \| "vertical"` | ✓ | - | - |
 | `id` | `string \| null` |  | - | - |
 | `keyboardResizeBy` | `number \| null` |  | - | - |
 | `onLayout` | `PanelGroupOnLayout \| null` |  | - | - |
 | `storage` | `PanelGroupStorage` |  | - | - |
-| `tagName` | `enum` |  | - | - |
+| `tagName` | `keyof HTMLElementTagNameMap` |  | - | - |
 
 
 

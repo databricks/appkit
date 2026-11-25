@@ -55,6 +55,17 @@ export class RemoteTunnelController {
     return isRemoteTunnelAllowedByEnv();
   }
 
+  private warnedRemoteServingDisabled = false;
+
+  /** Log once that a ?dev request was ignored because the app hasn't opted in. */
+  private warnRemoteServingDisabledOnce() {
+    if (this.warnedRemoteServingDisabled) return;
+    this.warnedRemoteServingDisabled = true;
+    logger.warn(
+      'Ignoring ?dev: Remote Bridge is off for this app. To use `databricks apps dev-remote`, start the app without NODE_ENV=production and set DISABLE_REMOTE_SERVING to "false" in app.yaml, then redeploy.',
+    );
+  }
+
   /**
    * Middleware for the remote tunnel
    * - Hard blocks in local dev
@@ -69,8 +80,11 @@ export class RemoteTunnelController {
     // hard blocker in local dev
     if (isLocalDev()) return next();
 
-    // if not allowed by env, block
-    if (!this.isAllowedByEnv()) return next();
+    // if not allowed by env, block (and tell a developer who asked for ?dev why)
+    if (!this.isAllowedByEnv()) {
+      if (hasDevQuery(req)) this.warnRemoteServingDisabledOnce();
+      return next();
+    }
 
     const wantsDev = hasDevQuery(req);
     const wantsRemoteAssets = isRemoteTunnelAssetRequest(req);

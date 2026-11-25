@@ -1,4 +1,4 @@
-import { createBrowserRouter, RouterProvider, NavLink, Outlet } from 'react-router';
+import { createBrowserRouter, RouterProvider, Link, NavLink, Outlet, useLocation } from 'react-router';
 import { useState } from 'react';
 import {
   Button,
@@ -6,13 +6,19 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
   useIsMobile,
 } from '@databricks/appkit-ui/react';
-import { Menu } from 'lucide-react';
+import { FileQuestionMark, Menu } from 'lucide-react';
 {{- if .plugins.agents}}
 import { AgentChat } from './pages/agents/AgentChat';
 {{- end}}
@@ -169,6 +175,7 @@ const router = createBrowserRouter([
 {{- if .plugins.jobs}}
       { path: '/jobs', element: <JobsPage /> },
 {{- end}}
+      { path: '*', element: <NotFoundPage /> },
     ],
   },
 ]);
@@ -177,9 +184,10 @@ export default function App() {
   return <RouterProvider router={router} />;
 }
 
+// `data-appkit-template-home` marks the placeholder home: remove it with the page.
 function HomePage() {
   return (
-    <div className="max-w-2xl mx-auto space-y-6 mt-8">
+    <div data-appkit-template-home className="max-w-2xl mx-auto space-y-6 mt-8">
       <div className="text-center">
         <h2 className="text-3xl font-bold mb-2 text-foreground">
           Welcome to your Databricks App
@@ -220,5 +228,28 @@ function HomePage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function NotFoundPage() {
+  const { pathname } = useLocation();
+
+  return (
+    <Empty>
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <FileQuestionMark />
+        </EmptyMedia>
+        <EmptyTitle>Page not found</EmptyTitle>
+        <EmptyDescription>
+          There is no page at <code className="break-all">{pathname}</code>
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button asChild>
+          <Link to="/">Back to home</Link>
+        </Button>
+      </EmptyContent>
+    </Empty>
   );
 }

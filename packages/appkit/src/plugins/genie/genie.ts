@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 
 import type express from "express";
 import type {
@@ -9,7 +12,7 @@ import type {
 } from "shared";
 import { z } from "zod";
 
-import { GenieConnector } from "../../connectors";
+import { GenieConnector, isGenieId } from "../../connectors";
 import { getWorkspaceClient } from "../../context";
 import { buildToolkitEntries } from "../../core/agent/build-toolkit";
 import {
@@ -54,7 +57,11 @@ export class GeniePlugin extends Plugin implements ToolProvider {
     });
 
     const spaces = this.config.spaces ?? {};
-    const missingAliases = Object.entries(spaces)
+    const agents = this.config.agents ?? {};
+    const missingAliases = [
+      ...Object.entries(spaces),
+      ...Object.entries(agents),
+    ]
       .filter(([, id]) => !id)
       .map(([alias]) => alias);
     if (missingAliases.length > 0) {
@@ -70,7 +77,18 @@ export class GeniePlugin extends Plugin implements ToolProvider {
       );
     }
 
-    for (const alias of Object.keys(spaces)) {
+    const sharedAliases = Object.keys(agents).filter((alias) =>
+      Object.hasOwn(spaces, alias),
+    );
+    if (sharedAliases.length > 0) {
+      throw new Error(
+        `GeniePlugin: ${sharedAliases.map((a) => `"${a}"`).join(", ")} ` +
+          "configured in both `spaces` and `agents`. An alias is either a chat space or an agent; " +
+          "use a different alias for the agent.",
+      );
+    }
+
+    for (const alias of [...Object.keys(spaces), ...Object.keys(agents)]) {
       Object.assign(this.tools, this._defineSpaceTools(alias));
     }
   }
@@ -127,7 +145,12 @@ export class GeniePlugin extends Plugin implements ToolProvider {
   }
 
   private resolveSpaceId(alias: string): string | null {
-    return this.config.spaces?.[alias] ?? null;
+    return this.config.spaces?.[alias] ?? this.config.agents?.[alias] ?? null;
+  }
+
+  /** Whether the alias uses Genie agent mode (an `agents` entry). */
+  private isAgent(alias: string): boolean {
+    return Object.hasOwn(this.config.agents ?? {}, alias);
   }
 
   /**
@@ -164,6 +187,15 @@ export class GeniePlugin extends Plugin implements ToolProvider {
       path: "/:alias/conversations/:conversationId/messages/:messageId",
       handler: async (req: express.Request, res: express.Response) => {
         await this._asUserScoped(req)._handleGetMessage(req, res);
+      },
+    });
+
+    this.route(router, {
+      name: "getVisualization",
+      method: "get",
+      path: "/:alias/conversations/:conversationId/messages/:messageId/attachments/:attachmentId/visualization",
+      handler: async (req: express.Request, res: express.Response) => {
+        await this._asUserScoped(req)._handleGetVisualization(req, res);
       },
     });
   }
@@ -216,13 +248,21 @@ export class GeniePlugin extends Plugin implements ToolProvider {
     await this.executeStream<GenieStreamEvent>(
       res,
       (signal) =>
-        this.genieConnector.streamSendMessage(
-          workspaceClient,
-          spaceId,
-          content,
-          conversationId,
-          { timeout, signal },
-        ),
+        this.isAgent(alias)
+          ? this.genieConnector.streamAgentResponse(
+              workspaceClient,
+              spaceId,
+              content,
+              conversationId,
+              { timeout, signal },
+            )
+          : this.genieConnector.streamSendMessage(
+              workspaceClient,
+              spaceId,
+              content,
+              conversationId,
+              { timeout, signal },
+            ),
       streamSettings,
     );
   }
@@ -272,7 +312,12 @@ export class GeniePlugin extends Plugin implements ToolProvider {
           workspaceClient,
           spaceId,
           conversationId,
-          { includeQueryResults, pageToken, signal },
+          {
+            includeQueryResults,
+            pageToken,
+            signal,
+            agent: this.isAgent(alias),
+          },
         ),
       streamSettings,
     );
@@ -325,10 +370,71 @@ export class GeniePlugin extends Plugin implements ToolProvider {
           spaceId,
           conversationId,
           messageId,
-          { timeout, signal },
+          { timeout, signal, agent: this.isAgent(alias) },
         ),
       streamSettings,
     );
+  }
+
+  /** Streams the PNG Genie rendered for a visualization attachment, so the UI can show it in an `<img>`. */
+  async _handleGetVisualization(
+    req: express.Request,
+    res: express.Response,
+  ): Promise<void> {
+    const { alias, conversationId, messageId, attachmentId } = req.params;
+    const spaceId = this.resolveSpaceId(alias);
+
+    if (!spaceId) {
+      res.status(404).json({ error: `Unknown space alias: ${alias}` });
+      return;
+    }
+    if (![conversationId, messageId, attachmentId].every(isGenieId)) {
+      res
+        .status(400)
+        .json({ error: "Invalid conversation, message or attachment id" });
+      return;
+    }
+
+    const workspaceClient = getWorkspaceClient();
+    const result = await this.execute(
+      (signal) =>
+        this.genieConnector.downloadVisualization(
+          workspaceClient,
+          spaceId,
+          conversationId,
+          messageId,
+          attachmentId,
+          signal,
+        ),
+      { default: genieStreamDefaults.default },
+    );
+
+    if (!result.ok) {
+      // The SDK leaves the message empty for Genie's `{"error": {...}}` bodies.
+      res
+        .status(result.status)
+        .json({ error: result.message || "Visualization not available" });
+      return;
+    }
+
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    // The chart of a completed message never changes.
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    if (!result.data) {
+      res.end();
+      return;
+    }
+    try {
+      // Unlike pipe(), pipeline() also cancels the download when the client goes away.
+      await pipeline(Readable.fromWeb(result.data as NodeReadableStream), res);
+    } catch (error) {
+      if (
+        (error as NodeJS.ErrnoException).code !== "ERR_STREAM_PREMATURE_CLOSE"
+      ) {
+        logger.error("Visualization stream error: %O", error);
+      }
+    }
   }
 
   async getConversation(
@@ -353,6 +459,7 @@ export class GeniePlugin extends Plugin implements ToolProvider {
       workspaceClient,
       spaceId,
       conversationId,
+      { agent: this.isAgent(alias) },
     );
   }
 
@@ -373,6 +480,16 @@ export class GeniePlugin extends Plugin implements ToolProvider {
     }
     const workspaceClient = getWorkspaceClient();
     const timeout = options?.timeout ?? this.config.timeout ?? 120_000;
+    if (this.isAgent(alias)) {
+      yield* this.genieConnector.streamAgentResponse(
+        workspaceClient,
+        spaceId,
+        content,
+        conversationId,
+        { timeout, signal: options?.signal },
+      );
+      return;
+    }
     yield* this.genieConnector.streamSendMessage(
       workspaceClient,
       spaceId,

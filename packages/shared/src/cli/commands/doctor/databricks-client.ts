@@ -87,8 +87,10 @@ export interface LakebasePoolHandle {
 }
 
 /** Builds a Lakebase pool via `createLakebasePool`. Connection settings
- * (`PGHOST`, `LAKEBASE_ENDPOINT`, …) come from the environment; we inject only
- * the resolved workspace client for OAuth token minting. */
+ * (`PGHOST`, `LAKEBASE_ENDPOINT`, …) come from the environment; we inject the
+ * resolved workspace client for OAuth token minting and the Postgres user,
+ * resolved like the app does at startup (`PGUSER`/`DATABRICKS_CLIENT_ID`, then
+ * `currentUser.me()`). */
 export async function getLakebasePool(
   client: unknown,
 ): Promise<LakebasePoolHandle> {
@@ -97,6 +99,9 @@ export async function getLakebasePool(
   const appkitPkg = "@databricks/appkit";
   let appkit: {
     createLakebasePool: (cfg: Record<string, unknown>) => unknown;
+    getUsernameWithApiLookup: (
+      cfg: Record<string, unknown>,
+    ) => Promise<string | undefined>;
   };
   try {
     appkit = await import(appkitPkg);
@@ -107,13 +112,17 @@ export async function getLakebasePool(
     throw err;
   }
 
+  const workspaceClient = client as WorkspaceClient;
+  const user = await appkit.getUsernameWithApiLookup({ workspaceClient });
+
   // Silence Lakebase's own logger. It defaults to an error-only console logger
   // that dumps the raw SDK ApiError (stack + full response blob) to stderr on a
   // failed token fetch. doctor classifies and prints that failure itself, so the
   // library's dump is just noise on top of our clean one-line report.
   // Lakebase takes the facade as is: it uses `request` and the typed `postgres`.
   const pool = appkit.createLakebasePool({
-    workspaceClient: client as WorkspaceClient,
+    workspaceClient,
+    user,
     logger: { error: false },
   });
   return pool as unknown as LakebasePoolHandle;

@@ -43,7 +43,7 @@ export async function setupSampleLakebaseRoutes(appkit: AppKitWithLakebase) {
       console.log('[lakebase] Created schema and table app.todos');
     }
   } catch (err) {
-    console.warn('[lakebase] Database setup failed:', (err as Error).message);
+    console.warn('[lakebase] Database setup failed:', err instanceof Error ? err.message : String(err));
     console.warn('[lakebase] Routes will be registered but may return errors');
     console.warn('[lakebase] See https://developers.databricks.com/docs/appkit/v0/plugins/lakebase#database-permissions for troubleshooting');
   }

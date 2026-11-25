@@ -54,17 +54,17 @@ import { Tooltip } from '@databricks/appkit-ui';
 | `onEscapeKeyDown` | `((event: KeyboardEvent) => void)` |  | - | Event handler called when the escape key is down. Can be prevented. |
 | `onPointerDownOutside` | `((event: PointerDownOutsideEvent) => void)` |  | - | Event handler called when the a `pointerdown` event happens outside of the `Tooltip`. Can be prevented. |
 | `asChild` | `boolean` |  | - | - |
-| `side` | `enum` |  | - | - |
+| `side` | `"top" \| "right" \| "bottom" \| "left"` |  | - | - |
 | `sideOffset` | `number` |  | - | - |
-| `align` | `enum` |  | - | - |
+| `align` | `"center" \| "start" \| "end"` |  | - | - |
 | `alignOffset` | `number` |  | - | - |
 | `arrowPadding` | `number` |  | - | - |
 | `avoidCollisions` | `boolean` |  | - | - |
 | `collisionBoundary` | `Boundary \| Boundary[]` |  | - | - |
 | `collisionPadding` | `number \| Partial<Record<"top" \| "right" \| "bottom" \| "left", number>>` |  | - | - |
-| `sticky` | `enum` |  | - | - |
+| `sticky` | `"partial" \| "always"` |  | - | - |
 | `hideWhenDetached` | `boolean` |  | - | - |
-| `updatePositionStrategy` | `enum` |  | - | - |
+| `updatePositionStrategy` | `"always" \| "optimized"` |  | - | - |
 
 
 

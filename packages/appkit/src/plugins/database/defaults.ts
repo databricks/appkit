@@ -23,7 +23,7 @@ export const STATEMENT_TIMEOUT_MS = 30_000;
 /** Server-side limit for an idle open transaction, independent of JS timers (ms). */
 export const IDLE_IN_TRANSACTION_TIMEOUT_MS = 30_000;
 
-/** Deadline for the transaction callback, not cancellation of arbitrary hook work (ms). */
+/** Deadline for one explicit transaction callback (ms). */
 export const TRANSACTION_TIMEOUT_MS = 30_000;
 
 // Generated-read limits. The wire caps a typed caller shares with HTTP live in
@@ -32,6 +32,8 @@ export const TRANSACTION_TIMEOUT_MS = 30_000;
 // Request decoding: rejected before any database work is scheduled.
 /** Max encoded size of a generated read query string. */
 export const MAX_QUERY_BYTES = 8 * 1024;
+/** Max UTF-8 size of one operation request body. */
+export const MAX_OPERATION_BODY_BYTES = 1024 * 1024;
 /** Max nesting depth of `and`/`or` groups in one generated filter. */
 export const MAX_WHERE_DEPTH = 5;
 /** Max column conditions across one generated filter. */
@@ -45,10 +47,12 @@ export const MAX_OFFSET = 10_000;
 /** Max rows one generated read may materialize across its include tree. */
 export const MAX_MATERIALIZED_NODES = 10_000;
 
-// Response shaping: bounds trusted output on its way to the wire.
-/** Max nesting depth of read-serializer output. */
+/** Max nesting depth of one bounded JSON value. */
 export const MAX_SERIALIZED_DEPTH = 32;
-/** Max node count of read-serializer output. */
+/** Max node count of one bounded JSON value. */
 export const MAX_SERIALIZED_NODES = 10_000;
 /** Max UTF-8 byte length of one generated read response body. */
 export const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
+const MIN_JSON_VALUE_BYTES = 2;
+/** Max node count of one operation answer. */
+export const MAX_OUTPUT_NODES = MAX_RESPONSE_BYTES / MIN_JSON_VALUE_BYTES;

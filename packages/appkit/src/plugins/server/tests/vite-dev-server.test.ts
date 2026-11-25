@@ -49,6 +49,8 @@ vi.mock("@/utils", () => ({
   })),
 }));
 
+import { mergeConfigDedup } from "@/utils";
+
 import { ViteDevServer } from "../vite-dev-server";
 
 describe("ViteDevServer", () => {
@@ -125,6 +127,22 @@ describe("ViteDevServer", () => {
         { mode: "development", command: "serve" },
         undefined,
         expect.any(String),
+      );
+    });
+
+    // mergeConfigDedup keeps the first plugin of each name, so the app's own
+    // react() (the template's carries the React Compiler) must come first.
+    test("should give the user vite config's plugins precedence", async () => {
+      const userConfig = { plugins: [{ name: "vite:react-babel" }] };
+      mockLoadConfigFromFile.mockResolvedValue({ config: userConfig });
+      const server = new ViteDevServer(mockApp);
+
+      await server.setup();
+
+      expect(mergeConfigDedup).toHaveBeenCalledWith(
+        userConfig,
+        expect.objectContaining({ plugins: expect.any(Array) }),
+        expect.any(Function),
       );
     });
 

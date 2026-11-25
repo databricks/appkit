@@ -732,6 +732,61 @@ describe("GenieConnector", () => {
       });
     });
 
+    test("handles viz attachments", async () => {
+      const msg = makeGenieMessage({
+        attachments: [
+          {
+            attachmentId: "att-viz",
+            attachment: {
+              $case: "viz",
+              viz: { title: "Sales by region", queryAttachmentId: "att-1" },
+            },
+          },
+        ],
+      });
+      mockStart(ws, msg);
+
+      const events = await collect(
+        connector.streamSendMessage(ws, "space-1", "q", undefined),
+      );
+
+      const msgResult = events.find((e) => e.type === "message_result") as any;
+      expect(msgResult.message.attachments[0]).toEqual({
+        attachmentId: "att-viz",
+        viz: { title: "Sales by region", queryAttachmentId: "att-1" },
+      });
+    });
+
+    test("maps viz attachments in conversation history", async () => {
+      ws.genie.genieListConversationMessages.mockResolvedValue({
+        messages: [
+          makeGenieMessage({
+            attachments: [
+              {
+                attachmentId: "att-viz",
+                attachment: {
+                  $case: "viz",
+                  viz: { title: "Sales by region", queryAttachmentId: "att-1" },
+                },
+              },
+            ],
+          }),
+        ],
+      });
+
+      const events = await collect(
+        connector.streamConversation(ws, "space-1", "conv-1", {
+          includeQueryResults: false,
+        }),
+      );
+
+      const msgResult = events.find((e) => e.type === "message_result") as any;
+      expect(msgResult.message.attachments[0].viz).toEqual({
+        title: "Sales by region",
+        queryAttachmentId: "att-1",
+      });
+    });
+
     test("returns empty array when message has no attachments", async () => {
       const msg = makeGenieMessage({ attachments: undefined });
       mockStart(ws, msg);
