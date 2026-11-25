@@ -175,14 +175,9 @@ async function migrateHolding(
   const schema = await loadDatabaseSchema(
     path.join(ctx.root, DEFAULT_SCHEMA_FILE),
   );
-  const generated = await generateMigrationFiles(lock, {
-    schema,
-    interactive: options.interactive,
-  });
-  const warnings = migrationWarnings(generated);
-
   // The types follow schema.ts and server/database/routes alone, so they are
-  // current even if applying fails.
+  // current even if applying fails. Written first, so a route module that
+  // fails to load stops migrate before it writes a migration.
   const typesFile = path.join(ctx.root, TYPES_DIR, DATABASE_TYPES_FILE);
   await writeDatabaseTypes(schema, typesFile);
   const operationsTypesFile = path.join(
@@ -194,6 +189,12 @@ async function migrateHolding(
     appRoot: ctx.root,
     outFile: operationsTypesFile,
   });
+
+  const generated = await generateMigrationFiles(lock, {
+    schema,
+    interactive: options.interactive,
+  });
+  const warnings = migrationWarnings(generated);
 
   let outcome: ApplyOutcome;
   try {

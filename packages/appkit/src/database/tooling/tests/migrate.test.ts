@@ -541,6 +541,42 @@ describe("runMigrate", () => {
     );
   });
 
+  test("a route module that fails to load stops migrate before it writes a migration", async () => {
+    const ctx = app(`notes: table("notes", { id: id(), body: text() })`);
+    resolveEnvBranch.mockResolvedValue(null);
+    await runMigrate(ctx, { interactive: false });
+    const folder = path.join(ctx.root, "config/database/migrations");
+    const before = historyFiles(folder);
+
+    writeSchema(
+      ctx.root,
+      `notes: table("notes", { id: id(), body: text().notNull() })`,
+    );
+    const routes = path.join(ctx.root, "server/database/routes");
+    fs.mkdirSync(routes, { recursive: true });
+    fs.writeFileSync(
+      path.join(routes, "notes.ts"),
+      `throw new Error("route module broke");`,
+    );
+    const error = await runMigrate(ctx, { interactive: false }).catch(
+      (caught: unknown) => caught,
+    );
+
+    expect((error as Error).message).toMatch(/notes\.ts/);
+    expect(historyFiles(folder)).toEqual(before);
+    expect(applyPendingMigrations).not.toHaveBeenCalled();
+
+    fs.rmSync(path.join(routes, "notes.ts"));
+    const report = await runMigrate(ctx, { interactive: false });
+    const setNotNull =
+      'ALTER TABLE "app"."notes" ALTER COLUMN "body" SET NOT NULL;';
+    expect(report).toMatchObject({
+      generated: { tag: "0001_migration" },
+      breaking: [setNotNull],
+      dataDependent: [setNotNull],
+    });
+  });
+
   test("a second migrate in the same checkout fails while the first runs, and writes nothing", async () => {
     const ctx = app(`notes: table("notes", { id: id() })`);
     let finishApply: (value: unknown) => void = () => undefined;
