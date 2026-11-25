@@ -330,11 +330,13 @@ describe("LakebaseApi", () => {
     const fake = client([
       { name: "op", done: true },
       apiError(404, "NOT_FOUND"),
+      apiError(404, "NOT_FOUND"),
       {
         name: "op",
         done: true,
         error: { error_code: "RESOURCE_DOES_NOT_EXIST", message: "gone" },
       },
+      apiError(404, "NOT_FOUND"),
       apiError(403, "PERMISSION_DENIED"),
     ]);
     const api = new LakebaseApi(fake, fast);
@@ -426,5 +428,34 @@ describe("LakebaseApi", () => {
     });
     expect(fake.requests[0]?.payload).toBeUndefined();
     expect(fake.requests).toHaveLength(2);
+  });
+
+  test("deleteRole: a NOT_FOUND while the role still exists fails, e.g. a reassign target that is missing", async () => {
+    const role = "projects/p/branches/b/roles/sp";
+    const fake = client([
+      {
+        name: "op",
+        done: true,
+        error: { error_code: "NOT_FOUND", message: "role alice not found" },
+      },
+      { name: role },
+      apiError(404, "role alice not found"),
+      { name: role },
+    ]);
+    const api = new LakebaseApi(fake, fast);
+    const reassign = { reassignOwnedTo: "projects/p/branches/b/roles/alice" };
+
+    await expect(api.deleteRole(role, reassign)).rejects.toThrow(
+      `Lakebase: delete role ${role} failed: role alice not found`,
+    );
+    await expect(api.deleteRole(role, reassign)).rejects.toThrow(
+      `Lakebase: delete role ${role} failed: role alice not found`,
+    );
+    expect(fake.requests.map((r) => `${r.method} ${r.path}`)).toEqual([
+      `DELETE /api/2.0/postgres/${role}`,
+      `GET /api/2.0/postgres/${role}`,
+      `DELETE /api/2.0/postgres/${role}`,
+      `GET /api/2.0/postgres/${role}`,
+    ]);
   });
 });

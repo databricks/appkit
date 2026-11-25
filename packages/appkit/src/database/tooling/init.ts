@@ -78,7 +78,10 @@ import {
 export type { SchemaStart } from "./schema-state";
 
 export interface InitOptions {
-  /** Default: this checkout's session branch when .env points at it, else your dev branch. */
+  /**
+   * Default: this checkout's session branch when .env points at it, or when a
+   * --session run stopped before .env did; else your dev branch.
+   */
   readonly mode?: BranchMode;
   readonly schema?: SchemaStart;
   readonly confirmClean?: (target: {
@@ -199,16 +202,41 @@ function scopeToProject(
 /**
  * Session when .env names a session id and points at one of your session
  * branches: this checkout's, or the gone one a rotation replaced before it
- * stopped short of rewriting .env, which the rerun then finishes. Dev
- * otherwise.
+ * stopped short of rewriting .env, which the rerun then finishes. Session too
+ * when .env points anywhere but your dev branch and the id's branch exists: a
+ * --session run that stopped before it rewrote .env. Dev otherwise.
  */
-function defaultMode(local: LocalTarget, userName: string): BranchMode {
+async function defaultMode(
+  ctx: DbContext,
+  project: string,
+  local: LocalTarget,
+  userName: string,
+): Promise<BranchMode> {
+  if (!local.session) return "dev";
   const branch = parseResourceName(local.endpoint ?? undefined)?.branch;
-  return local.session &&
-    branch &&
-    isUsersSessionBranchId(userName, resourceId(branch))
-    ? "session"
-    : "dev";
+  const id = branch ? resourceId(branch) : null;
+  if (id && isUsersSessionBranchId(userName, id)) return "session";
+  if (id === devBranchId(userName)) return "dev";
+  const stopped = await ctx
+    .api()
+    .getBranch(
+      `${project}/branches/${sessionBranchId(userName, local.session)}`,
+    );
+  return stopped && !isGone(stopped) ? "session" : "dev";
+}
+
+/**
+ * A plain rerun picks the dev branch when .env does not point at the session
+ * branch yet, so a failed session run's advice names --session.
+ */
+function withSessionRerun(error: unknown): unknown {
+  if (error instanceof Error) {
+    error.message = error.message.replace(
+      /([Rr]erun `appkit db init)(?! --session)/g,
+      "$1 --session",
+    );
+  }
+  return error;
 }
 
 function isGone(branch: LakebaseBranch, now = Date.now()): boolean {
@@ -226,17 +254,23 @@ interface BranchRequest {
   readonly ttl: { readonly api: string; readonly label: string };
   readonly boundary: DeployBoundary;
   readonly envFile: string;
-  readonly deployBranch: string | null;
+  readonly deploy: DeployTarget | null;
   readonly onStep: (message: string) => void;
 }
 
-interface FoundBranch {
+type FoundBranch = {
   readonly branch: LakebaseBranch;
-  /** Forked by this run. */
-  readonly created: boolean;
-  readonly sourceBranch?: string;
   readonly session: string | null;
-}
+} & (
+  | { readonly created: false }
+  | {
+      /** Forked by this run. */
+      readonly created: true;
+      readonly sourceBranch: string;
+      /** The bound database's Postgres name, read on the source before the fork. */
+      readonly boundDatabase: string | null;
+    }
+);
 
 function branchLimitError(
   project: string,
@@ -325,12 +359,19 @@ async function findOrCreateBranch(
 
     const branches = await api.listBranches(project);
     const deployed = branches.find(
-      (b) => b.name === request.deployBranch && !isGone(b),
+      (b) => b.name === request.deploy?.branch && !isGone(b),
     );
     const parent = deployed ?? branches.find((b) => b.status?.default);
     if (!parent) {
       throw new Error(`Project ${project} has no default branch to fork from.`);
     }
+    // A fork has its source's databases.
+    const boundDatabase = await readBoundDatabase(
+      ctx,
+      parent.name,
+      request.deploy,
+      name,
+    );
     persistSessionIdBeforeFork(request, session);
     onStep(
       `Creating ${resourceId(name)} from ${resourceId(parent.name)} (${deployed ? "the branch databricks.yml deploys to" : "the project's default branch"})${session === null ? "" : `, expiring after ${request.ttl.label}`}`,
@@ -346,6 +387,7 @@ async function findOrCreateBranch(
         branch: branch?.name ? branch : { name },
         created: true,
         sourceBranch: parent.name,
+        boundDatabase,
         session,
       };
     } catch (error) {
@@ -489,25 +531,26 @@ async function ensureDeveloperRole(
 }
 
 /**
- * The Postgres database .env names: the one it already names, else the one
- * databricks.yml binds, read on the branch (a fork inherits its parent's
- * databases), else the project's default database. A bound database the branch
- * lacks is refused: pointing .env at the default one would run the app on a
- * database its deploy does not use.
+ * The Postgres name of the database databricks.yml binds, read on `branch`;
+ * null when it binds none. A bound database the branch lacks is refused:
+ * pointing .env at another one would run the app on a database its deploy does
+ * not use. `forking` names the branch a fork of `branch` would create.
  */
-async function resolveDatabase(
+async function readBoundDatabase(
   ctx: DbContext,
   branch: string,
-  local: LocalTarget,
   deploy: DeployTarget | null,
-): Promise<string> {
-  if (local.database) return local.database;
-  if (!deploy?.database) return DEFAULT_DATABASE;
+  forking?: string,
+): Promise<string | null> {
+  if (!deploy?.database) return null;
   const id = resourceId(deploy.database);
   const database = await ctx.api().getDatabase(`${branch}/databases/${id}`);
   if (!database) {
+    const where = forking
+      ? `${resourceId(branch)}, the branch ${resourceId(forking)} would fork from, so init created nothing`
+      : resourceId(branch);
     throw new Error(
-      `Database ${id}, which databricks.yml binds, is not on ${resourceId(branch)}. Create it there (databricks postgres create-database ${branch} --database-id ${id}), or bind a database the project's branches have, then rerun \`appkit db init\`.`,
+      `Database ${id}, which databricks.yml binds, is not on ${where}. Create it there (databricks postgres create-database ${branch} --database-id ${id}), or bind a database the project's branches have, then rerun \`appkit db init\`.`,
     );
   }
   if (!database.status?.postgres_database) {
@@ -516,6 +559,21 @@ async function resolveDatabase(
     );
   }
   return database.status.postgres_database;
+}
+
+/** The bound database, else the one .env names, else the project's default database. */
+function chooseDatabase(
+  bound: string | null,
+  local: LocalTarget,
+  onWarning: (message: string) => void,
+): string {
+  if (bound === null) return local.database ?? DEFAULT_DATABASE;
+  if (local.database && local.database !== bound) {
+    onWarning(
+      `Setting PGDATABASE=${bound} in .env: it was ${local.database}, and databricks.yml binds ${bound}`,
+    );
+  }
+  return bound;
 }
 
 const SCHEMA_NAME_ADVICE = "Pass --schema-name <name> to read another schema.";
@@ -618,7 +676,7 @@ async function initHolding(
 
   const configured = {
     local: readLocalTarget(ctx.env),
-    deploy: readDeployTarget(ctx.root),
+    deploy: readDeployTarget(ctx.root, ctx.env),
   };
   const project = resolveProject(configured.local, configured.deploy);
   const { local, deploy } = scopeToProject(
@@ -627,194 +685,209 @@ async function initHolding(
     configured.deploy,
   );
   const identity = await currentIdentity(ctx);
-  const mode = options.mode ?? defaultMode(local, identity.userName);
+  const mode =
+    options.mode ?? (await defaultMode(ctx, project, local, identity.userName));
   if (options.ttl !== undefined && mode !== "session") {
     throw new Error("--ttl applies to session branches only; add --session.");
   }
-  const before = readEnvValues(envFile);
+  try {
+    const before = readEnvValues(envFile);
 
-  const found = await findOrCreateBranch(ctx, {
-    project,
-    mode,
-    identity,
-    session: local.session,
-    ttl,
-    boundary: readDeployBoundary(ctx.root),
-    envFile,
-    deployBranch: deploy?.branch ?? null,
-    onStep,
-  });
-  const { branch } = found;
-
-  const {
-    endpoint,
-    created: endpointCreated,
-    host,
-  } = await ensureReadWriteEndpoint(ctx, branch.name, onStep);
-  const roles = await ctx.api().listRoles(branch.name);
-  const { role, action } = await ensureDeveloperRole(
-    ctx,
-    branch.name,
-    identity,
-    roles,
-    onStep,
-  );
-  const database = await resolveDatabase(ctx, branch.name, local, deploy);
-
-  const values: Record<string, string> = {
-    LAKEBASE_PROJECT: project,
-    PGHOST: host,
-    LAKEBASE_ENDPOINT: endpoint.name,
-    PGDATABASE: database,
-    PGUSER: identity.userName,
-    ...(found.session === null ? {} : { APPKIT_DB_SESSION: found.session }),
-    ...(before.PGPORT && /^\d+$/.test(before.PGPORT) ? {} : { PGPORT: "5432" }),
-    ...(before.PGSSLMODE === TLS_MODE ? {} : { PGSSLMODE: TLS_MODE }),
-    ...(await authValues(ctx, before)),
-  };
-  if (before.PGSSLMODE && before.PGSSLMODE !== TLS_MODE) {
-    onStep(
-      `Setting PGSSLMODE=${TLS_MODE} in .env: it was ${before.PGSSLMODE}, and only ${TLS_MODE} makes every connection use TLS and check the server's certificate`,
-    );
-  }
-  onStep(`Pointing .env at ${resourceId(branch.name)}, database ${database}`);
-  updateEnvFile(envFile, values);
-  const branchCtx: DbContext = { ...ctx, env: { ...ctx.env, ...values } };
-
-  const base = {
-    mode,
-    branch: branch.name,
-    created: found.created,
-    ...(found.sourceBranch ? { sourceBranch: found.sourceBranch } : {}),
-    expireTime: branch.status?.expire_time ?? null,
-    endpoint: endpoint.name,
-    endpointCreated,
-    host,
-    database,
-    user: identity.userName,
-    role: { name: role.name, action },
-    envFile,
-  };
-  if (request.kind === "none") {
-    return {
-      ...base,
-      handedOff: null,
-      keptCopy: null,
-      installed: null,
-      start: { kind: "none" },
-    };
-  }
-  const { lock, requested } = request;
-
-  const state = await withBranchPool(branchCtx, (pool) =>
-    readSchemaState(pool, schemaName),
-  );
-  const plan = planStart(state, requested, hasSchema, found.created);
-  const on = `on ${resourceId(branch.name)}`;
-  if (
-    plan.confirm &&
-    options.confirmClean &&
-    !(await options.confirmClean({ branch: branch.name, schemaName }))
-  ) {
-    return {
-      ...base,
-      handedOff: null,
-      keptCopy: null,
-      installed: null,
-      start: { kind: "cancelled", schemaName },
-    };
-  }
-  const installed = ensureDrizzleKit(
-    ctx.root,
-    options.runCommand ?? runCommand,
-    onStep,
-  );
-  const onBranch = <T>(
-    work: (client: Pick<PoolClient, "query">) => Promise<T>,
-  ) => withBranchPool(branchCtx, work);
-
-  const introspect = (recordAsApplied: boolean) => {
-    onStep(`Writing schema.ts from schema ${schemaName} ${on}`);
-    return introspectForInit(branchCtx, lock, {
-      interactive,
-      schemaName,
-      recordAsApplied,
+    const found = await findOrCreateBranch(ctx, {
+      project,
+      mode,
+      identity,
+      session: local.session,
+      ttl,
+      boundary: readDeployBoundary(ctx.root, ctx.env),
+      envFile,
+      deploy,
+      onStep,
     });
-  };
-  let introspected: IntrospectReport | null = null;
-  if (plan.kind === "introspect" && plan.rebuild) {
-    introspected = await introspect(false);
-  }
+    const { branch } = found;
 
-  if (
-    plan.tag &&
-    !(await onBranch((client) => tagForkCopy(client, schemaName)))
-  ) {
-    onWarning(
-      `Could not mark schema ${schemaName} ${on} as the fork's copy. It has no journal table, or one owned by a role init does not trust. If this run stops before the rebuild finishes, the next \`appkit db init\` will see a schema that looks like your working branch and keep the copied rows. Run \`appkit db init --schema clean\` then.`,
+    const {
+      endpoint,
+      created: endpointCreated,
+      host,
+    } = await ensureReadWriteEndpoint(ctx, branch.name, onStep);
+    const roles = await ctx.api().listRoles(branch.name);
+    const { role, action } = await ensureDeveloperRole(
+      ctx,
+      branch.name,
+      identity,
+      roles,
+      onStep,
     );
-  }
-  const handedOff = plan.handOff
-    ? await handOffAppSchema(branchCtx, {
-        branch: branch.name,
-        database,
+    const database = chooseDatabase(
+      found.created
+        ? found.boundDatabase
+        : await readBoundDatabase(ctx, branch.name, deploy),
+      local,
+      onWarning,
+    );
+
+    const values: Record<string, string> = {
+      LAKEBASE_PROJECT: project,
+      PGHOST: host,
+      LAKEBASE_ENDPOINT: endpoint.name,
+      PGDATABASE: database,
+      PGUSER: identity.userName,
+      ...(found.session === null ? {} : { APPKIT_DB_SESSION: found.session }),
+      ...(before.PGPORT && /^\d+$/.test(before.PGPORT)
+        ? {}
+        : { PGPORT: "5432" }),
+      ...(before.PGSSLMODE === TLS_MODE ? {} : { PGSSLMODE: TLS_MODE }),
+      ...(await authValues(ctx, before)),
+    };
+    if (before.PGSSLMODE && before.PGSSLMODE !== TLS_MODE) {
+      onStep(
+        `Setting PGSSLMODE=${TLS_MODE} in .env: it was ${before.PGSSLMODE}, and only ${TLS_MODE} makes every connection use TLS and check the server's certificate`,
+      );
+    }
+    onStep(`Pointing .env at ${resourceId(branch.name)}, database ${database}`);
+    updateEnvFile(envFile, values);
+    const branchCtx: DbContext = { ...ctx, env: { ...ctx.env, ...values } };
+
+    const base = {
+      mode,
+      branch: branch.name,
+      created: found.created,
+      ...(found.created ? { sourceBranch: found.sourceBranch } : {}),
+      expireTime: branch.status?.expire_time ?? null,
+      endpoint: endpoint.name,
+      endpointCreated,
+      host,
+      database,
+      user: identity.userName,
+      role: { name: role.name, action },
+      envFile,
+    };
+    if (request.kind === "none") {
+      return {
+        ...base,
+        handedOff: null,
+        keptCopy: null,
+        installed: null,
+        start: { kind: "none" },
+      };
+    }
+    const { lock, requested } = request;
+
+    const state = await withBranchPool(branchCtx, (pool) =>
+      readSchemaState(pool, schemaName),
+    );
+    const plan = planStart(state, requested, hasSchema, found.created);
+    const on = `on ${resourceId(branch.name)}`;
+    if (
+      plan.confirm &&
+      options.confirmClean &&
+      !(await options.confirmClean({ branch: branch.name, schemaName }))
+    ) {
+      return {
+        ...base,
+        handedOff: null,
+        keptCopy: null,
+        installed: null,
+        start: { kind: "cancelled", schemaName },
+      };
+    }
+    const onBranch = <T>(
+      work: (client: Pick<PoolClient, "query">) => Promise<T>,
+    ) => withBranchPool(branchCtx, work);
+    if (
+      plan.tag &&
+      !(await onBranch((client) => tagForkCopy(client, schemaName)))
+    ) {
+      onWarning(
+        `Could not mark schema ${schemaName} ${on} as the fork's copy. It has no journal table, or one owned by a role init does not trust. If this run stops before the rebuild finishes, the next \`appkit db init\` will see a schema that looks like your working branch and keep the copied rows. Run \`appkit db init --schema clean\` then.`,
+      );
+    }
+    const installed = ensureDrizzleKit(
+      ctx.root,
+      options.runCommand ?? runCommand,
+      onStep,
+    );
+
+    const introspect = (recordAsApplied: boolean) => {
+      onStep(`Writing schema.ts from schema ${schemaName} ${on}`);
+      return introspectForInit(branchCtx, lock, {
+        interactive,
         schemaName,
-        developer: role,
-        roles,
-        onStep,
-      })
-    : null;
-  if (plan.keepsCopy) {
-    await onBranch((client) => untagForkCopy(client, schemaName));
-  }
-
-  const rebuildSchema = async (): Promise<Rebuild> => {
-    const reason: RebuildReason =
-      requested === undefined ? "fork-copy" : "requested";
-    const why =
-      reason === "fork-copy"
-        ? ": the branch still holds the rows the fork copied, and the committed migrations recreate its tables"
-        : "";
-    onStep(
-      schemaName === "public"
-        ? `Removing your objects in schema public ${on}${why}`
-        : `Dropping schema ${schemaName} ${on}${why}`,
-    );
-    const clean = await cleanHolding(branchCtx, lock);
-    const migrate = await migrateHolding(branchCtx, lock, {
-      interactive,
-      generate: false,
-    });
-    return { clean, migrate, reason };
-  };
-  let start: InitStart;
-  if (plan.kind === "migrate") {
-    onStep(`Migrating schema ${schemaName} ${on}`);
-    start = {
-      kind: "migrate",
-      migrate: await migrateHolding(branchCtx, lock, { interactive }),
+        recordAsApplied,
+      });
     };
-  } else if (plan.kind === "introspect") {
-    start = {
-      kind: "introspect",
-      introspect: introspected ?? (await introspect(true)),
-      rebuilt: plan.rebuild ? await rebuildSchema() : null,
-    };
-  } else {
-    start = { kind: "clean", ...(await rebuildSchema()) };
-  }
+    let introspected: IntrospectReport | null = null;
+    if (plan.kind === "introspect" && plan.rebuild) {
+      introspected = await introspect(false);
+    }
 
-  return {
-    ...base,
-    handedOff,
-    keptCopy: keptCopyOf(
-      state,
-      plan,
-      found.sourceBranch ?? branch.status?.source_branch ?? null,
-    ),
-    installed,
-    start,
-  };
+    const handedOff = plan.handOff
+      ? await handOffAppSchema(branchCtx, {
+          branch: branch.name,
+          database,
+          schemaName,
+          developer: role,
+          roles,
+          onStep,
+        })
+      : null;
+    if (plan.keepsCopy) {
+      await onBranch((client) => untagForkCopy(client, schemaName));
+    }
+
+    const rebuildSchema = async (): Promise<Rebuild> => {
+      const reason: RebuildReason =
+        requested === undefined ? "fork-copy" : "requested";
+      const why =
+        reason === "fork-copy"
+          ? ": the branch still holds the rows the fork copied, and the committed migrations recreate its tables"
+          : "";
+      onStep(
+        schemaName === "public"
+          ? `Removing your objects in schema public ${on}${why}`
+          : `Dropping schema ${schemaName} ${on}${why}`,
+      );
+      const clean = await cleanHolding(branchCtx, lock);
+      const migrate = await migrateHolding(branchCtx, lock, {
+        interactive,
+        generate: false,
+      });
+      return { clean, migrate, reason };
+    };
+    let start: InitStart;
+    if (plan.kind === "migrate") {
+      onStep(`Migrating schema ${schemaName} ${on}`);
+      start = {
+        kind: "migrate",
+        migrate: await migrateHolding(branchCtx, lock, { interactive }),
+      };
+    } else if (plan.kind === "introspect") {
+      start = {
+        kind: "introspect",
+        introspect: introspected ?? (await introspect(true)),
+        rebuilt: plan.rebuild ? await rebuildSchema() : null,
+      };
+    } else {
+      start = { kind: "clean", ...(await rebuildSchema()) };
+    }
+
+    return {
+      ...base,
+      handedOff,
+      keptCopy: keptCopyOf(
+        state,
+        plan,
+        found.created
+          ? found.sourceBranch
+          : (branch.status?.source_branch ?? null),
+      ),
+      installed,
+      start,
+    };
+  } catch (error) {
+    throw mode === "session" ? withSessionRerun(error) : error;
+  }
 }
 
 function keptCopyOf(

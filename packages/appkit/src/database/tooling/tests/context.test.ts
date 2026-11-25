@@ -148,6 +148,55 @@ describe("withBranchPool", () => {
     expect(createLakebasePool).not.toHaveBeenCalled();
   });
 
+  test("verifies the server's certificate: PGSSLMODE unset means require, even when the shell exports another mode", async () => {
+    const lakebase = new FakeLakebase();
+    lakebase.addBranch(BRANCH);
+    const env = {
+      PGHOST: HOST,
+      PGDATABASE: "databricks_postgres",
+      LAKEBASE_ENDPOINT: ENDPOINT,
+      PGUSER: "alice@example.com",
+    };
+    vi.stubEnv("PGSSLMODE", "prefer");
+    try {
+      await withBranchPool(contextFor(env, lakebase.api()), usePool);
+      await withBranchPool(
+        contextFor({ ...env, PGSSLMODE: "require" }, lakebase.api()),
+        usePool,
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    expect(createLakebasePool.mock.calls).toEqual([
+      [expect.objectContaining({ sslMode: "require" })],
+      [expect.objectContaining({ sslMode: "require" })],
+    ]);
+  });
+
+  test.each(["prefer", "disable", "allow"])(
+    "refuses PGSSLMODE=%s before any API call, naming the variable",
+    async (mode) => {
+      const lakebase = new FakeLakebase();
+      lakebase.addBranch(BRANCH);
+      const ctx = contextFor(
+        {
+          PGHOST: HOST,
+          PGDATABASE: "databricks_postgres",
+          LAKEBASE_ENDPOINT: ENDPOINT,
+          PGSSLMODE: mode,
+        },
+        lakebase.api(),
+      );
+
+      await expect(withBranchPool(ctx, usePool)).rejects.toThrow(
+        `PGSSLMODE=${mode} does not verify the server's certificate, so it did not connect. Set PGSSLMODE to require, or unset it.`,
+      );
+      expect(lakebase.calls).toEqual([]);
+      expect(createLakebasePool).not.toHaveBeenCalled();
+    },
+  );
+
   test("closes the pool when fn fails, and rethrows fn's error", async () => {
     const lakebase = new FakeLakebase();
     lakebase.addBranch(BRANCH);

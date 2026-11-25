@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
-import { readOwnedOutsideSchema, readRoleBlockers } from "../hand-off";
+import { readOwnedOutsideSchema, readRoleDependencies } from "../hand-off";
 
 // The pg_shdepend query against a real server, as a superuser that may create
 // databases and roles, e.g. APPKIT_TEST_PG_URL=postgres://localhost:5432/postgres
@@ -15,7 +15,7 @@ function databaseUrl(database: string): string {
   return next.toString();
 }
 
-describe.skipIf(!url)("readRoleBlockers against Postgres", () => {
+describe.skipIf(!url)("readRoleDependencies against Postgres", () => {
   const suffix = randomUUID().slice(0, 8);
   const role = `appkit_sp_${suffix}`;
   const main = `appkit_main_${suffix}`;
@@ -55,22 +55,20 @@ describe.skipIf(!url)("readRoleBlockers against Postgres", () => {
     await admin.end();
   });
 
-  test("lists what outlives a reassign in this database: other databases' objects, shared objects, and grants", async () => {
-    const blockers = await readRoleBlockers(mainPool, role);
-
-    expect(blockers).toEqual(
-      [
+  test("what outlives a reassign in this database: other databases' objects and shared objects it owns, apart from its grants", async () => {
+    await expect(readRoleDependencies(mainPool, role)).resolves.toEqual({
+      owned: [
         { database: "", count: 1 },
-        { database: main, count: 1 },
         { database: other, count: 1 },
-      ].sort((a, b) => a.database.localeCompare(b.database)),
-    );
+      ],
+      granted: [{ database: main, count: 1 }],
+    });
   });
 
-  test("a role without dependencies has no blockers", async () => {
+  test("a role without dependencies has none", async () => {
     await expect(
-      readRoleBlockers(mainPool, `appkit_missing_${suffix}`),
-    ).resolves.toEqual([]);
+      readRoleDependencies(mainPool, `appkit_missing_${suffix}`),
+    ).resolves.toEqual({ owned: [], granted: [] });
   });
 
   test("what the role owns in this database outside the app schema: nothing while it only owns the schema and its tables", async () => {
@@ -107,6 +105,23 @@ describe.skipIf(!url)("readRoleBlockers against Postgres", () => {
         drop type public.shared_kind;
         alter table public.shared owner to current_user;
       `);
+    }
+  });
+
+  test("lists an extension the role created, which has no schema", async () => {
+    await admin.query(`grant create on database "${main}" to "${role}"`);
+    await mainPool.query(`
+      set role "${role}";
+      create extension pgcrypto schema app;
+      reset role;
+    `);
+    try {
+      await expect(
+        readOwnedOutsideSchema(mainPool, role, "app"),
+      ).resolves.toEqual(["extension pgcrypto"]);
+    } finally {
+      await mainPool.query("drop extension pgcrypto");
+      await admin.query(`revoke create on database "${main}" from "${role}"`);
     }
   });
 });

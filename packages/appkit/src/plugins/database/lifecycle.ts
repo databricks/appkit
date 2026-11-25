@@ -192,6 +192,12 @@ export async function createDatabaseState<TSchema extends Schema>(
     });
     // A deployed app applies committed migrations as its own identity before the checks below.
     const migration = decideMigrateOnStart();
+    if (migration.kind === "off" && migration.ignored !== undefined) {
+      logger.warn(
+        'APPKIT_DB_MIGRATE_ON_START is %s, and only "true" turns migrate on start on, so this process ignored it and did not migrate.',
+        JSON.stringify(migration.ignored),
+      );
+    }
     if (migration.kind === "skipped") {
       logger.warn(
         "APPKIT_DB_MIGRATE_ON_START is true, but this process is not the deployed app, so it did not migrate. %s Databricks Apps sets DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET and PGUSER for the deployed app.",

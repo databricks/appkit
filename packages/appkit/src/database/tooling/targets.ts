@@ -3,7 +3,7 @@ import path from "node:path";
 
 import yaml from "js-yaml";
 
-import { isValidSessionId } from "./naming";
+import { parseSessionId } from "./naming";
 
 export type BranchMode = "dev" | "session";
 
@@ -55,7 +55,11 @@ export function parseProject(value: string | undefined): string | null {
   return PROJECT_ID.test(id) ? `projects/${id}` : null;
 }
 
-/** What `.env` says about the local branch. Unparseable values (template placeholders) read as null. */
+/**
+ * What `.env` says about the local branch. Unparseable values (template
+ * placeholders) read as null. APPKIT_DB_SESSION has no placeholder, so an
+ * invalid one throws instead of being replaced.
+ */
 export interface LocalTarget {
   /** LAKEBASE_PROJECT, normalized to "projects/<id>". */
   readonly project: string | null;
@@ -66,10 +70,9 @@ export interface LocalTarget {
 
 export function readLocalTarget(env: NodeJS.ProcessEnv): LocalTarget {
   const endpoint = parseResourceName(env.LAKEBASE_ENDPOINT)?.endpoint ?? null;
-  const session =
-    env.APPKIT_DB_SESSION && isValidSessionId(env.APPKIT_DB_SESSION)
-      ? env.APPKIT_DB_SESSION
-      : null;
+  const session = env.APPKIT_DB_SESSION
+    ? parseSessionId(env.APPKIT_DB_SESSION)
+    : null;
   return {
     project: parseProject(env.LAKEBASE_PROJECT),
     endpoint,
@@ -160,6 +163,19 @@ export interface BundleTarget extends TargetBindings {
    * without the file.
    */
   readonly overridden: (TargetBindings & { readonly file: string }) | null;
+  /**
+   * The same bindings with the command's BUNDLE_VAR_ variables applied ahead
+   * of variable-overrides.json, as a deploy from this shell would; null when
+   * none is set.
+   */
+  readonly environment:
+    | (TargetBindings & {
+        /** The BUNDLE_VAR_ variables set, e.g. "BUNDLE_VAR_postgres_branch". */
+        readonly variables: string;
+        /** The variable-overrides.json applied under them, if any. */
+        readonly file?: string;
+      })
+    | null;
 }
 
 interface Bundle {
@@ -215,6 +231,30 @@ function readVariableOverrides(
     );
   }
   return { file, values };
+}
+
+const BUNDLE_VAR = "BUNDLE_VAR_";
+
+/** The variable values `databricks bundle` takes from BUNDLE_VAR_<name>; null when none is set. */
+function readBundleVariables(env: NodeJS.ProcessEnv): {
+  readonly variables: string;
+  readonly values: Record<string, string>;
+} | null {
+  const set = Object.entries(env)
+    .filter(
+      (entry): entry is [string, string] =>
+        entry[0].startsWith(BUNDLE_VAR) &&
+        entry[0].length > BUNDLE_VAR.length &&
+        entry[1] !== undefined,
+    )
+    .sort(([a], [b]) => a.localeCompare(b));
+  if (set.length === 0) return null;
+  return {
+    variables: set.map(([key]) => key).join(", "),
+    values: Object.fromEntries(
+      set.map(([key, value]) => [key.slice(BUNDLE_VAR.length), value]),
+    ),
+  };
 }
 
 /**
@@ -438,15 +478,19 @@ export function defaultBundleTarget(bundle: Bundle): BundleTarget | null {
 /**
  * The branch and database the default target deploys to from this checkout:
  * its first app binding the files resolve, else its postgres_branch and
- * postgres_database variables, with the checkout's variable-overrides.json
- * applied as a deploy would. null without databricks.yml or a branch the
- * files resolve.
+ * postgres_database variables, with env's BUNDLE_VAR_ variables and the
+ * checkout's variable-overrides.json applied as a deploy would. null without
+ * databricks.yml or a branch the files resolve.
  */
-export function readDeployTarget(root: string): DeployTarget | null {
-  const bundle = readBundle(root);
+export function readDeployTarget(
+  root: string,
+  env: NodeJS.ProcessEnv,
+): DeployTarget | null {
+  const bundle = readBundle(root, env);
   const target = bundle ? defaultBundleTarget(bundle) : null;
   if (!target) return null;
-  const bindings: TargetBindings = target.overridden ?? target;
+  const bindings: TargetBindings =
+    target.environment ?? target.overridden ?? target;
   const resolved = (value: BundleValue | null) =>
     value?.kind === "resolved" ? value.name : null;
   const binding = bindings.apps
@@ -495,8 +539,12 @@ function rebaseSourcePaths(
 /**
  * databricks.yml, with the files its `include:` names merged in, per target;
  * null without one. Without `targets:` the bundle has one target, "default".
+ * env is the command's, for its BUNDLE_VAR_ variables.
  */
-export function readBundle(root: string): Bundle | null {
+export function readBundle(
+  root: string,
+  env: NodeJS.ProcessEnv,
+): Bundle | null {
   const file = ["databricks.yml", "databricks.yaml"]
     .map((name) => path.join(root, name))
     .find((candidate) => fs.existsSync(candidate));
@@ -520,6 +568,7 @@ export function readBundle(root: string): Bundle | null {
       ),
   ) as Record<string, unknown>;
 
+  const fromEnv = readBundleVariables(env);
   const declared = Object.entries(record(bundle.targets) ?? {});
   const targets: Array<[string, Yaml]> =
     declared.length > 0
@@ -575,6 +624,13 @@ export function readBundle(root: string): Bundle | null {
         overridden: overrides
           ? { file: overrides.file, ...bindings(overrides.values) }
           : null,
+        environment: fromEnv
+          ? {
+              variables: fromEnv.variables,
+              ...(overrides ? { file: overrides.file } : {}),
+              ...bindings({ ...overrides?.values, ...fromEnv.values }),
+            }
+          : null,
       };
     }),
   };
@@ -588,9 +644,11 @@ export interface UnresolvedBinding {
   readonly written: string;
   /** The variable-overrides.json whose values leave it unresolved; absent for databricks.yml's own values. */
   readonly file?: string;
+  /** The BUNDLE_VAR_ variables whose values leave it unresolved; absent without them. */
+  readonly environment?: string;
 }
 
-/** What databricks.yml deploys to, read from this checkout's files only, variable-overrides.json included. */
+/** What databricks.yml deploys to, read from this checkout's files, variable-overrides.json included, and the command's BUNDLE_VAR_ variables. */
 export interface DeployBoundary {
   /** Every branch any target binds, through an app's postgres resources or its postgres_branch variable. */
   readonly branches: ReadonlySet<string>;
@@ -603,24 +661,33 @@ export interface DeployBoundary {
  * reference it cannot resolve. Empty without databricks.yml or a postgres
  * binding. A database counts for the branch it is on.
  */
-export function readDeployBoundary(root: string): DeployBoundary {
+export function readDeployBoundary(
+  root: string,
+  env: NodeJS.ProcessEnv,
+): DeployBoundary {
   const branches = new Set<string>();
   const unresolved: UnresolvedBinding[] = [];
-  for (const target of readBundle(root)?.targets ?? []) {
-    const views: Array<[TargetBindings, string | undefined]> = [
-      [target, undefined],
-    ];
+  for (const target of readBundle(root, env)?.targets ?? []) {
+    type Source = Pick<UnresolvedBinding, "file" | "environment">;
+    const views: Array<[TargetBindings, Source]> = [[target, {}]];
     if (target.overridden) {
-      views.push([target.overridden, target.overridden.file]);
+      views.push([target.overridden, { file: target.overridden.file }]);
     }
-    for (const [bindings, file] of views) {
+    if (target.environment) {
+      const { file, variables } = target.environment;
+      views.push([
+        target.environment,
+        { ...(file ? { file } : {}), environment: variables },
+      ]);
+    }
+    for (const [bindings, source] of views) {
       const add = (at: string, value: BundleValue) => {
         if (value.kind === "unresolved") {
           unresolved.push({
             target: target.name,
             at,
             written: value.written,
-            ...(file ? { file } : {}),
+            ...source,
           });
           return;
         }

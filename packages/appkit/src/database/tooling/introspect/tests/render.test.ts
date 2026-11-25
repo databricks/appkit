@@ -658,10 +658,10 @@ describe("renderSchemaSource", () => {
   });
 
   test("bidi and line-separator characters are escaped in string literals", () => {
-    const name = "t\u202e\u2066\u2028x";
+    const name = "t\u202e\u2066\u061c\u2028x";
     const { source } = firstRender([keyed(name)], "app");
-    expect(source).not.toMatch(/[\u2028\u202e\u2066]/);
-    expect(source).toContain('table("t\\u202e\\u2066\\u2028x", {');
+    expect(source).not.toMatch(/[\u2028\u202e\u2066\u061c]/);
+    expect(source).toContain('table("t\\u202e\\u2066\\u061c\\u2028x", {');
   });
 
   test("what schema.ts leaves out is listed by raw name, for the drop check", () => {

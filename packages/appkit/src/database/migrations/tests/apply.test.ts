@@ -205,6 +205,8 @@ function steps(statements: readonly string[]): string[] {
     if (statement.includes("pg_catalog.pg_attribute"))
       return "baseline tables?";
     if (statement.startsWith("select hash, created_at")) return "recorded?";
+    if (statement.startsWith("select 1 from pg_catalog.pg_namespace"))
+      return "schema?";
     if (statement.startsWith(`CREATE SCHEMA IF NOT EXISTS`))
       return "create schema";
     if (statement.startsWith(`CREATE TABLE "app"."__drizzle_migrations"`))
@@ -251,6 +253,7 @@ describe("applyPendingMigrations", () => {
       "journal table?",
       "begin",
       "journal table?",
+      "schema?",
       "create schema",
       "create journal",
       `CREATE TABLE "app"."notes" ("id" integer);`,
@@ -321,6 +324,63 @@ describe("applyPendingMigrations", () => {
 
     expect(result.applied).toEqual([]);
     expect(fake.client.statements).not.toContain("begin");
+  });
+
+  describe("beforeApply", () => {
+    test("nothing pending: never runs", async () => {
+      const folder = twoMigrations();
+      const { pool } = fakePool({
+        recorded: [
+          { hash: hashOf(folder, "0000_migration"), created_at: 1000 },
+          { hash: hashOf(folder, "0001_migration"), created_at: 2000 },
+        ],
+      });
+      const beforeApply = vi.fn(async () => undefined);
+
+      await applyPendingMigrations(pool, { ...options(folder), beforeApply });
+
+      expect(beforeApply).not.toHaveBeenCalled();
+    });
+
+    test("something pending: runs once on the migrating connection, under the lock, before the first migration", async () => {
+      const folder = twoMigrations();
+      const { pool, client } = fakePool({ recorded: null });
+      const beforeApply = vi.fn(
+        async (connection: { query(text: string): unknown }) => {
+          await connection.query("select 'before apply'");
+        },
+      );
+
+      await applyPendingMigrations(pool, { ...options(folder), beforeApply });
+
+      expect(beforeApply).toHaveBeenCalledTimes(1);
+      const order = steps(client.statements);
+      expect(order.indexOf("select 'before apply'")).toBeGreaterThan(
+        order.indexOf("try lock"),
+      );
+      expect(order.indexOf("select 'before apply'")).toBeLessThan(
+        order.indexOf("begin"),
+      );
+    });
+
+    test("what it throws reaches the caller unchanged: nothing applied, the lock released", async () => {
+      const folder = twoMigrations();
+      const { pool, client, state } = fakePool({ recorded: null });
+      const refusal = new Error("tables left in public");
+
+      const error = await applyPendingMigrations(pool, {
+        ...options(folder),
+        beforeApply: async () => {
+          throw refusal;
+        },
+      }).catch((caught: unknown) => caught);
+
+      expect(error).toBe(refusal);
+      expect(client.statements).not.toContain("begin");
+      expect(state.recorded).toBeNull();
+      expect(steps(client.statements)).toContain("unlock");
+      expect(client.released).toEqual({ error: undefined });
+    });
   });
 
   test("without a journal it never connects", async () => {
@@ -1010,6 +1070,41 @@ describe("applyPendingMigrations", () => {
     );
     expect(fake.connects()).toBe(0);
   });
+
+  test.each([
+    [
+      "is a directory",
+      (file: string) => {
+        fs.rmSync(file);
+        fs.mkdirSync(file);
+      },
+      "EISDIR",
+    ],
+    [
+      "has no read permission",
+      (file: string) => fs.chmodSync(file, 0o000),
+      "EACCES",
+    ],
+  ])(
+    "a .sql file that %s fails before connecting, naming the file and the reason",
+    async (_label, breakFile, reason) => {
+      if (reason === "EACCES" && process.getuid?.() === 0) return;
+      const folder = twoMigrations();
+      const file = path.join(folder, "0001_migration.sql");
+      breakFile(file);
+      const fake = fakePool({ recorded: null });
+
+      const error = await applyPendingMigrations(
+        fake.pool,
+        options(folder),
+      ).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(MigrationFilesError);
+      expect((error as Error).message).toContain(`Cannot read ${file}: `);
+      expect((error as Error).message).toContain(reason);
+      expect(fake.connects()).toBe(0);
+    },
+  );
 
   test.each([
     [

@@ -89,7 +89,7 @@ function printInitReport(
   const { start, keptCopy } = report;
   if (rebuildOf(start)?.reason === "fork-copy") {
     info(
-      `The branch still held the rows the fork copied: the app schema was rebuilt from the committed migrations. \`appkit db init --schema ${start.kind === "introspect" ? "introspect" : "migrate"}\` keeps them.`,
+      "The branch still held the rows the fork copied, so the app schema was rebuilt from the committed migrations without them.",
     );
   }
   if (start.kind === "introspect") {
@@ -173,7 +173,8 @@ export const dbInitCommand = new Command("init")
     "after",
     `
 init asks nothing. It keeps this checkout's session branch when .env points at
-one, and otherwise uses your dev branch (dev-<you>-<hash>). A new branch forks
+one, or when a --session run stopped before .env did, and otherwise uses your
+dev branch (dev-<you>-<hash>). A new branch forks
 the branch databricks.yml deploys to, else the project's default branch, which
 copies its rows, production data included. init reads from the branch whether
 the app schema is still that copy. If it is, init takes the schema over and
