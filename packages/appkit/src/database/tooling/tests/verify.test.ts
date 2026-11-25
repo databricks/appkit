@@ -1395,6 +1395,29 @@ describe("runVerify --deployed", () => {
     });
   });
 
+  test("a branch a BUNDLE_VAR_ variable sets wins over variable-overrides.json, as a deploy from this shell uses it", async () => {
+    const qa = "projects/p/branches/qa";
+    const { ctx } = deployedApp();
+    const overrides = path.join(
+      ctx.root,
+      ".databricks/bundle/default/variable-overrides.json",
+    );
+    fs.mkdirSync(path.dirname(overrides), { recursive: true });
+    fs.writeFileSync(
+      overrides,
+      JSON.stringify({ postgres_branch: "projects/p/branches/staging" }),
+    );
+    ctx.env.BUNDLE_VAR_postgres_branch = qa;
+    const source =
+      "databricks.yml with .databricks/bundle/default/variable-overrides.json and BUNDLE_VAR_postgres_branch";
+
+    expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+      branch: qa,
+      problems: [`${source} deploys to ${qa}, which does not exist`],
+      ok: false,
+    });
+  });
+
   test("a workspace.host the checkout's files do not resolve is refused before any API call, naming where to set it", async () => {
     const { ctx, lakebase, requests } = deployedApp({
       yml: ymlWithHost("${var.host}"),

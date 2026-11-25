@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "vitest";
 
-import { classifyBranch } from "../guard";
+import { classifyBranch, everyBranchRefusal } from "../guard";
 import { devBranchId } from "../naming";
 import {
   parseProject,
@@ -408,9 +408,10 @@ resources:
         userName: "alice@example.com",
         sessionId: null,
         boundary,
-      }).reason,
-    ).toBe(
-      'databricks.yml may deploy to it: the files do not resolve resources.apps.app.resources[0].postgres.branch in target default with BUNDLE_VAR_postgres_branch ("${var.postgres_branch}"), variables.postgres_branch in target default with BUNDLE_VAR_postgres_branch (no value); give them values in databricks.yml or the BUNDLE_VAR_ variable named',
+      }).kind,
+    ).toBe("deploy-target");
+    expect(everyBranchRefusal(boundary)).toBe(
+      'The files do not resolve resources.apps.app.resources[0].postgres.branch in target default with BUNDLE_VAR_postgres_branch ("${var.postgres_branch}"), variables.postgres_branch in target default with BUNDLE_VAR_postgres_branch (no value), so `appkit db migrate` applies migrations to no branch, and `init`, `introspect`, `clean` and `seed` refuse every branch. Give them values in databricks.yml or the BUNDLE_VAR_ variable named',
     );
   });
 
@@ -585,11 +586,13 @@ targets:
         tempApp({
           "databricks.yml": `${variables}targets:\n  dev: {}\n  prod: {}\n`,
         }),
+        {},
       ),
     ).toBeNull();
     expect(
       readDeployTarget(
         tempApp({ "databricks.yml": `${variables}targets:\n  dev: {}\n` }),
+        {},
       ),
     ).toEqual({ branch: "projects/p/branches/main", database: null });
   });
@@ -630,7 +633,7 @@ targets:
 `,
     });
 
-    const bundle = readBundle(root);
+    const bundle = readBundle(root, {});
 
     expect(bundle?.file).toBe("databricks.yml");
     expect(
@@ -679,8 +682,8 @@ targets:
     const noHost = tempApp({
       "databricks.yml": "resources:\n  apps:\n    app:\n      name: my-app\n",
     });
-    expect(readBundle(noHost)?.targets.map((target) => target.host)).toEqual([
-      null,
-    ]);
+    expect(
+      readBundle(noHost, {})?.targets.map((target) => target.host),
+    ).toEqual([null]);
   });
 });

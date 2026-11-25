@@ -678,7 +678,7 @@ async function verifyDeploy(
   ctx: DbContext,
   targetName: string | undefined,
 ): Promise<DeployVerifyReport> {
-  const bundle = readBundle(ctx.root);
+  const bundle = readBundle(ctx.root, ctx.env);
   if (!bundle) {
     throw new Error(
       "No databricks.yml, so there is no deployed app to verify.",
@@ -691,12 +691,16 @@ async function verifyDeploy(
     targetName,
     defaultBundleTarget(bundle),
   );
-  // What a deploy from this checkout uses: variable-overrides.json's values
-  // when it has the file, as the deploy guard reads them.
-  const deploy = target.overridden ?? target;
-  const withFile = target.overridden ? ` with ${target.overridden.file}` : "";
+  // What a deploy from this shell uses: the BUNDLE_VAR_ variables, then
+  // variable-overrides.json's values, as the deploy guard reads them.
+  const deploy = target.environment ?? target.overridden ?? target;
+  const applied = target.environment
+    ? [target.environment.file, target.environment.variables]
+    : [target.overridden?.file];
+  const values = applied.filter(Boolean).join(" and ");
+  const withValues = values ? ` with ${values}` : "";
   // Where the branch and database come from.
-  const source = `${file}${withFile}`;
+  const source = `${file}${withValues}`;
   const bound = deploy.apps.filter((app) => app.postgres.length > 0);
   if (bound.length > 1) {
     throw new Error(
@@ -719,23 +723,23 @@ async function verifyDeploy(
   }
   if (branchValue.kind === "unresolved") {
     throw new Error(
-      `No deploy branch: ${declared ? `${declared.at}.branch` : "variables.postgres_branch"} in target ${target.name}${withFile} is "${branchValue.written}", which this checkout's files do not resolve to a branch.`,
+      `No deploy branch: ${declared ? `${declared.at}.branch` : "variables.postgres_branch"} in target ${target.name}${withValues} is "${branchValue.written}", which this checkout's files do not resolve to a branch.`,
     );
   }
   const databaseValue = declared ? declared.database : deploy.postgresDatabase;
   if (databaseValue?.kind === "unresolved") {
     throw new Error(
-      `No deploy database: ${declared ? `${declared.at}.database` : "variables.postgres_database"} in target ${target.name}${withFile} is "${databaseValue.written}", which this checkout's files do not resolve to a database.`,
+      `No deploy database: ${declared ? `${declared.at}.database` : "variables.postgres_database"} in target ${target.name}${withValues} is "${databaseValue.written}", which this checkout's files do not resolve to a database.`,
     );
   }
   if (deploy.host?.kind === "unresolved") {
     throw new Error(
-      `No target workspace: workspace.host in target ${target.name}${withFile} is "${deploy.host.written}", which this checkout's files do not resolve to a host. Give the variable it names a value in ${file}, or in .databricks/bundle/${target.name}/variable-overrides.json, then rerun.`,
+      `No target workspace: workspace.host in target ${target.name}${withValues} is "${deploy.host.written}", which this checkout's files do not resolve to a host. Give the variable it names a value in ${file}, or in .databricks/bundle/${target.name}/variable-overrides.json, then rerun.`,
     );
   }
   if (!deploy.host && deploy.profile?.kind === "unresolved") {
     throw new Error(
-      `No target workspace: workspace.profile in target ${target.name}${withFile} is "${deploy.profile.written}", which this checkout's files do not resolve to a profile. Give the variable it names a value in ${file}, or in .databricks/bundle/${target.name}/variable-overrides.json, then rerun.`,
+      `No target workspace: workspace.profile in target ${target.name}${withValues} is "${deploy.profile.written}", which this checkout's files do not resolve to a profile. Give the variable it names a value in ${file}, or in .databricks/bundle/${target.name}/variable-overrides.json, then rerun.`,
     );
   }
   const branch = branchValue.name;
