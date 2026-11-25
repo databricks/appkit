@@ -217,6 +217,30 @@ describe("resolveEnvBranch", () => {
     );
   });
 
+  test("a branch a BUNDLE_VAR_ in the command's environment names is a deploy target", async () => {
+    const lakebase = new FakeLakebase();
+    lakebase.addBranch(dev);
+    const root = tempApp({
+      "databricks.yml": databricksYml(
+        `${P}/branches/production`,
+        `${P}/branches/production/databases/db`,
+      ),
+    });
+
+    const env = await resolveEnvBranch(
+      fakeContext({
+        root,
+        env: { ...envFor(dev), BUNDLE_VAR_postgres_branch: dev },
+        api: lakebase.api(),
+      }),
+    );
+
+    expect(env).toMatchObject({
+      kind: "deploy-target",
+      reason: "it is a branch databricks.yml deploys to",
+    });
+  });
+
   test("a target whose branch the files cannot resolve keeps your own dev branch from taking writes", async () => {
     const lakebase = new FakeLakebase();
     lakebase.addBranch(dev);

@@ -191,6 +191,52 @@ describe("runClean", () => {
   });
 });
 
+describe("clean on the fork's untouched copy", () => {
+  const untouched =
+    'Refusing to clean: dev-alice-3f9a2c still holds the rows the fork copied into schema "app", which "app-sp" still owns, so your role cannot drop it. Run `appkit db init` to take it over and rebuild it from the committed migrations.';
+
+  test("runClean refuses before dropping anything, and says to run init", async () => {
+    const ctx = fakeContext({
+      root: tempApp({ "config/database/schema.ts": schemaFile("app") }),
+    });
+    writableEnvBranch.mockResolvedValue(devBranch);
+    const { statements } = recordingPool({ schemaOwner: "app-sp" });
+
+    await expect(runClean(ctx)).rejects.toThrow(untouched);
+    expect(statements.some((text) => text.includes("DROP"))).toBe(false);
+  });
+
+  test("previewClean refuses too, so the CLI does not ask first", async () => {
+    const ctx = fakeContext({
+      root: tempApp({ "config/database/schema.ts": schemaFile("app") }),
+    });
+    writableEnvBranch.mockResolvedValue(devBranch);
+    recordingPool({ schemaOwner: "app-sp" });
+
+    await expect(previewClean(ctx)).rejects.toThrow(untouched);
+  });
+});
+
+describe("catalog text in clean and seed", () => {
+  test("control characters in catalog names are escaped before they reach the terminal", async () => {
+    const ctx = fakeContext({
+      root: tempApp({ "config/database/schema.ts": schemaFile("app") }),
+    });
+    writableEnvBranch.mockResolvedValue(devBranch);
+    recordingPool({ dependents: ['view reporting."a\u001b[2Jb"'] });
+
+    await expect(runClean(ctx)).resolves.toMatchObject({
+      dependents: ['view reporting."a\\u001b[2Jb"'],
+    });
+
+    const root = tempApp({ [SEED_FILE]: "select 1;" });
+    recordingPool({ schemaOwner: "sp\nFAKE: done" });
+    await expect(runSeed(fakeContext({ root }))).rejects.toThrow(
+      'which "sp\\u000aFAKE: done" still owns',
+    );
+  });
+});
+
 describe("previewClean", () => {
   test("reads the dependents without opening a transaction or dropping anything", async () => {
     const ctx = fakeContext({

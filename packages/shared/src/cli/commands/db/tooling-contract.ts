@@ -120,6 +120,7 @@ export interface DeployVerifyReport {
         readonly evidence: "differs";
         readonly missing: readonly string[];
         readonly changed: readonly string[];
+        readonly lineEndings: readonly string[];
         readonly unknown: readonly string[];
       }
     | { readonly evidence: "unavailable"; readonly reason: string }

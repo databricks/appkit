@@ -7,7 +7,7 @@ import {
   detectPackageManager,
   type PackageManager,
 } from "../../../../shared/src/cli/package-manager";
-import { DRIZZLE_KIT_VERSION, hasDrizzleKit } from "./migrations";
+import { DRIZZLE_KIT_VERSION, drizzleKitVersionAt } from "./migrations";
 
 /** Runs a command in `cwd`; throws when it fails. */
 export type RunCommand = (
@@ -31,15 +31,21 @@ interface Install {
 
 /**
  * The install with the manager the app declares, by packageManager field or
- * lockfile, in its own directory or the nearest ancestor's (a workspace member
- * has neither; its root does). Without one, the manager that launched this
- * command, else npm.
+ * lockfile, in its own directory or the nearest ancestor's up to the
+ * repository root (a workspace member has neither; its root does). Without
+ * one, the manager that launched this command, else npm.
  */
 export function drizzleKitInstall(root: string): Install {
   let manager: PackageManager | null = null;
   for (let dir = path.resolve(root); ; dir = path.dirname(dir)) {
     manager = declaredPackageManager(dir);
-    if (manager || dir === path.dirname(dir)) break;
+    if (
+      manager ||
+      fs.existsSync(path.join(dir, ".git")) ||
+      dir === path.dirname(dir)
+    ) {
+      break;
+    }
   }
   const command = manager ?? detectPackageManager(root, "npm");
   return {
@@ -67,21 +73,25 @@ export const runCommand: RunCommand = (command, args, cwd) => {
 
 /**
  * Install drizzle-kit as an exact dev dependency when the app cannot resolve
- * it. Returns the command it ran; null when drizzle-kit was there, or there is
- * no package.json to add it to.
+ * it, or resolves another version. Returns the command it ran; null when the
+ * pinned version was there, or there is no package.json to add it to.
  */
 export function ensureDrizzleKit(
   root: string,
   run: RunCommand,
   onStep: (message: string) => void,
 ): string | null {
-  if (hasDrizzleKit(root) || !fs.existsSync(path.join(root, "package.json"))) {
+  const found = drizzleKitVersionAt(root);
+  if (
+    found === DRIZZLE_KIT_VERSION ||
+    !fs.existsSync(path.join(root, "package.json"))
+  ) {
     return null;
   }
   const { command, args } = drizzleKitInstall(root);
   const line = [command, ...args].join(" ");
   onStep(
-    `Installing drizzle-kit ${DRIZZLE_KIT_VERSION}, which writes migrations (${line})`,
+    `Installing drizzle-kit ${DRIZZLE_KIT_VERSION}${found ? ` in place of ${found}` : ""}, which writes migrations (${line})`,
   );
   try {
     run(command, args, root);

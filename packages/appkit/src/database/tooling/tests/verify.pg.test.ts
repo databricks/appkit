@@ -24,6 +24,7 @@ import type { DbContext } from "../context";
 import { devBranchId } from "../naming";
 import { FORK_COPY_TAG } from "../schema-state";
 import { runVerify } from "../verify";
+import { FakeLakebase } from "./fakes";
 
 const url = process.env.APPKIT_TEST_PG_URL;
 const builder = path.resolve(
@@ -88,6 +89,10 @@ describe.skipIf(!url)("runVerify against Postgres", () => {
       `insert into ${journal} (hash, created_at) values ($1, $2)`,
       [createHash("sha256").update(sql).digest("hex"), MIGRATION.when],
     );
+    // The .env branch is classified through the API, as you.
+    const lakebase = new FakeLakebase();
+    lakebase.addBranch(BRANCH);
+    lakebase.addBranch(PRODUCTION, { default: true });
     ctx = {
       root,
       env: {
@@ -96,12 +101,16 @@ describe.skipIf(!url)("runVerify against Postgres", () => {
         LAKEBASE_ENDPOINT: `${BRANCH}/endpoints/primary`,
         PGUSER: USER,
       },
-      workspace: () => {
-        throw new Error("no workspace calls expected");
-      },
-      api: () => {
-        throw new Error("no Lakebase API calls expected");
-      },
+      workspace: () => ({
+        request: async () => {
+          throw new Error("no raw API calls expected");
+        },
+        currentUser: { me: async () => ({ userName: USER }) },
+        getHost: async () => {
+          throw new Error("no host lookup expected");
+        },
+      }),
+      api: () => lakebase.api(),
     };
     resolveEnvBranch.mockResolvedValue({
       branch: { name: BRANCH },

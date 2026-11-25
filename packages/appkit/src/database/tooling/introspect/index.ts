@@ -24,6 +24,8 @@ import {
   discardMigrationFiles,
   type GeneratedMigration,
   generateMigrationFiles,
+  generatesPending,
+  type PlannedMigration,
 } from "../migrations";
 import {
   FORK_COPY_TAG,
@@ -76,7 +78,7 @@ export class IntrospectRefusedError extends Error {
   }
 }
 
-/** Tags introspect writes. Pending ones match the branch when a fresh render adds nothing. */
+/** Tags introspect writes. A pending one is recorded when introspect would write the same SQL now. */
 const INTROSPECT_TAG = /^\d{4}_(introspect|baseline)$/;
 
 /** File contents, or null when it does not exist. */
@@ -105,24 +107,20 @@ function refuseSymlinkedDestination(root: string, file: string): void {
 const plural = (count: number, word: string) =>
   `${count} ${word}${count === 1 ? "" : "s"}`;
 
-/** The statement drizzle-kit 0.31 writes to remove it. */
-function dropStatement(item: Unexpressed, schemaName: string): string {
-  // drizzle-kit leaves the public schema out of the name.
-  const named =
-    schemaName === "public"
-      ? `"${item.name}"`
-      : `"${schemaName}"."${item.name}"`;
+/** How a refusal names it. */
+function described(item: Unexpressed, schemaName: string): string {
+  const table = `${schemaName}.${item.name}`;
   switch (item.kind) {
     case "table":
-      return `DROP TABLE ${named} CASCADE;`;
+      return `table ${table}`;
     case "column":
-      return `ALTER TABLE ${named} DROP COLUMN "${item.member}";`;
+      return `column ${table}.${item.member}`;
     case "default":
-      return `ALTER TABLE ${named} ALTER COLUMN "${item.member}" DROP DEFAULT;`;
+      return `the default of ${table}.${item.member}`;
     case "constraint":
-      return `ALTER TABLE ${named} DROP CONSTRAINT "${item.member}";`;
+      return `constraint ${item.member} of ${table}`;
     case "type":
-      return `DROP TYPE ${named};`;
+      return `type ${table}`;
   }
 }
 
@@ -132,26 +130,21 @@ function dropStatement(item: Unexpressed, schemaName: string): string {
  * recorded falsely here, and would remove it from every deployed database.
  */
 function refuseDropsOfUnexpressed(
-  statements: readonly string[],
+  migration: PlannedMigration,
   unexpressed: readonly Unexpressed[],
   schemaName: string,
 ): void {
-  const reasons = new Map(
-    unexpressed.map((item) => [dropStatement(item, schemaName), item.reason]),
-  );
-  const refused = statements
-    .map((statement) => statement.trim())
-    .filter((statement) => reasons.has(statement));
+  const refused = unexpressed.filter((item) => migration.removes(item));
   if (refused.length === 0) return;
   throw new IntrospectRefusedError(
     `Refusing to write a migration that drops what the branch still has but schema.ts cannot express: ${refused
       .map(
-        (statement) =>
-          `${shown(statement)} (${shown(reasons.get(statement) ?? "")})`,
+        (item) =>
+          `${shown(described(item, schemaName))} (${shown(item.reason)})`,
       )
       .join(
-        " ",
-      )}. The deployed app would run ${refused.length === 1 ? "it" : "them"} on start.`,
+        "; ",
+      )}. The deployed app would drop ${refused.length === 1 ? "it" : "them"} on start.`,
   );
 }
 
@@ -215,7 +208,7 @@ export async function introspectHolding(
       `Refusing to introspect: ${notYourBranch(
         env,
         "Introspect records the migration it writes as applied, so it runs only on branches `appkit db init` created for you. " +
-          `Run \`appkit db init\`: it creates your dev branch from the project's default branch, and introspects it when there is no ${DEFAULT_SCHEMA_FILE}`,
+          `Run \`appkit db init\`: it creates your dev branch from the branch the default databricks.yml target binds, else the project's default branch, and introspects it when there is no ${DEFAULT_SCHEMA_FILE}`,
       )}.`,
     );
   }
@@ -330,19 +323,35 @@ export async function introspectHolding(
         interactive: options.interactive,
         ...(hasHistory
           ? {
-              beforeWrite: (statements: readonly string[]) =>
+              beforeWrite: (planned: PlannedMigration) =>
                 refuseDropsOfUnexpressed(
-                  statements,
+                  planned,
                   rendered.unexpressed,
                   schemaName,
                 ),
             }
           : {}),
       });
-      if (unrecorded.length > 0 && migration) {
-        throw notApplied(
-          `Its tables differ from what ${unrecorded.length === 1 ? "it describes" : "they describe"}.`,
-        );
+      if (unrecorded.length > 0) {
+        const one = unrecorded.length === 1;
+        if (migration) {
+          throw notApplied(
+            `Its tables differ from what ${one ? "it describes" : "they describe"}.`,
+          );
+        }
+        // A file someone edited after introspect wrote it may do more than its snapshot says.
+        if (
+          !(await generatesPending(
+            folder,
+            schema,
+            unrecorded,
+            options.interactive,
+          ))
+        ) {
+          throw notApplied(
+            `${one ? "Its" : "Their"} SQL is not what introspect would write for the branch now, so recording ${one ? "it" : "them"} without running ${one ? "it" : "them"} could skip a change.`,
+          );
+        }
       }
       await writeDatabaseTypes(schema, typesFile);
       // The database already holds what the migrations describe; recording is the last step.
@@ -373,7 +382,7 @@ export async function introspectHolding(
     const breaking = breakingStatements(migration?.statements ?? []);
     if (migration && breaking.length > 0) {
       warnings.push(
-        `${migration.tag} breaks instances still running the previous release, which keep serving while the new one migrates on start: ${breaking.join(" ")}`,
+        `${migration.tag} breaks instances still running the previous release, which keep serving while the new one migrates on start: ${breaking.map(shown).join(" ")}`,
       );
     }
     return {

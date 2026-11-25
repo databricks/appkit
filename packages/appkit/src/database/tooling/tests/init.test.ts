@@ -63,7 +63,11 @@ let journalTrusted: boolean;
 let tagged: boolean;
 let keptInPublic: string[];
 let ownedOutside: string[];
-let blockers: { database: string; count: number }[];
+let blockers: {
+  kind: "owned" | "granted";
+  database: string;
+  count: number;
+}[];
 const queries: string[] = [];
 const pool = {
   query: vi.fn(async (text: string) => {
@@ -708,6 +712,17 @@ describe("runInit — session branch", () => {
     expect(untouched.calls).toEqual([]);
   });
 
+  test("an invalid APPKIT_DB_SESSION is refused before any API call, and .env keeps it", async () => {
+    const lakebase = project();
+    const ctx = appOn(lakebase, { APPKIT_DB_SESSION: "My-Session" });
+
+    await expect(init(ctx, { mode: "session" })).rejects.toThrow(
+      'Invalid APPKIT_DB_SESSION "My-Session": use 1-48 lowercase letters or digits.',
+    );
+    expect(lakebase.calls).toEqual([]);
+    expect(envFile(ctx.root).APPKIT_DB_SESSION).toBe("My-Session");
+  });
+
   test("the session id is in .env before the branch is created, so a failed run's rerun reuses it", async () => {
     const lakebase = project();
     lakebase.createBranchError = new Error("network down");
@@ -793,6 +808,54 @@ describe("runInit — session branch", () => {
       created: false,
     });
     expect(afterFork.branches.has(DEV)).toBe(false);
+  });
+
+  test("a --session run that stopped after the fork is resumed by a plain init, from a .env that still points elsewhere", async () => {
+    schemaOwner = USER;
+    const lakebase = project();
+    lakebase.addBranch(session("k2x9q0ab"), {
+      expire_time: "2099-01-01T00:00:00Z",
+    });
+    const ctx = appOn(lakebase, { APPKIT_DB_SESSION: "k2x9q0ab" });
+
+    const { report } = await init(ctx, { schema: "none" });
+
+    expect(report).toMatchObject({
+      mode: "session",
+      branch: session("k2x9q0ab"),
+      created: false,
+    });
+    expect(lakebase.branches.has(DEV)).toBe(false);
+  });
+
+  test("a .env that points at your dev branch stays on it, even with a session id whose branch exists", async () => {
+    schemaOwner = USER;
+    const lakebase = project();
+    lakebase.addBranch(DEV);
+    lakebase.addBranch(session("k2x9q0ab"), {
+      expire_time: "2099-01-01T00:00:00Z",
+    });
+    const ctx = appOn(lakebase, {
+      APPKIT_DB_SESSION: "k2x9q0ab",
+      LAKEBASE_ENDPOINT: `${DEV}/endpoints/primary`,
+    });
+
+    const { report } = await init(ctx, { schema: "none" });
+
+    expect(report).toMatchObject({ mode: "dev", branch: DEV });
+  });
+
+  test("a failed session run says to rerun with --session, since a plain rerun can pick the dev branch", async () => {
+    const lakebase = project();
+    lakebase.createBranchError = forbidden();
+    const ctx = appOn(lakebase);
+
+    await expect(init(ctx, { mode: "session" })).rejects.toThrow(
+      `needs CAN MANAGE on ${P}. Ask a project owner for it, then rerun \`appkit db init --session\`.`,
+    );
+    await expect(init(ctx)).rejects.toThrow(
+      `needs CAN MANAGE on ${P}. Ask a project owner for it, then rerun \`appkit db init\`.`,
+    );
   });
 
   test("an expired session branch, or a 409 for one that is gone, gets a fresh session id", async () => {
@@ -921,7 +984,48 @@ describe("runInit — hand-off failures", () => {
     );
   });
 
-  test("a failed role delete lists what blocks it", async () => {
+  test("catalog names in hand-off messages have their control characters escaped", async () => {
+    schemaOwner = "legacy\u001b[2J";
+
+    await expect(init(appOn(project()))).rejects.toThrow(
+      'it belongs to "legacy\\u001b[2J", which is not a Lakebase-managed role',
+    );
+
+    schemaOwner = SP;
+    ownedOutside = ['table public."x\ny"'];
+    await expect(init(appOn(project()))).rejects.toThrow(
+      'what else it owns on this branch: table public."x\\u000ay".',
+    );
+  });
+
+  test("an extension the owner has is named with the manual command, and nothing is deleted", async () => {
+    const lakebase = project();
+    ownedOutside = ["extension pgcrypto"];
+
+    await expect(init(appOn(lakebase))).rejects.toThrow(
+      `what else it owns on this branch: extension pgcrypto. .env already points at the branch. Reassign or drop them, or take them all with \`databricks postgres delete-role ${DEV}/roles/dbrx-apps-${SP} --reassign-owned-to ${DEV}/roles/alice\`, then rerun \`appkit db init\`.`,
+    );
+    expect(lakebase.calls.some((call) => call.startsWith("deleteRole"))).toBe(
+      false,
+    );
+  });
+
+  test("an owner with objects in another database is refused before the delete, which cannot reassign them", async () => {
+    const lakebase = project();
+    blockers = [
+      { kind: "owned", database: "analytics", count: 3 },
+      { kind: "granted", database: "databricks_postgres", count: 2 },
+    ];
+
+    await expect(init(appOn(lakebase))).rejects.toThrow(
+      `Refusing to hand schema app in database databricks_postgres on ${devBranchId(USER)} to you: role "${SP}" also owns objects in other databases on this branch, which deleting it cannot reassign: database analytics (3). .env already points at the branch. Reassign or drop them in those databases, then rerun \`appkit db init\`.`,
+    );
+    expect(lakebase.calls.some((call) => call.startsWith("deleteRole"))).toBe(
+      false,
+    );
+  });
+
+  test("a failed role delete lists the shared objects the owner has apart from its privileges", async () => {
     const lakebase = project();
     lakebase.deleteRoleError = new LakebaseApiError(
       "delete role",
@@ -929,16 +1033,27 @@ describe("runInit — hand-off failures", () => {
       { statusCode: 500 },
     );
     blockers = [
-      { database: "analytics", count: 3 },
-      { database: "databricks_postgres", count: 1 },
+      { kind: "owned", database: "", count: 1 },
+      { kind: "granted", database: "analytics", count: 2 },
+      { kind: "granted", database: "databricks_postgres", count: 1 },
     ];
 
     await expect(init(appOn(lakebase))).rejects.toThrow(
-      `These objects and privileges of "${SP}" block the delete: database analytics (3), database databricks_postgres (1). .env already points at the branch. Drop them or reassign them to you, then rerun \`appkit db init\`.`,
+      `failed (Lakebase: delete role failed: INTERNAL_ERROR). "${SP}" still owns shared objects (1), which block the delete. Privileges granted to "${SP}": database analytics (2), database databricks_postgres (1). .env already points at the branch. Reassign or drop what it owns and revoke its privileges, then rerun \`appkit db init\`.`,
     );
     expect(pool.query).toHaveBeenCalledWith(
       expect.stringContaining("pg_shdepend"),
       [SP],
+    );
+  });
+
+  test("a failed role delete with only privileges says to revoke them", async () => {
+    const lakebase = project();
+    lakebase.deleteRoleError = new Error("timeout");
+    blockers = [{ kind: "granted", database: "analytics", count: 2 }];
+
+    await expect(init(appOn(lakebase))).rejects.toThrow(
+      `failed (timeout). Privileges granted to "${SP}": database analytics (2). .env already points at the branch. Revoke its privileges, then rerun \`appkit db init\`.`,
     );
   });
 
@@ -1036,6 +1151,20 @@ describe("runInit — schema start", () => {
     ).rejects.toThrow(
       `Installing drizzle-kit failed. Run \`npm install --save-dev --save-exact drizzle-kit@${DRIZZLE_KIT_VERSION}\`, then rerun \`appkit db init\`.`,
     );
+  });
+
+  test("a failed install on a new fork leaves the copy tagged, so the next init rebuilds it", async () => {
+    const ctx = appOn(project(), {}, { files: { "package.json": "{}" } });
+
+    await expect(
+      runInit(ctx, {
+        runCommand: () => {
+          throw new Error("ENOTFOUND registry");
+        },
+      }),
+    ).rejects.toThrow(/^Installing drizzle-kit failed\./);
+    expect(tagWrites()).toEqual(["insert"]);
+    expect(cleanHolding).not.toHaveBeenCalled();
   });
 
   test("clean drops the schema, then applies the committed migrations without generating", async () => {
@@ -1250,17 +1379,27 @@ describe("runInit — the start follows the branch's own state", () => {
     expect(tagWrites()).toEqual([]);
   });
 
-  test("an interrupted rebuild without schema.ts says how to continue instead of guessing", async () => {
+  test("an interrupted rebuild without schema.ts introspects the copy, then rebuilds it without another hand-off or tag", async () => {
     schemaOwner = USER;
     tagged = true;
+    const lakebase = existingDev();
 
-    await expect(
-      init(appOn(existingDev(), {}, { schema: false })),
-    ).rejects.toThrow(
-      "Restore schema.ts, then rerun `appkit db init`. `appkit db init --schema introspect` writes schema.ts from the branch and keeps the rows the fork copied.",
+    const { report } = await init(appOn(lakebase, {}, { schema: false }));
+
+    expect(report.start).toMatchObject({
+      kind: "introspect",
+      rebuilt: { reason: "fork-copy" },
+    });
+    expect(introspectHolding.mock.calls[0]?.[2]).toMatchObject({
+      recordAsApplied: false,
+    });
+    expect(introspectHolding.mock.invocationCallOrder[0]).toBeLessThan(
+      cleanHolding.mock.invocationCallOrder[0] ?? 0,
     );
-    expect(introspectHolding).not.toHaveBeenCalled();
-    expect(cleanHolding).not.toHaveBeenCalled();
+    expect(lakebase.calls.some((call) => call.startsWith("deleteRole"))).toBe(
+      false,
+    );
+    expect(tagWrites()).toEqual([]);
   });
 
   test("a copy without a journal is rebuilt without a tag, with a warning before the hand-off that says what to do after a stop", async () => {
@@ -1487,13 +1626,37 @@ describe("runInit — .env", () => {
       DATABRICKS_HOST: "https://real.cloud.databricks.com",
     });
     expect(lakebase.calls).toContain(
-      `getDatabase ${DEV}/databases/databricks-postgres`,
+      `getDatabase ${PRODUCTION}/databases/databricks-postgres`,
     );
     expect(fs.statSync(path.join(root, ".env")).mode & 0o777).toBe(0o600);
   });
 
-  test("a database databricks.yml binds that the branch does not have is refused, naming both, before .env is written", async () => {
+  test("a database databricks.yml binds that the source branch does not have is refused before the fork, naming both", async () => {
     const lakebase = project();
+    const root = tempApp({
+      "databricks.yml": databricksYml(
+        PRODUCTION,
+        `${PRODUCTION}/databases/analytics`,
+      ),
+    });
+    const ctx = fakeContext({ root, userName: USER, api: lakebase.api() });
+
+    await expect(init(ctx, { schema: "none" })).rejects.toThrow(
+      `Database analytics, which databricks.yml binds, is not on production, the branch ${devBranchId(USER)} would fork from, so init created nothing. Create it there (databricks postgres create-database ${PRODUCTION} --database-id analytics), or bind a database the project's branches have, then rerun \`appkit db init\`.`,
+    );
+    expect(lakebase.calls).toContain(
+      `getDatabase ${PRODUCTION}/databases/analytics`,
+    );
+    expect(lakebase.calls.some((call) => call.startsWith("createBranch"))).toBe(
+      false,
+    );
+    expect(fs.existsSync(path.join(root, ".env"))).toBe(false);
+  });
+
+  test("a reused branch without the database databricks.yml binds is refused, naming both, before .env is written", async () => {
+    const lakebase = project();
+    lakebase.addBranch(DEV);
+    lakebase.addRole(DEV, "alice", USER, ["DATABRICKS_SUPERUSER"]);
     const root = tempApp({
       "databricks.yml": databricksYml(
         PRODUCTION,
@@ -1507,6 +1670,22 @@ describe("runInit — .env", () => {
     );
     expect(lakebase.calls).toContain(`getDatabase ${DEV}/databases/analytics`);
     expect(fs.existsSync(path.join(root, ".env"))).toBe(false);
+  });
+
+  test("the database databricks.yml binds wins over .env's PGDATABASE, and init says so when they differ", async () => {
+    const lakebase = project();
+    const ctx = appOn(lakebase, { PGDATABASE: "scratch" });
+
+    const { report, warnings } = await init(ctx, { schema: "none" });
+
+    expect(report.database).toBe("databricks_postgres");
+    expect(envFile(ctx.root).PGDATABASE).toBe("databricks_postgres");
+    expect(warnings).toEqual([
+      "Setting PGDATABASE=databricks_postgres in .env: it was scratch, and databricks.yml binds databricks_postgres",
+    ]);
+
+    const same = await init(appOn(project()), { schema: "none" });
+    expect(same.warnings).toEqual([]);
   });
 
   test("the profile init authenticated with wins over the host", async () => {

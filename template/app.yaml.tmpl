@@ -1,15 +1,17 @@
 command: ['{{or .packageManager "pnpm"}}', 'run', 'start']
-# Databricks Apps counts the deploy as succeeded only once /health answers 2xx,
-# within 300 s. AppKit serves /health after every plugin's setup, migrations
-# included, so a failed start fails the deploy instead of passing after 2 s.
+# Keep this health check. When Databricks Apps enforces it, a deploy succeeds only
+# once /health answers 2xx, within 300 s. AppKit serves /health after every
+# plugin's setup, migrations included, so a failed start fails the deploy.
+# Otherwise, a deploy succeeds once the process has lived 2 s.
 health_check:
   path: /health
-{{- if .appEnv}}
+{{- if or .appEnv .plugins.database}}
 env:
+{{- end}}
+{{- if .appEnv}}
 {{.appEnv}}
 {{- end}}
 {{- if .plugins.database}}
-{{- /* The plugin's postgres resource always renders LAKEBASE_ENDPOINT into .appEnv, so env: is open. */}}
   - name: APPKIT_DB_MIGRATE_ON_START
     value: "true"
 {{- end}}
