@@ -564,6 +564,12 @@ Introspect keeps the `.private()` an existing `schema.ts` declares, because the 
 columns from its reads by default. Every other column it writes is public. When `schema.ts` does not load, introspect
 refuses before it reads the branch, because it could not keep the columns the file marks private.
 
+Before it replaces `schema.ts`, introspect copies the old file to `schema.ts.bak`. It writes the backup only when the
+new file differs, so a second run with the same catalog keeps the first backup. With history, introspect refuses to
+write a migration that drops an object the branch still has but `schema.ts` cannot express, such as a skipped column.
+It would record that migration as applied, and the deployed app would run the drop on start. The refusal names each
+object, says why introspect left it out, and says the deployed app would drop it.
+
 ### Flag Strategy
 
 | Flag | Default | Introduced in | Turning it off |
