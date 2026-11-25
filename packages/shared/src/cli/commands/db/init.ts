@@ -89,7 +89,7 @@ function printInitReport(
   const { start, keptCopy } = report;
   if (rebuildOf(start)?.reason === "fork-copy") {
     info(
-      `The branch still held the rows the fork copied: the app schema was rebuilt from the committed migrations. \`appkit db init --schema ${start.kind === "introspect" ? "introspect" : "migrate"}\` keeps them.`,
+      "The branch still held the rows the fork copied, so the app schema was rebuilt from the committed migrations without them.",
     );
   }
   if (start.kind === "introspect") {
