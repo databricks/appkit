@@ -2,6 +2,10 @@ import fs from "node:fs";
 
 import type { Pool } from "pg";
 
+import {
+  type DevelopmentBranchKind,
+  developmentBranchKind,
+} from "../../database/branch-names";
 import { databaseSetupFailed } from "../../database/errors";
 import {
   applyPendingMigrations,
@@ -63,19 +67,10 @@ function endpointBranch(endpoint: string | undefined): string | undefined {
   return endpoint?.match(/\/branches\/([^/]+)\//)?.[1];
 }
 
-const BRANCH_ID_MAX_LENGTH = 63;
-
-const DEVELOPMENT_BRANCH_SHAPES = {
-  "a developer": /^dev-[a-z0-9]+(?:-[a-z0-9]+)*-[0-9a-f]{6}$/,
-  "an agent session": /^session-[0-9a-f]{6}-[a-z0-9]{1,48}$/,
+const DEVELOPMENT_BRANCH_OWNERS: Record<DevelopmentBranchKind, string> = {
+  dev: "a developer",
+  session: "an agent session",
 };
-
-function developmentBranchOwner(branch: string): string | undefined {
-  if (branch.length > BRANCH_ID_MAX_LENGTH) return undefined;
-  return Object.entries(DEVELOPMENT_BRANCH_SHAPES).find(([, shape]) =>
-    shape.test(branch),
-  )?.[0];
-}
 
 /**
  * Apply pending committed migrations from <root>/config/database/migrations as
@@ -90,8 +85,9 @@ export async function migrateOnStart(
 ): Promise<void> {
   const folder = migrationsFolder(root);
   const branch = endpointBranch(env.LAKEBASE_ENDPOINT);
-  const owner = branch && developmentBranchOwner(branch);
-  if (owner) {
+  const kind = branch && developmentBranchKind(branch);
+  if (kind) {
+    const owner = DEVELOPMENT_BRANCH_OWNERS[kind];
     throw databaseSetupFailed(
       `LAKEBASE_ENDPOINT points at branch "${branch}", whose name has the shape of ${owner} branch, and a deployed app migrates only its deploy branch. ` +
         "Bind the app to its deploy branch. If this is the deploy branch, rename it so it does not look like a dev or session branch.",
