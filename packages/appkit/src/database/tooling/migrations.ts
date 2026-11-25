@@ -166,13 +166,16 @@ function originSnapshot(): Snapshot {
   };
 }
 
-function latestSnapshot(folder: string, journal: Journal | null): Snapshot {
-  const last = journal?.entries.at(-1);
-  if (!last) return originSnapshot();
-  const file = snapshotFile(folder, last.idx);
+/** The snapshot after `entry`; the origin before the first migration. */
+function snapshotAfter(
+  folder: string,
+  entry: JournalEntry | undefined,
+): Snapshot {
+  if (!entry) return originSnapshot();
+  const file = snapshotFile(folder, entry.idx);
   if (!fs.existsSync(file)) {
     throw new Error(
-      `Missing ${file} for migration ${last.tag}. Restore it from version control; it is the baseline for the next migration.`,
+      `Missing ${file} for migration ${entry.tag}. Restore it from version control; it is the baseline for the next migration.`,
     );
   }
   return readJsonFile<Snapshot>(file);
@@ -386,6 +389,63 @@ export function dataDependentStatements(
   return statementsWhere(MAY_FAIL_ON_EXISTING_ROWS, statements);
 }
 
+/** drizzle-kit's diff from `prev` to the schema: the new snapshot and its SQL. */
+async function diffSchema(
+  prev: Snapshot,
+  schema: Schema,
+  interactive: boolean,
+): Promise<{ cur: Snapshot; statements: string[] }> {
+  const { generateDrizzleJson, generateMigration } = await loadDrizzleKit();
+  const cur = generateDrizzleJson(drizzleKitImports(schema), prev.id, [
+    schema.$schemaName,
+  ]) as unknown as Snapshot;
+
+  if (!interactive) {
+    const ambiguity = findRenameAmbiguity(prev, cur, schema.$schemaName);
+    if (ambiguity) throw ambiguity;
+  }
+
+  type KitSnapshot = Parameters<typeof generateMigration>[0];
+  const statements = await generateMigration(
+    prev as unknown as KitSnapshot,
+    cur as unknown as KitSnapshot,
+  );
+  return { cur, statements };
+}
+
+/**
+ * Whether the files of `tags`, the newest committed migrations, hold the SQL
+ * generation writes for the schema on top of the migrations before them.
+ */
+export async function generatesPending(
+  folder: string,
+  schema: Schema,
+  tags: readonly string[],
+  interactive: boolean,
+): Promise<boolean> {
+  const entries = readJournal(folder)?.entries ?? [];
+  const first = entries.findIndex((entry) => entry.tag === tags[0]);
+  if (first < 0) return false;
+  const { statements } = await diffSchema(
+    snapshotAfter(folder, entries[first - 1]),
+    schema,
+    interactive,
+  );
+  const normalized = (text: string) => text.replace(/\r\n/g, "\n");
+  const committed = tags.flatMap((tag) =>
+    normalized(fs.readFileSync(migrationFile(folder, tag), "utf-8")).split(
+      BREAKPOINT,
+    ),
+  );
+  return (
+    committed.length === statements.length &&
+    committed.every(
+      (statement, index) =>
+        statement.trim() === normalized(statements[index] ?? "").trim(),
+    )
+  );
+}
+
 /**
  * Diff the schema against the latest committed snapshot with drizzle-kit and
  * write the next v7 migration: `NNNN_<tag>.sql`, `meta/NNNN_snapshot.json`,
@@ -401,28 +461,14 @@ export async function generateMigrationFiles(
       `Migration tag "${name}" must use lowercase letters, digits and underscores`,
     );
   }
-  const { generateDrizzleJson, generateMigration } = await loadDrizzleKit();
   const { folder } = lock;
 
   const journal = readJournal(folder);
-  const prev = latestSnapshot(folder, journal);
-  const cur = generateDrizzleJson(drizzleKitImports(options.schema), prev.id, [
-    options.schema.$schemaName,
-  ]) as unknown as Snapshot;
-
-  if (!options.interactive) {
-    const ambiguity = findRenameAmbiguity(
-      prev,
-      cur,
-      options.schema.$schemaName,
-    );
-    if (ambiguity) throw ambiguity;
-  }
-
-  type KitSnapshot = Parameters<typeof generateMigration>[0];
-  const statements = await generateMigration(
-    prev as unknown as KitSnapshot,
-    cur as unknown as KitSnapshot,
+  const prev = snapshotAfter(folder, journal?.entries.at(-1));
+  const { cur, statements } = await diffSchema(
+    prev,
+    options.schema,
+    options.interactive,
   );
   if (statements.length === 0) return null;
   const schemaName = options.schema.$schemaName;

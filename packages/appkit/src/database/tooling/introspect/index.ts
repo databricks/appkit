@@ -24,6 +24,7 @@ import {
   discardMigrationFiles,
   type GeneratedMigration,
   generateMigrationFiles,
+  generatesPending,
   type PlannedMigration,
 } from "../migrations";
 import { resourceId } from "../targets";
@@ -71,7 +72,7 @@ export class IntrospectRefusedError extends Error {
   }
 }
 
-/** Tags introspect writes. Pending ones match the branch when a fresh render adds nothing. */
+/** Tags introspect writes. A pending one is recorded when introspect would write the same SQL now. */
 const INTROSPECT_TAG = /^\d{4}_(introspect|baseline)$/;
 
 /** File contents, or null when it does not exist. */
@@ -306,10 +307,26 @@ async function introspectHolding(
             }
           : {}),
       });
-      if (unrecorded.length > 0 && migration) {
-        throw notApplied(
-          `Its tables differ from what ${unrecorded.length === 1 ? "it describes" : "they describe"}.`,
-        );
+      if (unrecorded.length > 0) {
+        const one = unrecorded.length === 1;
+        if (migration) {
+          throw notApplied(
+            `Its tables differ from what ${one ? "it describes" : "they describe"}.`,
+          );
+        }
+        // A file someone edited after introspect wrote it may do more than its snapshot says.
+        if (
+          !(await generatesPending(
+            folder,
+            schema,
+            unrecorded,
+            options.interactive,
+          ))
+        ) {
+          throw notApplied(
+            `${one ? "Its" : "Their"} SQL is not what introspect would write for the branch now, so recording ${one ? "it" : "them"} without running ${one ? "it" : "them"} could skip a change.`,
+          );
+        }
       }
       await writeDatabaseTypes(schema, typesFile);
       // The database already holds what the migrations describe; recording is the last step.
