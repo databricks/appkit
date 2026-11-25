@@ -220,18 +220,18 @@ function installedPackage(name: string, from: string): InstalledPackage | null {
 }
 
 /**
- * Whether the app at `root` has drizzle-kit, at any version. The node_modules
- * walk is what ESM resolution does; createRequire would also follow NODE_PATH,
- * which `import("drizzle-kit/api")` ignores.
+ * The version of the drizzle-kit the app at `root` has; null when it has none.
+ * The node_modules walk is what ESM resolution does; createRequire would also
+ * follow NODE_PATH, which `import("drizzle-kit/api")` ignores.
  */
-export function hasDrizzleKit(root: string): boolean {
+export function drizzleKitVersionAt(root: string): string | null {
   for (let dir = path.resolve(root); ; dir = path.dirname(dir)) {
-    if (
-      fs.existsSync(path.join(dir, "node_modules/drizzle-kit/package.json"))
-    ) {
-      return true;
+    const file = path.join(dir, "node_modules/drizzle-kit/package.json");
+    if (fs.existsSync(file)) {
+      const { version } = readJsonFile<{ version?: unknown }>(file);
+      return typeof version === "string" ? version : null;
     }
-    if (dir === path.dirname(dir)) return false;
+    if (dir === path.dirname(dir)) return null;
   }
 }
 
