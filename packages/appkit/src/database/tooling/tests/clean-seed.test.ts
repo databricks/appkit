@@ -217,6 +217,26 @@ describe("clean on the fork's untouched copy", () => {
   });
 });
 
+describe("catalog text in clean and seed", () => {
+  test("control characters in catalog names are escaped before they reach the terminal", async () => {
+    const ctx = fakeContext({
+      root: tempApp({ "config/database/schema.ts": schemaFile("app") }),
+    });
+    writableEnvBranch.mockResolvedValue(devBranch);
+    recordingPool({ dependents: ['view reporting."a\u001b[2Jb"'] });
+
+    await expect(runClean(ctx)).resolves.toMatchObject({
+      dependents: ['view reporting."a\\u001b[2Jb"'],
+    });
+
+    const root = tempApp({ [SEED_FILE]: "select 1;" });
+    recordingPool({ schemaOwner: "sp\nFAKE: done" });
+    await expect(runSeed(fakeContext({ root }))).rejects.toThrow(
+      'which "sp\\u000aFAKE: done" still owns',
+    );
+  });
+});
+
 describe("previewClean", () => {
   test("reads the dependents without opening a transaction or dropping anything", async () => {
     const ctx = fakeContext({

@@ -982,6 +982,20 @@ describe("runInit — hand-off failures", () => {
     );
   });
 
+  test("catalog names in hand-off messages have their control characters escaped", async () => {
+    schemaOwner = "legacy\u001b[2J";
+
+    await expect(init(appOn(project()))).rejects.toThrow(
+      'it belongs to "legacy\\u001b[2J", which is not a Lakebase-managed role',
+    );
+
+    schemaOwner = SP;
+    ownedOutside = ['table public."x\ny"'];
+    await expect(init(appOn(project()))).rejects.toThrow(
+      'what else it owns on this branch: table public."x\\u000ay".',
+    );
+  });
+
   test("an extension the owner has is named with the manual command, and nothing is deleted", async () => {
     const lakebase = project();
     ownedOutside = ["extension pgcrypto"];
