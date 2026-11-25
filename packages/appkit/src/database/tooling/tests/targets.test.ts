@@ -79,7 +79,6 @@ describe("readLocalTarget", () => {
         LAKEBASE_ENDPOINT: "your_postgres_endpointPath",
         PGHOST: "your_postgres_host",
         PGDATABASE: "your_postgres_databaseName",
-        APPKIT_DB_SESSION: "NOT VALID",
       }),
     ).toEqual({
       project: null,
@@ -87,6 +86,13 @@ describe("readLocalTarget", () => {
       database: null,
       session: null,
     });
+  });
+
+  test("an APPKIT_DB_SESSION set to an invalid id is refused, not read as unset", () => {
+    expect(() => readLocalTarget({ APPKIT_DB_SESSION: "NOT VALID" })).toThrow(
+      'Invalid APPKIT_DB_SESSION "NOT VALID": use 1-48 lowercase letters or digits.',
+    );
+    expect(readLocalTarget({ APPKIT_DB_SESSION: "" }).session).toBeNull();
   });
 });
 

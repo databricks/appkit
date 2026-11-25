@@ -708,6 +708,17 @@ describe("runInit — session branch", () => {
     expect(untouched.calls).toEqual([]);
   });
 
+  test("an invalid APPKIT_DB_SESSION is refused before any API call, and .env keeps it", async () => {
+    const lakebase = project();
+    const ctx = appOn(lakebase, { APPKIT_DB_SESSION: "My-Session" });
+
+    await expect(init(ctx, { mode: "session" })).rejects.toThrow(
+      'Invalid APPKIT_DB_SESSION "My-Session": use 1-48 lowercase letters or digits.',
+    );
+    expect(lakebase.calls).toEqual([]);
+    expect(envFile(ctx.root).APPKIT_DB_SESSION).toBe("My-Session");
+  });
+
   test("the session id is in .env before the branch is created, so a failed run's rerun reuses it", async () => {
     const lakebase = project();
     lakebase.createBranchError = new Error("network down");
