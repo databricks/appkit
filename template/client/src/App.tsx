@@ -275,7 +275,10 @@ function RouteErrorPage() {
 }
 
 function errorDetails(error: unknown): string {
-  if (isRouteErrorResponse(error)) return `${error.status} ${error.statusText}`;
+  if (isRouteErrorResponse(error)) {
+    const data = typeof error.data === 'string' ? `\n${error.data}` : '';
+    return `${error.status} ${error.statusText}${data}`;
+  }
   if (error instanceof Error) return error.stack ?? error.message;
   try {
     return String(error);
