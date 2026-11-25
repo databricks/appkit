@@ -449,7 +449,7 @@ function unreadableMigrationError(
   error: unknown,
 ): MigrationFilesError {
   for (const entry of journal.entries) {
-    const file = path.join(folder, `${entry.tag}.sql`);
+    const file = migrationFile(folder, entry.tag);
     try {
       fs.readFileSync(file);
     } catch (cause) {
