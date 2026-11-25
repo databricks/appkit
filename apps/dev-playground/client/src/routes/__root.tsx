@@ -7,6 +7,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  ErrorPage,
   TooltipProvider,
 } from "@databricks/appkit-ui/react";
 import {
@@ -19,7 +20,6 @@ import {
 } from "@tanstack/react-router";
 import { MenuIcon } from "lucide-react";
 
-import { ErrorComponent } from "@/components/error-component";
 import { ThemeSelector } from "@/components/theme-selector";
 import { findNavItemForPath, NAV_GROUPS } from "@/lib/nav";
 
@@ -122,7 +122,7 @@ function RootComponent() {
         onCatch={(error) => {
           console.error(error);
         }}
-        errorComponent={(error) => <ErrorComponent error={error} />}
+        errorComponent={({ error }) => <ErrorPage error={error} />}
       >
         <Outlet />
       </CatchBoundary>

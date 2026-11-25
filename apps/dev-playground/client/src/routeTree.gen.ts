@@ -23,6 +23,7 @@ import { Route as LakebaseRouteRouteImport } from './routes/lakebase.route'
 import { Route as JobsRouteRouteImport } from './routes/jobs.route'
 import { Route as GenieRouteRouteImport } from './routes/genie.route'
 import { Route as FilesRouteRouteImport } from './routes/files.route'
+import { Route as ErrorPageRouteRouteImport } from './routes/error-page.route'
 import { Route as DatabaseRouteRouteImport } from './routes/database.route'
 import { Route as DataVisualizationRouteRouteImport } from './routes/data-visualization.route'
 import { Route as ChartInferenceRouteRouteImport } from './routes/chart-inference.route'
@@ -102,6 +103,11 @@ const FilesRouteRoute = FilesRouteRouteImport.update({
   path: '/files',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ErrorPageRouteRoute = ErrorPageRouteRouteImport.update({
+  id: '/error-page',
+  path: '/error-page',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DatabaseRouteRoute = DatabaseRouteRouteImport.update({
   id: '/database',
   path: '/database',
@@ -152,6 +158,7 @@ export interface FileRoutesByFullPath {
   '/chart-inference': typeof ChartInferenceRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
   '/database': typeof DatabaseRouteRoute
+  '/error-page': typeof ErrorPageRouteRoute
   '/files': typeof FilesRouteRoute
   '/genie': typeof GenieRouteRoute
   '/jobs': typeof JobsRouteRoute
@@ -176,6 +183,7 @@ export interface FileRoutesByTo {
   '/chart-inference': typeof ChartInferenceRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
   '/database': typeof DatabaseRouteRoute
+  '/error-page': typeof ErrorPageRouteRoute
   '/files': typeof FilesRouteRoute
   '/genie': typeof GenieRouteRoute
   '/jobs': typeof JobsRouteRoute
@@ -201,6 +209,7 @@ export interface FileRoutesById {
   '/chart-inference': typeof ChartInferenceRouteRoute
   '/data-visualization': typeof DataVisualizationRouteRoute
   '/database': typeof DatabaseRouteRoute
+  '/error-page': typeof ErrorPageRouteRoute
   '/files': typeof FilesRouteRoute
   '/genie': typeof GenieRouteRoute
   '/jobs': typeof JobsRouteRoute
@@ -227,6 +236,7 @@ export interface FileRouteTypes {
     | '/chart-inference'
     | '/data-visualization'
     | '/database'
+    | '/error-page'
     | '/files'
     | '/genie'
     | '/jobs'
@@ -251,6 +261,7 @@ export interface FileRouteTypes {
     | '/chart-inference'
     | '/data-visualization'
     | '/database'
+    | '/error-page'
     | '/files'
     | '/genie'
     | '/jobs'
@@ -275,6 +286,7 @@ export interface FileRouteTypes {
     | '/chart-inference'
     | '/data-visualization'
     | '/database'
+    | '/error-page'
     | '/files'
     | '/genie'
     | '/jobs'
@@ -300,6 +312,7 @@ export interface RootRouteChildren {
   ChartInferenceRouteRoute: typeof ChartInferenceRouteRoute
   DataVisualizationRouteRoute: typeof DataVisualizationRouteRoute
   DatabaseRouteRoute: typeof DatabaseRouteRoute
+  ErrorPageRouteRoute: typeof ErrorPageRouteRoute
   FilesRouteRoute: typeof FilesRouteRoute
   GenieRouteRoute: typeof GenieRouteRoute
   JobsRouteRoute: typeof JobsRouteRoute
@@ -416,6 +429,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof FilesRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/error-page': {
+      id: '/error-page'
+      path: '/error-page'
+      fullPath: '/error-page'
+      preLoaderRoute: typeof ErrorPageRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/database': {
       id: '/database'
       path: '/database'
@@ -484,6 +504,7 @@ const rootRouteChildren: RootRouteChildren = {
   ChartInferenceRouteRoute: ChartInferenceRouteRoute,
   DataVisualizationRouteRoute: DataVisualizationRouteRoute,
   DatabaseRouteRoute: DatabaseRouteRoute,
+  ErrorPageRouteRoute: ErrorPageRouteRoute,
   FilesRouteRoute: FilesRouteRoute,
   GenieRouteRoute: GenieRouteRoute,
   JobsRouteRoute: JobsRouteRoute,
