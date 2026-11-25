@@ -3,7 +3,9 @@ import path from "node:path";
 
 import { DEFAULT_SCHEMA_FILE } from "../../plugins/database/load-schema";
 import {
+  DATABASE_OPERATIONS_TYPES_FILE,
   DATABASE_TYPES_FILE,
+  generateDatabaseOperations,
   loadDatabaseSchema,
   writeDatabaseTypes,
 } from "../../type-generator/database";
@@ -41,10 +43,7 @@ function requireSchemaFile(root: string): void {
   );
 }
 
-const DATABASE_TYPES_PATH = path.join(
-  "shared/appkit-types",
-  DATABASE_TYPES_FILE,
-);
+const TYPES_DIR = "shared/appkit-types";
 
 export interface MigrateReport {
   /** The migration written by this run; null when schema.ts matches the latest snapshot. */
@@ -59,6 +58,7 @@ export interface MigrateReport {
   /** Why nothing was applied, when applying was skipped. */
   readonly notApplied?: string;
   readonly typesFile: string;
+  readonly operationsTypesFile: string;
 }
 
 export interface MigrateOptions {
@@ -153,8 +153,9 @@ async function applyToEnvBranch(
 
 /**
  * `appkit db migrate`: generate a migration when schema.ts changed, regenerate
- * database.d.ts, and apply pending migrations to the `.env` branch (only AppKit
- * dev/session branches). One command at a time owns the checkout's history.
+ * database.d.ts and database-operations.d.ts, and apply pending migrations to
+ * the `.env` branch (only AppKit dev/session branches). One command at a time
+ * owns the checkout's history.
  */
 export async function runMigrate(
   ctx: DbContext,
@@ -180,9 +181,19 @@ async function migrateHolding(
   });
   const warnings = migrationWarnings(generated);
 
-  // The types follow schema.ts alone, so they are current even if applying fails.
-  const typesFile = path.join(ctx.root, DATABASE_TYPES_PATH);
+  // The types follow schema.ts and server/database/routes alone, so they are
+  // current even if applying fails.
+  const typesFile = path.join(ctx.root, TYPES_DIR, DATABASE_TYPES_FILE);
   await writeDatabaseTypes(schema, typesFile);
+  const operationsTypesFile = path.join(
+    ctx.root,
+    TYPES_DIR,
+    DATABASE_OPERATIONS_TYPES_FILE,
+  );
+  await generateDatabaseOperations({
+    appRoot: ctx.root,
+    outFile: operationsTypesFile,
+  });
 
   let outcome: ApplyOutcome;
   try {
@@ -220,5 +231,6 @@ async function migrateHolding(
       : {}),
     ...outcome,
     typesFile,
+    operationsTypesFile,
   };
 }

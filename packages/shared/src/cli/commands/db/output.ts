@@ -84,4 +84,5 @@ export function printMigrateReport(report: MigrateReport): void {
   }
 
   ok(`Generated ${relative(report.typesFile)}`);
+  ok(`Generated ${relative(report.operationsTypesFile)}`);
 }

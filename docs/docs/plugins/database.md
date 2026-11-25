@@ -135,8 +135,9 @@ only the AppKit CLI of the same release imports. It has no semver guarantee.
 `npx appkit db migrate` compares `config/database/schema.ts` with the latest
 committed snapshot. When they differ, it writes
 `config/database/migrations/NNNN_migration.sql`. It regenerates
-`shared/appkit-types/database.d.ts`, then applies pending migrations to the
-branch `.env` names. Commit the migrations with `schema.ts`.
+`shared/appkit-types/database.d.ts` and
+`shared/appkit-types/database-operations.d.ts`, then applies pending migrations
+to the branch `.env` names. Commit the migrations with `schema.ts`.
 
 ### Warnings about a generated migration
 

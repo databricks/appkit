@@ -600,7 +600,8 @@ scaffold to deploy in six steps:
    committed migrations, so the new branch holds no copied app rows. With `--schema none`, init stops after it writes
    `.env`, and a later plain init still rebuilds.
 3. The developer declares a table in `schema.ts` and runs `appkit db migrate`. It writes `0000_migration.sql`,
-   regenerates `shared/appkit-types/database.d.ts`, and applies the migration to the dev branch.
+   regenerates `shared/appkit-types/database.d.ts` and `database-operations.d.ts`, and applies the migration to the
+   dev branch.
 4. The developer adds authorized operations in `server/database/routes/` and uses them in the UI, as design 002
    describes. Changes to storage still require `appkit db migrate`, and editing an operation never applies DDL.
 5. The developer commits `config/database/`, the operations with their generated contracts, and the UI changes. After
