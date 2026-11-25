@@ -23,7 +23,7 @@ export const DATABASE_OPERATIONS_TYPES_FILE = "database-operations.d.ts";
 
 /** Application-relative POSIX paths of the operation conventions. */
 const ROUTES_DIR = "server/database/routes";
-const ROUTES_FILE = "server/database/routes.gen.ts";
+export const ROUTES_FILE = "server/database/routes.gen.ts";
 const SCHEMA_FILE = "config/database/schema.ts";
 
 /** Fixed header shared by both generated files. */

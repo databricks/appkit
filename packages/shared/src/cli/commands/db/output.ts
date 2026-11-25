@@ -131,4 +131,5 @@ export function printIntrospectReport(report: IntrospectReport): void {
     );
   }
   ok(`Generated ${relative(report.typesFile)}`);
+  ok(`Generated ${relative(report.operationsTypesFile)}`);
 }

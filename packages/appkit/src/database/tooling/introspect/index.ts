@@ -2,10 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { DEFAULT_SCHEMA_FILE } from "../../../plugins/database/load-schema";
-import {
-  loadDatabaseSchema,
-  writeDatabaseTypes,
-} from "../../../type-generator/database";
+import { loadDatabaseSchema } from "../../../type-generator/database";
 import {
   editedReason,
   markMigrationsApplied,
@@ -18,7 +15,7 @@ import { type DbContext, NO_ENV_BRANCH, withBranchPool } from "../context";
 import { refuseSymlink, SymlinkRefusedError, writeFileAtomic } from "../files";
 import { notYourBranch, resolveEnvBranch, takesWrites } from "../guard";
 import { type HistoryLock, withHistoryLock } from "../history-lock";
-import { DATABASE_TYPES_PATH } from "../migrate";
+import { generatedTypesOf, writeGeneratedTypes } from "../migrate";
 import {
   breakingStatements,
   discardMigrationFiles,
@@ -62,6 +59,7 @@ export interface IntrospectReport {
   /** Tags recorded as applied: the migration, and any an interrupted run wrote but did not record. */
   readonly recorded: readonly string[];
   readonly typesFile: string;
+  readonly operationsTypesFile: string;
 }
 
 /** Introspect would record history the branch or the deployed app contradicts. */
@@ -166,9 +164,8 @@ async function readPreviousSchema(root: string): Promise<Schema | null> {
  * that brings history up to the database, and record it as applied. A column
  * the previous schema.ts marks private stays private. Runs only on your dev or
  * session branch, and only when the branch records exactly the committed
- * migrations. A failure puts back schema.ts, the backup,
- * database.d.ts and the migrations folder. One command at a time owns the
- * checkout's history.
+ * migrations. A failure puts back schema.ts, the backup, the generated types
+ * and the migrations folder. One command at a time owns the checkout's history.
  */
 export async function runIntrospect(
   ctx: DbContext,
@@ -269,10 +266,12 @@ async function introspectHolding(
       );
     }
     const backupFile = `${schemaFile}.bak`;
-    const typesFile = path.join(ctx.root, DATABASE_TYPES_PATH);
+    const generatedTypes = generatedTypesOf(ctx.root);
     const previous = readIfExists(schemaFile);
     const previousBackup = readIfExists(backupFile);
-    const previousTypes = readIfExists(typesFile);
+    const previousTypes = Object.values(generatedTypes).map(
+      (file) => [file, readIfExists(file)] as const,
+    );
     const backsUp = previous !== null && previous !== rendered.source;
     let migration: GeneratedMigration | null = null;
     let recorded: string[] = [];
@@ -326,7 +325,7 @@ async function introspectHolding(
           );
         }
       }
-      await writeDatabaseTypes(schema, typesFile);
+      await writeGeneratedTypes(ctx.root, schema);
       // The database already holds what the migrations describe; recording is the last step.
       recorded = [...unrecorded, ...(migration ? [migration.tag] : [])];
       if (recorded.length > 0) {
@@ -335,7 +334,9 @@ async function introspectHolding(
     } catch (error) {
       writeOrRemove(schemaFile, previous);
       if (backsUp) writeOrRemove(backupFile, previousBackup);
-      writeOrRemove(typesFile, previousTypes);
+      for (const [file, contents] of previousTypes) {
+        writeOrRemove(file, contents);
+      }
       if (migration) await discardMigrationFiles(lock, migration);
       if (error instanceof IntrospectRefusedError) throw error;
       throw new Error(
@@ -367,7 +368,8 @@ async function introspectHolding(
       approximated: rendered.approximated,
       migration,
       recorded,
-      typesFile,
+      typesFile: generatedTypes.typesFile,
+      operationsTypesFile: generatedTypes.operationsTypesFile,
     };
   });
 }

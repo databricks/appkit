@@ -52,6 +52,7 @@ const report = {
   },
   recorded: ["0000_baseline"],
   typesFile: `${process.cwd()}/shared/appkit-types/database.d.ts`,
+  operationsTypesFile: `${process.cwd()}/shared/appkit-types/database-operations.d.ts`,
 };
 
 beforeEach(() => {
@@ -106,6 +107,9 @@ describe("appkit db introspect", () => {
       "Recorded 0000_baseline as applied on dev-alice-3f9a2c: the branch already has what it describes",
     );
     expect(printed).toContain("Generated shared/appkit-types/database.d.ts");
+    expect(printed).toContain(
+      "Generated shared/appkit-types/database-operations.d.ts",
+    );
     expect(process.exitCode).toBeUndefined();
   });
 

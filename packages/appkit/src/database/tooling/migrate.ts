@@ -9,6 +9,7 @@ import {
   loadDatabaseSchema,
   writeDatabaseTypes,
 } from "../../type-generator/database";
+import { ROUTES_FILE } from "../../type-generator/database/generate-operations";
 import {
   applyPendingMigrations,
   MigrationApplyError,
@@ -45,7 +46,39 @@ function requireSchemaFile(root: string): void {
 
 const TYPES_DIR = "shared/appkit-types";
 
-export const DATABASE_TYPES_PATH = path.join(TYPES_DIR, DATABASE_TYPES_FILE);
+/** What migrate and introspect regenerate from schema.ts and server/database/routes. */
+interface GeneratedTypes {
+  readonly typesFile: string;
+  readonly operationsTypesFile: string;
+  /** The routes registry main's operation generator writes next to the routes. */
+  readonly routesFile: string;
+}
+
+export function generatedTypesOf(root: string): GeneratedTypes {
+  return {
+    typesFile: path.join(root, TYPES_DIR, DATABASE_TYPES_FILE),
+    operationsTypesFile: path.join(
+      root,
+      TYPES_DIR,
+      DATABASE_OPERATIONS_TYPES_FILE,
+    ),
+    routesFile: path.join(root, ROUTES_FILE),
+  };
+}
+
+/** Regenerate database.d.ts, then the operation contracts, as `appkit generate-types` does. */
+export async function writeGeneratedTypes(
+  root: string,
+  schema: Schema,
+): Promise<GeneratedTypes> {
+  const generated = generatedTypesOf(root);
+  await writeDatabaseTypes(schema, generated.typesFile);
+  await generateDatabaseOperations({
+    appRoot: root,
+    outFile: generated.operationsTypesFile,
+  });
+  return generated;
+}
 
 export interface MigrateReport {
   /** The migration written by this run; null when schema.ts matches the latest snapshot. */
@@ -203,17 +236,10 @@ async function migrateHolding(
 
   // The types follow schema.ts and server/database/routes alone, so they are
   // current even if applying fails.
-  const typesFile = path.join(ctx.root, TYPES_DIR, DATABASE_TYPES_FILE);
-  await writeDatabaseTypes(schema, typesFile);
-  const operationsTypesFile = path.join(
+  const { typesFile, operationsTypesFile } = await writeGeneratedTypes(
     ctx.root,
-    TYPES_DIR,
-    DATABASE_OPERATIONS_TYPES_FILE,
+    schema,
   );
-  await generateDatabaseOperations({
-    appRoot: ctx.root,
-    outFile: operationsTypesFile,
-  });
 
   let outcome: ApplyOutcome;
   try {

@@ -39,6 +39,7 @@ export interface IntrospectReport {
   readonly migration: GeneratedMigration | null;
   readonly recorded: readonly string[];
   readonly typesFile: string;
+  readonly operationsTypesFile: string;
 }
 
 /**
