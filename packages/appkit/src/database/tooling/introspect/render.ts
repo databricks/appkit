@@ -330,21 +330,38 @@ function importLine(names: readonly string[], source: string): string {
   return `import {\n${names.map((name) => `  ${name},`).join("\n")}\n} from ${q(source)};`;
 }
 
-function makeSkip(
-  table: string,
-  column: string | undefined,
-  reason: string,
-): Skip {
-  return {
-    table: shown(table),
-    ...(column === undefined ? {} : { column: shown(column) }),
-    reason: shown(reason),
-  };
-}
-
-function skipComment(skip: Skip): string {
-  return `// appkit: skipped ${skip.column ? `column "${skip.column}"` : `table "${skip.table}"`}: ${skip.reason}`;
-}
+/** Something the branch has that schema.ts leaves out, by raw catalog name. */
+type Omission =
+  | { readonly kind: "table"; readonly table: string; readonly reason: string }
+  | {
+      readonly kind: "column";
+      readonly table: string;
+      readonly column: string;
+      readonly reason: string;
+      /** NOT NULL with nothing to fill it: inserts through the entity client fail. */
+      readonly failsInserts: boolean;
+    }
+  | {
+      readonly kind: "default";
+      readonly table: string;
+      readonly column: string;
+      readonly defaultExpr: string;
+      readonly reason: string;
+      /** NOT NULL: inserts through the entity client must give a value. */
+      readonly failsInserts: boolean;
+    }
+  | {
+      readonly kind: "constraint";
+      readonly table: string;
+      /** The names a migration may drop it by. */
+      readonly names: readonly string[];
+      /** The columns the Skipped line names; null: it names only the table. */
+      readonly columns: string | null;
+      /** false: the comment of its skipped column already covers it. */
+      readonly listed: boolean;
+      readonly reason: string;
+    }
+  | { readonly kind: "type"; readonly name: string; readonly reason: string };
 
 /** Defaults the builder allows only on uuid / timestamp columns, never on fk(). */
 const TYPED_DEFAULTS = new Set([".defaultRandom()", ".defaultNow()"]);
@@ -378,11 +395,95 @@ export function renderSchemaSource(
   const tableComments: string[] = [];
   const qualified = (table: string, column?: string) =>
     `${schemaName}.${table}${column ? `.${column}` : ""}`;
-  const skipTable = (table: string, reason: string) => {
-    const skip = makeSkip(table, undefined, reason);
-    skipped.push(skip);
-    unexpressed.push({ kind: "table", name: table, reason });
-    tableComments.push(skipComment(skip));
+  /**
+   * Record what schema.ts leaves out: its `Skipped` line, its `Unexpressed`
+   * entry and its warning, and its `// appkit: skipped` comment into `comments`.
+   */
+  const omit = (omission: Omission, comments?: Pick<string[], "push">) => {
+    const { reason } = omission;
+    const skip = (table: string, column?: string) =>
+      skipped.push({
+        table: shown(table),
+        ...(column === undefined ? {} : { column: shown(column) }),
+        reason: shown(reason),
+      });
+    switch (omission.kind) {
+      case "type":
+        unexpressed.push({ ...omission });
+        return;
+      case "table": {
+        const { table } = omission;
+        unexpressed.push({ kind: "table", name: table, reason });
+        skip(table);
+        comments?.push(
+          `// appkit: skipped table "${shown(table)}": ${shown(reason)}`,
+        );
+        return;
+      }
+      case "column": {
+        const { table, column } = omission;
+        unexpressed.push({
+          kind: "column",
+          name: table,
+          member: column,
+          reason,
+        });
+        skip(table, column);
+        comments?.push(
+          `// appkit: skipped column "${shown(column)}": ${shown(reason)}`,
+        );
+        if (omission.failsInserts) {
+          warnings.push(
+            `${qualified(table, column)} is NOT NULL with no default but is not in schema.ts (${reason}). Inserts through ${client(table)} will fail until it gets a default, becomes nullable, or is dropped.`,
+          );
+        }
+        return;
+      }
+      case "default": {
+        const { table, column } = omission;
+        unexpressed.push({
+          kind: "default",
+          name: table,
+          member: column,
+          reason,
+        });
+        skip(table, column);
+        comments?.push(`// appkit: skipped ${shown(reason)}`);
+        if (omission.failsInserts) {
+          warnings.push(
+            `${qualified(table, column)}: its default ${omission.defaultExpr} is not in schema.ts, so ${client(table)} requires a value for it on insert.`,
+          );
+        }
+        return;
+      }
+      case "constraint": {
+        const { table } = omission;
+        for (const member of omission.names) {
+          unexpressed.push({ kind: "constraint", name: table, member, reason });
+        }
+        if (!omission.listed) return;
+        skip(table, omission.columns ?? undefined);
+        comments?.push(`// appkit: skipped ${shown(reason)}`);
+        return;
+      }
+    }
+  };
+  const skipTable = (table: string, reason: string) =>
+    omit({ kind: "table", table, reason }, tableComments);
+  /** The builder type of a column, or why the builder cannot declare it. */
+  const columnBase = (
+    column: IntrospectedColumn,
+    isPrimaryKey: boolean,
+  ): BaseType | string => {
+    if (isReservedColumnName(column.name)) {
+      return `the name "${column.name}" is reserved by AppKit`;
+    }
+    if (column.generated) return "generated columns are not supported";
+    const base = baseType(column, schemaName);
+    if (typeof base === "string" || column.identity === "" || isPrimaryKey) {
+      return base;
+    }
+    return "identity columns other than the primary key are not supported";
   };
   const { previous } = options;
   // A declaration of another schema declares nothing in this one.
@@ -451,70 +552,52 @@ export function renderSchemaSource(
   // 2. Columns. A table whose primary-key column cannot be expressed is skipped whole.
   for (const plan of [...plans.values()]) {
     const { table } = plan;
-    const pk = table.primaryKey[0];
-    const tableSkips: Skip[] = [];
-    const tableWarnings: string[] = [];
-    const tableApproximated: string[] = [];
-    const tableRenamed: string[] = [];
-    const columnReasons = new Map<string, string>();
+    const pk = table.primaryKey[0] as string;
+    const pkColumn = table.columns.find((column) => column.name === pk);
+    const pkBase = pkColumn ? columnBase(pkColumn, true) : "unsupported";
+    if (typeof pkBase === "string") {
+      plans.delete(table.name);
+      skipTable(
+        table.name,
+        `its primary key column "${pk}" cannot be expressed (${pkBase})`,
+      );
+      continue;
+    }
     /** Single-column unique constraints, by column. */
     const singleUnique = new Map(
       table.unique
         .filter((unique) => unique.columns.length === 1)
         .map((unique) => [unique.columns[0] as string, unique]),
     );
-    const tableUnexpressed: Unexpressed[] = [];
     for (const unique of table.unique.filter((u) => u.columns.length > 1)) {
-      const reason = `unique constraint (${list(unique.columns)}) spans several columns, which is not supported`;
-      const skip = makeSkip(table.name, undefined, reason);
-      tableSkips.push(skip);
-      tableUnexpressed.push({
-        kind: "constraint",
-        name: table.name,
-        member: unique.name,
-        reason,
-      });
-      plan.comments.push(`// appkit: skipped ${skip.reason}`);
+      omit(
+        {
+          kind: "constraint",
+          table: table.name,
+          names: [unique.name],
+          columns: null,
+          listed: true,
+          reason: `unique constraint (${list(unique.columns)}) spans several columns, which is not supported`,
+        },
+        plan.comments,
+      );
     }
 
     for (const column of table.columns) {
-      const skipColumn = (reason: string) => {
-        const skip = makeSkip(table.name, column.name, reason);
-        tableSkips.push(skip);
-        tableUnexpressed.push({
-          kind: "column",
-          name: table.name,
-          member: column.name,
-          reason,
-        });
-        columnReasons.set(column.name, reason);
-        plan.body.push(skipComment(skip));
+      const isPrimaryKey = column.name === pk;
+      const base = columnBase(column, isPrimaryKey);
+      if (typeof base === "string") {
         const generatesValue =
           column.identity !== "" || column.generated || !!column.defaultExpr;
-        if (column.notNull && !generatesValue) {
-          tableWarnings.push(
-            `${qualified(table.name, column.name)} is NOT NULL with no default but is not in schema.ts (${reason}). Inserts through ${client(table.name)} will fail until it gets a default, becomes nullable, or is dropped.`,
-          );
-        }
-      };
-
-      if (isReservedColumnName(column.name)) {
-        skipColumn(`the name "${column.name}" is reserved by AppKit`);
-        continue;
-      }
-      if (column.generated) {
-        skipColumn("generated columns are not supported");
-        continue;
-      }
-      const base = baseType(column, schemaName);
-      if (typeof base === "string") {
-        skipColumn(base);
-        continue;
-      }
-      const isPrimaryKey = column.name === pk;
-      if (column.identity !== "" && !isPrimaryKey) {
-        skipColumn(
-          "identity columns other than the primary key are not supported",
+        omit(
+          {
+            kind: "column",
+            table: table.name,
+            column: column.name,
+            reason: base,
+            failsInserts: column.notNull && !generatesValue,
+          },
+          plan.body,
         );
         continue;
       }
@@ -527,7 +610,7 @@ export function renderSchemaSource(
         comments: [],
       };
       if (base.approximation) {
-        tableApproximated.push(
+        approximated.push(
           `${qualified(table.name, column.name)}: ${base.approximation}`,
         );
       }
@@ -535,10 +618,10 @@ export function renderSchemaSource(
       const migrationsUnique = pgName(`${table.name}_${column.name}_unique`);
       if (columnPlan.isUnique && unique) {
         if (unique.name !== migrationsUnique) {
-          tableRenamed.push(`${unique.name} (${migrationsUnique})`);
+          renamed.push(`${unique.name} (${migrationsUnique})`);
         }
         if (unique.deferrable) {
-          tableApproximated.push(
+          approximated.push(
             `${qualified(table.name, column.name)}: the unique constraint is declared without DEFERRABLE`,
           );
         }
@@ -554,7 +637,7 @@ export function renderSchemaSource(
         const serverKey = SERVER_KEYS[base.storage];
         columnPlan.base = serverKey.base;
         if (column.identity !== "d") {
-          tableApproximated.push(
+          approximated.push(
             `${qualified(table.name, column.name)}: ${column.identity === "a" ? "GENERATED ALWAYS AS IDENTITY" : "a serial key"} is declared as ${serverKey.base.call}, an identity generated BY DEFAULT`,
           );
         }
@@ -562,7 +645,7 @@ export function renderSchemaSource(
           ? sequenceDifferences(column.sequence, serverKey.max)
           : null;
         if (differences) {
-          tableApproximated.push(
+          approximated.push(
             `${qualified(table.name, column.name)}: the key's sequence has ${differences.has}; ${serverKey.base.call} declares the defaults (${differences.declared})`,
           );
         }
@@ -575,39 +658,25 @@ export function renderSchemaSource(
         if ("call" in parsed) {
           columnPlan.defaultCall = parsed.call;
         } else {
-          const skip = makeSkip(table.name, column.name, parsed.skip);
-          tableSkips.push(skip);
-          tableUnexpressed.push({
-            kind: "default",
-            name: table.name,
-            member: column.name,
-            reason: parsed.skip,
-          });
-          columnPlan.comments.push(`// appkit: skipped ${skip.reason}`);
-          if (column.notNull) {
-            tableWarnings.push(
-              `${qualified(table.name, column.name)}: its ${parsed.skip.replace(/ is not supported$/, "")} is not in schema.ts, so ${client(table.name)} requires a value for it on insert.`,
-            );
-          }
+          omit(
+            {
+              kind: "default",
+              table: table.name,
+              column: column.name,
+              defaultExpr: column.defaultExpr,
+              reason: parsed.skip,
+              failsInserts: column.notNull,
+            },
+            columnPlan.comments,
+          );
         }
       }
       plan.columns.push(columnPlan);
       plan.body.push(columnPlan);
     }
 
-    if (!plan.columns.some((c) => c.isPrimaryKey)) {
-      plans.delete(table.name);
-      skipTable(
-        table.name,
-        `its primary key column "${pk}" cannot be expressed (${columnReasons.get(pk as string) ?? "unsupported"})`,
-      );
-      continue;
-    }
-    skipped.push(...tableSkips);
-    unexpressed.push(...tableUnexpressed);
-    warnings.push(...tableWarnings);
     if (table.partitioned) {
-      tableApproximated.push(
+      approximated.push(
         `${qualified(table.name)}: a partitioned table is declared as a plain table`,
       );
     }
@@ -626,8 +695,6 @@ export function renderSchemaSource(
         );
       }
     }
-    approximated.push(...tableApproximated);
-    renamed.push(...tableRenamed);
   }
 
   // 3. Foreign keys the builder can express; the rest stay plain columns.
@@ -719,36 +786,26 @@ export function renderSchemaSource(
       );
       const problem = fkProblem(plan, foreignKey, source, targets);
       if (problem) {
-        const reason = `foreign key to ${foreignKey.table}(${list(foreignKey.refColumns)}) is not kept: ${problem}`;
         // Migrations name it after its column; a schema.ts that declared it gave it that name.
-        const constraintNames = [foreignKey.name];
+        const names = [foreignKey.name];
         if (foreignKey.columns.length === 1) {
-          constraintNames.push(
+          names.push(
             pgName(
               `${plan.table.name}_${foreignKey.columns[0]}_${foreignKey.table}_${foreignKey.refColumns[0]}_fk`,
             ),
           );
         }
-        for (const member of new Set(constraintNames)) {
-          unexpressed.push({
+        omit(
+          {
             kind: "constraint",
-            name: plan.table.name,
-            member,
-            reason,
-          });
-        }
-        // A skipped column already carries its own comment.
-        if (source || foreignKey.columns.length > 1) {
-          const skip = makeSkip(
-            plan.table.name,
-            foreignKey.columns.join(", "),
-            reason,
-          );
-          skipped.push(skip);
-          (source?.comments ?? plan.comments).push(
-            `// appkit: skipped ${skip.reason}`,
-          );
-        }
+            table: plan.table.name,
+            names: [...new Set(names)],
+            columns: foreignKey.columns.join(", "),
+            listed: !!source || foreignKey.columns.length > 1,
+            reason: `foreign key to ${foreignKey.table}(${list(foreignKey.refColumns)}) is not kept: ${problem}`,
+          },
+          source?.comments ?? plan.comments,
+        );
         continue;
       }
       const sourceColumn = source as ColumnPlan;
@@ -762,26 +819,19 @@ export function renderSchemaSource(
         TYPED_DEFAULTS.has(sourceColumn.defaultCall)
       ) {
         // fk() takes no defaultRandom()/defaultNow(); the key matters more than the default.
-        const reason = `default ${sourceColumn.column.defaultExpr} is not supported on a foreign key column`;
-        const skip = makeSkip(
-          plan.table.name,
-          sourceColumn.column.name,
-          reason,
+        const defaultExpr = sourceColumn.column.defaultExpr as string;
+        omit(
+          {
+            kind: "default",
+            table: plan.table.name,
+            column: sourceColumn.column.name,
+            defaultExpr,
+            reason: `default ${defaultExpr} is not supported on a foreign key column`,
+            failsInserts: sourceColumn.column.notNull,
+          },
+          sourceColumn.comments,
         );
-        skipped.push(skip);
-        unexpressed.push({
-          kind: "default",
-          name: plan.table.name,
-          member: sourceColumn.column.name,
-          reason,
-        });
-        sourceColumn.comments.push(`// appkit: skipped ${skip.reason}`);
         delete sourceColumn.defaultCall;
-        if (sourceColumn.column.notNull) {
-          warnings.push(
-            `${qualified(plan.table.name, sourceColumn.column.name)}: its default ${sourceColumn.column.defaultExpr} is not in schema.ts, so ${client(plan.table.name)} requires a value for it on insert.`,
-          );
-        }
       }
       for (const [flag, what] of [
         [foreignKey.deferrable, "DEFERRABLE"],
@@ -836,7 +886,7 @@ export function renderSchemaSource(
     ),
   );
   for (const name of undeclaredEnums) {
-    unexpressed.push({
+    omit({
       kind: "type",
       name,
       reason: "only what schema.ts leaves out uses it",
