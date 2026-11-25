@@ -369,8 +369,9 @@ and `clean --delete-branch` take none. A second `appkit db` command that needs t
 says who holds it. `init` holds one lock for its whole run, so no other command that takes the lock runs between its
 clean and its migrate. `init --schema none` changes no migration history and takes no lock.
 
-A command killed by a signal leaves the file behind. The next command fails the same way and says whether the
-holder's pid still runs on this machine. AppKit never takes over or deletes a lock it does not hold. Once no
+A command releases the lock when it finishes, when it exits, and on SIGINT or SIGTERM. Only a kill the process cannot
+catch, such as SIGKILL, leaves the file behind. The next command fails the same way and says whether the holder's pid
+still runs on this machine. AppKit never takes over or deletes a lock it does not hold. Once no
 `appkit db` command runs in the checkout, the developer deletes the file and reruns the command. The template's
 `.gitignore` lists the file.
 
@@ -747,6 +748,9 @@ the `applied`, `adopted`, `edited` and `unknown` (the `ahead` rows) counts, `loc
   is missing, init writes its own keys and the profile or host it authenticated with. It never copies `.env.example`,
   whose `DATABRICKS_HOST` is a placeholder. It replaces a `PGSSLMODE` of `prefer` or `disable` with `require` and says
   so, because `prefer` does not verify the server's certificate.
+- **`appkit db` connects only with TLS that verifies.** Of the modes the Lakebase pool takes, only `PGSSLMODE=require`
+  verifies the server's certificate, and an unset `PGSSLMODE` means `require`. The CLI refuses `prefer`, `disable` and
+  `allow`, says why, and does not connect.
 - **Session branches are bound to a user.** With the user hash in the name, a copied `.env` fails the guard for
   everyone but its creator.
 
