@@ -74,6 +74,7 @@ describe("ErrorPage as the default route error element", () => {
     expect(await screen.findByText("Page not found")).toBeTruthy();
     expect(screen.queryByText(/Unexpected Application Error/)).toBeNull();
     expect(screen.queryByText("Something went wrong")).toBeNull();
+    expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy();
     // Development: the status and React Router's message.
     expect(screen.getByText(/404 Not Found/).textContent).toMatch(
       /No route matches URL "\/no-such-page"/,
@@ -123,4 +124,17 @@ describe("ErrorPage", () => {
     expect(screen.getByText("Something went wrong")).toBeTruthy();
     expect(screen.getByText("plain string")).toBeTruthy();
   });
+
+  // String() throws for it: the page must not crash into an outer boundary.
+  test.each([true, false])(
+    "renders a thrown value without toString (DEV: %s)",
+    (dev) => {
+      vi.stubEnv("DEV", dev);
+      render(<ErrorPage error={Object.create(null)} />);
+      expect(screen.getByText("Something went wrong")).toBeTruthy();
+      expect(document.querySelector("pre")?.textContent ?? null).toBe(
+        dev ? "[object Object]" : null,
+      );
+    },
+  );
 });

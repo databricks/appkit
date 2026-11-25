@@ -38,16 +38,21 @@ function isRouteErrorResponse(error: unknown): error is RouteErrorResponse {
 }
 
 function details(error: unknown): string {
-  if (isRouteErrorResponse(error)) {
-    const data = typeof error.data === "string" ? `\n${error.data}` : "";
-    return `${error.status} ${error.statusText}${data}`;
+  try {
+    if (isRouteErrorResponse(error)) {
+      const data = typeof error.data === "string" ? `\n${error.data}` : "";
+      return `${error.status} ${error.statusText}${data}`;
+    }
+    if (error instanceof Error) {
+      const { message, stack = "" } = error;
+      // V8's stack starts with the message; Firefox's and Safari's don't.
+      return stack.includes(message) ? stack : `${message}\n${stack}`;
+    }
+    return String(error);
+  } catch {
+    // String() throws for a value without toString (Object.create(null)): the page must still render.
+    return Object.prototype.toString.call(error);
   }
-  if (error instanceof Error) {
-    const { message, stack = "" } = error;
-    // V8's stack starts with the message; Firefox's and Safari's don't.
-    return stack.includes(message) ? stack : `${message}\n${stack}`;
-  }
-  return String(error);
 }
 
 /**
@@ -82,9 +87,7 @@ export function ErrorPage({ error }: ErrorPageProps) {
         </pre>
       )}
       <EmptyContent className="flex-row justify-center">
-        {!notFound && (
-          <Button onClick={() => window.location.reload()}>Reload</Button>
-        )}
+        <Button onClick={() => window.location.reload()}>Reload</Button>
         <Button variant="outline" asChild>
           <a href="/">Back to home</a>
         </Button>
