@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
 
 import type { Plugin, ViteDevServer } from "vite";
@@ -155,30 +154,25 @@ export function pageState(page: {
 }
 
 /**
- * Node's resolution from the design page (the app's own copy): this plugin's
- * folder may see a hoisted older version, and Vite returns its nameless pre-bundle.
+ * The app's own copy: the nearest `node_modules/react-router` from the design
+ * page up, as Vite resolves it. Not this plugin's folder (it may see a hoisted
+ * older version), not Vite (it returns its nameless pre-bundle), and not Node's
+ * resolution (it also searches NODE_PATH, which pnpm's bin shims point at the
+ * workspace's hidden hoisted packages).
  */
 function hasReactRouter(clientRoot: string): boolean {
-  let entry: string;
-  try {
-    entry = createRequire(
-      path.join(clientRoot, "src/design/index.tsx"),
-    ).resolve("react-router");
-  } catch {
-    return false;
-  }
   for (
-    let dir = path.dirname(entry);
-    dir !== path.dirname(dir);
+    let dir = path.join(clientRoot, "src/design");
+    ;
     dir = path.dirname(dir)
   ) {
-    const pkg = path.join(dir, "package.json");
-    if (!fs.existsSync(pkg)) continue;
-    const { name, version } = JSON.parse(fs.readFileSync(pkg, "utf-8"));
-    if (name !== "react-router") continue;
-    return Number.parseInt(String(version), 10) >= 7;
+    const pkg = path.join(dir, "node_modules/react-router/package.json");
+    if (fs.existsSync(pkg)) {
+      const { version } = JSON.parse(fs.readFileSync(pkg, "utf-8"));
+      return Number.parseInt(String(version), 10) >= 7;
+    }
+    if (dir === path.dirname(dir)) return false;
   }
-  return false;
 }
 
 /** Browser code for page and app scripts: `settled()`; the includer defines `schedule()`. */
