@@ -21,6 +21,7 @@ vi.mock("@databricks/appkit/beta/database-tooling", () => ({
 }));
 
 import { dbCommand } from "./index";
+import { REWRITE } from "./output";
 
 let log: MockInstance;
 let error: MockInstance;
@@ -154,7 +155,7 @@ describe("appkit db verify", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  test("a migration merged out of order is named, with how to regenerate it after the recorded ones", async () => {
+  test("a migration merged out of order is named, with the recovery that rewrites the branch's history on main's, never deleting a migration", async () => {
     runVerify.mockResolvedValue({
       ...local,
       strandedMigrations: ["0001_parallel"],
@@ -166,10 +167,16 @@ describe("appkit db verify", () => {
     expect(output(log)).toContain(
       "Never runs: 0001_parallel: it is older than a migration the branch already ran (merged out of order), and the deployed app refuses to start on that history",
     );
-    expect(output(error)).toContain(
-      "Delete its .sql file, snapshot and journal entry, then run `appkit db migrate` to generate the migration again from schema.ts, after the recorded ones.",
+    const printed = output(error);
+    expect(printed).toContain(
+      `dev-alice-3f9a2c does not match config/database/schema.ts and the committed migrations. ${REWRITE}`,
     );
-    expect(output(error)).not.toContain("`appkit db clean`");
+    expect(REWRITE).toContain("Save any SQL you wrote by hand");
+    expect(REWRITE).toContain("Merge main");
+    expect(REWRITE).toContain("config/database/migrations");
+    expect(REWRITE).toContain("`appkit db clean` and `appkit db migrate`");
+    expect(REWRITE).toContain("Add the saved SQL back");
+    expect(printed).not.toMatch(/delete/i);
     expect(process.exitCode).toBe(1);
   });
 
