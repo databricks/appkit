@@ -258,9 +258,7 @@ export class LakebaseApi {
 
   /** A branch that is already gone counts as deleted. */
   async deleteBranch(name: string): Promise<void> {
-    await this.deleteResource(`delete branch ${name}`, {
-      path: `${API}/${name}`,
-    });
+    await this.deleteResource(`delete branch ${name}`, name);
   }
 
   getDatabase(name: string): Promise<LakebaseDatabase | null> {
@@ -301,24 +299,30 @@ export class LakebaseApi {
     role: string,
     options: { reassignOwnedTo: string },
   ): Promise<void> {
-    await this.deleteResource(`delete role ${role}`, {
-      path: `${API}/${role}`,
-      query: { reassign_owned_to: options.reassignOwnedTo },
+    await this.deleteResource(`delete role ${role}`, role, {
+      reassign_owned_to: options.reassignOwnedTo,
     });
   }
 
+  /**
+   * A NOT_FOUND counts as deleted only when the resource is gone: it can name
+   * another resource the delete needs, such as a missing reassign target.
+   */
   private async deleteResource(
     operation: string,
-    request: { path: string; query?: ToolingRequest["query"] },
+    name: string,
+    query?: ToolingRequest["query"],
   ): Promise<void> {
     try {
       const op = await this.call<Operation>(operation, {
-        ...request,
+        path: `${API}/${name}`,
         method: "DELETE",
+        ...(query ? { query } : {}),
       });
       await this.wait<unknown>(operation, op);
     } catch (error) {
       if (!isNotFound(error)) throw error;
+      if (await this.getOrNull(`get ${name}`, name)) throw error;
     }
   }
 
