@@ -231,6 +231,34 @@ describe("sanitizeClientConfig", () => {
     expect(result.token).toBe("[redacted by appkit]");
   });
 
+  test("keeps published endpoint names and HTTP methods but still redacts a secret in the same config", () => {
+    process.env.DATABRICKS_APP_NAME = "notes";
+    process.env.SYNC_METHOD = "POST";
+    process.env.MY_API_KEY = "sk-live-4242";
+
+    const result = sanitizeClientConfig(
+      "database",
+      {
+        operations: { "notes.get": "GET", "notes.create": "POST" },
+        apiKey: "sk-live-4242",
+        label: "notes.unpublished",
+      },
+      [
+        "notes.get",
+        "/api/database/operations/notes.get",
+        "notes.create",
+        "/api/database/operations/notes.create",
+      ],
+    );
+
+    expect(result.operations).toEqual({
+      "notes.get": "GET",
+      "notes.create": "POST",
+    });
+    expect(result.apiKey).toBe("[redacted by appkit]");
+    expect(result.label).toBe("[redacted by appkit]");
+  });
+
   test("redacts env-derived object keys", () => {
     process.env.DATABRICKS_TOKEN = "secret-token";
 

@@ -41,8 +41,9 @@ NNNN_introspect, once the branch has applied every committed migration. The
 migration is recorded as applied, so introspect runs only on your dev or session
 branch; \`appkit db init\` creates one, forked from the branch the default
 databricks.yml target binds, else the project's default branch. The deployed
-app adopts 0000_baseline on start when its tables already exist. If anything
-fails, schema.ts, database.d.ts and the migrations are left as they were.
+app adopts 0000_baseline on start when its tables already exist. It also
+regenerates database.d.ts and database-operations.d.ts. If anything fails,
+schema.ts, the generated types and the migrations are left as they were.
 
 Examples:
   $ appkit db introspect

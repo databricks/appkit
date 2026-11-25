@@ -200,7 +200,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
   // the deploy wiring so it doesn't advise fixing what's already correct.
   const configCtx: ConfigCheckContext = {
     envFile: options.envFile ?? DEFAULT_ENV_FILE,
-    wiredEnvVars: new Set(bundle.envToBinding.keys()),
+    wiredEnvVars: bundle.wiredEnvVars,
   };
 
   const setup = checkSetup(cwd, options);

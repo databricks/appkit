@@ -8,13 +8,35 @@ import {
   NewFolderInput,
 } from '@databricks/appkit-ui/react';
 import { FolderPlus, Loader2, Upload } from 'lucide-react';
+import { fetchJson, fetchOrThrow } from '../../lib/fetch-or-throw';
 import {
   type RefObject,
-  useCallback,
   useEffect,
+  useEffectEvent,
   useRef,
   useState,
 } from 'react';
+import { z } from 'zod';
+
+const VolumeListSchema = z.object({ volumes: z.array(z.string()) });
+
+// Leaves out `last_modified`, which DirectoryList doesn't read: the files plugin sends epoch
+// milliseconds, but AppKit UI's DirectoryEntry declared a string before it was fixed.
+const DirectoryEntrySchema: z.ZodType<DirectoryEntry> = z.object({
+  name: z.string().optional(),
+  path: z.string().optional(),
+  is_directory: z.boolean().optional(),
+  file_size: z.number().optional(),
+});
+
+const FilePreviewSchema: z.ZodType<FilePreview> = z.object({
+  contentLength: z.number().or(z.undefined()),
+  contentType: z.string().or(z.undefined()),
+  lastModified: z.string().or(z.undefined()),
+  textPreview: z.string().nullable(),
+  isText: z.boolean(),
+  isImage: z.boolean(),
+});
 
 function useAbortController(): RefObject<AbortController | null> {
   const ref = useRef<AbortController | null>(null);
@@ -26,6 +48,9 @@ function nextSignal(ref: RefObject<AbortController | null>): AbortSignal {
   ref.current = new AbortController();
   return ref.current.signal;
 }
+
+const isAbort = (err: unknown) =>
+  err instanceof DOMException && err.name === 'AbortError';
 
 export function FilesPage() {
   const [volumes, setVolumes] = useState<string[]>([]);
@@ -51,118 +76,132 @@ export function FilesPage() {
   const normalize = (p: string) => p.replace(/\/+$/, '');
   const isAtRoot = !currentPath;
 
-  const apiUrl = useCallback(
-    (action: string, params?: Record<string, string>) => {
-      const base = `/api/files/${volumeKey}/${action}`;
-      if (!params) return base;
-      const qs = new URLSearchParams(params).toString();
-      return `${base}?${qs}`;
-    },
-    [volumeKey],
-  );
+  const apiUrl = (action: string, params?: Record<string, string>) => {
+    const base = `/api/files/${volumeKey}/${action}`;
+    if (!params) return base;
+    const qs = new URLSearchParams(params).toString();
+    return `${base}?${qs}`;
+  };
 
-  const loadDirectory = useCallback(
-    async (path?: string) => {
-      if (!volumeKey) return;
-      setLoading(true);
-      setError(null);
-      setSelectedFile(null);
-      setPreview(null);
+  const loadDirectory = async (path: string) => {
+    if (!volumeKey) return;
+    setLoading(true);
+    setError(null);
+    setSelectedFile(null);
+    setPreview(null);
+    const url = path ? apiUrl('list', { path }) : apiUrl('list');
 
-      try {
-        const signal = nextSignal(listAbort);
-        const url = path ? apiUrl('list', { path }) : apiUrl('list');
-        const response = await fetch(url, { signal });
-
-        if (!response.ok) {
-          const data = await response.json().catch(() => ({}));
-          throw new Error(
-            data.error ?? `HTTP ${response.status}: ${response.statusText}`,
-          );
-        }
-
-        const data: DirectoryEntry[] = await response.json();
-        data.sort((a, b) => {
-          if (a.is_directory && !b.is_directory) return -1;
-          if (!a.is_directory && b.is_directory) return 1;
-          return (a.name ?? '').localeCompare(b.name ?? '');
-        });
-        setEntries(data);
-        setCurrentPath(path ?? '');
-      } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') return;
+    try {
+      const signal = nextSignal(listAbort);
+      const data = await fetchJson(
+        url,
+        { signal },
+        z.array(DirectoryEntrySchema),
+        (res) => `HTTP ${res.status}: ${res.statusText}`,
+      );
+      data.sort((a, b) => {
+        if (a.is_directory && !b.is_directory) return -1;
+        if (!a.is_directory && b.is_directory) return 1;
+        return (a.name ?? '').localeCompare(b.name ?? '');
+      });
+      setEntries(data);
+      setCurrentPath(path);
+    } catch (err) {
+      if (!isAbort(err)) {
         setError(err instanceof Error ? err.message : String(err));
         setEntries([]);
-      } finally {
-        setLoading(false);
       }
-    },
-    [volumeKey, apiUrl, listAbort],
-  );
+    }
+    setLoading(false);
+  };
 
-  const loadPreview = useCallback(
-    async (filePath: string) => {
-      setPreviewLoading(true);
-      setPreview(null);
+  const loadPreview = async (filePath: string) => {
+    setPreviewLoading(true);
+    setPreview(null);
 
-      try {
-        const signal = nextSignal(previewAbort);
-        const response = await fetch(apiUrl('preview', { path: filePath }), {
-          signal,
-        });
+    try {
+      const signal = nextSignal(previewAbort);
+      setPreview(
+        await fetchJson(
+          apiUrl('preview', { path: filePath }),
+          { signal },
+          FilePreviewSchema,
+          (res) => `HTTP ${res.status}`,
+        ),
+      );
+    } catch (err) {
+      if (!isAbort(err)) setPreview(null);
+    }
+    setPreviewLoading(false);
+  };
 
-        if (!response.ok) {
-          const data = await response.json().catch(() => ({}));
-          throw new Error(data.error ?? `HTTP ${response.status}`);
+  const loadVolumes = () => {
+    setError(null);
+    return fetchJson(
+      '/api/files/volumes',
+      undefined,
+      VolumeListSchema,
+      (res) => `HTTP ${res.status}: ${res.statusText}`,
+    )
+      .then(({ volumes: list }) => {
+        setVolumes(list);
+        if (volumeKey && list.includes(volumeKey)) return volumeKey;
+        const first = list[0];
+        if (first) {
+          setVolumeKey(first);
+          localStorage.setItem('appkit:files:volumeKey', first);
         }
+        return first;
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : String(err));
+        return undefined;
+      });
+  };
 
-        const data = await response.json();
-        setPreview(data);
-      } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') return;
-        setPreview(null);
-      } finally {
-        setPreviewLoading(false);
-      }
-    },
-    [apiUrl, previewAbort],
-  );
+  // Until the volume list loads, the saved volume may no longer exist, so check
+  // it again first. A new volume loads its root through the effect below.
+  const retry = () => {
+    if (volumes.length) {
+      void loadDirectory(currentPath);
+      return;
+    }
+    void loadVolumes().then((key) => {
+      if (key === volumeKey) void loadDirectory(currentPath);
+    });
+  };
+
+  const loadVolumesForKey = useEffectEvent(() => {
+    void loadVolumes();
+  });
 
   useEffect(() => {
-    fetch('/api/files/volumes')
-      .then((res) => res.json())
-      .then((data: { volumes: string[] }) => {
-        const list = data.volumes ?? [];
-        setVolumes(list);
-        if (!volumeKey || !list.includes(volumeKey)) {
-          const first = list[0];
-          if (first) {
-            setVolumeKey(first);
-            localStorage.setItem('appkit:files:volumeKey', first);
-          }
-        }
-      })
-      .catch(() => {});
+    loadVolumesForKey();
   }, [volumeKey]);
 
-  useEffect(() => {
-    if (volumeKey) {
-      loadDirectory();
-    }
-  }, [volumeKey, loadDirectory]);
+  // An effect event, so the load reruns only when the volume changes, whether
+  // or not the React Compiler memoizes this component.
+  const loadRootDirectory = useEffectEvent(() => {
+    void loadDirectory('');
+  });
 
-  const resolveEntryPath = (entry: DirectoryEntry) => {
-    const name = entry.name ?? '';
-    return currentPath ? `${currentPath}/${name}` : name;
-  };
+  useEffect(() => {
+    if (volumeKey) loadRootDirectory();
+  }, [volumeKey]);
+
+  const childPath = (name: string) =>
+    currentPath ? `${currentPath}/${name}` : name;
+
+  const resolveEntryPath = (entry: DirectoryEntry) =>
+    childPath(entry.name ?? '');
 
   const handleEntryClick = (entry: DirectoryEntry) => {
     const entryPath = resolveEntryPath(entry);
     if (entry.is_directory) {
-      loadDirectory(entryPath);
+      void loadDirectory(entryPath);
     } else {
       setSelectedFile(entryPath);
-      loadPreview(entryPath);
+      void loadPreview(entryPath);
     }
   };
 
@@ -171,7 +210,7 @@ export function FilesPage() {
     const segments = currentPath.split('/').filter(Boolean);
     segments.pop();
     const parentPath = segments.join('/');
-    loadDirectory(parentPath || undefined);
+    void loadDirectory(parentPath);
   };
 
   const allSegments = normalize(currentPath).split('/').filter(Boolean);
@@ -179,7 +218,7 @@ export function FilesPage() {
   const navigateToBreadcrumb = (index: number) => {
     const targetSegments = allSegments.slice(0, index + 1);
     const targetPath = targetSegments.join('/');
-    loadDirectory(targetPath);
+    void loadDirectory(targetPath);
   };
 
   const MAX_UPLOAD_SIZE = 5 * 1024 * 1024 * 1024; // 5 GB
@@ -198,27 +237,18 @@ export function FilesPage() {
 
     setUploading(true);
     try {
-      const uploadPath = currentPath
-        ? `${currentPath}/${file.name}`
-        : file.name;
-      const response = await fetch(apiUrl('upload', { path: uploadPath }), {
-        method: 'POST',
-        body: file,
-      });
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error ?? `Upload failed (${response.status})`);
-      }
-
-      await loadDirectory(currentPath || undefined);
+      await fetchOrThrow(
+        apiUrl('upload', { path: childPath(file.name) }),
+        { method: 'POST', body: file },
+        (res) => `Upload failed (${res.status})`,
+      );
+      await loadDirectory(currentPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+    }
+    setUploading(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
 
@@ -230,24 +260,18 @@ export function FilesPage() {
 
     setDeleting(true);
     try {
-      const response = await fetch(
+      await fetchOrThrow(
         `/api/files/${volumeKey}?path=${encodeURIComponent(selectedFile)}`,
         { method: 'DELETE' },
+        (res) => `Delete failed (${res.status})`,
       );
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error ?? `Delete failed (${response.status})`);
-      }
-
       setSelectedFile(null);
       setPreview(null);
-      await loadDirectory(currentPath || undefined);
+      await loadDirectory(currentPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setDeleting(false);
     }
+    setDeleting(false);
   };
 
   const handleCreateDirectory = async () => {
@@ -256,28 +280,22 @@ export function FilesPage() {
 
     setCreatingDir(true);
     try {
-      const dirPath = currentPath ? `${currentPath}/${name}` : name;
-      const response = await fetch(apiUrl('mkdir'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: dirPath }),
-      });
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(
-          data.error ?? `Create directory failed (${response.status})`,
-        );
-      }
-
+      await fetchOrThrow(
+        apiUrl('mkdir'),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: childPath(name) }),
+        },
+        (res) => `Create directory failed (${res.status})`,
+      );
       setShowNewDirInput(false);
       setNewDirName('');
-      await loadDirectory(currentPath || undefined);
+      await loadDirectory(currentPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCreatingDir(false);
     }
+    setCreatingDir(false);
   };
 
   return (
@@ -315,7 +333,7 @@ export function FilesPage() {
           <FileBreadcrumb
             rootLabel={volumeKey || 'Root'}
             segments={allSegments}
-            onNavigateToRoot={() => loadDirectory()}
+            onNavigateToRoot={() => void loadDirectory('')}
             onNavigateToSegment={navigateToBreadcrumb}
           />
         </div>
@@ -333,7 +351,7 @@ export function FilesPage() {
             ref={fileInputRef}
             type="file"
             className="hidden"
-            onChange={handleUpload}
+            onChange={(e) => void handleUpload(e)}
           />
           <Button
             variant="outline"
@@ -359,7 +377,7 @@ export function FilesPage() {
           error={error}
           onEntryClick={handleEntryClick}
           onNavigateToParent={navigateToParent}
-          onRetry={() => loadDirectory(currentPath || undefined)}
+          onRetry={retry}
           isAtRoot={isAtRoot}
           selectedPath={selectedFile}
           resolveEntryPath={resolveEntryPath}
@@ -369,7 +387,7 @@ export function FilesPage() {
               <NewFolderInput
                 value={newDirName}
                 onChange={setNewDirName}
-                onCreate={handleCreateDirectory}
+                onCreate={() => void handleCreateDirectory()}
                 onCancel={() => {
                   setShowNewDirInput(false);
                   setNewDirName('');
@@ -388,7 +406,7 @@ export function FilesPage() {
           onDownload={(path) =>
             window.open(apiUrl('download', { path }), '_blank')
           }
-          onDelete={handleDelete}
+          onDelete={() => void handleDelete()}
           deleting={deleting}
           imagePreviewSrc={(p) => apiUrl('raw', { path: p })}
         />

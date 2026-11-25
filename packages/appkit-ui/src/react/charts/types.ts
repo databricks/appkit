@@ -38,6 +38,12 @@ export type ChartType =
 /** Data that can be passed to unified charts */
 export type ChartData = Table | Record<string, unknown>[];
 
+/** One row of chart data (indexable, to type plain data modules). */
+export type ChartRow = Record<string, unknown>;
+
+/** A chart's `data`: an Arrow Table, or rows (interfaces and `as const` arrays too). */
+export type ChartDataInput = Table | readonly object[];
+
 /** Formats a measure value for chart axes, tooltips, and value labels. */
 export type ChartValueFormatter = (
   value: string | number,
@@ -76,9 +82,14 @@ export interface ChartBaseProps {
    * - "diverging": Two-tone for positive/negative values
    */
   colorPalette?: ChartColorPalette;
-  /** Custom colors for series (overrides colorPalette) */
+  /**
+   * Custom colors for series (overrides colorPalette) as hex, `rgb()` or `hsl()` strings, since ECharts draws on a
+   * canvas and cannot resolve `var()` or parse `oklch()` (those draw gray); without it, series colors are the CSS
+   * variables `--chart-cat-1` to `--chart-cat-8` on `:root` (`--chart-seq-*` and `--chart-div-*` for the
+   * sequential and diverging palettes), held to the same formats.
+   */
   colors?: string[];
-  /** Chart height in pixels @default 300 */
+  /** Chart height in pixels. Defaults to filling its parent (see `chartSizeStyle`). */
   height?: number;
   /** Additional CSS classes */
   className?: string;
@@ -97,9 +108,9 @@ export interface ChartBaseProps {
   options?: Record<string, unknown>;
 
   /**
-   * Formats measure values in the chart's built-in value axes, tooltips, and
-   * value labels. `field` is the corresponding `yKey`, so one formatter can
-   * select a different format for each series.
+   * `(value: string | number, field: string) => string`. Formats measure values in the chart's built-in value
+   * axes, tooltips, and value labels. `field` is the corresponding `yKey`, so one formatter can select a different
+   * format for each series.
    *
    * For charts with multiple series on one value axis, axis ticks use the
    * first `yKey`; each tooltip uses its own series field.
@@ -187,8 +198,8 @@ export interface QueryProps extends ChartBaseProps {
 
 /** Props for direct data injection */
 export interface DataProps extends ChartBaseProps {
-  /** Arrow Table or JSON array */
-  data: ChartData;
+  /** Arrow Table or an array of row objects (interfaces and `as const` arrays too). */
+  data: ChartDataInput;
 
   // Discriminator: cannot use query props with direct data
   queryKey?: never;

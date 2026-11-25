@@ -20,7 +20,8 @@ vi.mock("../context", async (importOriginal) => ({
   withBranchPool,
 }));
 
-import { loadDefaultDatabaseSchema } from "../../../plugins/database/load-schema";
+import { DEFAULT_SCHEMA_FILE } from "../../../plugins/database/load-schema";
+import { loadDatabaseSchema } from "../../../type-generator/database";
 import { applyPendingMigrations } from "../../migrations/apply";
 import { migrationsFolder } from "../../migrations/paths";
 import { hashOf } from "../../migrations/tests/fixtures";
@@ -106,9 +107,9 @@ describe.skipIf(!url)("runInit against Postgres", () => {
     ).rows[0]?.owner;
 
   async function generate(appRoot: string) {
-    const schema = await loadDefaultDatabaseSchema(appRoot, {
-      showImportError: true,
-    });
+    const schema = await loadDatabaseSchema(
+      path.join(appRoot, DEFAULT_SCHEMA_FILE),
+    );
     await withHistoryLock(appRoot, "migrate", (lock) =>
       generateMigrationFiles(lock, { schema, interactive: false }),
     );

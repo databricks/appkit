@@ -19,7 +19,7 @@ await createApp({
 });
 ```
 
-Storage auto-selects **Lakebase Autoscaling persistent cache when healthy**, otherwise falls back to in-memory.
+Storage auto-selects **Lakebase Autoscaling persistent cache when healthy**, otherwise falls back to in-memory. When Lakebase is configured but unusable, AppKit logs a warning with the cause.
 
 The database-backed cache requires the same Lakebase environment variables as the [Lakebase plugin](./lakebase.md#environment-variables) (`PGHOST`, `PGDATABASE`, `LAKEBASE_ENDPOINT`, `PGSSLMODE`).
 

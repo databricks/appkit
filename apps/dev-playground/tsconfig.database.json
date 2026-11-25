@@ -1,0 +1,15 @@
+{
+  // Type-check the database schema, policies, operations, and their test
+  // edges against the built @databricks/appkit declarations and the generated
+  // registry. Run `pnpm build` first.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "config/database",
+    "server/database",
+    "server/testing",
+    "shared/appkit-types/database.d.ts"
+  ]
+}

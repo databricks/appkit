@@ -23,7 +23,7 @@ Menu triggered by right-clicking an element
 | Prop | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
 | `onOpenChange` | `((open: boolean) => void)` |  | - | - |
-| `dir` | `enum` |  | - | - |
+| `dir` | `"ltr" \| "rtl"` |  | - | - |
 | `modal` | `boolean` |  | - | - |
 
 
@@ -88,9 +88,9 @@ import { ContextMenuCheckboxItem } from '@databricks/appkit-ui';
 | `avoidCollisions` | `boolean` |  | - | - |
 | `collisionBoundary` | `Boundary \| Boundary[]` |  | - | - |
 | `collisionPadding` | `number \| Partial<Record<"top" \| "right" \| "bottom" \| "left", number>>` |  | - | - |
-| `sticky` | `enum` |  | - | - |
+| `sticky` | `"partial" \| "always"` |  | - | - |
 | `hideWhenDetached` | `boolean` |  | - | - |
-| `updatePositionStrategy` | `enum` |  | - | - |
+| `updatePositionStrategy` | `"always" \| "optimized"` |  | - | - |
 
 
 
@@ -141,7 +141,7 @@ import { ContextMenuGroup } from '@databricks/appkit-ui';
 | `disabled` | `boolean` |  | - | - |
 | `textValue` | `string` |  | - | - |
 | `inset` | `boolean` |  | - | - |
-| `variant` | `enum` |  | `default` | - |
+| `variant` | `"default" \| "destructive"` |  | `default` | - |
 
 
 
@@ -346,9 +346,9 @@ import { ContextMenuSub } from '@databricks/appkit-ui';
 | `avoidCollisions` | `boolean` |  | - | - |
 | `collisionBoundary` | `Boundary \| Boundary[]` |  | - | - |
 | `collisionPadding` | `number \| Partial<Record<"top" \| "right" \| "bottom" \| "left", number>>` |  | - | - |
-| `sticky` | `enum` |  | - | - |
+| `sticky` | `"partial" \| "always"` |  | - | - |
 | `hideWhenDetached` | `boolean` |  | - | - |
-| `updatePositionStrategy` | `enum` |  | - | - |
+| `updatePositionStrategy` | `"always" \| "optimized"` |  | - | - |
 
 
 

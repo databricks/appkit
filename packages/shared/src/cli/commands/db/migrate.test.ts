@@ -44,6 +44,10 @@ afterEach(() => {
 });
 
 const typesFile = path.join(process.cwd(), "shared/appkit-types/database.d.ts");
+const operationsTypesFile = path.join(
+  process.cwd(),
+  "shared/appkit-types/database-operations.d.ts",
+);
 
 describe("appkit db migrate", () => {
   test("is registered under the db group", () => {
@@ -64,6 +68,7 @@ describe("appkit db migrate", () => {
       },
       applied: ["0001_migration"],
       typesFile,
+      operationsTypesFile,
     });
 
     await dbCommand.parseAsync(["migrate"], { from: "user" });
@@ -82,11 +87,19 @@ describe("appkit db migrate", () => {
     expect(printed).toContain(
       `Generated ${path.join("shared/appkit-types/database.d.ts")}`,
     );
+    expect(printed).toContain(
+      `Generated ${path.join("shared/appkit-types/database-operations.d.ts")}`,
+    );
     expect(process.exitCode).toBeUndefined();
   });
 
   test("reports an unchanged schema and an up-to-date branch", async () => {
-    runMigrate.mockResolvedValue({ generated: null, applied: [], typesFile });
+    runMigrate.mockResolvedValue({
+      generated: null,
+      applied: [],
+      typesFile,
+      operationsTypesFile,
+    });
 
     await dbCommand.parseAsync(["migrate"], { from: "user" });
 
@@ -101,6 +114,7 @@ describe("appkit db migrate", () => {
       applied: ["0001_migration"],
       adopted: ["0000_baseline"],
       typesFile,
+      operationsTypesFile,
     });
 
     await dbCommand.parseAsync(["migrate"], { from: "user" });
@@ -126,6 +140,7 @@ describe("appkit db migrate", () => {
       breaking: [drop],
       applied: ["0002_migration"],
       typesFile,
+      operationsTypesFile,
     });
 
     await dbCommand.parseAsync(["migrate"], { from: "user" });
@@ -151,6 +166,7 @@ describe("appkit db migrate", () => {
       dataDependent: [unique],
       applied: ["0002_migration"],
       typesFile,
+      operationsTypesFile,
     });
 
     await dbCommand.parseAsync(["migrate"], { from: "user" });
@@ -168,6 +184,7 @@ describe("appkit db migrate", () => {
       applied: [],
       notApplied: "no branch configured — run appkit db init",
       typesFile,
+      operationsTypesFile,
     });
 
     await dbCommand.parseAsync(["migrate"], { from: "user" });
