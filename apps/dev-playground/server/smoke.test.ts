@@ -242,6 +242,10 @@ describe("dev-playground database operations", () => {
     const as = (token?: string): { headers: Record<string, string> } => ({
       headers: token ? { "x-forwarded-access-token": token } : {},
     });
+    // A browser marks its same-origin writes with this header.
+    const writeAs = (token: string) => ({
+      headers: { ...as(token).headers, "sec-fetch-site": "same-origin" },
+    });
     return {
       app,
       memory,
@@ -251,11 +255,11 @@ describe("dev-playground database operations", () => {
           as(token),
         ),
       post: (token: string, name: string, body: unknown) =>
-        app.post(path(name), { ...as(token), body }),
+        app.post(path(name), { ...writeAs(token), body }),
       patch: (token: string, name: string, body: unknown) =>
-        app.patch(path(name), { ...as(token), body }),
+        app.patch(path(name), { ...writeAs(token), body }),
       remove: (token: string, name: string, body: unknown) =>
-        app.delete(path(name), { ...as(token), body }),
+        app.delete(path(name), { ...writeAs(token), body }),
     };
   }
 
@@ -267,6 +271,20 @@ describe("dev-playground database operations", () => {
     const signedIn = await read(ada.token, "boards.list", {});
     expect(signedIn.status).toBe(200);
     await expect(signedIn.json()).resolves.toEqual([]);
+  });
+
+  test("creates boards whose titles share a slug", async () => {
+    const { app, memory, post } = await bootDatabase();
+    await using _app = app;
+
+    expect(
+      (await post(ada.token, "boards.create", { title: "A B" })).status,
+    ).toBe(201);
+    expect(
+      (await post(ada.token, "boards.create", { title: "A-B" })).status,
+    ).toBe(201);
+    const slugs = memory.rows("boards").map((board) => board.slug);
+    expect(new Set(slugs).size).toBe(2);
   });
 
   test("writes a note and its created event together, authored by the caller", async () => {

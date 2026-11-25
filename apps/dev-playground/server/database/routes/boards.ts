@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { defineOperation } from "@databricks/appkit/beta";
 import { z } from "zod";
 
@@ -39,14 +41,17 @@ export const createBoard = defineOperation({
     created_at: z.string(),
   }),
   authorize: signedIn,
-  execute: ({ db, input }) =>
-    db.boards.create({
-      slug:
-        input.title
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, "-")
-          .replace(/^-|-$/g, "")
-          .slice(0, 64) || "board",
+  execute: ({ db, input }) => {
+    const base =
+      input.title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 55) || "board";
+    // Titles like "A B" and "A-B" share a base, so a random suffix keeps the slug unique.
+    return db.boards.create({
+      slug: `${base}-${randomUUID().slice(0, 8)}`,
       title: input.title,
-    }),
+    });
+  },
 });
