@@ -234,6 +234,19 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.104.2](https://github.com/databricks/appkit/compare/v0.104.1...v0.104.2) (2026-11-25)
+
+### appkit
+
+* **appkit:** drop legacy execution span attributes and fix telemetry doc anchor ([#748](https://github.com/databricks/appkit/issues/748)) ([1d13834](https://github.com/databricks/appkit/commit/1d13834ce77c46856d2c8897d95aabfb9e63d009))
+
+### appkit-ui
+
+* **appkit-ui:** describe chat-mode Genie charts by their query ([#736](https://github.com/databricks/appkit/issues/736)) ([7e6f0f1](https://github.com/databricks/appkit/commit/7e6f0f1e8046942208f76bf74a06c0cf62a172ac))
+
+
 ## [0.104.1](https://github.com/databricks/appkit/compare/v0.104.0...v0.104.1) (2026-11-24)
 
 ### appkit
