@@ -54,9 +54,9 @@ describe("planStart", () => {
     );
   });
 
-  test("an interrupted rebuild without schema.ts cannot be finished by default: the message says how to continue", () => {
-    expect(() => planStart(interrupted, undefined, false)).toThrow(
-      "Restore schema.ts, then rerun `appkit db init`. `appkit db init --schema introspect` writes schema.ts from the branch and keeps the rows the fork copied.",
+  test("an interrupted rebuild without schema.ts introspects the copy, then rebuilds", () => {
+    expect(planStart(interrupted, undefined, false)).toEqual(
+      only({ kind: "introspect", rebuild: true }),
     );
   });
 

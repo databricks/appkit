@@ -1262,17 +1262,27 @@ describe("runInit — the start follows the branch's own state", () => {
     expect(tagWrites()).toEqual([]);
   });
 
-  test("an interrupted rebuild without schema.ts says how to continue instead of guessing", async () => {
+  test("an interrupted rebuild without schema.ts introspects the copy, then rebuilds it without another hand-off or tag", async () => {
     schemaOwner = USER;
     tagged = true;
+    const lakebase = existingDev();
 
-    await expect(
-      init(appOn(existingDev(), {}, { schema: false })),
-    ).rejects.toThrow(
-      "Restore schema.ts, then rerun `appkit db init`. `appkit db init --schema introspect` writes schema.ts from the branch and keeps the rows the fork copied.",
+    const { report } = await init(appOn(lakebase, {}, { schema: false }));
+
+    expect(report.start).toMatchObject({
+      kind: "introspect",
+      rebuilt: { reason: "fork-copy" },
+    });
+    expect(introspectHolding.mock.calls[0]?.[2]).toMatchObject({
+      recordAsApplied: false,
+    });
+    expect(introspectHolding.mock.invocationCallOrder[0]).toBeLessThan(
+      cleanHolding.mock.invocationCallOrder[0] ?? 0,
     );
-    expect(introspectHolding).not.toHaveBeenCalled();
-    expect(cleanHolding).not.toHaveBeenCalled();
+    expect(lakebase.calls.some((call) => call.startsWith("deleteRole"))).toBe(
+      false,
+    );
+    expect(tagWrites()).toEqual([]);
   });
 
   test("a copy without a journal is rebuilt without a tag, with a warning before the hand-off that says what to do after a stop", async () => {
