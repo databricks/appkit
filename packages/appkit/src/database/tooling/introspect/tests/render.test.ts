@@ -522,8 +522,8 @@ describe("renderSchemaSource", () => {
     ]);
   });
 
-  test("what schema.ts declares differently from the database is listed as approximated", () => {
-    const { approximated } = firstRender(
+  test("what schema.ts declares differently from the database is approximated; CHECK, EXCLUDE and indexes it cannot declare are warnings", () => {
+    const { approximated, warnings } = firstRender(
       [
         tableOf({
           name: "a",
@@ -570,11 +570,15 @@ describe("renderSchemaSource", () => {
       "app.a.n: the unique constraint is declared without DEFERRABLE",
       "app.a.at: timestamp(3) with time zone is declared without its precision",
       "app.a: a partitioned table is declared as a plain table",
-      "app.a: CHECK or EXCLUDE constraint a_n_check is not declared",
-      "app.a: indexes a_n_idx, a_m_idx are not declared",
       "app.b.a_id: the foreign key is declared without DEFERRABLE",
       "app.b.a_id: the foreign key is declared without MATCH FULL",
     ]);
+    expect(warnings).toEqual(
+      expect.arrayContaining([
+        "app.a: CHECK or EXCLUDE constraint a_n_check is not in schema.ts, so a database the migrations create will not have it.",
+        "app.a: indexes a_n_idx, a_m_idx are not in schema.ts, so a database the migrations create will not have them.",
+      ]),
+    );
   });
 
   test("a key whose sequence has the default options is exact; other bounds and CYCLE are approximated", () => {
