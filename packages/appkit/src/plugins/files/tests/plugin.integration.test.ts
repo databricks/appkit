@@ -53,6 +53,8 @@ const MOCK_AUTH_HEADERS = {
 
 /** Volume key used in all integration tests. */
 const VOL = "files";
+/** Allow-all volume for tests that need a successful upload. */
+const UPLOAD_VOL = "uploads";
 
 describe("Files Plugin Integration", () => {
   let server: Server;
@@ -62,6 +64,7 @@ describe("Files Plugin Integration", () => {
   beforeAll(async () => {
     setupDatabricksEnv({
       DATABRICKS_VOLUME_FILES: "/Volumes/catalog/schema/vol",
+      DATABRICKS_VOLUME_UPLOADS: "/Volumes/catalog/schema/uploads",
     });
     ServiceContext.reset();
 
@@ -78,7 +81,9 @@ describe("Files Plugin Integration", () => {
           port: 0,
           host: "127.0.0.1",
         }),
-        files(),
+        files({
+          volumes: { [UPLOAD_VOL]: { policy: files.policy.allowAll() } },
+        }),
       ],
     });
 
@@ -89,6 +94,7 @@ describe("Files Plugin Integration", () => {
 
   afterAll(async () => {
     delete process.env.DATABRICKS_VOLUME_FILES;
+    delete process.env.DATABRICKS_VOLUME_UPLOADS;
     serviceContextMock?.restore();
     if (server) {
       await new Promise<void>((resolve, reject) => {
@@ -117,7 +123,7 @@ describe("Files Plugin Integration", () => {
 
       expect(response.status).toBe(200);
       const data = await response.json();
-      expect(data).toEqual({ volumes: [VOL] });
+      expect(data).toEqual({ volumes: [VOL, UPLOAD_VOL] });
     });
   });
 
@@ -635,6 +641,28 @@ describe("Files Plugin Integration", () => {
       const data = JSON.parse(res.body) as { error: string; plugin: string };
       expect(data.plugin).toBe("files");
       expect(data.error).toMatch(/Policy denied/);
+    });
+  });
+
+  describe("Upload Body", () => {
+    test("POST upload with Content-Type application/json uploads the raw body", async () => {
+      let uploaded: string | undefined;
+      mockFilesApi.uploadFile.mockImplementation(async ({ contents }) => {
+        uploaded = await new Response(contents).text();
+      });
+      const body = JSON.stringify({ hello: "world" });
+
+      const response = await fetch(
+        `${baseUrl}/api/files/${UPLOAD_VOL}/upload?path=data.json`,
+        {
+          method: "POST",
+          headers: { ...MOCK_AUTH_HEADERS, "Content-Type": "application/json" },
+          body,
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(uploaded).toBe(body);
     });
   });
 

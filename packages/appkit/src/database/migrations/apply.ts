@@ -5,6 +5,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { readMigrationFiles } from "drizzle-orm/migrator";
 import type { Pool, PoolClient } from "pg";
+import { MIGRATION_HISTORY_REWRITE } from "shared";
 
 import { createLogger } from "../../logging/logger";
 import {
@@ -214,8 +215,7 @@ function strandedMessage(
   return (
     `Migration${many ? "s" : ""} ${stranded.join(", ")} ${many ? "are" : "is"} older than ${last}, which schema "${schemaName}" already recorded, ` +
     `and ${many ? "were" : "was"} never applied, so ${many ? "they" : "it"} would never run. This happens when migrations from parallel branches merge. ` +
-    `Delete ${many ? "their" : "its"} .sql file, snapshot and journal entry, generate the migration again from schema.ts, and deploy again. ` +
-    "No migration was applied."
+    `${MIGRATION_HISTORY_REWRITE} No migration was applied.`
   );
 }
 

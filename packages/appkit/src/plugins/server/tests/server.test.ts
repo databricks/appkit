@@ -415,40 +415,39 @@ describe("ServerPlugin", () => {
           getEndpoints: vi.fn().mockReturnValue({}),
           getSkipBodyParsingPaths: vi
             .fn()
-            .mockReturnValue(new Set(["/api/files/upload"])),
+            .mockReturnValue(new Set(["/api/files/:volumeKey/upload"])),
         },
       };
 
-      const plugin = new ServerPlugin({ plugins });
+      const plugin = new ServerPlugin({
+        context: createContextWithPlugins(plugins),
+      } as any);
       await plugin.start();
 
       // Get the type function passed to express.json
-      const jsonCall = vi.mocked(express.json).mock.calls[0][0] as any;
-      const typeFn = jsonCall.type;
+      const typeFn = (vi.mocked(express.json).mock.calls[0][0] as any).type;
+      const json = { "content-type": "application/json" };
 
-      // Should skip body parsing for the declared path
-      expect(typeFn({ url: "/api/files/upload", headers: {} })).toBe(false);
+      // Every URL Express routes to the declared pattern skips parsing
+      for (const url of [
+        "/api/files/files/upload",
+        "/api/files/files/upload?path=data.json",
+        "/api/files/files/upload/",
+        "/API/Files/files/Upload",
+      ]) {
+        expect(typeFn({ url, headers: json })).toBe(false);
+      }
 
-      // Should skip body parsing for declared path with query string
-      expect(typeFn({ url: "/api/files/upload?path=foo", headers: {} })).toBe(
-        false,
-      );
-
-      // Should NOT skip body parsing for other routes (no hardcoded /upload check)
-      expect(
-        typeFn({
-          url: "/api/other/upload",
-          headers: { "content-type": "application/json" },
-        }),
-      ).toBe(true);
-
-      // Should still parse JSON for normal routes
-      expect(
-        typeFn({
-          url: "/api/analytics/query",
-          headers: { "content-type": "application/json" },
-        }),
-      ).toBe(true);
+      // Other routes still parse JSON; `:volumeKey` matches exactly one segment
+      for (const url of [
+        "/api/files/files/mkdir",
+        "/api/files/a/b/upload",
+        "/api/files//upload",
+        "/api/other/upload",
+        "/api/analytics/query",
+      ]) {
+        expect(typeFn({ url, headers: json })).toBe(true);
+      }
     });
 
     test("extendRoutes registers plugin routes correctly", async () => {

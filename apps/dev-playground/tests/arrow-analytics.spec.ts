@@ -43,23 +43,25 @@ test.describe("Arrow Analytics", () => {
 
     const barCharts = page.locator('[data-testid="bar-chart-apps_list"]');
     expect(await barCharts.count()).toBe(3);
-    await expect(barCharts.first().locator("canvas")).toBeVisible();
+    await expect(barCharts.first().locator("canvas").first()).toBeVisible();
 
     const lineCharts = page.locator('[data-testid="line-chart-spend_data"]');
     expect(await lineCharts.count()).toBe(3);
-    await expect(lineCharts.first().locator("canvas")).toBeVisible();
+    await expect(lineCharts.first().locator("canvas").first()).toBeVisible();
 
     const donutCharts = page.locator(
       '[data-testid="donut-chart-top_contributors"]',
     );
     expect(await donutCharts.count()).toBe(2);
-    await expect(donutCharts.first().locator("canvas")).toBeVisible();
+    await expect(donutCharts.first().locator("canvas").first()).toBeVisible();
 
+    // ECharts may draw a chart into several stacked <canvas> layers (the
+    // heatmap uses three since 6.1), so check the first layer.
     const heatmapCharts = page.locator(
       '[data-testid="heatmap-chart-app_activity_heatmap"]',
     );
     expect(await heatmapCharts.count()).toBe(2);
-    await expect(heatmapCharts.first().locator("canvas")).toBeVisible();
+    await expect(heatmapCharts.first().locator("canvas").first()).toBeVisible();
   });
 
   test("chart tooltip appears on hover with mock app data", async ({
@@ -71,7 +73,8 @@ test.describe("Arrow Analytics", () => {
     const barChart = page
       .locator('[data-testid="bar-chart-apps_list"]')
       .first()
-      .locator("canvas");
+      .locator("canvas")
+      .first();
     await expect(barChart).toBeVisible();
 
     const box = await barChart.boundingBox();

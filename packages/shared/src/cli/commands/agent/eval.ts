@@ -107,6 +107,31 @@ function parseHeaders(values: string[]): Record<string, string> {
 }
 
 /**
+ * Databricks Apps sit behind an OAuth proxy that 401s without a bearer, so send
+ * the resolved workspace token to a deployed app. Scoped to https
+ * `*.databricksapps.com` so the token never leaks to an arbitrary URL; an
+ * explicit `Authorization` header (`--header`) always wins.
+ */
+export function withAppAuth(
+  baseUrl: string,
+  headers: Record<string, string> | undefined,
+  token: string | undefined,
+): Record<string, string> | undefined {
+  if (!token || !URL.canParse(baseUrl)) return headers;
+  const { protocol, hostname } = new URL(baseUrl);
+  if (protocol !== "https:" || !hostname.endsWith(".databricksapps.com")) {
+    return headers;
+  }
+  if (
+    Object.keys(headers ?? {}).some((k) => k.toLowerCase() === "authorization")
+  ) {
+    return headers;
+  }
+  // shortcut: token is minted once per run (~1h for U2M), refresh if long runs start 401ing.
+  return { ...headers, Authorization: `Bearer ${token}` };
+}
+
+/**
  * Parse `--min-pass-rate`: a finite number in `[0, 1]`, or `undefined` when
  * unset. Throws on blank, out-of-range, or non-numeric input so a bad gate
  * value fails fast instead of silently disabling or inverting the CI gate.
@@ -414,7 +439,11 @@ async function runAgentEval(
       filter,
       tags: opts.tag,
       strict: opts.strict,
-      headers: opts.header ? parseHeaders(opts.header) : undefined,
+      headers: withAppAuth(
+        baseUrl,
+        opts.header ? parseHeaders(opts.header) : undefined,
+        auth.token,
+      ),
       concurrency,
       mlflow: resolveMlflow(opts, auth),
       judge: resolveJudge(opts, auth),
@@ -523,7 +552,7 @@ export const agentEvalCommand = new Command("eval")
   )
   .option(
     "--profile <name>",
-    "Databricks CLI profile to authenticate with via OAuth (default: DATABRICKS_CONFIG_PROFILE)",
+    "Databricks CLI profile to authenticate with via OAuth; the token is also sent to a deployed *.databricksapps.com --url (default: DATABRICKS_CONFIG_PROFILE)",
   )
   .option(
     "--databricks-host <host>",

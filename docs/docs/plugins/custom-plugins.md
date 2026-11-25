@@ -48,11 +48,11 @@ Author the manifest as JSON, import it, and attach it to a [`Plugin`](../api/app
 
 ```typescript
 // my-plugin/index.ts
-import { Plugin, toPlugin, type PluginManifest } from "@databricks/appkit";
+import { defineManifest, Plugin, toPlugin } from "@databricks/appkit";
 import manifest from "./manifest.json";
 
 class MyPlugin extends Plugin {
-  static manifest = manifest as PluginManifest<"my-plugin">;
+  static manifest = defineManifest<"my-plugin">(manifest);
 
   async setup() {
     // Initialize your plugin
@@ -139,7 +139,7 @@ This pattern allows:
 - **Shared services**:
   - **Cache management**: Access the cache service via `this.cache`. See [`CacheConfig`](../api/appkit/Interface.CacheConfig.md) for configuration.
   - **Telemetry**: Instrument your plugin with traces and metrics via `this.telemetry`. See [`ITelemetry`](../api/appkit/Interface.ITelemetry.md).
-- **Execution interceptors**: Use `execute()` and `executeStream()` with [`StreamExecutionSettings`](../api/appkit/Interface.StreamExecutionSettings.md) for automatic caching, retry, timeout, and [telemetry span attributes](./execution-context.md#telemetry-span-attributes) (`execution.context`, `caller.id`)
+- **Execution interceptors**: Use `execute()` and `executeStream()` with [`StreamExecutionSettings`](../api/appkit/Interface.StreamExecutionSettings.md) for automatic caching, retry, timeout, and [telemetry span attributes](./execution-context.md#credential-expiration-and-telemetry) (`appkit.execution.principal`, `appkit.execution.principal_id`)
 
 **Consuming your plugin programmatically**
 

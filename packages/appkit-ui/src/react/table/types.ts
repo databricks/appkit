@@ -13,7 +13,8 @@ export interface TableWrapperProps<TRaw = any, TProcessed = any> {
   /**
    * Optional function to transform raw data before creating table.
    * A new function reference re-runs it and resets the table to the first page,
-   * so define it outside the component or wrap it in `useCallback`.
+   * so keep it stable: define it outside the component, or rely on the React Compiler
+   * (enabled in the AppKit template); without the compiler, wrap it in `useCallback`.
    */
   transformer?: (data: TRaw[]) => TProcessed[];
   /** Render function that receives the TanStack Table instance */
@@ -45,7 +46,8 @@ export interface DataTableProps {
   /**
    * Optional function to transform data before creating table.
    * A new function reference re-runs it and resets the table to the first page,
-   * so define it outside the component or wrap it in `useCallback`.
+   * so keep it stable: define it outside the component, or rely on the React Compiler
+   * (enabled in the AppKit template); without the compiler, wrap it in `useCallback`.
    */
   transform?: (data: any[]) => any[];
   /** Optional labels for the DataTable component */

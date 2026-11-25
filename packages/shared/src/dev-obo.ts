@@ -17,14 +17,27 @@ export interface DevOboIdentity {
   email?: string;
 }
 
+/** A SCIM `Me` document names a service principal by schema or application id. */
+export function isServicePrincipalUser(user: unknown): boolean {
+  if (typeof user !== "object" || user === null) return false;
+  const { applicationId, schemas } = user as Record<string, unknown>;
+  return (
+    Boolean(applicationId) ||
+    (Array.isArray(schemas) &&
+      schemas.some(
+        (schema) =>
+          typeof schema === "string" && schema.endsWith(":ServicePrincipal"),
+      ))
+  );
+}
+
 function identityFromUser(token: string, userOutput: string): DevOboIdentity {
   const user = JSON.parse(userOutput);
   if (
     !token.trim() ||
     typeof user.id !== "string" ||
     !user.id.trim() ||
-    user.applicationId ||
-    user.schemas?.some((schema: string) => schema.endsWith(":ServicePrincipal"))
+    isServicePrincipalUser(user)
   )
     throw new Error();
   return {

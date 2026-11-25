@@ -16,6 +16,7 @@ import {
 import type { ResourceRequirementRow } from "./requirements";
 import {
   composeResourceId,
+  DEFAULT_PARENTS,
   isFlatListable,
   isParentContext,
   listParentContextStep,
@@ -36,6 +37,7 @@ export interface EnvSyncOptions {
 
 /** Sentinel select value meaning "let me type the id myself". */
 const MANUAL = "__manual__";
+const BROWSE = "__browse__";
 
 /**
  * Max resources shown in a picker select. Real workspaces can have thousands
@@ -46,7 +48,7 @@ const MANUAL = "__manual__";
 const PICKER_LIMIT = 25;
 
 /** Reads a `.env`-style file into a map; empty when the file is absent. */
-function readEnvFile(file: string): Record<string, string> {
+export function readEnvFile(file: string): Record<string, string> {
   if (!fs.existsSync(file)) return {};
   return parseEnv(fs.readFileSync(file, "utf-8"));
 }
@@ -141,6 +143,29 @@ async function pickParentContext(
   profile: string | undefined,
 ): Promise<string | undefined> {
   const depth = parentContextDepth(need.resourceType);
+  const defaults = DEFAULT_PARENTS[need.resourceType];
+  if (defaults) {
+    // Open on the default parents; an empty listing falls through to the walk.
+    const step = listParentContextStep(
+      need.resourceType,
+      defaults.length,
+      defaults,
+      profile,
+    );
+    if (step && step.choices.length > 0) {
+      const picked = await selectFrom(
+        `${need.env} — pick a ${step.key} in ${defaults.join(".")}`,
+        [
+          ...capChoices(step.choices, step.key),
+          { value: BROWSE, label: "Browse other catalogs..." },
+        ],
+      );
+      if (picked === null || picked === MANUAL) return undefined;
+      if (picked !== BROWSE) {
+        return composeResourceId(need.resourceType, [...defaults, picked]);
+      }
+    }
+  }
   const picks: string[] = [];
   for (let i = 0; i < depth; i++) {
     const step = listParentContextStep(need.resourceType, i, picks, profile);

@@ -773,12 +773,15 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(mocks.startWarehouse).toHaveBeenCalledWith(
       expect.anything(),
       "wh-1",
+      // Bounded like the status check, so a start that never answers can't hang.
+      { timeoutMs: 30_000 },
     );
     expect(mocks.waitUntilRunning).toHaveBeenCalledWith(
       expect.anything(),
       "wh-1",
       expect.objectContaining({
-        maxMs: 300_000,
+        // The default 5-min budget, minus what the run already spent.
+        maxMs: expect.closeTo(300_000, -4),
         treatStoppedAsTransient: true,
       }),
     );
@@ -868,7 +871,7 @@ describe("generateFromEntryPoint — metric-view emission", () => {
     expect(mocks.waitUntilRunning).toHaveBeenCalledWith(
       expect.anything(),
       "wh-1",
-      expect.objectContaining({ maxMs: 300_000 }),
+      expect.objectContaining({ maxMs: expect.closeTo(300_000, -4) }),
     );
     expect(mocks.executeStatement).not.toHaveBeenCalled();
     // Degraded metric artifacts are NOT written in blocking mode.

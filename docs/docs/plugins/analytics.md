@@ -286,7 +286,7 @@ Editing `definitions.json` is picked up on the next request — no server restar
 
 ### useAnalyticsQuery
 
-React hook that subscribes to an analytics query over SSE and returns its latest result.
+React hook that subscribes to an analytics query over SSE and returns its latest result. Pass `parameters` inline: they're compared by value, so the query re-runs only when a value changes (see [Memoization](#memoization)).
 
 ```ts
 import { useAnalyticsQuery } from "@databricks/appkit-ui/react";
@@ -470,15 +470,10 @@ import { sql } from "@databricks/appkit-ui/js";
 import { Skeleton } from "@databricks/appkit-ui";
 
 function SpendTable() {
-  const params = useMemo(
-    () => ({
-      startDate: sql.date("2025-01-01"),
-      endDate: sql.date("2025-12-31"),
-    }),
-    [],
-  );
-
-  const { data, loading, error } = useAnalyticsQuery("spend_summary", params);
+  const { data, loading, error } = useAnalyticsQuery("spend_summary", {
+    startDate: sql.date("2025-01-01"),
+    endDate: sql.date("2025-12-31"),
+  });
 
   if (loading) return <Skeleton className="h-32 w-full" />;
   if (error) return <div className="text-destructive">{error}</div>;
@@ -518,16 +513,13 @@ See [Type generation](../development/type-generation.md) for automatic generatio
 
 ### Memoization
 
-**Always wrap parameters in `useMemo`** to avoid refetch loops. The hook re-executes whenever the parameters reference changes:
+Parameters don't need `useMemo`. The hook compares them by value, so a new object with the same values on every render doesn't refetch; the query re-runs only when a value changes:
 
 ```ts
-// Good
-const params = useMemo(() => ({ status: sql.string("active") }), []);
-const { data } = useAnalyticsQuery("users", params);
-
-// Bad - creates a new object every render, causing infinite refetches
-const { data } = useAnalyticsQuery("users", { status: sql.string("active") });
+const { data } = useAnalyticsQuery("users", { status: sql.string(status) });
 ```
+
+The AppKit template also runs the React Compiler, which memoizes components, and its lint config rejects hand-written `useMemo` and `useCallback`.
 
 ### useMetricView
 
@@ -693,6 +685,13 @@ function RevenueChart() {
 When multiple series share one value axis, its ticks use the first `yKey`; each tooltip uses the matching series field.
 
 The `selected` prop adds declarative emphasis only to bar, pie, and donut charts. Line, area, scatter, heatmap, and radar charts ignore it because category-selection semantics are not defined for those chart types.
+
+**Chart size.** By default a chart fills its container's height, so it fits the card or grid cell it's placed in, and is at least 160px tall when the container's height comes from its content. In a fixed-height card, give the chart's parent the remaining space (e.g. `className="flex-1 min-h-0"` on `CardContent` in a `flex flex-col` card). Pass `height` (pixels) for an exact size instead:
+
+```tsx
+<BarChart data={rows} xKey="city" yKey="trips" />              {/* fills its container */}
+<BarChart data={rows} xKey="city" yKey="trips" height={208} /> {/* exactly 208px */}
+```
 
 **[Plotly](https://plotly.com/javascript/)** — pass the numeric specifier as `tickformat` and the literal currency symbol as `tickprefix`. Keeping them separate is necessary because d3's `$` marker is locale-driven and cannot represent arbitrary symbols:
 
