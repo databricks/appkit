@@ -43,8 +43,9 @@ export class LakebaseApiError extends Error {
 
 const API = "/api/2.0/postgres";
 
-// The guard decides from these fields whether a command may write to a branch.
-// A response without them must fail, not read as "not default, not protected".
+// The guard decides from `default` and `is_protected` whether a command may
+// write to a branch. proto3 JSON omits false values, so a missing one reads as
+// false. A response without `status`, or with a non-boolean value, fails.
 const branchResponse = z.looseObject({
   name: z.string(),
   status: z.looseObject({
