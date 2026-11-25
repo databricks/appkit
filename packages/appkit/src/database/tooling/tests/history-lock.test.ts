@@ -18,13 +18,14 @@ function writeLock(root: string, contents: string): void {
 }
 
 /**
- * Run a process that takes the lock in root and waits; resolves once it holds
- * the lock, with a promise of the signal that ended it.
+ * Run a process that takes the lock in root, runs whileHeld and waits; resolves
+ * once it holds the lock, with a promise of the signal that ended it.
  */
-async function holderProcess(root: string) {
+async function holderProcess(root: string, whileHeld = "") {
   const script = `
     const { withHistoryLock } = await import(${JSON.stringify(path.resolve(import.meta.dirname, "../history-lock.ts"))});
     await withHistoryLock(${JSON.stringify(root)}, "migrate", async () => {
+      ${whileHeld}
       process.stdout.write("held\\n");
       await new Promise(() => setInterval(() => undefined, 1000));
     });`;
@@ -42,7 +43,13 @@ async function holderProcess(root: string) {
     });
     ended.then(() => reject(new Error("the holder exited before holding")));
   });
-  return { child, ended };
+  const output = (text: string) =>
+    new Promise<void>((resolve) => {
+      child.stdout.on("data", (chunk: Buffer) => {
+        if (chunk.toString().includes(text)) resolve();
+      });
+    });
+  return { child, ended, output };
 }
 
 async function failure(promise: Promise<unknown>): Promise<Error> {
@@ -174,6 +181,31 @@ describe("withHistoryLock", () => {
       expect(fs.existsSync(path.join(root, LOCK))).toBe(false);
     },
   );
+
+  test("a signal another listener handles keeps the lock while the process runs, and its exit releases it", async () => {
+    const root = tempApp();
+    const { child, ended, output } = await holderProcess(
+      root,
+      `let signals = 0;
+      process.on("SIGINT", () => {
+        signals += 1;
+        if (signals === 2) process.exit(0);
+        process.stdout.write("handled\\n");
+      });`,
+    );
+
+    const handled = output("handled");
+    child.kill("SIGINT");
+    await handled;
+
+    expect(child.exitCode).toBeNull();
+    expect(fs.existsSync(path.join(root, LOCK))).toBe(true);
+
+    child.kill("SIGINT");
+    await ended;
+    expect(child.exitCode).toBe(0);
+    expect(fs.existsSync(path.join(root, LOCK))).toBe(false);
+  });
 
   test("a signal leaves a lock another holder wrote in its place", async () => {
     const root = tempApp();
