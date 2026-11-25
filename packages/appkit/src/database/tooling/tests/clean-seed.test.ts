@@ -316,9 +316,9 @@ test.each([
     });
     writableEnvBranch.mockResolvedValue(devBranch);
 
-    const error = await run(fakeContext({ root })).catch(
-      (caught: Error) => caught,
-    );
+    const error = (await run(fakeContext({ root })).catch(
+      (caught: unknown) => caught,
+    )) as Error;
 
     expect((error.cause as Error).message).toMatch(/schema\.ts:\d+:\d+/);
   },

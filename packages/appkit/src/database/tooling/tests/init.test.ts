@@ -1262,7 +1262,7 @@ describe("runInit — schema start", () => {
       { files: { "config/database/schema.ts": "export const schema = (" } },
     );
 
-    const error = await init(ctx).catch((caught: Error) => caught);
+    const error = (await init(ctx).catch((caught: unknown) => caught)) as Error;
 
     expect((error.cause as Error).message).toMatch(/schema\.ts:\d+:\d+/);
   });
