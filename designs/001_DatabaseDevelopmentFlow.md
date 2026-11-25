@@ -228,7 +228,9 @@ runs only when `APPKIT_DB_MIGRATE_ON_START=true` and the process connects as the
 with a bound database. So the plugin migrates only when `DATABRICKS_CLIENT_ID` and `DATABRICKS_CLIENT_SECRET` are set
 and `PGUSER` is set and equals `DATABRICKS_CLIENT_ID`. An unset
 `PGUSER` does not qualify, though the pool would then connect with the client ID. When the flag is set and the process
-does not qualify, the plugin logs why and does not migrate. The template's `app.yaml.tmpl` writes the flag for apps that
+does not qualify, the plugin logs why and does not migrate. A process that qualifies also needs `LAKEBASE_ENDPOINT` set
+to the endpoint's full resource name, `projects/<p>/branches/<b>/endpoints/<e>`, because the plugin reads the branch
+from it. When it is unset or has another form, startup fails and names the variable. The template's `app.yaml.tmpl` writes the flag for apps that
 select the plugin, which `apps init` offers only after the reveal. Until then, an app that adds the plugin by hand adds
 the flag to `app.yaml` too. `.env` never carries it.
 
@@ -241,7 +243,8 @@ deploy branch. This gap closes before the reveal.
 
 A deployed app bound to a branch with the exact shape of a dev or session branch, `dev-<user>-<hash6>` or
 `session-<hash6>-<id>`, refuses to start and names the branch. Only a developer migrates those branches. A deploy
-branch named `session-store` does not have that shape, so it migrates.
+branch named `session-store` does not have that shape, so it migrates. The refusal runs inside migrate on start, so it
+covers only a start that migrates. An app without the flag, or a process that does not qualify, starts on such a branch.
 
 Rejected alternatives:
 
@@ -369,9 +372,10 @@ and `clean --delete-branch` take none. A second `appkit db` command that needs t
 says who holds it. `init` holds one lock for its whole run, so no other command that takes the lock runs between its
 clean and its migrate. `init --schema none` changes no migration history and takes no lock.
 
-A command releases the lock when it finishes, when it exits, and on SIGINT or SIGTERM. Only a kill the process cannot
-catch, such as SIGKILL, leaves the file behind. The next command fails the same way and says whether the holder's pid
-still runs on this machine. AppKit never takes over or deletes a lock it does not hold. Once no
+A command releases the lock when it finishes or exits, and on SIGINT or SIGTERM when nothing else in the process handles
+the signal. When another handler keeps the process running, the command keeps the lock until it exits. A command that
+ends any other way, such as SIGKILL, can leave the file behind. The next command fails the same way, reports the lock as
+stale, and says whether the holder's pid still runs on this machine. AppKit never takes over or deletes a lock it does not hold. Once no
 `appkit db` command runs in the checkout, the developer deletes the file and reruns the command. The template's
 `.gitignore` lists the file.
 

@@ -154,7 +154,9 @@ function refuseDropsOfUnexpressed(
 async function readPreviousSchema(root: string): Promise<Schema | null> {
   if (!fs.existsSync(path.join(root, DEFAULT_SCHEMA_FILE))) return null;
   try {
-    return await loadDatabaseSchema(path.join(root, DEFAULT_SCHEMA_FILE));
+    return await loadDatabaseSchema(path.join(root, DEFAULT_SCHEMA_FILE), {
+      showImportError: true,
+    });
   } catch (error) {
     throw new IntrospectRefusedError(
       `Refusing to introspect: ${DEFAULT_SCHEMA_FILE} does not load, so introspect cannot keep the columns it marks private. Fix it, then rerun.`,
@@ -306,7 +308,9 @@ export async function introspectHolding(
       writeFileAtomic(schemaFile, rendered.source);
       let schema: Schema;
       try {
-        schema = await loadDatabaseSchema(schemaFile);
+        schema = await loadDatabaseSchema(schemaFile, {
+          showImportError: true,
+        });
       } catch (error) {
         throw new Error(
           `The schema.ts introspect generated does not load. This is a bug in \`appkit db introspect\`; please report it with the catalog of schema "${schemaName}".`,

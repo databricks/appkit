@@ -137,7 +137,7 @@ export async function handOffAppSchema(
 
   const { owner, ownedOutside, dependencies } = found;
   const ownerName = shown(owner);
-  const where = `schema ${input.schemaName} in database ${input.database} on ${resourceId(input.branch)}`;
+  const where = `schema ${input.schemaName} in database ${shown(input.database)} on ${resourceId(input.branch)}`;
   const role = input.roles.find((r) => r.status?.postgres_role === owner);
   if (!role) {
     throw new Error(

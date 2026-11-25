@@ -81,9 +81,10 @@ function heldError(root: string, file: string): Error {
  * Run fn as the only writer of the checkout's migration history. The lock is
  * config/database/.appkit-db.lock, created exclusively; a second command in
  * the same checkout, in this process or another, fails with who holds it.
- * Released when fn settles, the process exits, or SIGINT or SIGTERM arrives.
- * A process killed otherwise leaves the file behind: the next command reports
- * it as stale, and it is deleted by hand, never taken over.
+ * Released when fn settles, the process exits, or SIGINT or SIGTERM arrives
+ * with nothing else listening for it. A process ended otherwise leaves the
+ * file behind: the next command reports it as stale, and it is deleted by
+ * hand, never taken over.
  */
 export async function withHistoryLock<T>(
   root: string,
@@ -126,11 +127,13 @@ export async function withHistoryLock<T>(
     if (readOwner(file)?.token === owner.token)
       fs.rmSync(file, { force: true });
   };
-  // A listener replaces the signal's default exit, so re-raise it once the lock
-  // is gone; when other listeners remain, ending the process is theirs.
+  // A listener replaces the signal's default exit, so when this is the only
+  // one, release and re-raise. Another listener may keep the process running,
+  // and fn with it, so keep the lock; the exit listener releases it.
   const onSignal = (signal: NodeJS.Signals) => {
+    if (process.listenerCount(signal) > 1) return;
     release();
-    if (process.listenerCount(signal) === 0) process.kill(process.pid, signal);
+    process.kill(process.pid, signal);
   };
   process.on("exit", release);
   for (const signal of RELEASE_SIGNALS) process.on(signal, onSignal);
