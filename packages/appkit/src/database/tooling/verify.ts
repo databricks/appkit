@@ -23,6 +23,7 @@ import {
   withBranchPool,
 } from "./context";
 import { resolveEnvBranch, takesWrites } from "./guard";
+import { shown } from "./introspect/render";
 import { requireSchemaFile } from "./migrate";
 import {
   FORK_COPY_TAG,
@@ -141,14 +142,16 @@ async function verifyLocal(ctx: DbContext): Promise<LocalVerifyReport> {
         await diagnoseSchema(rawOn(client), schema);
       // Only init forks a copy, onto the developer's own branch. Elsewhere,
       // e.g. production, another owner is the normal state.
-      const forkCopy = takesWrites(env.kind)
-        ? (forkCopyRefusal(
+      const refusal = takesWrites(env.kind)
+        ? forkCopyRefusal(
             branch,
             schema.$schemaName,
             await readSchemaState(client, schema.$schemaName),
             "migrate",
-          ) ?? null)
-        : null;
+          )
+        : undefined;
+      // It names the schema's owner as the catalog reports it.
+      const forkCopy = refusal ? shown(refusal) : null;
       const drift = await readMigrationDrift(client, {
         migrationsFolder: migrationsFolder(ctx.root),
         schemaName: schema.$schemaName,
@@ -222,7 +225,7 @@ async function readApp(
       return null;
     }
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Could not read app ${name}: ${message}`, {
+    throw new Error(`Could not read app ${name}: ${shown(message)}`, {
       cause: error,
     });
   }
@@ -412,7 +415,7 @@ async function readDeployedMigrations(
       const them = unknown.length === 1 ? "it" : "them";
       return {
         evidence: "unavailable",
-        reason: `the deployment has ${unknown.join(", ")}, and this checkout commits none in config/database/migrations next to databricks.yml: pull ${them}, then run verify again`,
+        reason: `the deployment has ${unknown.map(shown).join(", ")}, and this checkout commits none in config/database/migrations next to databricks.yml: pull ${them}, then run verify again`,
       };
     }
     const deployedByTag = new Map(deployed.map((entry) => [entry.tag, entry]));
@@ -457,9 +460,10 @@ async function readDeployedMigrations(
       ? { evidence: "verified" }
       : { evidence: "differs", missing, changed, lineEndings, unknown };
   } catch (error) {
+    // The message can carry the snapshot's path and tags, or an API's text.
     return {
       evidence: "unavailable",
-      reason: error instanceof Error ? error.message : String(error),
+      reason: shown(error instanceof Error ? error.message : String(error)),
     };
   }
 }
@@ -503,7 +507,7 @@ function migrationsProblems(
   if (unknown.length > 0) {
     const them = unknown.length === 1 ? "it" : "them";
     problems.push(
-      `app ${name}'s active deployment has ${unknown.join(", ")}, which this checkout does not commit: pull ${them}, then run verify again`,
+      `app ${name}'s active deployment has ${unknown.map(shown).join(", ")}, which this checkout does not commit: pull ${them}, then run verify again`,
     );
   }
   return problems;
@@ -530,19 +534,19 @@ function bindingProblems(
   if (!binding) {
     return [
       bound.length > 0
-        ? `app ${name} uses branch ${bound.map((postgres) => postgres.branch).join(", ")}, not ${branch} from ${source}: ${DEPLOY} applies ${source}`
+        ? `app ${name} uses branch ${bound.map((postgres) => shown(postgres.branch ?? "(none)")).join(", ")}, not ${branch} from ${source}: ${DEPLOY} applies ${source}`
         : `app ${name} has no postgres resource: ${DEPLOY} adds the one ${file} declares`,
     ];
   }
   const problems: string[] = [];
   if (database && binding.database !== database) {
     problems.push(
-      `app ${name} uses database ${binding.database ?? "(none)"}, not ${database} from ${source}: ${DEPLOY} applies ${source}`,
+      `app ${name} uses database ${shown(binding.database ?? "(none)")}, not ${database} from ${source}: ${DEPLOY} applies ${source}`,
     );
   }
   if (binding.permission !== POSTGRES_PERMISSION) {
     problems.push(
-      `app ${name}'s postgres resource has permission ${binding.permission ?? "(none)"}, but the app needs ${POSTGRES_PERMISSION} to create its schema: set it in ${file}, then run ${DEPLOY}`,
+      `app ${name}'s postgres resource has permission ${shown(binding.permission ?? "(none)")}, but the app needs ${POSTGRES_PERMISSION} to create its schema: set it in ${file}, then run ${DEPLOY}`,
     );
   }
   return problems;
@@ -551,7 +555,7 @@ function bindingProblems(
 /** ": <message>" for an API status message, without its final period; "" without one. */
 function detail(message: string | undefined): string {
   const text = message?.trim().replace(/\.+$/, "");
-  return text ? `: ${text}` : "";
+  return text ? `: ${shown(text)}` : "";
 }
 
 /**
@@ -585,13 +589,13 @@ function runningProblems(app: DeployedApp, name: string): string[] {
   }
   if (compute?.state && compute.state !== "ACTIVE") {
     return [
-      `app ${name}'s compute is ${compute.state.toLowerCase()}${detail(compute.message)}`,
+      `app ${name}'s compute is ${shown(compute.state.toLowerCase())}${detail(compute.message)}`,
     ];
   }
   const status = app.app_status;
   if (status?.state === "RUNNING") return [];
   return [
-    `app ${name} is ${status?.state?.toLowerCase() ?? "not running"}${detail(status?.message)}. ${LOGS} shows why; a migration that fails stops the app on start`,
+    `app ${name} is ${shown(status?.state?.toLowerCase() ?? "not running")}${detail(status?.message)}. ${LOGS} shows why; a migration that fails stops the app on start`,
   ];
 }
 
@@ -827,7 +831,7 @@ async function verifyDeploy(
   ]);
   if (roles && !roles.some((role) => role.status?.postgres_role === sp)) {
     problems.push(
-      `the app's service principal ${sp} has no Postgres role on ${branchId}: ${DEPLOY} creates it from the app's postgres resource`,
+      `the app's service principal ${shown(sp ?? "")} has no Postgres role on ${branchId}: ${DEPLOY} creates it from the app's postgres resource`,
     );
   }
   // Without an active deployment, runningProblems already says why; the

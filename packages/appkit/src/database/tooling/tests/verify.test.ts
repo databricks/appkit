@@ -345,6 +345,19 @@ describe("runVerify", () => {
     });
   });
 
+  test("the owner the catalog reports for a fork's copy is printed with control characters escaped", async () => {
+    const ctx = app(two);
+    branch({
+      columns: { notes: ["id", "body"] },
+      recorded: recordedAs(ctx, two),
+      schemaOwner: "deployed\nsp",
+    });
+
+    expect(await runVerify(ctx)).toMatchObject({
+      forkCopy: expect.stringContaining('which "deployed\\u000asp" still owns'),
+    });
+  });
+
   test("a fork's copy whose rebuild did not finish is reported as one, and its tag is not an unknown migration", async () => {
     const ctx = app(two);
     branch({
@@ -1014,6 +1027,28 @@ describe("runVerify --deployed", () => {
       ],
       ok: false,
     });
+  });
+
+  test("tags and texts from the deployed journal and the apps API are printed with control characters escaped", async () => {
+    const migrations = [{ tag: "0000_migration", when: 1000 }];
+    const { ctx } = deployedApp({
+      migrations,
+      deployedJournal: [...migrations, { tag: "0001_\u001b[2Jx", when: 2000 }],
+      app: runningApp({
+        app_status: { state: "CRASHED", message: "boom\nfake: line" },
+      }),
+    });
+
+    const problems = await deployProblems(ctx);
+    expect(problems).toContain(
+      "app my-app's active deployment has 0001_\\u001b[2Jx, which this checkout does not commit: pull it, then run verify again",
+    );
+    expect(problems).toContain(
+      "app my-app is crashed: boom\\u000afake: line. `databricks apps logs` shows why; a migration that fails stops the app on start",
+    );
+    expect(
+      Array.from(problems.join("")).some((char) => char.charCodeAt(0) < 0x20),
+    ).toBe(false);
   });
 
   test.each([
