@@ -2,6 +2,7 @@ import type { PoolClient } from "pg";
 
 import { loadDefaultDatabaseSchema } from "../../plugins/database/load-schema";
 import { quoteIdentifier } from "../migrations/apply";
+import { schemaOwnership } from "../migrations/ownership";
 import { runInTransaction } from "./branch-sql";
 import { type DbContext, NO_ENV_BRANCH, withBranchPool } from "./context";
 import { notYourBranch, resolveEnvBranch, writableEnvBranch } from "./guard";
@@ -231,10 +232,30 @@ async function cleanTarget(ctx: DbContext) {
   return { branch: branch.name, schemaName: schema.$schemaName };
 }
 
+/**
+ * An app schema another role owns is the fork's untouched copy. Only its owner
+ * may drop it, and init takes it over first.
+ */
+async function refuseUntouchedCopy(
+  client: Pick<PoolClient, "query">,
+  target: { readonly branch: string; readonly schemaName: string },
+): Promise<void> {
+  if (target.schemaName === "public") return;
+  const { owner, currentUser } = await schemaOwnership(
+    client,
+    target.schemaName,
+  );
+  if (owner === null || owner === currentUser) return;
+  throw new Error(
+    `Refusing to clean: ${resourceId(target.branch)} still holds the rows the fork copied into schema "${target.schemaName}", which "${owner}" still owns, so your role cannot drop it. Run \`appkit db init\` to take it over and rebuild it from the committed migrations.`,
+  );
+}
+
 /** What `appkit db clean` would drop, read without changing anything. */
 export async function previewClean(ctx: DbContext): Promise<CleanReport> {
   const target = await cleanTarget(ctx);
   return withBranchPool(ctx, async (pool) => {
+    await refuseUntouchedCopy(pool, target);
     const dependents = await readCascadeDependents(pool, target.schemaName);
     // Before the drop, another role's object that depends on yours is still there; it goes.
     const kept = (await readKeptObjects(pool, target.schemaName)).filter(
@@ -264,6 +285,7 @@ export async function cleanHolding(
   lock.assertHeld();
   const target = await cleanTarget(ctx);
   return runInTransaction(ctx, async (client) => {
+    await refuseUntouchedCopy(client, target);
     const dependents = await readCascadeDependents(client, target.schemaName);
     for (const statement of cleanStatements(target.schemaName)) {
       await client.query(statement);
