@@ -94,12 +94,13 @@ function record(value: unknown): Yaml {
 }
 
 /**
- * A branch, database or workspace host databricks.yml names, as far as the
- * checkout's files resolve it. A reference that is not declared at all has no
- * value: the binding, variable or host that holds it is absent instead.
+ * A branch, database, workspace host or source path databricks.yml names, as
+ * far as the checkout's files resolve it. A reference that is not declared at
+ * all has no value: the binding, variable or host that holds it is absent
+ * instead.
  */
 type BundleValue =
-  /** A full resource name, e.g. "projects/p/branches/b", or a workspace host. */
+  /** A full resource name, e.g. "projects/p/branches/b", a workspace host, or a path. */
   | { readonly kind: "resolved"; readonly name: string }
   /** As written: a `${…}` only a deploy resolves, no value, or not a resource name. */
   | { readonly kind: "unresolved"; readonly written: string };
@@ -119,13 +120,15 @@ interface PostgresBinding {
 }
 
 /** An app one target of databricks.yml deploys. */
-interface BundleApp {
+export interface BundleApp {
   /** Its key under resources.apps. */
   readonly key: string;
   /** Its name as written; null when it has none. */
   readonly declaredName: string | null;
   /** Its name with bundle references resolved; null when one needs a deploy to resolve. */
   readonly name: string | null;
+  /** Its source_code_path, relative to databricks.yml's folder; null when it declares none. */
+  readonly sourceCodePath: BundleValue | null;
   /**
    * Every postgres resource it has, and any `${…}` standing where its
    * resources, one of them, or a postgres block should be.
@@ -346,8 +349,8 @@ function bundleValue(
   };
 }
 
-/** null when no host is declared; unresolved when one is declared and the files cannot resolve it. */
-function hostValue(
+/** null when the value is not declared; unresolved when it is and the files cannot resolve it. */
+function declaredValue(
   written: unknown,
   resolve: (value: unknown) => string | null,
 ): BundleValue | null {
@@ -412,6 +415,7 @@ function bundleApps(
       key,
       declaredName: typeof declared === "string" && declared ? declared : null,
       name: resolve(declared),
+      sourceCodePath: declaredValue(app?.source_code_path, resolve),
       postgres: appPostgres(
         `resources.apps.${key}.resources`,
         app?.resources,
@@ -455,6 +459,38 @@ export function readDeployTarget(root: string): DeployTarget | null {
 }
 
 /**
+ * An included file's app source_code_paths, made relative to databricks.yml's
+ * folder: the CLI resolves a path against the file that declares it.
+ */
+function rebaseSourcePaths(
+  file: Record<string, unknown>,
+  folder: string,
+): Record<string, unknown> {
+  if (!folder) return file;
+  const rebase = (resources: unknown) => {
+    for (const app of Object.values(record(record(resources)?.apps) ?? {})) {
+      const declared = record(app);
+      const source = declared?.source_code_path;
+      if (
+        declared &&
+        typeof source === "string" &&
+        !path.posix.isAbsolute(source)
+      ) {
+        declared.source_code_path = path.posix.join(
+          folder.split(path.sep).join("/"),
+          source,
+        );
+      }
+    }
+  };
+  rebase(file.resources);
+  for (const target of Object.values(record(file.targets) ?? {})) {
+    rebase(record(target)?.resources);
+  }
+  return file;
+}
+
+/**
  * databricks.yml, with the files its `include:` names merged in, per target;
  * null without one. Without `targets:` the bundle has one target, "default".
  */
@@ -470,7 +506,14 @@ export function readBundle(root: string): Bundle | null {
       .filter((pattern): pattern is string => typeof pattern === "string")
       .flatMap((pattern) => includedFiles(root, pattern))
       .reduce<unknown>(
-        (merged, included) => merge(merged, parseYaml(included)),
+        (merged, included) =>
+          merge(
+            merged,
+            rebaseSourcePaths(
+              parseYaml(included),
+              path.relative(root, path.dirname(included)),
+            ),
+          ),
         main,
       ),
   ) as Record<string, unknown>;
@@ -508,7 +551,7 @@ export function readBundle(root: string): Bundle | null {
               )
             : null;
         return {
-          host: hostValue(
+          host: declaredValue(
             record(target?.workspace)?.host ?? record(bundle.workspace)?.host,
             resolve,
           ),

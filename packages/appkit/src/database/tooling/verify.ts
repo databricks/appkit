@@ -25,6 +25,7 @@ import {
   readSchemaState,
 } from "./schema-state";
 import {
+  type BundleApp,
   type BundleTarget,
   defaultBundleTarget,
   readBundle,
@@ -321,6 +322,35 @@ function parseDeployedJournal(bytes: Buffer, label: string): JournalEntry[] {
   return entries;
 }
 
+/** The local folder whose files an app's deployment carries, or why verify cannot tell. */
+type SourceFolder = { readonly folder: string } | { readonly reason: string };
+
+/**
+ * The folder the app's source_code_path names, which must hold the
+ * migrations. Without one it is the checkout's root.
+ */
+function sourceFolder(
+  root: string,
+  file: string,
+  name: string,
+  declared: BundleApp["sourceCodePath"],
+): SourceFolder {
+  if (!declared) return { folder: root };
+  if (declared.kind === "unresolved") {
+    return {
+      reason: `source_code_path of app ${name} in ${file} is "${declared.written}", which this checkout's files do not resolve to a folder`,
+    };
+  }
+  const folder = path.resolve(root, declared.name);
+  const migrations = path.relative(folder, migrationsFolder(root));
+  if (migrations.startsWith("..") || path.isAbsolute(migrations)) {
+    return {
+      reason: `${path.relative(root, migrationsFolder(root)).split(path.sep).join("/")} is not inside source_code_path ${declared.name} of app ${name} in ${file}, so no deployment of it has the committed migrations`,
+    };
+  }
+  return { folder };
+}
+
 /**
  * The committed migrations against the snapshot of the source the active
  * deployment runs: each needs the same journal entry (idx, when,
@@ -334,7 +364,11 @@ async function readDeployedMigrations(
   ctx: DbContext,
   deployment: Deployment | undefined,
   committed: readonly CommittedMigration[],
+  source: SourceFolder,
 ): Promise<DeployedMigrations | null> {
+  if ("reason" in source) {
+    return { evidence: "unavailable", reason: source.reason };
+  }
   if (!deployment) {
     return {
       evidence: "unavailable",
@@ -353,7 +387,7 @@ async function readDeployedMigrations(
   }
   const folder = migrationsFolder(ctx.root);
   const deployedPath = (file: string) =>
-    `${snapshot}/${path.relative(ctx.root, file).split(path.sep).join("/")}`;
+    `${snapshot}/${path.relative(source.folder, file).split(path.sep).join("/")}`;
   try {
     const journalPath = deployedPath(journalFile(folder));
     const journal = await exportFile(ctx, journalPath);
@@ -752,7 +786,12 @@ async function verifyDeploy(
   const [roles, migrations] = await Promise.all([
     // Only meaningful once the app is bound to this branch.
     sp && binding.length === 0 ? api.listRoles(branch) : null,
-    readDeployedMigrations(ctx, deployed.active_deployment, committed),
+    readDeployedMigrations(
+      ctx,
+      deployed.active_deployment,
+      committed,
+      sourceFolder(ctx.root, file, name, app.sourceCodePath),
+    ),
   ]);
   if (roles && !roles.some((role) => role.status?.postgres_role === sp)) {
     problems.push(

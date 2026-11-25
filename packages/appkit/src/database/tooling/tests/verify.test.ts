@@ -1124,6 +1124,60 @@ describe("runVerify --deployed", () => {
     });
   });
 
+  test("an app declared in an included file reads the deployed migrations relative to its source_code_path there", async () => {
+    const migrations = [{ tag: "0000_migration", when: 1000 }];
+    const yml = ymlWithHost();
+    const { ctx, requests } = deployedApp({
+      migrations,
+      yml: yml.replace(
+        /resources:\n {2}apps:\n(?: {4}.*\n)+/,
+        "include:\n  - resources/*.yml\n",
+      ),
+    });
+    const app = /resources:\n {2}apps:\n(?: {4}.*\n)+/.exec(yml)?.[0] ?? "";
+    fs.mkdirSync(path.join(ctx.root, "resources"));
+    fs.writeFileSync(
+      path.join(ctx.root, "resources/app.yml"),
+      app.replace("source_code_path: ./", "source_code_path: .."),
+    );
+
+    expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+      migrations: { evidence: "verified" },
+      ok: true,
+    });
+    expect(requests).toContain(
+      `workspace.export ${SNAPSHOT}/${MIGRATIONS}/0000_migration.sql`,
+    );
+  });
+
+  test.each([
+    [
+      "./server",
+      `${MIGRATIONS} is not inside source_code_path ./server of app my-app in databricks.yml, so no deployment of it has the committed migrations`,
+    ],
+    [
+      "${var.app_source}",
+      'source_code_path of app my-app in databricks.yml is "${var.app_source}", which this checkout\'s files do not resolve to a folder',
+    ],
+  ])(
+    "with source_code_path %s, the deployed migrations are unavailable and no snapshot file is read",
+    async (source, reason) => {
+      const { ctx, requests } = deployedApp({
+        migrations: [{ tag: "0000_migration", when: 1000 }],
+        yml: ymlWithHost().replace(
+          "source_code_path: ./",
+          `source_code_path: ${source}`,
+        ),
+      });
+
+      expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+        migrations: { evidence: "unavailable", reason },
+        ok: false,
+      });
+      expect(requests.filter((r) => r.startsWith("workspace."))).toEqual([]);
+    },
+  );
+
   test("--target checks that target's app, branch and host", async () => {
     const staging = "projects/p/branches/staging";
     const { ctx, lakebase } = deployedApp({
