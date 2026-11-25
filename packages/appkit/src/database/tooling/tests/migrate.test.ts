@@ -334,6 +334,51 @@ describe("runMigrate", () => {
     ).toBe(journal);
   });
 
+  test.each([
+    [
+      "55P03",
+      "Another session held a lock on a table this migration changes for over 5s, 3 times. Deploy again once the long-running query or transaction finishes.",
+    ],
+    ["57014", undefined],
+  ])(
+    "when the migration this run wrote fails with SQLSTATE %s, neither schema.ts nor the data is at fault, so it stays",
+    async (code, hint) => {
+      const ctx = app(`notes: table("notes", { id: id() })`);
+      resolveEnvBranch.mockResolvedValue(null);
+      await runMigrate(ctx, { interactive: false });
+      writeSchema(
+        ctx.root,
+        `notes: table("notes", { id: id(), body: text() })`,
+      );
+      resolveEnvBranch.mockResolvedValue(devBranch);
+      const failure = new MigrationApplyError({
+        step: "Applying migrations",
+        failed: "0001_migration",
+        pending: ["0001_migration"],
+        hint,
+        cause: Object.assign(new Error("canceling statement"), { code }),
+      });
+      applyPendingMigrations.mockRejectedValue(failure);
+
+      const error = (await runMigrate(ctx, { interactive: false }).catch(
+        (caught: unknown) => caught,
+      )) as Error;
+
+      expect(error.message).toBe(
+        `Wrote ${path.join("config/database/migrations", "0001_migration.sql")}, but did not apply it: ${failure.message}`,
+      );
+      expect(error.message).not.toContain("Change config/database/schema.ts");
+      if (hint) expect(error.message).toContain(hint);
+      expect(error.cause).toBe(failure);
+      expect(error).toMatchObject({ generated: { tag: "0001_migration" } });
+      expect(
+        fs.existsSync(
+          path.join(ctx.root, "config/database/migrations/0001_migration.sql"),
+        ),
+      ).toBe(true);
+    },
+  );
+
   test("when an earlier migration fails, the one this run wrote stays for the next try", async () => {
     const ctx = app(`notes: table("notes", { id: id() })`);
     resolveEnvBranch.mockResolvedValue(null);

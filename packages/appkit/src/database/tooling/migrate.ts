@@ -106,6 +106,12 @@ class UnappliedMigrationError extends Error implements MigrationWarnings {
   }
 }
 
+/**
+ * SQLSTATEs where another session or a cancel, not the migration, made it fail:
+ * lock_not_available and query_canceled. The same migration can apply later.
+ */
+const RETRYABLE_AS_WRITTEN: ReadonlySet<string> = new Set(["55P03", "57014"]);
+
 /** Applying was refused before anything ran: a migration would shadow tables left in public. */
 class TablesLeftInPublicError extends Error {
   constructor(reason: string) {
@@ -197,7 +203,8 @@ async function migrateHolding(
     if (
       error instanceof MigrationApplyError &&
       error.failed === generated.tag &&
-      error.code
+      error.code &&
+      !RETRYABLE_AS_WRITTEN.has(error.code)
     ) {
       discardMigrationFiles(lock, generated);
       throw new Error(
