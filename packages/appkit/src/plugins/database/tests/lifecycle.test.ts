@@ -276,6 +276,21 @@ describe("createDatabaseState", () => {
     );
   });
 
+  test("a flag other than true warns once that it was ignored, and migrates nothing", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { execute } = arrange();
+    const decision = { kind: "off", ignored: "1" } as const;
+    mocks.decideMigrateOnStart.mockReturnValue(decision);
+
+    await createDatabaseState(schema, execute);
+
+    expect(mocks.migrateOnStart).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls.flat().map(String).join(" ")).toContain(
+      'APPKIT_DB_MIGRATE_ON_START is "1", and only "true" turns migrate on start on, so this process ignored it and did not migrate.',
+    );
+  });
+
   test("a start the flag asks to migrate but that is not the deployed app warns once with the reason, and migrates nothing", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { path, execute } = arrange();

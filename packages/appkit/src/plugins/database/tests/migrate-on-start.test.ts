@@ -95,14 +95,24 @@ describe("decideMigrateOnStart", () => {
       "a deployed app without the flag",
       { DATABRICKS_APP_NAME: "my-app", ...credentials },
     ],
-    [
-      "a flag other than true",
-      { APPKIT_DB_MIGRATE_ON_START: "1", ...credentials },
-    ],
+    ["an empty flag", { APPKIT_DB_MIGRATE_ON_START: "", ...credentials }],
     ["nothing set", {}],
   ] as const)("%s: off, with nothing to say", (_label, env) => {
     expect(decideMigrateOnStart(env)).toEqual({ kind: "off" });
   });
+
+  test.each(["1", "TRUE", "true ", "yes"])(
+    "a flag of %j is not true: off, naming the value it ignored",
+    (value) => {
+      expect(
+        decideMigrateOnStart({
+          APPKIT_DB_MIGRATE_ON_START: value,
+          ...credentials,
+          PGUSER: "sp-client-id",
+        }),
+      ).toEqual({ kind: "off", ignored: value });
+    },
+  );
 
   test.each([
     [

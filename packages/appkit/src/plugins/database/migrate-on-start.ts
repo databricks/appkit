@@ -25,7 +25,11 @@ import { createLogger } from "../../logging/logger";
 const logger = createLogger("database");
 
 export type MigrateOnStartDecision =
-  | { readonly kind: "off" }
+  | {
+      readonly kind: "off";
+      /** A non-empty flag value other than "true", which turns nothing on. */
+      readonly ignored?: string;
+    }
   | { readonly kind: "skipped"; readonly reason: string }
   | { readonly kind: "migrate" };
 
@@ -42,7 +46,9 @@ export type MigrateOnStartDecision =
 export function decideMigrateOnStart(
   env: NodeJS.ProcessEnv = process.env,
 ): MigrateOnStartDecision {
-  if (env.APPKIT_DB_MIGRATE_ON_START !== "true") return { kind: "off" };
+  const flag = env.APPKIT_DB_MIGRATE_ON_START;
+  if (flag !== "true")
+    return flag ? { kind: "off", ignored: flag } : { kind: "off" };
   for (const name of ["DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"]) {
     if (!env[name]) return { kind: "skipped", reason: `${name} is not set.` };
   }
