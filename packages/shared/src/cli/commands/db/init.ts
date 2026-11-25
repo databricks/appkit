@@ -173,7 +173,8 @@ export const dbInitCommand = new Command("init")
     "after",
     `
 init asks nothing. It keeps this checkout's session branch when .env points at
-one, and otherwise uses your dev branch (dev-<you>-<hash>). A new branch forks
+one, or when a --session run stopped before .env did, and otherwise uses your
+dev branch (dev-<you>-<hash>). A new branch forks
 the branch databricks.yml deploys to, else the project's default branch, which
 copies its rows, production data included. init reads from the branch whether
 the app schema is still that copy. If it is, init takes the schema over and

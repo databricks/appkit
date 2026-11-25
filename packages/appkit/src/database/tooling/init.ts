@@ -73,7 +73,10 @@ import {
 export type { SchemaStart } from "./schema-state";
 
 export interface InitOptions {
-  /** Default: this checkout's session branch when .env points at it, else your dev branch. */
+  /**
+   * Default: this checkout's session branch when .env points at it, or when a
+   * --session run stopped before .env did; else your dev branch.
+   */
   readonly mode?: BranchMode;
   readonly schema?: SchemaStart;
   readonly confirmClean?: (target: {
