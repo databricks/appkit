@@ -134,6 +134,7 @@ async function verifyLocal(ctx: DbContext): Promise<LocalVerifyReport> {
   const branch = env.branch.name;
   const schema = await loadDatabaseSchema(
     path.join(ctx.root, DEFAULT_SCHEMA_FILE),
+    { showImportError: true },
   );
   return withBranchPool(ctx, async (pool) => {
     const client = await pool.connect();
