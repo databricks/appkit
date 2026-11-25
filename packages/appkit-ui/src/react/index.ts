@@ -1,4 +1,5 @@
 export * from "./charts";
+export * from "./error-page";
 export * from "./file-browser";
 export * from "./genie";
 export * from "./hooks";
