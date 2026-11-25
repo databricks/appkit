@@ -293,6 +293,7 @@ const MAY_FAIL_ON_EXISTING_ROWS: readonly StatementPredicate[] = [
   matches(/\bSET DATA TYPE\b/i),
   addsRequiredColumn,
   matches(/\bADD CONSTRAINT\b/i),
+  matches(/\bADD PRIMARY KEY\b/i),
   addsConstrainedColumn,
   matches(/^CREATE UNIQUE INDEX\b/i),
 ];
