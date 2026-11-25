@@ -2,8 +2,15 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 vi.mock("../genie-query-visualization", () => ({
-  GenieQueryVisualization: (props: { chartImageUrl?: string }) => (
-    <div data-testid="query-result" data-chart-image={props.chartImageUrl} />
+  GenieQueryVisualization: (props: {
+    chartImageUrl?: string;
+    chartImageAlt?: string;
+  }) => (
+    <div
+      data-testid="query-result"
+      data-chart-image={props.chartImageUrl}
+      data-chart-alt={props.chartImageAlt}
+    />
   ),
 }));
 
@@ -79,6 +86,55 @@ describe("GenieChatMessage", () => {
     const img = screen.getByRole("img", { name: "Franchises by Country" });
     expect(img.getAttribute("src")).toBe("/api/genie/a/viz-1.png");
     expect(screen.queryByTestId("query-result")).toBeNull();
+  });
+
+  test("describes a chat-mode chart by its query's description", () => {
+    render(
+      <GenieChatMessage
+        message={assistant({
+          attachments: [
+            {
+              attachmentId: "query-1",
+              query: {
+                description:
+                  "You want to see the number of franchises by size.",
+                query: "SELECT size, COUNT(*) FROM franchises GROUP BY size",
+              },
+            },
+            { attachmentId: "viz-1", viz: { queryAttachmentId: "query-1" } },
+          ],
+          visualizationUrls: { "viz-1": "/api/genie/a/viz-1.png" },
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByRole("img", {
+        name: "You want to see the number of franchises by size.",
+      }),
+    ).toBeTruthy();
+  });
+
+  test("names a chat-mode chart in the result by its query's title first", () => {
+    render(
+      <GenieChatMessage
+        message={assistant({
+          attachments: [
+            {
+              attachmentId: "query-1",
+              query: { title: "Franchises", description: "Franchise counts." },
+            },
+            { attachmentId: "viz-1", viz: { queryAttachmentId: "query-1" } },
+          ],
+          queryResults: new Map([["query-1", queryResult]]),
+          visualizationUrls: { "viz-1": "/api/genie/a/viz-1.png" },
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByTestId("query-result").getAttribute("data-chart-alt"),
+    ).toBe("Franchises");
   });
 
   test("leaves the query result alone for a query without a visualization", () => {
