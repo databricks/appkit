@@ -3,25 +3,25 @@
     {
       "name": "@databricks/appkit",
       "tarball": {
-        "packed": 1605479,
-        "unpacked": 5475395
+        "packed": 1605551,
+        "unpacked": 5476020
       },
       "dist": {
         "total": {
-          "raw": 5459581,
-          "gzip": 1866487
+          "raw": 5460206,
+          "gzip": 1866593
         },
         "js": {
-          "raw": 1662190,
-          "gzip": 589471
+          "raw": 1662583,
+          "gzip": 589547
         },
         "types": {
           "raw": 509717,
           "gzip": 185285
         },
         "maps": {
-          "raw": 3276879,
-          "gzip": 1087913
+          "raw": 3277111,
+          "gzip": 1087943
         },
         "css": {
           "raw": 0,
@@ -142,17 +142,17 @@
         },
         {
           "id": "./beta/database-tooling",
-          "gzip": 58066,
+          "gzip": 57006,
           "composition": {
-            "initialGzip": 58066,
+            "initialGzip": 57006,
             "lazyGzip": 0,
-            "totalGzip": 58066,
-            "own": 173766,
+            "totalGzip": 57006,
+            "own": 170568,
             "nodeModules": null,
             "chunks": [
               {
                 "label": "index.js",
-                "gzip": 58066,
+                "gzip": 57006,
                 "kind": "initial"
               }
             ]
