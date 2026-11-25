@@ -1573,8 +1573,32 @@ describe("runInit — .env", () => {
     expect(fs.statSync(path.join(root, ".env")).mode & 0o777).toBe(0o600);
   });
 
-  test("a database databricks.yml binds that the branch does not have is refused, naming both, before .env is written", async () => {
+  test("a database databricks.yml binds that the source branch does not have is refused before the fork, naming both", async () => {
     const lakebase = project();
+    const root = tempApp({
+      "databricks.yml": databricksYml(
+        PRODUCTION,
+        `${PRODUCTION}/databases/analytics`,
+      ),
+    });
+    const ctx = fakeContext({ root, userName: USER, api: lakebase.api() });
+
+    await expect(init(ctx, { schema: "none" })).rejects.toThrow(
+      `Database analytics, which databricks.yml binds, is not on production, the branch ${devBranchId(USER)} would fork from, so init created nothing. Create it there (databricks postgres create-database ${PRODUCTION} --database-id analytics), or bind a database the project's branches have, then rerun \`appkit db init\`.`,
+    );
+    expect(lakebase.calls).toContain(
+      `getDatabase ${PRODUCTION}/databases/analytics`,
+    );
+    expect(lakebase.calls.some((call) => call.startsWith("createBranch"))).toBe(
+      false,
+    );
+    expect(fs.existsSync(path.join(root, ".env"))).toBe(false);
+  });
+
+  test("a reused branch without the database databricks.yml binds is refused, naming both, before .env is written", async () => {
+    const lakebase = project();
+    lakebase.addBranch(DEV);
+    lakebase.addRole(DEV, "alice", USER, ["DATABRICKS_SUPERUSER"]);
     const root = tempApp({
       "databricks.yml": databricksYml(
         PRODUCTION,
@@ -1588,6 +1612,22 @@ describe("runInit — .env", () => {
     );
     expect(lakebase.calls).toContain(`getDatabase ${DEV}/databases/analytics`);
     expect(fs.existsSync(path.join(root, ".env"))).toBe(false);
+  });
+
+  test("the database databricks.yml binds wins over .env's PGDATABASE, and init says so when they differ", async () => {
+    const lakebase = project();
+    const ctx = appOn(lakebase, { PGDATABASE: "scratch" });
+
+    const { report, warnings } = await init(ctx, { schema: "none" });
+
+    expect(report.database).toBe("databricks_postgres");
+    expect(envFile(ctx.root).PGDATABASE).toBe("databricks_postgres");
+    expect(warnings).toEqual([
+      "Setting PGDATABASE=databricks_postgres in .env: it was scratch, and databricks.yml binds databricks_postgres",
+    ]);
+
+    const same = await init(appOn(project()), { schema: "none" });
+    expect(same.warnings).toEqual([]);
   });
 
   test("the profile init authenticated with wins over the host", async () => {
