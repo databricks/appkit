@@ -3,7 +3,7 @@ import path from "node:path";
 
 import yaml from "js-yaml";
 
-import { isValidSessionId } from "./naming";
+import { parseSessionId } from "./naming";
 
 export type BranchMode = "dev" | "session";
 
@@ -55,7 +55,11 @@ export function parseProject(value: string | undefined): string | null {
   return PROJECT_ID.test(id) ? `projects/${id}` : null;
 }
 
-/** What `.env` says about the local branch. Unparseable values (template placeholders) read as null. */
+/**
+ * What `.env` says about the local branch. Unparseable values (template
+ * placeholders) read as null. APPKIT_DB_SESSION has no placeholder, so an
+ * invalid one throws instead of being replaced.
+ */
 export interface LocalTarget {
   /** LAKEBASE_PROJECT, normalized to "projects/<id>". */
   readonly project: string | null;
@@ -66,10 +70,9 @@ export interface LocalTarget {
 
 export function readLocalTarget(env: NodeJS.ProcessEnv): LocalTarget {
   const endpoint = parseResourceName(env.LAKEBASE_ENDPOINT)?.endpoint ?? null;
-  const session =
-    env.APPKIT_DB_SESSION && isValidSessionId(env.APPKIT_DB_SESSION)
-      ? env.APPKIT_DB_SESSION
-      : null;
+  const session = env.APPKIT_DB_SESSION
+    ? parseSessionId(env.APPKIT_DB_SESSION)
+    : null;
   return {
     project: parseProject(env.LAKEBASE_PROJECT),
     endpoint,

@@ -49,17 +49,22 @@ export function isValidSessionId(sessionId: string): boolean {
   return SESSION_ID.test(sessionId);
 }
 
-/**
- * session-<userHash>-<sessionId>. The id lives in this checkout's .env; the
- * hash makes a copied .env name a branch only its creator passes the guard on.
- */
-export function sessionBranchId(userName: string, sessionId: string): string {
+/** The session id as given; an invalid one throws. */
+export function parseSessionId(sessionId: string): string {
   if (!isValidSessionId(sessionId)) {
     throw new Error(
       `Invalid APPKIT_DB_SESSION ${JSON.stringify(sessionId)}: use 1-${SESSION_ID_LENGTH} lowercase letters or digits.`,
     );
   }
-  return `${SESSION_PREFIX}${userHash(userName)}-${sessionId}`;
+  return sessionId;
+}
+
+/**
+ * session-<userHash>-<sessionId>. The id lives in this checkout's .env; the
+ * hash makes a copied .env name a branch only its creator passes the guard on.
+ */
+export function sessionBranchId(userName: string, sessionId: string): string {
+  return `${SESSION_PREFIX}${userHash(userName)}-${parseSessionId(sessionId)}`;
 }
 
 /** Whether a branch id is one of this user's session branches, whatever its session id. */
