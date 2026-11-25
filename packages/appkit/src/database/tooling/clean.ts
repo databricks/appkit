@@ -1,6 +1,9 @@
+import path from "node:path";
+
 import type { PoolClient } from "pg";
 
-import { loadDefaultDatabaseSchema } from "../../plugins/database/load-schema";
+import { DEFAULT_SCHEMA_FILE } from "../../plugins/database/load-schema";
+import { loadDatabaseSchema } from "../../type-generator/database";
 import { quoteIdentifier } from "../migrations/apply";
 import { schemaOwnership } from "../migrations/ownership";
 import { runInTransaction } from "./branch-sql";
@@ -227,9 +230,9 @@ export interface CleanReport {
 async function cleanTarget(ctx: DbContext) {
   requireSchemaFile(ctx.root, "clean");
   const branch = await writableEnvBranch(ctx, "clean");
-  const schema = await loadDefaultDatabaseSchema(ctx.root, {
-    showImportError: true,
-  });
+  const schema = await loadDatabaseSchema(
+    path.join(ctx.root, DEFAULT_SCHEMA_FILE),
+  );
   return { branch: branch.name, schemaName: schema.$schemaName };
 }
 
