@@ -78,6 +78,27 @@ describe("assertSchemaMatchesDatabase — tables left in public", () => {
     expect(error.message).not.toContain("commit migrations");
   });
 
+  test('schemaName "app" named explicitly: the usual advice, whatever public holds', async () => {
+    const explicit = defineSchema(
+      ({ table }) => ({
+        boards: table("boards", { id: id() }),
+        notes: table("notes", { id: id() }),
+      }),
+      { schemaName: "app" },
+    );
+    const { path } = catalog({}, {}, ["boards", "notes"]);
+
+    const error = await assertSchemaMatchesDatabase(path, explicit, OFF).catch(
+      (caught) => caught,
+    );
+
+    expect(error.message).toContain("table app.boards does not exist");
+    expect(error.message).toContain(
+      "commit migrations under config/database/migrations",
+    );
+    expect(error.message).not.toContain("unless told otherwise");
+  });
+
   test("only some missing tables are in public: the usual advice", async () => {
     const { path } = catalog({}, {}, ["boards"]);
 
