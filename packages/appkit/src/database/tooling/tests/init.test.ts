@@ -1568,7 +1568,7 @@ describe("runInit — .env", () => {
       DATABRICKS_HOST: "https://real.cloud.databricks.com",
     });
     expect(lakebase.calls).toContain(
-      `getDatabase ${DEV}/databases/databricks-postgres`,
+      `getDatabase ${PRODUCTION}/databases/databricks-postgres`,
     );
     expect(fs.statSync(path.join(root, ".env")).mode & 0o777).toBe(0o600);
   });

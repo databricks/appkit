@@ -246,17 +246,23 @@ interface BranchRequest {
   readonly ttl: { readonly api: string; readonly label: string };
   readonly boundary: DeployBoundary;
   readonly envFile: string;
-  readonly deployBranch: string | null;
+  readonly deploy: DeployTarget | null;
   readonly onStep: (message: string) => void;
 }
 
-interface FoundBranch {
+type FoundBranch = {
   readonly branch: LakebaseBranch;
-  /** Forked by this run. */
-  readonly created: boolean;
-  readonly sourceBranch?: string;
   readonly session: string | null;
-}
+} & (
+  | { readonly created: false }
+  | {
+      /** Forked by this run. */
+      readonly created: true;
+      readonly sourceBranch: string;
+      /** The bound database's Postgres name, read on the source before the fork. */
+      readonly boundDatabase: string | null;
+    }
+);
 
 function branchLimitError(
   project: string,
@@ -341,12 +347,19 @@ async function findOrCreateBranch(
 
     const branches = await api.listBranches(project);
     const deployed = branches.find(
-      (b) => b.name === request.deployBranch && !isGone(b),
+      (b) => b.name === request.deploy?.branch && !isGone(b),
     );
     const parent = deployed ?? branches.find((b) => b.status?.default);
     if (!parent) {
       throw new Error(`Project ${project} has no default branch to fork from.`);
     }
+    // A fork has its source's databases.
+    const boundDatabase = await readBoundDatabase(
+      ctx,
+      parent.name,
+      request.deploy,
+      name,
+    );
     persistSessionIdBeforeFork(request, session);
     onStep(
       `Creating ${resourceId(name)} from ${resourceId(parent.name)} (${deployed ? "the branch databricks.yml deploys to" : "the project's default branch"})${session === null ? "" : `, expiring after ${request.ttl.label}`}`,
@@ -362,6 +375,7 @@ async function findOrCreateBranch(
         branch: branch?.name ? branch : { name },
         created: true,
         sourceBranch: parent.name,
+        boundDatabase,
         session,
       };
     } catch (error) {
@@ -505,25 +519,26 @@ async function ensureDeveloperRole(
 }
 
 /**
- * The Postgres database .env names: the one it already names, else the one
- * databricks.yml binds, read on the branch (a fork inherits its parent's
- * databases), else the project's default database. A bound database the branch
- * lacks is refused: pointing .env at the default one would run the app on a
- * database its deploy does not use.
+ * The Postgres name of the database databricks.yml binds, read on `branch`;
+ * null when it binds none. A bound database the branch lacks is refused:
+ * pointing .env at another one would run the app on a database its deploy does
+ * not use. `forking` names the branch a fork of `branch` would create.
  */
-async function resolveDatabase(
+async function readBoundDatabase(
   ctx: DbContext,
   branch: string,
-  local: LocalTarget,
   deploy: DeployTarget | null,
-): Promise<string> {
-  if (local.database) return local.database;
-  if (!deploy?.database) return DEFAULT_DATABASE;
+  forking?: string,
+): Promise<string | null> {
+  if (!deploy?.database) return null;
   const id = resourceId(deploy.database);
   const database = await ctx.api().getDatabase(`${branch}/databases/${id}`);
   if (!database) {
+    const where = forking
+      ? `${resourceId(branch)}, the branch ${resourceId(forking)} would fork from, so init created nothing`
+      : resourceId(branch);
     throw new Error(
-      `Database ${id}, which databricks.yml binds, is not on ${resourceId(branch)}. Create it there (databricks postgres create-database ${branch} --database-id ${id}), or bind a database the project's branches have, then rerun \`appkit db init\`.`,
+      `Database ${id}, which databricks.yml binds, is not on ${where}. Create it there (databricks postgres create-database ${branch} --database-id ${id}), or bind a database the project's branches have, then rerun \`appkit db init\`.`,
     );
   }
   if (!database.status?.postgres_database) {
@@ -532,6 +547,21 @@ async function resolveDatabase(
     );
   }
   return database.status.postgres_database;
+}
+
+/** The bound database, else the one .env names, else the project's default database. */
+function chooseDatabase(
+  bound: string | null,
+  local: LocalTarget,
+  onWarning: (message: string) => void,
+): string {
+  if (bound === null) return local.database ?? DEFAULT_DATABASE;
+  if (local.database && local.database !== bound) {
+    onWarning(
+      `Setting PGDATABASE=${bound} in .env: it was ${local.database}, and databricks.yml binds ${bound}`,
+    );
+  }
+  return bound;
 }
 
 const SCHEMA_NAME_ADVICE = "Pass --schema-name <name> to read another schema.";
@@ -659,7 +689,7 @@ async function initHolding(
       ttl,
       boundary: readDeployBoundary(ctx.root),
       envFile,
-      deployBranch: deploy?.branch ?? null,
+      deploy,
       onStep,
     });
     const { branch } = found;
@@ -677,7 +707,13 @@ async function initHolding(
       roles,
       onStep,
     );
-    const database = await resolveDatabase(ctx, branch.name, local, deploy);
+    const database = chooseDatabase(
+      found.created
+        ? found.boundDatabase
+        : await readBoundDatabase(ctx, branch.name, deploy),
+      local,
+      onWarning,
+    );
 
     const values: Record<string, string> = {
       LAKEBASE_PROJECT: project,
@@ -705,7 +741,7 @@ async function initHolding(
       mode,
       branch: branch.name,
       created: found.created,
-      ...(found.sourceBranch ? { sourceBranch: found.sourceBranch } : {}),
+      ...(found.created ? { sourceBranch: found.sourceBranch } : {}),
       expireTime: branch.status?.expire_time ?? null,
       endpoint: endpoint.name,
       endpointCreated,
@@ -830,7 +866,9 @@ async function initHolding(
       keptCopy: keptCopyOf(
         state,
         plan,
-        found.sourceBranch ?? branch.status?.source_branch ?? null,
+        found.created
+          ? found.sourceBranch
+          : (branch.status?.source_branch ?? null),
       ),
       installed,
       start,
