@@ -325,6 +325,32 @@ describe("runMigrate", () => {
     ).toBe(true);
   });
 
+  test("when a pending introspect migration fails, it says to rerun appkit db introspect", async () => {
+    const ctx = app(`notes: table("notes", { id: id() })`);
+    resolveEnvBranch.mockResolvedValue(null);
+    await runMigrate(ctx, { interactive: false });
+
+    resolveEnvBranch.mockResolvedValue(devBranch);
+    const failure = new MigrationApplyError({
+      step: "Applying migrations",
+      failed: "0001_introspect",
+      pending: ["0001_introspect"],
+      cause: Object.assign(new Error('relation "notes" already exists'), {
+        code: "42P07",
+      }),
+    });
+    applyPendingMigrations.mockRejectedValue(failure);
+
+    const error = (await runMigrate(ctx, { interactive: false }).catch(
+      (caught: unknown) => caught,
+    )) as Error;
+
+    expect(error.message).toBe(
+      `${failure.message} If an interrupted \`appkit db introspect\` wrote 0001_introspect, the branch already has what it does: rerun \`appkit db introspect\` to record it.`,
+    );
+    expect(error.cause).toBe(failure);
+  });
+
   test("a guard failure after generating says so too, and never connects", async () => {
     const ctx = app(`notes: table("notes", { id: id() })`);
     resolveEnvBranch.mockRejectedValue(
