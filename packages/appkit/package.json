@@ -1,7 +1,7 @@
 {
   "name": "@databricks/appkit",
   "type": "module",
-  "version": "0.104.2",
+  "version": "0.105.0",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {

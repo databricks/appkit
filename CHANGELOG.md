@@ -236,6 +236,15 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.105.0](https://github.com/databricks/appkit/compare/v0.104.2...v0.105.0) (2026-11-25)
+
+### appkit
+
+* **appkit:** serve named database operations instead of AutoCRUD ([#692](https://github.com/databricks/appkit/issues/692)) ([79fcd2e](https://github.com/databricks/appkit/commit/79fcd2e897f7995100131994f7be542ebc0335da))
+
+
 ## [0.104.2](https://github.com/databricks/appkit/compare/v0.104.1...v0.104.2) (2026-11-25)
 
 ### appkit
