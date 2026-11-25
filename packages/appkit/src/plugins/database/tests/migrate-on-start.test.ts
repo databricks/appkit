@@ -168,6 +168,7 @@ describe("migrateOnStart", () => {
       migrationsFolder: path.join(root, "config/database/migrations"),
       schemaName: "app",
       onDrift: "refuse",
+      beforeApply: expect.any(Function),
     });
     const logged = log.mock.calls.map((call) => call.map(String).join(" "));
     expect(logged).toEqual([

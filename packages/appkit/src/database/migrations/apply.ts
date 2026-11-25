@@ -42,6 +42,12 @@ interface ApplyMigrationsOptions {
   /** Longest wait for each table lock a migration takes, in milliseconds. */
   readonly lockTimeoutMs?: number;
   readonly onDrift?: DriftPolicy;
+  /**
+   * Runs on the migrating connection, under the migration lock, once a
+   * migration is pending and before any is applied. What it throws reaches
+   * the caller unchanged, and nothing is applied.
+   */
+  readonly beforeApply?: (client: PoolClient) => Promise<void>;
 }
 
 interface ApplyMigrationsResult {
@@ -913,6 +919,7 @@ export async function applyPendingMigrations(
   let pending: string[] = [];
   let step = "Reading the recorded migrations";
   let failed: string | undefined;
+  let inBeforeApply = false;
   try {
     let history = reconcileMigrations(
       files,
@@ -955,6 +962,11 @@ export async function applyPendingMigrations(
 
     const toApply = [...history.pending];
     pending = tags(toApply);
+    if (toApply.length > 0 && options.beforeApply) {
+      inBeforeApply = true;
+      await options.beforeApply(client);
+      inBeforeApply = false;
+    }
     const baseline = toApply[0];
     if (history.lastRecorded === null && baseline?.tag === BASELINE_TAG) {
       failed = BASELINE_TAG;
@@ -995,6 +1007,7 @@ export async function applyPendingMigrations(
     };
   } catch (error) {
     if (
+      inBeforeApply ||
       error instanceof MigrationBaselineMismatchError ||
       error instanceof MigrationFilesError ||
       error instanceof MigrationHistoryError ||

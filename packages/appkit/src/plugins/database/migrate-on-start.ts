@@ -87,7 +87,7 @@ function developmentBranchOwner(branch: string): string | undefined {
  * no-op. Every migration failure becomes a setup failure that names it.
  */
 export async function migrateOnStart(
-  pool: Pick<Pool, "connect" | "query">,
+  pool: Pick<Pool, "connect">,
   schema: Schema,
   root: string = process.cwd(),
   env: NodeJS.ProcessEnv = process.env,
@@ -112,14 +112,6 @@ export async function migrateOnStart(
       `PGHOST ${env.PGHOST} is a pooled endpoint, and migrations need a direct connection. Use the host without "-pooler".`,
     );
   }
-  const leftInPublic = await detectTablesLeftInPublic(
-    catalogSqlOf(pool),
-    schema,
-  );
-  if (leftInPublic) {
-    throw databaseSetupFailed(`not applying migrations: ${leftInPublic}`);
-  }
-
   const started = Date.now();
   let result: Awaited<ReturnType<typeof applyPendingMigrations>>;
   try {
@@ -127,6 +119,15 @@ export async function migrateOnStart(
       migrationsFolder: folder,
       schemaName: schema.$schemaName,
       onDrift: "refuse",
+      beforeApply: async (client) => {
+        const leftInPublic = await detectTablesLeftInPublic(
+          catalogSqlOf(client),
+          schema,
+        );
+        if (leftInPublic) {
+          throw databaseSetupFailed(`not applying migrations: ${leftInPublic}`);
+        }
+      },
     });
   } catch (error) {
     if (
