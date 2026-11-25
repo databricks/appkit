@@ -183,6 +183,7 @@ export async function runCheck(ctx: DbContext): Promise<CheckReport> {
   if (entries.length === 0 || links.at(-1)) {
     const schema = await loadDatabaseSchema(
       path.join(ctx.root, DEFAULT_SCHEMA_FILE),
+      { showImportError: true },
     );
     if (await hasUnmigratedChanges(folder, schema)) {
       const last = entries.at(-1)?.tag;

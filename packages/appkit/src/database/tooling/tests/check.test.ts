@@ -419,4 +419,18 @@ describe("runCheck", () => {
       "No config/database/schema.ts yet, so there is nothing to check.",
     );
   });
+
+  test("a schema.ts that fails to import keeps the import error for the CLI to show", async () => {
+    const ctx = app({});
+    fs.writeFileSync(
+      path.join(ctx.root, "config/database/schema.ts"),
+      "export const schema = (",
+    );
+
+    const error = (await runCheck(ctx).catch(
+      (caught: unknown) => caught,
+    )) as Error;
+
+    expect((error.cause as Error).message).toMatch(/schema\.ts:\d+:\d+/);
+  });
 });
