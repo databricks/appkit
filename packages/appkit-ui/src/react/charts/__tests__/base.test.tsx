@@ -294,3 +294,40 @@ describe("BaseChart ECharts registration", () => {
     expect(registrationErrors).toEqual([]);
   });
 });
+
+describe("BaseChart sizing", () => {
+  test("fills its parent's height by default, with a minimum height", async () => {
+    const { container } = render(
+      <BaseChart
+        data={cartesianData}
+        chartType="bar"
+        xKey="month"
+        yKey="revenue"
+      />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector("canvas")).not.toBeNull(),
+    );
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.style.height).toBe("100%");
+    expect(root.style.minHeight).toBe("160px");
+  });
+
+  test("an explicit height is exactly that tall", async () => {
+    const { container } = render(
+      <BaseChart
+        data={cartesianData}
+        chartType="bar"
+        xKey="month"
+        yKey="revenue"
+        height={208}
+      />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector("canvas")).not.toBeNull(),
+    );
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.style.height).toBe("208px");
+    expect(root.style.minHeight).toBe("");
+  });
+});

@@ -17,6 +17,7 @@ import {
 // created in a hoisted block too (plain top-level consts would be in the TDZ when
 // the hoisted factory runs).
 const {
+  generateDatabaseOperations,
   generateDatabaseTypes,
   generateFromEntryPoint,
   generateServingTypes,
@@ -32,6 +33,7 @@ const {
   const lockPathOf = (root: string) =>
     nodePath.join(root, "node_modules", ".databricks", "appkit", "worker.lock");
   return {
+    generateDatabaseOperations: vi.fn(async () => {}),
     generateDatabaseTypes: vi.fn(async () => {}),
     generateFromEntryPoint: vi.fn(async () => {}),
     generateServingTypes: vi.fn(async () => {}),
@@ -51,7 +53,9 @@ const {
 // command's `await import("@databricks/appkit/type-generator")` resolves to spies
 // and never touches a warehouse.
 vi.mock("@databricks/appkit/type-generator", () => ({
+  DATABASE_OPERATIONS_TYPES_FILE: "database-operations.d.ts",
   DATABASE_TYPES_FILE: "database.d.ts",
+  generateDatabaseOperations,
   generateDatabaseTypes,
   generateFromEntryPoint,
   generateServingTypes,
@@ -69,9 +73,15 @@ vi.mock("./spawn-lock.js", () => ({
   releaseSpawnLock,
   getSpawnLockPath,
   SPAWN_LOCK_STALE_MS: 360_000,
+  spawnLockStaleMsFor: (ms?: number) =>
+    ms === undefined ? 360_000 : Math.max(360_000, ms + 60_000),
 }));
 
-import { generateTypesCommand, resolveTypegenMode } from "./generate-types";
+import {
+  generateTypesCommand,
+  parseWaitTimeoutSeconds,
+  resolveTypegenMode,
+} from "./generate-types";
 
 /**
  * Drive the real commander command the way the bin does, so argv parsing
@@ -103,15 +113,37 @@ describe("resolveTypegenMode (generate-types --wait)", () => {
   });
 });
 
+describe("parseWaitTimeoutSeconds (--wait-timeout)", () => {
+  test("accepts whole and fractional seconds, and 0", () => {
+    expect(parseWaitTimeoutSeconds("300")).toBe(300);
+    expect(parseWaitTimeoutSeconds("0.5")).toBe(0.5);
+    expect(parseWaitTimeoutSeconds("0")).toBe(0);
+  });
+
+  test.each(["", "abc", "-1", "Infinity"])("rejects %j", (value) => {
+    expect(() => parseWaitTimeoutSeconds(value)).toThrow(
+      "Expected a number of seconds",
+    );
+  });
+});
+
 describe("generate-types foreground spawn orchestration", () => {
   let tmpRoot: string;
   let consoleLog: Mock;
   let consoleError: Mock;
+  let exit: Mock;
   const prevWarehouse = process.env.DATABRICKS_WAREHOUSE_ID;
 
   beforeEach(() => {
     vi.clearAllMocks();
     acquireSpawnLock.mockReturnValue(true);
+    exit = vi
+      .spyOn(process, "exit")
+      .mockImplementation(() => undefined as never) as Mock;
+    // The command is a module singleton and commander keeps parsed option
+    // values between parseAsync calls; clear the ones these tests vary.
+    generateTypesCommand.setOptionValue("wait", undefined);
+    generateTypesCommand.setOptionValue("waitTimeout", undefined);
 
     // A real temp project root with config/queries and config/metric-views
     // folders so the analytics + metric generate paths run.
@@ -174,6 +206,13 @@ describe("generate-types foreground spawn orchestration", () => {
     ]);
     expect(opts).toMatchObject({ detached: true, stdio: "ignore" });
     expect(unref).toHaveBeenCalledTimes(1);
+
+    // The command exits itself once the worker is on its way, in case a route
+    // module imported for the contracts holds the event loop open.
+    expect(exit).toHaveBeenCalledTimes(1);
+    expect(exit.mock.invocationCallOrder[0]).toBeGreaterThan(
+      spawn.mock.invocationCallOrder[0],
+    );
   });
 
   test("generates database types without a warehouse", async () => {
@@ -190,6 +229,52 @@ describe("generate-types foreground spawn orchestration", () => {
       outFile: path.join(path.dirname(outFile), "database.d.ts"),
     });
     expect(generateFromEntryPoint).not.toHaveBeenCalled();
+  });
+
+  test("a failed schema pass still regenerates the operation contracts, then reports the first failure", async () => {
+    delete process.env.DATABRICKS_WAREHOUSE_ID;
+    const schemaFile = path.join(tmpRoot, "config/database/schema.ts");
+    const outFile = path.join(tmpRoot, "shared/appkit-types/analytics.d.ts");
+    fs.mkdirSync(path.dirname(schemaFile), { recursive: true });
+    fs.writeFileSync(schemaFile, "export const schema = {};", "utf8");
+    const typegenError = (message: string) =>
+      Object.assign(new Error(message), { name: "DatabaseTypegenError" });
+    generateDatabaseTypes.mockRejectedValueOnce(
+      typegenError("config/database/schema.ts threw while loading"),
+    );
+    generateDatabaseOperations.mockRejectedValueOnce(
+      typegenError("the routes could not load their schema"),
+    );
+
+    await runCli([tmpRoot, outFile]);
+
+    expect(generateDatabaseOperations).toHaveBeenCalledTimes(1);
+    expect(consoleError).toHaveBeenCalledWith(
+      "config/database/schema.ts threw while loading",
+    );
+    expect(consoleError).not.toHaveBeenCalledWith(
+      "the routes could not load their schema",
+    );
+    expect(exit).toHaveBeenCalledWith(1);
+  });
+
+  test("generates the database operations registry and contracts, strictly in production", async () => {
+    delete process.env.DATABRICKS_WAREHOUSE_ID;
+    const outFile = path.join(tmpRoot, "shared/appkit-types/analytics.d.ts");
+    const operations = {
+      appRoot: tmpRoot,
+      outFile: path.join(path.dirname(outFile), "database-operations.d.ts"),
+    };
+    vi.stubEnv("NODE_ENV", "development");
+    await runCli([tmpRoot, outFile]);
+    vi.stubEnv("NODE_ENV", "production");
+    await runCli([tmpRoot, outFile]);
+    vi.unstubAllEnvs();
+
+    expect(generateDatabaseOperations.mock.calls).toEqual([
+      [{ ...operations, strict: false }],
+      [{ ...operations, strict: true }],
+    ]);
   });
 
   test("lock already held (fresh): does NOT spawn, foreground still resolves", async () => {
@@ -240,20 +325,100 @@ describe("generate-types foreground spawn orchestration", () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
+  test("--wait-timeout <seconds> is passed to the generator in milliseconds", async () => {
+    await runCli([tmpRoot, "--wait", "--wait-timeout", "120"]);
+
+    expect(generateFromEntryPoint).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "blocking", waitTimeoutMs: 120_000 }),
+    );
+  });
+
+  test("without --wait-timeout the generator resolves the limit itself", async () => {
+    await runCli([tmpRoot, "--wait"]);
+
+    expect(generateFromEntryPoint).toHaveBeenCalledWith(
+      expect.objectContaining({ waitTimeoutMs: undefined }),
+    );
+  });
+
+  test("a long --wait-timeout stretches the worker lock's staleness window", async () => {
+    await runCli([tmpRoot, "--wait-timeout", "900"]);
+
+    expect(acquireSpawnLock).toHaveBeenCalledWith(
+      getSpawnLockPath(tmpRoot),
+      960_000,
+    );
+  });
+
+  test("the background worker inherits --wait-timeout", async () => {
+    await runCli([tmpRoot, "--wait-timeout", "45"]);
+
+    expect(spawn).toHaveBeenCalledTimes(1);
+    const argv = spawn.mock.calls[0][1] as string[];
+    const at = argv.indexOf("--wait-timeout");
+    expect(at).toBeGreaterThan(-1);
+    expect(argv[at + 1]).toBe("45");
+  });
+
   test("worker invocation (--worker-lock): runs blocking generate, releases lock, does NOT spawn", async () => {
     const lockPath = getSpawnLockPath(tmpRoot);
 
-    await runCli([tmpRoot, "--worker-lock", lockPath]);
+    // Same flags spawnTypegenWorker passes: a worker is always `--wait`.
+    await runCli([tmpRoot, "--wait", "--worker-lock", lockPath]);
 
     // A worker is always blocking — it does the real DESCRIBE lifecycle.
     expect(generateFromEntryPoint).toHaveBeenCalledWith(
       expect.objectContaining({ mode: "blocking" }),
     );
-    // It releases the SAME lock it was handed.
+    // It releases the SAME lock it was handed, then exits.
     expect(releaseSpawnLock).toHaveBeenCalledWith(lockPath);
+    expect(exit.mock.invocationCallOrder[0]).toBeGreaterThan(
+      releaseSpawnLock.mock.invocationCallOrder[0],
+    );
     // It must never spawn another worker (recursion would never terminate).
     expect(spawn).not.toHaveBeenCalled();
     expect(acquireSpawnLock).not.toHaveBeenCalled();
+  });
+
+  test("a failure no generator names is reported and still ends the process with status 1", async () => {
+    generateDatabaseOperations.mockRejectedValueOnce(
+      new Error("ENOSPC: no space left on device"),
+    );
+    try {
+      await runCli([tmpRoot]);
+      expect(consoleError).toHaveBeenCalledWith(
+        "\nENOSPC: no space left on device",
+      );
+      expect(process.exitCode).toBe(1);
+      expect(exit).toHaveBeenCalledTimes(1);
+    } finally {
+      process.exitCode = undefined;
+    }
+  });
+
+  test("exits only after stdout and stderr hand off what was written", async () => {
+    const pending: (() => void)[] = [];
+    for (const stream of [process.stdout, process.stderr]) {
+      const write = stream.write.bind(stream);
+      vi.spyOn(stream, "write").mockImplementation(((
+        chunk: unknown,
+        ...rest: unknown[]
+      ) => {
+        const done = rest.find((arg) => typeof arg === "function");
+        if (chunk === "" && done) {
+          pending.push(done as () => void);
+          return true;
+        }
+        return write(chunk as string, ...(rest as []));
+      }) as typeof stream.write);
+    }
+
+    const run = runCli([tmpRoot]);
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    expect(exit).not.toHaveBeenCalled();
+    for (const done of pending) done();
+    await run;
+    expect(exit).toHaveBeenCalledTimes(1);
   });
 
   test("reports the metric artifact when config/metric-views/definitions.json exists", async () => {

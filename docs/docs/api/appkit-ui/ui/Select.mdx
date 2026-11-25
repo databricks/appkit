@@ -25,7 +25,7 @@ Dropdown control for selecting a value from a list
 | `open` | `boolean` |  | - | - |
 | `defaultOpen` | `boolean` |  | - | - |
 | `onOpenChange` | `((open: boolean) => void)` |  | - | - |
-| `dir` | `enum` |  | - | - |
+| `dir` | `"ltr" \| "rtl"` |  | - | - |
 | `name` | `string` |  | - | - |
 | `autoComplete` | `string` |  | - | - |
 | `disabled` | `boolean` |  | - | - |
@@ -59,19 +59,19 @@ import { Select } from '@databricks/appkit-ui';
 | `onCloseAutoFocus` | `((event: Event) => void)` |  | - | Event handler called when auto-focusing on close. Can be prevented. |
 | `onEscapeKeyDown` | `((event: KeyboardEvent) => void)` |  | - | Event handler called when the escape key is down. Can be prevented. |
 | `onPointerDownOutside` | `((event: PointerDownOutsideEvent) => void)` |  | - | Event handler called when the a `pointerdown` event happens outside of the `DismissableLayer`. Can be prevented. |
-| `position` | `enum` |  | `popper` | - |
+| `position` | `"item-aligned" \| "popper"` |  | `popper` | - |
 | `asChild` | `boolean` |  | - | - |
-| `side` | `enum` |  | - | - |
+| `side` | `"top" \| "right" \| "bottom" \| "left"` |  | - | - |
 | `sideOffset` | `number` |  | - | - |
-| `align` | `enum` |  | - | - |
+| `align` | `"center" \| "start" \| "end"` |  | - | - |
 | `alignOffset` | `number` |  | - | - |
 | `arrowPadding` | `number` |  | - | - |
 | `avoidCollisions` | `boolean` |  | - | - |
 | `collisionBoundary` | `Boundary \| Boundary[]` |  | - | - |
 | `collisionPadding` | `number \| Partial<Record<"top" \| "right" \| "bottom" \| "left", number>>` |  | - | - |
-| `sticky` | `enum` |  | - | - |
+| `sticky` | `"partial" \| "always"` |  | - | - |
 | `hideWhenDetached` | `boolean` |  | - | - |
-| `updatePositionStrategy` | `enum` |  | - | - |
+| `updatePositionStrategy` | `"always" \| "optimized"` |  | - | - |
 
 
 
@@ -238,7 +238,7 @@ import { SelectSeparator } from '@databricks/appkit-ui';
 | Prop | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
 | `asChild` | `boolean` |  | - | - |
-| `size` | `enum` |  | `default` | - |
+| `size` | `"default" \| "sm"` |  | `default` | - |
 
 
 

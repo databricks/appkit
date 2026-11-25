@@ -570,13 +570,11 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
     def: AgentDefinition,
     name: string,
   ): Promise<AgentAdapter> {
-    // Explicit model (adapter or string) wins; otherwise fall back to the
-    // DATABRICKS_SERVING_ENDPOINT_NAME env default. A string from any source
-    // routes by name in `adapterFromModelString` (system.* → AI Gateway,
-    // everything else → Model Serving).
+    // Explicit model wins, then the model_service env, then the legacy serving env.
     const source =
       def.model ??
       this.config.defaultModel ??
+      process.env.DATABRICKS_MODEL_SERVICE_NAME ??
       process.env.DATABRICKS_SERVING_ENDPOINT_NAME;
     // Per-agent adapter knobs from `AgentDefinition` / markdown frontmatter.
     // Only applied when AppKit builds the adapter itself (string or omitted
@@ -593,7 +591,7 @@ export class AgentsPlugin extends Plugin implements ToolProvider {
 
     if (!source) {
       throw new Error(
-        `Agent '${name}' has no model configured and no DATABRICKS_SERVING_ENDPOINT_NAME default available`,
+        `Agent '${name}' has no model configured and no DATABRICKS_MODEL_SERVICE_NAME default available`,
       );
     }
     if (typeof source === "string") {

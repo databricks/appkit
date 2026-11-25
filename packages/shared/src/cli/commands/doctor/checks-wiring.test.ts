@@ -8,6 +8,7 @@ function info(overrides: Partial<BundleInfo> = {}): BundleInfo {
   return {
     bindings: new Map(),
     envToBinding: new Map(),
+    wiredEnvVars: new Set(),
     declaredResources: new Set(),
     present: true,
     ...overrides,
@@ -29,8 +30,15 @@ function target(overrides: Partial<ResourceTarget> = {}): ResourceTarget {
 }
 
 describe("checkWiring", () => {
-  it("returns nothing when no bundle is present", () => {
-    expect(checkWiring(info({ present: false }), [])).toEqual([]);
+  it("skips the bundle checks with a note when no bundle is present", () => {
+    const targets = [target({ envVars: ["DATABRICKS_WAREHOUSE_ID"] })];
+    expect(checkWiring(info({ present: false }), targets)).toEqual([
+      expect.objectContaining({
+        status: "skipped",
+        code: "NO_BUNDLE",
+        detail: "no databricks.yml: bundle checks skipped",
+      }),
+    ]);
   });
 
   it("flags an app.yaml valueFrom that matches no binding", () => {
@@ -90,6 +98,7 @@ describe("checkWiring", () => {
       info({
         // app.yaml provides one env, bindings exist for it.
         envToBinding: new Map([["DATABRICKS_WAREHOUSE_ID", "sql-warehouse"]]),
+        wiredEnvVars: new Set(["DATABRICKS_WAREHOUSE_ID"]),
         bindings: new Map([
           [
             "sql-warehouse",
@@ -135,6 +144,22 @@ describe("checkWiring", () => {
     expect(unwired?.detail).toMatch(
       /won't be set in the environment of the deployed app/i,
     );
+  });
+
+  it("treats a literal app.yaml `value:` entry as wired", () => {
+    // `{ name: X, value: <id> }` sets the var on deploy with no binding, so it's
+    // neither unwired nor an unbound valueFrom.
+    const findings = checkWiring(
+      info({ wiredEnvVars: new Set(["DATABRICKS_GENIE_SPACE_ID"]) }),
+      [
+        target({
+          type: "genie_space",
+          required: true,
+          envVars: ["DATABRICKS_GENIE_SPACE_ID"],
+        }),
+      ],
+    );
+    expect(findings).toEqual([]);
   });
 
   it("marks an optional resource's unwired var as optional in the detail", () => {

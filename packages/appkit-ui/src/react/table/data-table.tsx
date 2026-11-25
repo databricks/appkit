@@ -40,6 +40,12 @@ import type { DataTableLabels, DataTableProps } from "./types";
  *  - Responsive design
  *  - Supports opinionated mode (auto columns) and full-control mode (`children(table)`)
  *
+ * In opinionated mode the columns are the keys of the first row that match `/^[a-zA-Z_][a-zA-Z0-9_]*$/` (other
+ * keys are dropped), headed by the key in Title Case. Every cell whose value parses as a number, numeric strings
+ * included, is right-aligned and formatted: a key containing `cost`, `price`, `spend`, `revenue` or `usd` shows as
+ * USD, and any other value of 1000 or more is abbreviated (10021 shows as 10K). For ids, zip codes or years, render
+ * a `Table` from `useAnalyticsQuery` rows instead.
+ *
  * @param props - Props for the DataTable component
  * @param props.queryKey - The query key to fetch the data
  * @param props.parameters - The parameters to pass to the query. Required - use `{}` if none.

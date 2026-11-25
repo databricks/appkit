@@ -1,7 +1,9 @@
+import { readFileSync } from "node:fs";
+
 import {
   Binary,
   Bool,
-  type DataType,
+  DataType,
   DateDay,
   Decimal,
   DurationMicrosecond,
@@ -23,7 +25,12 @@ import {
 } from "apache-arrow";
 import { describe, expect, test } from "vitest";
 
-import { buildEmptyArrowIPCBase64, parseDatabricksType } from "../arrow-schema";
+import type { ColumnInfo } from "../../../workspace-client";
+import {
+  buildArrowIPCFromRows,
+  buildEmptyArrowIPCBase64,
+  parseDatabricksType,
+} from "../arrow-schema";
 
 // ============================================================================
 // Helpers
@@ -511,5 +518,299 @@ describe("buildEmptyArrowIPCBase64", () => {
     const table = tableFromIPC(buf);
     expect(table.numRows).toBe(0);
     expect(table.numCols).toBe(0);
+  });
+});
+
+// ============================================================================
+// buildArrowIPCFromRows (rebuilds ARROW_STREAM from INLINE JSON_ARRAY rows)
+// ============================================================================
+
+describe("buildArrowIPCFromRows", () => {
+  type Case = {
+    column: Parameters<typeof buildArrowIPCFromRows>[0][number];
+    cells: Array<string | null>;
+    expected: unknown[];
+  };
+
+  const decimalUnscaled = (v: unknown) => (v === null ? null : String(v));
+  const cases: Record<string, Case & { read?: (v: unknown) => unknown }> = {
+    INT: {
+      column: { name: "c", typeName: "INT", typeText: "INT" },
+      cells: ["1", null, "-3"],
+      expected: [1, null, -3],
+    },
+    TINYINT: {
+      column: { name: "c", typeName: "BYTE", typeText: "TINYINT" },
+      cells: ["7", null, "-128"],
+      expected: [7, null, -128],
+    },
+    SMALLINT: {
+      column: { name: "c", typeName: "SHORT", typeText: "SMALLINT" },
+      cells: ["32767", null],
+      expected: [32767, null],
+    },
+    BIGINT: {
+      column: { name: "c", typeName: "LONG", typeText: "BIGINT" },
+      cells: ["9007199254740993", null, "-9223372036854775808"],
+      expected: [9007199254740993n, null, -9223372036854775808n],
+    },
+    FLOAT: {
+      column: { name: "c", typeName: "FLOAT", typeText: "FLOAT" },
+      cells: ["1.5", null, "-0.25"],
+      expected: [1.5, null, -0.25],
+    },
+    DOUBLE: {
+      column: { name: "c", typeName: "DOUBLE", typeText: "DOUBLE" },
+      cells: ["1.1", "NaN", null],
+      expected: [1.1, Number.NaN, null],
+    },
+    DECIMAL: {
+      column: {
+        name: "c",
+        typeName: "DECIMAL",
+        typeText: "DECIMAL(10,2)",
+        typePrecision: 10,
+        typeScale: 2,
+      },
+      cells: ["1.50", "-0.05", null, "12345678.99", "7"],
+      expected: ["150", "-5", null, "1234567899", "700"],
+      read: decimalUnscaled,
+    },
+    "DECIMAL without (p,s) in typeText": {
+      column: {
+        name: "c",
+        typeName: "DECIMAL",
+        typeText: "DECIMAL",
+        typePrecision: 12,
+        typeScale: 3,
+      },
+      cells: ["1.5", null],
+      expected: ["1500", null],
+      read: decimalUnscaled,
+    },
+    DATE: {
+      column: { name: "c", typeName: "DATE", typeText: "DATE" },
+      cells: ["2026-01-02", null],
+      expected: [Date.UTC(2026, 0, 2), null],
+    },
+    TIMESTAMP: {
+      column: { name: "c", typeName: "TIMESTAMP", typeText: "TIMESTAMP" },
+      cells: ["2026-01-02T10:00:00.123Z", null],
+      expected: [Date.UTC(2026, 0, 2, 10, 0, 0, 123), null],
+    },
+    TIMESTAMP_NTZ: {
+      column: {
+        name: "c",
+        typeName: "TIMESTAMP_NTZ",
+        typeText: "TIMESTAMP_NTZ",
+      },
+      cells: ["2026-01-02T10:00:00.123", null],
+      expected: [Date.UTC(2026, 0, 2, 10, 0, 0, 123), null],
+    },
+    STRING: {
+      column: { name: "c", typeName: "STRING", typeText: "STRING" },
+      cells: ["a", "", null],
+      expected: ["a", "", null],
+    },
+    BOOLEAN: {
+      column: { name: "c", typeName: "BOOLEAN", typeText: "BOOLEAN" },
+      cells: ["true", "false", null],
+      expected: [true, false, null],
+    },
+    BINARY: {
+      column: { name: "c", typeName: "BINARY", typeText: "BINARY" },
+      cells: ["AQI=", null],
+      expected: [[1, 2], null],
+      read: (v) => (v instanceof Uint8Array ? [...v] : v),
+    },
+    VOID: {
+      column: { name: "c", typeName: "NULL", typeText: "VOID" },
+      cells: [null, null],
+      expected: [null, null],
+    },
+  };
+
+  test.each(Object.entries(cases))(
+    "%s keeps the native Arrow type and values, nulls included",
+    (_name, { column, cells, expected, read }) => {
+      const ipc = buildArrowIPCFromRows(
+        [column],
+        cells.map((cell) => [cell]),
+      );
+      const table = tableFromIPC(ipc);
+
+      const native = parseDatabricksType(column.typeText ?? "STRING");
+      const field = table.schema.fields[0];
+      expect(field.name).toBe(column.name);
+      expect(field.typeId).toBe(native.typeId);
+      if (DataType.isDecimal(field.type)) {
+        expect([field.type.precision, field.type.scale]).toEqual([
+          column.typePrecision,
+          column.typeScale,
+        ]);
+      } else {
+        expect(String(field.type)).toBe(String(native));
+      }
+      const values = [...(table.getChildAt(0) ?? [])];
+      expect(values.map((v) => (read ? read(v) : v))).toEqual(expected);
+    },
+  );
+
+  test("duplicate column names and JSON-looking strings come through verbatim", () => {
+    const payload = '{"id":9007199254740993, "label":"kept verbatim"}';
+    const ipc = buildArrowIPCFromRows(
+      [
+        { name: "x", typeName: "INT", typeText: "INT" },
+        { name: "x", typeName: "INT", typeText: "INT" },
+        { name: "payload", typeName: "STRING", typeText: "STRING" },
+      ],
+      [["1", "2", payload]],
+    );
+    const table = tableFromIPC(ipc);
+    expect(table.schema.fields.map((f) => f.name)).toEqual([
+      "x",
+      "x",
+      "payload",
+    ]);
+    expect(table.getChildAt(0)?.get(0)).toBe(1);
+    expect(table.getChildAt(1)?.get(0)).toBe(2);
+    expect(table.getChildAt(2)?.get(0)).toBe(payload);
+  });
+
+  test("an unnamed column gets the column_N name the header carries", () => {
+    const ipc = buildArrowIPCFromRows([{ name: "", typeText: "INT" }], [["1"]]);
+    expect(tableFromIPC(ipc).schema.fields[0].name).toBe("column_0");
+  });
+
+  test("nested, interval and geospatial columns stay strings", () => {
+    const columns = [
+      { name: "a", typeText: "ARRAY<INT>" },
+      { name: "m", typeText: "MAP<STRING,INT>" },
+      { name: "s", typeText: "STRUCT<f:INT>" },
+      { name: "i", typeText: "INTERVAL DAY" },
+      { name: "g", typeName: "GEOGRAPHY", typeText: "GEOGRAPHY(4326)" },
+    ];
+    const row = [
+      "[1,2]",
+      '{"k":1}',
+      '{"f":1}',
+      "1 00:00:00.000000000",
+      "POINT(1 2)",
+    ];
+    const table = tableFromIPC(buildArrowIPCFromRows(columns, [row]));
+    expect(table.schema.fields.map((f) => f.typeId)).toEqual(
+      columns.map(() => Type.Utf8),
+    );
+    expect(table.toArray()[0].toJSON()).toEqual({
+      a: row[0],
+      m: row[1],
+      s: row[2],
+      i: row[3],
+      g: row[4],
+    });
+  });
+
+  test("zero rows still yield the typed schema", () => {
+    const table = tableFromIPC(
+      buildArrowIPCFromRows(
+        [{ name: "n", typeName: "LONG", typeText: "BIGINT" }],
+        [],
+      ),
+    );
+    expect(table.numRows).toBe(0);
+    expect(table.schema.fields[0].typeId).toBe(Type.Int);
+  });
+
+  test("a cell that does not parse as its column type throws", () => {
+    expect(() =>
+      buildArrowIPCFromRows(
+        [{ typeText: "INT" }, { typeText: "DATE" }],
+        [["1", "not-a-date"]],
+      ),
+    ).toThrow(/Invalid date/);
+    expect(() =>
+      buildArrowIPCFromRows(
+        [{ typeText: "DECIMAL(5,2)", typePrecision: 5, typeScale: 2 }],
+        [["abc"]],
+      ),
+    ).toThrow(/Invalid decimal/);
+    expect(() =>
+      buildArrowIPCFromRows([{ typeText: "INT" }], [["abc"]]),
+    ).toThrow(/Invalid integer/);
+    expect(() =>
+      buildArrowIPCFromRows([{ typeText: "BIGINT" }], [["1.5"]]),
+    ).toThrow();
+    expect(() =>
+      buildArrowIPCFromRows([{ typeText: "DOUBLE" }], [["x"]]),
+    ).toThrow(/Invalid number/);
+    expect(() =>
+      buildArrowIPCFromRows([{ typeText: "BOOLEAN" }], [["maybe"]]),
+    ).toThrow(/Invalid boolean/);
+  });
+});
+
+describe("buildArrowIPCFromRows against a captured warehouse response", () => {
+  const fixture = JSON.parse(
+    readFileSync(
+      new URL("./fixtures/typed-values.json", import.meta.url),
+      "utf8",
+    ),
+  ) as {
+    columns: ColumnInfo[];
+    dataArray: Array<Array<string | null>>;
+    arrowIpcBase64: string;
+  };
+  const native = tableFromIPC(Buffer.from(fixture.arrowIpcBase64, "base64"));
+  const rebuilt = tableFromIPC(
+    buildArrowIPCFromRows(fixture.columns, fixture.dataArray),
+  );
+  const comparable = (value: unknown) =>
+    value !== null && typeof value === "object" ? String(value) : value;
+  const values = (table: typeof native, index: number) =>
+    [...(table.getChildAt(index) ?? [])].map(comparable);
+  const SESSION_ZONE = "America/Los_Angeles";
+
+  test("has the same rows and column names, duplicates included", () => {
+    expect(rebuilt.numRows).toBe(native.numRows);
+    expect(rebuilt.schema.fields.map((f) => f.name)).toEqual(
+      native.schema.fields.map((f) => f.name),
+    );
+  });
+
+  test.each(
+    fixture.columns
+      .map((column, index) => [column.name ?? "", index] as const)
+      .filter(([name]) => !["ts", "ts_micro", "arr"].includes(name)),
+  )("column %s (%i) has the native Arrow type and values", (_name, index) => {
+    expect(String(rebuilt.schema.fields[index].type)).toBe(
+      String(native.schema.fields[index].type),
+    );
+    expect(values(rebuilt, index)).toEqual(values(native, index));
+  });
+
+  test("TIMESTAMP keeps every instant but is labeled UTC instead of the session zone", () => {
+    const index = fixture.columns.findIndex((c) => c.name === "ts");
+    expect(native.schema.fields[index].type.timezone).toBe(SESSION_ZONE);
+    expect(rebuilt.schema.fields[index].type.timezone).toBe("UTC");
+    expect(values(rebuilt, index)).toEqual(values(native, index));
+  });
+
+  test("TIMESTAMP keeps milliseconds, because the JSON text has no microseconds", () => {
+    const index = fixture.columns.findIndex((c) => c.name === "ts_micro");
+    expect(fixture.dataArray[0][index]).toMatch(/\.\d{3}-\d{2}:\d{2}$/);
+    expect(values(rebuilt, index)).toEqual(
+      values(native, index).map((ms) =>
+        ms === null ? null : Math.trunc(Number(ms)),
+      ),
+    );
+  });
+
+  test("ARRAY arrives as JSON text and stays a string column", () => {
+    const index = fixture.columns.findIndex((c) => c.name === "arr");
+    expect(native.schema.fields[index].type.typeId).toBe(Type.List);
+    expect(rebuilt.schema.fields[index].type.typeId).toBe(Type.Utf8);
+    expect(values(rebuilt, index)).toEqual(
+      fixture.dataArray.map((row) => row[index]),
+    );
   });
 });

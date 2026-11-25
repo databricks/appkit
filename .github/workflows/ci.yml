@@ -172,6 +172,8 @@ jobs:
       # The generated database registry must reach appkit-ui's built declarations.
       - name: Typecheck database components
         run: pnpm --filter=dev-playground typecheck:database
+      - name: Run a built database server without sources
+        run: pnpm exec tsx tools/verify-database-bundle.ts
       - name: Run Integration Tests
         run: pnpm --filter=dev-playground test:integration
         env:
@@ -204,6 +206,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Install, build, and start the pnpm template
         run: pnpm exec tsx tools/smoke-test-template.ts --package-manager pnpm --output-dir .smoke-test/app-pnpm --run
+      - name: Typecheck and lint the template with every plugin
+        run: pnpm exec tsx tools/smoke-test-template.ts --package-manager pnpm --output-dir .smoke-test/app-all-plugins --run --all-plugins
 
   template-deploy-shape-npm:
     name: Template Deploy-Shape (npm install, build, and startup)

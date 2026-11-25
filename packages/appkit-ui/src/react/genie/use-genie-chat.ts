@@ -54,7 +54,31 @@ function makeUserItem(
   };
 }
 
-function makeAssistantItem(msg: GenieMessageResponse): GenieMessageItem {
+/** URLs of the plugin route that serves each visualization attachment as a PNG. */
+function visualizationUrls(
+  basePath: string,
+  alias: string,
+  msg: GenieMessageResponse,
+): Record<string, string> | undefined {
+  const entries = (msg.attachments ?? []).flatMap((att) =>
+    att.viz && att.attachmentId
+      ? [
+          [
+            att.attachmentId,
+            `${basePath}/${encodeURIComponent(alias)}/conversations/${encodeURIComponent(msg.conversationId)}` +
+              `/messages/${encodeURIComponent(msg.messageId)}/attachments/${encodeURIComponent(att.attachmentId)}/visualization`,
+          ],
+        ]
+      : [],
+  );
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function makeAssistantItem(
+  msg: GenieMessageResponse,
+  basePath: string,
+  alias: string,
+): GenieMessageItem {
   return {
     id: msg.messageId,
     role: "assistant",
@@ -63,6 +87,8 @@ function makeAssistantItem(msg: GenieMessageResponse): GenieMessageItem {
     attachments: msg.attachments ?? [],
     queryResults: new Map(),
     error: msg.error,
+    reasoning: msg.reasoning,
+    visualizationUrls: visualizationUrls(basePath, alias, msg),
   };
 }
 
@@ -74,7 +100,11 @@ function makeAssistantItem(msg: GenieMessageResponse): GenieMessageItem {
  * attachments yet, we emit an empty assistant placeholder so the UI can
  * show a loading indicator and later poll for the completed response.
  */
-function messageResultToItems(msg: GenieMessageResponse): GenieMessageItem[] {
+function messageResultToItems(
+  msg: GenieMessageResponse,
+  basePath: string,
+  alias: string,
+): GenieMessageItem[] {
   const hasAttachments = (msg.attachments?.length ?? 0) > 0;
 
   if (!hasAttachments && TERMINAL_STATUSES.has(msg.status)) {
@@ -93,7 +123,7 @@ function messageResultToItems(msg: GenieMessageResponse): GenieMessageItem[] {
       },
     ];
   }
-  return [makeUserItem(msg, "-user"), makeAssistantItem(msg)];
+  return [makeUserItem(msg, "-user"), makeAssistantItem(msg, basePath, alias)];
 }
 
 /**
@@ -128,7 +158,7 @@ function fetchConversationPage(
         const event = JSON.parse(message.data) as GenieStreamEvent;
         switch (event.type) {
           case "message_result":
-            items.push(...messageResultToItems(event.message));
+            items.push(...messageResultToItems(event.message, basePath, alias));
             break;
           case "query_result":
             for (let i = items.length - 1; i >= 0; i--) {
@@ -224,8 +254,23 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
           break;
         }
 
+        case "reasoning": {
+          setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (last?.role !== "assistant") return prev;
+            return [
+              ...prev.slice(0, -1),
+              {
+                ...last,
+                reasoning: [...(last.reasoning ?? []), event.content],
+              },
+            ];
+          });
+          break;
+        }
+
         case "message_result": {
-          const item = makeAssistantItem(event.message);
+          const item = makeAssistantItem(event.message, basePath, alias);
           setMessages((prev) => {
             const last = prev[prev.length - 1];
             if (!last || last.role !== "assistant") return prev;
@@ -272,7 +317,7 @@ export function useGenieChat(options: UseGenieChatOptions): UseGenieChatReturn {
         }
       }
     },
-    [persistInUrl, urlParamName],
+    [persistInUrl, urlParamName, basePath, alias],
   );
 
   processStreamEventRef.current = processStreamEvent;

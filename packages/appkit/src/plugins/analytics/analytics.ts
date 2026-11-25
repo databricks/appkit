@@ -24,7 +24,11 @@ import {
   toolsFromRegistry,
 } from "../../core/agent/tools/define-tool";
 import { assertReadOnlySql } from "../../core/agent/tools/sql-policy";
-import { AppKitError, ExecutionError } from "../../errors";
+import {
+  AppKitError,
+  ExecutionError,
+  IdentityExpiredError,
+} from "../../errors";
 import { createLogger } from "../../logging/logger";
 import { Plugin, toPlugin } from "../../plugin";
 import { defineManifest } from "../../registry";
@@ -43,8 +47,9 @@ import {
 } from "./metric";
 import { QueryProcessor } from "./query";
 import {
-  type ArrowCapability,
-  deliverArrowBytes,
+  ArrowCapabilityMemo,
+  type ArrowDeliveryOut,
+  deliverArrowBytesWithFallback,
   deliverJsonResult,
   type QueryExecutor,
 } from "./result-delivery";
@@ -127,7 +132,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    * is not user-scoped. Bounded by the number of distinct warehouses a process
    * talks to (effectively one).
    */
-  private _arrowCapability = new Map<string, ArrowCapability>();
+  private _arrowCapability = new ArrowCapabilityMemo();
 
   constructor(config: IAnalyticsConfig) {
     super(config);
@@ -399,12 +404,14 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
               // warehouse only accepts ARROW_STREAM for INLINE, retries as
               // ARROW_STREAM and decodes server-side — returning the SSE
               // `result` message with plain rows. (ARROW_STREAM requests are
-              // handled earlier via `_handleArrowStreamQuery`.)
+              // handled earlier via `_handleArrowStreamQuery`.) Numeric and
+              // BOOLEAN cells are coerced to match the generated query types.
               return await self._executeJsonArrayPath(
                 executor,
                 query,
                 processedParams,
                 sig,
+                { coerceScalars: true },
               );
             } catch (err) {
               originalError = err;
@@ -760,12 +767,14 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       | Record<string, SQLTypeMarker | null | undefined>
       | undefined,
     signal?: AbortSignal,
+    options?: { coerceScalars?: boolean },
   ): Promise<AnalyticsSseMessage> {
     const result = await deliverJsonResult(
       executor,
       query,
       processedParams,
       signal,
+      options,
     );
     return makeResultMessage(result.data, {
       status: result.status,
@@ -784,7 +793,7 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    */
   private _setArrowColumnsHeader(
     res: express.Response,
-    columnsRef: { columnNames?: string[]; statementId?: string },
+    columnsRef: ArrowDeliveryOut,
   ): void {
     const names = columnsRef.columnNames;
     if (!names || names.length === 0) return;
@@ -857,14 +866,11 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
 
       const warehouseId = await getWarehouseId();
 
-      // Populated by `deliverArrowBytes` from the result manifest before the
-      // first chunk is yielded, so the header below carries the real names.
-      const columnsRef: { columnNames?: string[]; statementId?: string } = {};
-      const bytes = deliverArrowBytes(
-        // Wrap the executor so the INLINE attempt runs through the interceptor
-        // chain (cache + retry), matching the JSON path. Only inline attachments
-        // are cached; EXTERNAL_LINKS carry expiring pre-signed URLs and are
-        // never cached (see `_arrowCachingExecutor`).
+      // Populated by `deliverArrowBytesWithFallback` from the result manifest
+      // before the first chunk is yielded, so the header below carries the
+      // real names.
+      const columnsRef: ArrowDeliveryOut = {};
+      const bytes = deliverArrowBytesWithFallback(
         this._arrowCachingExecutor(
           executor,
           query_key,
@@ -878,8 +884,6 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
         columnsRef,
         signal,
         {
-          // Skip the doomed INLINE probe on a warehouse already known to need
-          // EXTERNAL_LINKS; remember the resolved mode for next time.
           capabilityHint: this._arrowCapability.get(warehouseId),
           onCapabilityResolved: (capability) =>
             this._arrowCapability.set(warehouseId, capability),
@@ -937,10 +941,14 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
       // Do not echo upstream / SDK error text — it can include statement
       // fragments and correlation ids. Keep the structured code so the
       // client can branch (e.g. RESULT_TOO_LARGE_FOR_JSON_FALLBACK,
-      // ARROW_DELIVERY_UNSUPPORTED).
+      // ARROW_DELIVERY_UNSUPPORTED, IDENTITY_EXPIRED).
       const errorCode =
-        error instanceof ExecutionError ? error.errorCode : undefined;
-      res.status(500).json({
+        error instanceof IdentityExpiredError
+          ? error.code
+          : error instanceof ExecutionError
+            ? error.errorCode
+            : undefined;
+      res.status(error instanceof AppKitError ? error.statusCode : 500).json({
         // `clientMessage` is the sanitized, actionable text (e.g. "Re-run with
         // JSON_ARRAY" for ARROW_DELIVERY_UNSUPPORTED); it never carries raw
         // warehouse/SDK strings. Fall back to a generic message otherwise.
@@ -979,13 +987,13 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
   }
 
   /**
-   * Wrap an executor so the `INLINE + ARROW_STREAM` attempt is served from
-   * (and populates) the same per-user TTL cache the JSON path uses — otherwise
-   * every arrow chart render is a fresh warehouse execution, unlike its JSON
-   * twin. Caching is deliberately scoped to inline attachments:
+   * Wrap an executor so INLINE attempts are served from (and populate) the same
+   * per-user TTL cache the JSON path uses — otherwise every arrow chart render
+   * is a fresh warehouse execution, unlike its JSON twin. Caching is
+   * deliberately scoped to inline results:
    *
-   * - INLINE results carry a bounded (<=25 MiB) base64 `attachment` with the
-   *   same lifecycle as cached JSON rows — safe to cache.
+   * - INLINE results are bounded (<=25 MiB) and have the same lifecycle as
+   *   cached JSON rows — safe to cache, keyed by the requested format.
    * - EXTERNAL_LINKS results carry short-lived pre-signed URLs that expire in
    *   minutes; caching them would serve dead links, so those pass through
    *   uncached (only the tiny link metadata would be cached anyway).
@@ -993,8 +1001,8 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
    * Uses `this.cache.getOrExecute` directly rather than `this.execute()`
    * because `execute()` reduces a thrown error to `{ ok:false, message }`,
    * dropping the `errorCode` the capability fallback classifies on. The cache
-   * re-throws `AppKitError`s intact and never caches a rejection, so the
-   * INLINE→EXTERNAL_LINKS fallback still sees the structured rejection.
+   * re-throws `AppKitError`s intact and never caches a rejection, so delivery
+   * still sees the structured rejection.
    */
   private _arrowCachingExecutor(
     executor: AnalyticsPlugin,
@@ -1008,22 +1016,15 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
     const ttl = queryDefaults.cache?.ttl;
     return {
       query: (q, params, formatParameters, signal) => {
-        // Only the inline-arrow attempt is cacheable — EXTERNAL_LINKS carry
-        // short-lived pre-signed URLs, so those pass straight through.
-        if (
-          formatParameters.disposition !== "INLINE" ||
-          formatParameters.format !== "ARROW_STREAM"
-        ) {
+        if (formatParameters.disposition !== "INLINE") {
           return executor.query(q, params, formatParameters, signal);
         }
-        // On a standard warehouse this throws a capability rejection — the
-        // cache never stores a rejection, so the fallback still sees the
-        // structured error. On Reyden it returns a bounded (<=25 MiB)
-        // attachment that caches like the JSON path's rows. The shared signal
-        // dedupes concurrent renders (e.g. React StrictMode double-mount).
+        // The shared signal dedupes concurrent renders (e.g. React StrictMode
+        // double-mount).
         return cache.getOrExecute(
           [
             "analytics:query:arrow",
+            JSON.stringify(formatParameters),
             query_key,
             JSON.stringify(parameters),
             hashedQuery,

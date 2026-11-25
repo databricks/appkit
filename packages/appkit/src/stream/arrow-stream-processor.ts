@@ -18,13 +18,97 @@ export type RefreshChunkLink = (
 ) => Promise<ExternalLink | undefined>;
 
 interface ArrowStreamOptions {
-  /** Idle timeout (ms) for a single chunk: no progress → abort the download. */
+  /** Idle timeout (ms) for a single read, and the header wait of every chunk but a first that can still fall back. */
   timeout: number;
   /** Attempts to establish a chunk's response before any bytes are yielded. */
   retries: number;
+  /** Longest wait (ms) for the first chunk's response headers before the download counts as denied. */
+  responseTimeoutMs: number;
 }
 
+const EXTERNAL_LINK_DOWNLOAD_FAILED = "EXTERNAL_LINK_DOWNLOAD_FAILED";
+
 const BACKOFF_MULTIPLIER = 1000;
+
+type UsableLink = ExternalLink & { externalLink: string };
+
+const hasUrl = (link: ExternalLink | undefined): link is UsableLink =>
+  Boolean(link?.externalLink);
+
+/** How storage refuses a presigned URL, including one that has expired. */
+const isRefusalStatus = (status: unknown) => status === 400 || status === 403;
+
+/** Node's fetch stops connecting after 10 s on its own, before a longer header wait fires. */
+const isConnectTimeout = (error: unknown) => {
+  const cause = error instanceof Error ? error.cause : undefined;
+  return (
+    typeof cause === "object" &&
+    cause !== null &&
+    "code" in cause &&
+    cause.code === "UND_ERR_CONNECT_TIMEOUT"
+  );
+};
+
+const errorText = (error: unknown) =>
+  error instanceof Error
+    ? error.cause instanceof Error
+      ? `${error.message}: ${error.cause.message}`
+      : error.message
+    : String(error);
+
+/** A 4xx won't change on retry, except a request timeout (408) or a rate limit (429). */
+const isFinalStatus = (status: number) =>
+  status >= 400 && status < 500 && status !== 408 && status !== 429;
+
+interface DownloadFailure {
+  status?: number;
+  error: unknown;
+  timedOut: boolean;
+}
+
+type Connection =
+  | {
+      ok: true;
+      response: Response;
+      controller: AbortController;
+      detach: () => void;
+    }
+  | ({ ok: false } & DownloadFailure);
+
+function downloadFailed(
+  message: string,
+  { status, error, timedOut }: DownloadFailure,
+): ExecutionError {
+  return new ExecutionError(message, {
+    errorCode: EXTERNAL_LINK_DOWNLOAD_FAILED,
+    context: { httpStatus: status, timedOut },
+    cause: error instanceof Error ? error : undefined,
+  });
+}
+
+/**
+ * `err` as a chunk download failure: storage refused it (400/403), never
+ * answered, or it failed some other way. `undefined` for any other error.
+ */
+export function asDownloadFailure(
+  err: unknown,
+):
+  | { kind: "refused" | "unanswered" | "other"; error: ExecutionError }
+  | undefined {
+  if (
+    !(err instanceof ExecutionError) ||
+    err.errorCode !== EXTERNAL_LINK_DOWNLOAD_FAILED
+  ) {
+    return undefined;
+  }
+  const status = err.context?.httpStatus;
+  const kind = isRefusalStatus(status)
+    ? "refused"
+    : err.context?.timedOut === true
+      ? "unanswered"
+      : "other";
+  return { kind, error: err };
+}
 
 /**
  * Streams Arrow IPC bytes for a completed statement's EXTERNAL_LINKS chunks
@@ -36,6 +120,7 @@ const BACKOFF_MULTIPLIER = 1000;
 export class ArrowStreamProcessor {
   static readonly DEFAULT_TIMEOUT = 30000;
   static readonly DEFAULT_RETRIES = 3;
+  static readonly DEFAULT_RESPONSE_TIMEOUT = 10000;
 
   private options: ArrowStreamOptions;
 
@@ -43,6 +128,9 @@ export class ArrowStreamProcessor {
     this.options = {
       timeout: options?.timeout ?? ArrowStreamProcessor.DEFAULT_TIMEOUT,
       retries: options?.retries ?? ArrowStreamProcessor.DEFAULT_RETRIES,
+      responseTimeoutMs:
+        options?.responseTimeoutMs ??
+        ArrowStreamProcessor.DEFAULT_RESPONSE_TIMEOUT,
     };
   }
 
@@ -53,18 +141,34 @@ export class ArrowStreamProcessor {
    * memory is one read buffer. Chunks are fetched sequentially; the
    * concatenation of everything yielded is byte-identical to the raw Arrow
    * result, so the client parses it exactly as a buffered response.
+   *
+   * Only the first chunk waits `responseTimeoutMs` for headers and stops on a
+   * timeout, because only a failure before the first byte can still fall back.
+   * `fullHeaderWait` gives it the full `timeout` too, for a second pass over a
+   * download that only looked stalled.
    */
   async *streamChunks(
     chunks: ExternalLink[],
     signal?: AbortSignal,
     refresh?: RefreshChunkLink,
+    fullHeaderWait = false,
   ): AsyncGenerator<Uint8Array, void, unknown> {
     if (chunks.length === 0) {
       throw ValidationError.missingField("chunks");
     }
 
-    for (const chunk of chunks) {
-      yield* this.streamChunkBody(chunk, signal, refresh);
+    const { timeout, responseTimeoutMs } = this.options;
+    for (const [index, chunk] of chunks.entries()) {
+      const first = index === 0;
+      yield* this.streamChunkBody(
+        chunk,
+        signal,
+        refresh,
+        first && !fullHeaderWait
+          ? Math.min(responseTimeoutMs, timeout)
+          : timeout,
+        first,
+      );
     }
   }
 
@@ -75,89 +179,83 @@ export class ArrowStreamProcessor {
    * or non-2xx) — once bytes have been yielded downstream we cannot re-fetch,
    * so a mid-body failure propagates and the caller aborts the response. An
    * idle timeout, reset before every read, aborts a stalled download.
+   *
+   * A 400 or 403 re-mints the link once, since a pre-signed URL may have expired. Other
+   * 4xx (except 408/429) stop, and so does a header or connect timeout when
+   * `stopOnTimeout`: a blocked host hangs instead of refusing, so a retry only
+   * repeats the wait.
    */
   private async *streamChunkBody(
     chunk: ExternalLink,
-    signal?: AbortSignal,
-    refresh?: RefreshChunkLink,
+    signal: AbortSignal | undefined,
+    refresh: RefreshChunkLink | undefined,
+    headerWaitMs: number,
+    stopOnTimeout: boolean,
   ): AsyncGenerator<Uint8Array, void, unknown> {
-    let externalLink = chunk.externalLink;
-    if (!externalLink) {
+    if (!hasUrl(chunk)) {
       // A missing link cannot be fixed by retrying — fail loudly.
       throw ExecutionError.statementFailed(
         `External link missing for chunk ${chunk.chunkIndex}`,
       );
     }
+    let link: UsableLink = chunk;
 
-    let response: Response | undefined;
-    let controller: AbortController | undefined;
-    let onOuterAbort: (() => void) | undefined;
-    let lastError: unknown;
+    const { timeout, retries } = this.options;
+    let connection: Extract<Connection, { ok: true }> | undefined;
+    let failure: DownloadFailure = {
+      error: new Error("no download attempts"),
+      timedOut: false,
+    };
+    let attempts = 0;
+    let reminted = false;
 
-    for (let attempt = 0; attempt < this.options.retries; attempt++) {
+    while (attempts < retries) {
       if (signal?.aborted) throw ExecutionError.canceled();
+      attempts++;
+      const result = await this.connect(link, headerWaitMs, signal);
+      if (result.ok) {
+        connection = result;
+        break;
+      }
+      failure = result;
+      if (signal?.aborted) throw ExecutionError.canceled();
+      if (result.timedOut && stopOnTimeout) break;
 
-      const attemptController = new AbortController();
-      const listener = () => attemptController.abort();
-      signal?.addEventListener("abort", listener, { once: true });
-      const timer = setTimeout(
-        () => attemptController.abort(),
-        this.options.timeout,
-      );
-
-      try {
-        const r = await fetch(externalLink, {
-          signal: attemptController.signal,
-        });
-        clearTimeout(timer);
-        if (!r.ok) {
-          throw ExecutionError.statementFailed(
-            `Failed to download chunk ${chunk.chunkIndex}: ${r.status} ${r.statusText}`,
+      const { status } = result;
+      if (
+        isRefusalStatus(status) &&
+        refresh &&
+        chunk.chunkIndex != null &&
+        !reminted
+      ) {
+        reminted = true;
+        attempts--;
+        try {
+          const fresh = await refresh(chunk.chunkIndex, signal);
+          if (hasUrl(fresh)) link = fresh;
+        } catch (refreshError) {
+          logger.warn(
+            "Failed to re-resolve link for chunk %s: %O",
+            chunk.chunkIndex,
+            refreshError,
           );
         }
-        // Keep this attempt's controller alive to drive the body read + idle
-        // timeout below.
-        response = r;
-        controller = attemptController;
-        onOuterAbort = listener;
-        break;
-      } catch (error) {
-        clearTimeout(timer);
-        signal?.removeEventListener("abort", listener);
-        lastError = error;
-        if (signal?.aborted) throw ExecutionError.canceled();
-        if (attempt < this.options.retries - 1) {
-          await this.delay(2 ** attempt * BACKOFF_MULTIPLIER, signal);
-          // Pre-signed URLs expire (<= 15 min). Before retrying, re-mint this
-          // chunk's link — a stale URL would just 403 again on the same address.
-          // Only meaningful before any bytes are yielded (below), which is why
-          // this lives in the establish-response loop.
-          if (refresh && chunk.chunkIndex != null) {
-            try {
-              const fresh = await refresh(chunk.chunkIndex, signal);
-              if (fresh?.externalLink) externalLink = fresh.externalLink;
-            } catch (refreshError) {
-              // Keep retrying the current URL; surface the original error if
-              // all attempts fail.
-              logger.warn(
-                "Failed to re-resolve link for chunk %s: %O",
-                chunk.chunkIndex,
-                refreshError,
-              );
-            }
-          }
-        }
+        continue;
+      }
+      if (status !== undefined && isFinalStatus(status)) break;
+      if (attempts < retries) {
+        await this.delay(2 ** (attempts - 1) * BACKOFF_MULTIPLIER, signal);
       }
     }
 
-    if (!response || !controller) {
-      throw ExecutionError.statementFailed(
-        `Failed to download chunk ${chunk.chunkIndex} after ${this.options.retries} attempts: ${
-          lastError instanceof Error ? lastError.message : String(lastError)
-        }`,
+    if (!connection) {
+      throw downloadFailed(
+        `Failed to download chunk ${chunk.chunkIndex}: ${errorText(failure.error)}`,
+        failure,
       );
     }
 
+    const { response, controller, detach } = connection;
     const body = response.body;
     let idleTimer: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -170,10 +268,7 @@ export class ArrowStreamProcessor {
           // it the instant the read resolves — if it stayed armed across the
           // yield, a slow client backpressuring `writeChunk` would look like an
           // upstream stall and abort a perfectly healthy download.
-          idleTimer = setTimeout(
-            () => controller.abort(),
-            this.options.timeout,
-          );
+          idleTimer = setTimeout(() => controller.abort(), timeout);
           let done: boolean;
           let value: Uint8Array | undefined;
           try {
@@ -197,14 +292,52 @@ export class ArrowStreamProcessor {
       );
       throw error instanceof ExecutionError
         ? error
-        : ExecutionError.statementFailed(
-            `Failed streaming chunk ${chunk.chunkIndex}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
+        : downloadFailed(
+            `Failed streaming chunk ${chunk.chunkIndex}: ${errorText(error)}`,
+            { error, timedOut: false },
           );
     } finally {
       clearTimeout(idleTimer);
-      if (onOuterAbort) signal?.removeEventListener("abort", onOuterAbort);
+      detach();
+    }
+  }
+
+  private async connect(
+    link: UsableLink,
+    headerWaitMs: number,
+    signal?: AbortSignal,
+  ): Promise<Connection> {
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const detach = () => signal?.removeEventListener("abort", onAbort);
+    const timer = setTimeout(() => controller.abort(), headerWaitMs);
+    try {
+      const response = await fetch(link.externalLink, {
+        signal: controller.signal,
+        headers: link.httpHeaders,
+      });
+      clearTimeout(timer);
+      if (response.ok) return { ok: true, response, controller, detach };
+      await response.body?.cancel().catch(() => {});
+      detach();
+      return {
+        ok: false,
+        status: response.status,
+        error: new Error(`${response.status} ${response.statusText}`),
+        timedOut: false,
+      };
+    } catch (error) {
+      clearTimeout(timer);
+      detach();
+      const headerWaitExpired = !signal?.aborted && controller.signal.aborted;
+      return {
+        ok: false,
+        error: headerWaitExpired
+          ? new Error(`no response within ${headerWaitMs}ms`)
+          : error,
+        timedOut: headerWaitExpired || isConnectTimeout(error),
+      };
     }
   }
 

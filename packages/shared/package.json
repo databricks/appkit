@@ -70,10 +70,10 @@
     "@standard-schema/spec": "1.1.0",
     "commander": "12.1.0",
     "dotenv": "16.6.1",
-    "js-yaml": "4.3.1",
+    "js-yaml": "4.3.2",
     "picocolors": "1.1.1",
     "semver": "7.7.3",
-    "yaml": "2.8.2",
-    "zod": "4.3.6"
+    "yaml": "2.9.1",
+    "zod": "4.6.7"
   }
 }
