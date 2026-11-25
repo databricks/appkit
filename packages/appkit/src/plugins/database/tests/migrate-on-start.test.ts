@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -332,29 +333,121 @@ describe("migrateOnStart", () => {
 });
 
 describe("migrateOnStart: tables an earlier release left in public", () => {
+  const NOTES_SQL = 'CREATE TABLE "app"."notes" ("id" integer);';
+  const NOTES_WHEN = 1000;
   // An upgraded app: public.notes holds its rows, app.notes does not exist.
-  const notesInPublic = {
-    rows: [{ schema_name: "public", table_name: "notes" }],
-  };
+  const notesInPublic = [{ schema_name: "public", table_name: "notes" }];
 
-  test("the default schema and every declared table in public: refused, nothing applied", async () => {
-    pool.query.mockResolvedValue(notesInPublic);
-    applyPendingMigrations.mockResolvedValueOnce(nothingDone);
+  /** An app root whose one committed migration, 0000_notes, creates app.notes. */
+  function appRootWithNotesMigration(): { root: string; hash: string } {
+    const root = appRoot();
+    const folder = path.join(root, "config/database/migrations");
+    fs.mkdirSync(path.join(folder, "meta"), { recursive: true });
+    fs.writeFileSync(
+      path.join(folder, "meta/_journal.json"),
+      JSON.stringify({
+        version: "7",
+        dialect: "postgresql",
+        entries: [
+          {
+            idx: 0,
+            version: "7",
+            when: NOTES_WHEN,
+            tag: "0000_notes",
+            breakpoints: true,
+          },
+        ],
+      }),
+    );
+    fs.writeFileSync(path.join(folder, "0000_notes.sql"), NOTES_SQL);
+    return {
+      root,
+      hash: createHash("sha256").update(NOTES_SQL).digest("hex"),
+    };
+  }
 
-    const error = await migrateOnStart(
-      pool,
-      schema,
-      appRootWithMigrations(),
-      deployEnv,
-    ).catch((caught: unknown) => caught);
+  /**
+   * The deploy branch's one connection. Its journal records `recorded`, and
+   * the catalog lookup of the declared tables in app and public finds `catalog`.
+   */
+  function deployBranch(
+    recorded: readonly string[],
+    catalog: readonly { schema_name: string; table_name: string }[],
+  ) {
+    const statements: string[] = [];
+    const client = {
+      release: vi.fn(),
+      query: vi.fn(async (input: string) => {
+        const text = input.trim();
+        statements.push(text);
+        if (text.includes("c.relowner")) {
+          const journal = {
+            relkind: "r",
+            owner: "app-sp",
+            schema_owner: "app-sp",
+            current_user: "app-sp",
+            row_security: false,
+            trusted: true,
+          };
+          return { rows: recorded.length > 0 ? [journal] : [] };
+        }
+        if (text.startsWith("select hash, created_at")) {
+          return {
+            rows: recorded.map((hash) => ({ hash, created_at: NOTES_WHEN })),
+          };
+        }
+        if (text.includes("pg_try_advisory_lock(")) {
+          return { rows: [{ locked: true }] };
+        }
+        if (text.includes("'public'")) return { rows: catalog };
+        return { rows: [] };
+      }),
+    };
+    pool.connect.mockResolvedValue(client);
+    return {
+      statements,
+      lookedInPublic: () =>
+        statements.some((text) => text.includes("'public'")),
+    };
+  }
 
-    expect(applyPendingMigrations).not.toHaveBeenCalled();
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+  });
+
+  test("a current branch costs one connection and one read of the journal: public is not looked at", async () => {
+    const { root, hash } = appRootWithNotesMigration();
+    const branch = deployBranch([hash], notesInPublic);
+
+    await migrateOnStart(pool, schema, root, deployEnv);
+
+    expect(pool.connect).toHaveBeenCalledTimes(1);
+    expect(pool.query).not.toHaveBeenCalled();
+    expect(branch.lookedInPublic()).toBe(false);
+    expect(branch.statements).toEqual([
+      expect.stringContaining("c.relowner"),
+      expect.stringMatching(/^select hash, created_at/),
+    ]);
+  });
+
+  test("a pending migration, the default schema and every declared table in public: refused, nothing applied", async () => {
+    const { root } = appRootWithNotesMigration();
+    const branch = deployBranch([], notesInPublic);
+
+    const error = await migrateOnStart(pool, schema, root, deployEnv).catch(
+      (caught: unknown) => caught,
+    );
+
     expect(error).toBeInstanceOf(DatabasePluginError);
     expect(error).toMatchObject({ category: "SETUP_FAILED", phase: "setup" });
-    expect((error as Error).message).toContain("public has notes");
+    expect((error as Error).message).toContain(
+      'not applying migrations: none of the declared tables exist in schema "app", but public has notes.',
+    );
     expect((error as Error).message).toContain(
       'pass { schemaName: "public" } as the second argument of defineSchema()',
     );
+    expect(branch.statements).not.toContain(NOTES_SQL);
+    expect(branch.statements).not.toContain("begin");
   });
 
   test('schemaName "app" named explicitly is migrated, whatever public holds', async () => {
@@ -362,36 +455,31 @@ describe("migrateOnStart: tables an earlier release left in public", () => {
       ({ table }) => ({ notes: table("notes", { id: id() }) }),
       { schemaName: "app" },
     );
-    pool.query.mockResolvedValue(notesInPublic);
-    applyPendingMigrations.mockResolvedValueOnce(nothingDone);
-    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const { root } = appRootWithNotesMigration();
+    const branch = deployBranch([], notesInPublic);
 
-    await migrateOnStart(pool, explicit, appRootWithMigrations(), deployEnv);
+    await migrateOnStart(pool, explicit, root, deployEnv);
 
-    expect(applyPendingMigrations).toHaveBeenCalledTimes(1);
+    expect(branch.statements).toContain(NOTES_SQL);
+    expect(branch.lookedInPublic()).toBe(false);
   });
 
   test("a declared table already in app: migrated, whatever public holds", async () => {
-    pool.query.mockResolvedValue({
-      rows: [
-        { schema_name: "app", table_name: "notes" },
-        { schema_name: "public", table_name: "notes" },
-      ],
-    });
-    applyPendingMigrations.mockResolvedValueOnce(nothingDone);
-    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const { root } = appRootWithNotesMigration();
+    const branch = deployBranch(
+      [],
+      [{ schema_name: "app", table_name: "notes" }, ...notesInPublic],
+    );
 
-    await migrateOnStart(pool, schema, appRootWithMigrations(), deployEnv);
+    await migrateOnStart(pool, schema, root, deployEnv);
 
-    expect(applyPendingMigrations).toHaveBeenCalledTimes(1);
+    expect(branch.statements).toContain(NOTES_SQL);
   });
 
   test("no committed journal: nothing to apply, so the catalog is not consulted", async () => {
-    vi.spyOn(console, "log").mockImplementation(() => undefined);
-    pool.query.mockResolvedValue(notesInPublic);
-
     await migrateOnStart(pool, schema, appRoot(), deployEnv);
 
+    expect(pool.connect).not.toHaveBeenCalled();
     expect(pool.query).not.toHaveBeenCalled();
   });
 });

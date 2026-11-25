@@ -323,6 +323,63 @@ describe("applyPendingMigrations", () => {
     expect(fake.client.statements).not.toContain("begin");
   });
 
+  describe("beforeApply", () => {
+    test("nothing pending: never runs", async () => {
+      const folder = twoMigrations();
+      const { pool } = fakePool({
+        recorded: [
+          { hash: hashOf(folder, "0000_migration"), created_at: 1000 },
+          { hash: hashOf(folder, "0001_migration"), created_at: 2000 },
+        ],
+      });
+      const beforeApply = vi.fn(async () => undefined);
+
+      await applyPendingMigrations(pool, { ...options(folder), beforeApply });
+
+      expect(beforeApply).not.toHaveBeenCalled();
+    });
+
+    test("something pending: runs once on the migrating connection, under the lock, before the first migration", async () => {
+      const folder = twoMigrations();
+      const { pool, client } = fakePool({ recorded: null });
+      const beforeApply = vi.fn(
+        async (connection: { query(text: string): unknown }) => {
+          await connection.query("select 'before apply'");
+        },
+      );
+
+      await applyPendingMigrations(pool, { ...options(folder), beforeApply });
+
+      expect(beforeApply).toHaveBeenCalledTimes(1);
+      const order = steps(client.statements);
+      expect(order.indexOf("select 'before apply'")).toBeGreaterThan(
+        order.indexOf("try lock"),
+      );
+      expect(order.indexOf("select 'before apply'")).toBeLessThan(
+        order.indexOf("begin"),
+      );
+    });
+
+    test("what it throws reaches the caller unchanged: nothing applied, the lock released", async () => {
+      const folder = twoMigrations();
+      const { pool, client, state } = fakePool({ recorded: null });
+      const refusal = new Error("tables left in public");
+
+      const error = await applyPendingMigrations(pool, {
+        ...options(folder),
+        beforeApply: async () => {
+          throw refusal;
+        },
+      }).catch((caught: unknown) => caught);
+
+      expect(error).toBe(refusal);
+      expect(client.statements).not.toContain("begin");
+      expect(state.recorded).toBeNull();
+      expect(steps(client.statements)).toContain("unlock");
+      expect(client.released).toEqual({ error: undefined });
+    });
+  });
+
   test("without a journal it never connects", async () => {
     const folder = migrations([]);
     fs.rmSync(path.join(folder, "meta"), { recursive: true });
