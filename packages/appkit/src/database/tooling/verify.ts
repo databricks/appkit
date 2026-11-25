@@ -69,6 +69,8 @@ type DeployedMigrations =
       readonly missing: readonly string[];
       /** Committed migrations the snapshot has with another journal entry or other SQL. */
       readonly changed: readonly string[];
+      /** Committed migrations the snapshot has with the same SQL in other line endings. */
+      readonly lineEndings: readonly string[];
       /** Migrations the snapshot has that this checkout does not commit. */
       readonly unknown: readonly string[];
     }
@@ -398,18 +400,23 @@ async function readDeployedMigrations(
             `${file} is listed in the deployed journal but missing from the snapshot`,
           );
         }
-        return bytes.equals(sql) ? "same" : "changed";
+        if (bytes.equals(sql)) return "same";
+        return withLf(bytes) === withLf(sql) ? "lineEndings" : "changed";
       }),
     );
-    const tags = (status: "missing" | "changed") =>
+    const tags = (status: "missing" | "changed" | "lineEndings") =>
       committed
         .filter((_, index) => compared[index] === status)
         .map(({ entry }) => entry.tag);
     const missing = tags("missing");
     const changed = tags("changed");
-    return missing.length === 0 && changed.length === 0 && unknown.length === 0
+    const lineEndings = tags("lineEndings");
+    return missing.length === 0 &&
+      changed.length === 0 &&
+      lineEndings.length === 0 &&
+      unknown.length === 0
       ? { evidence: "verified" }
-      : { evidence: "differs", missing, changed, unknown };
+      : { evidence: "differs", missing, changed, lineEndings, unknown };
   } catch (error) {
     return {
       evidence: "unavailable",
@@ -417,6 +424,9 @@ async function readDeployedMigrations(
     };
   }
 }
+
+const withLf = (bytes: Buffer) =>
+  bytes.toString("utf-8").replace(/\r\n/g, "\n");
 
 /** Why the deployed migrations do not match the committed ones, each with its fix; empty when verified. */
 function migrationsProblems(
@@ -430,7 +440,7 @@ function migrationsProblems(
     ];
   }
   const problems: string[] = [];
-  const { missing, changed, unknown } = migrations;
+  const { missing, changed, lineEndings, unknown } = migrations;
   if (missing.length > 0) {
     const them = missing.length === 1 ? "it" : "them";
     problems.push(
@@ -441,6 +451,14 @@ function migrationsProblems(
     const them = changed.length === 1 ? "it" : "them";
     problems.push(
       `app ${name}'s active deployment has ${changed.join(", ")} with another journal entry or other SQL than this checkout commits. A migration that ran never runs again: restore ${them} to what was deployed, and put the change in a new migration`,
+    );
+  }
+  // The app's start hashes either line ending as the same file, so a new
+  // migration would be wrong advice; verify still wants the deployed bytes.
+  if (lineEndings.length > 0) {
+    const it = lineEndings.length === 1 ? "it" : "them";
+    problems.push(
+      `app ${name}'s active deployment has ${lineEndings.join(", ")} with the same SQL as this checkout commits, but other line endings (CRLF or LF). The app's start treats either line ending as the same file, but verify compares bytes: check ${it} out with the line endings that were deployed, or run ${DEPLOY} to deploy ${it} as committed`,
     );
   }
   if (unknown.length > 0) {

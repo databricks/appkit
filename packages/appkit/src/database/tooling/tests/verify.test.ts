@@ -792,6 +792,38 @@ describe("runVerify --deployed", () => {
     );
   });
 
+  test("SQL that differs only in line endings still fails, says so, and does not ask for a new migration", async () => {
+    const migrations = [
+      { tag: "0000_migration", when: 1000 },
+      { tag: "0001_migration", when: 2000 },
+    ];
+    const { ctx } = deployedApp({
+      migrations,
+      deployedSql: {
+        "0000_migration": "-- 0000_migration\r\nselect 1;\r\n",
+        "0001_migration": "-- 0001_migration\r\nselect 2;\r\n",
+      },
+    });
+
+    const report = await runVerify(ctx, DEPLOYED);
+    expect(report).toMatchObject({
+      migrations: {
+        evidence: "differs",
+        missing: [],
+        changed: ["0001_migration"],
+        lineEndings: ["0000_migration"],
+        unknown: [],
+      },
+      ok: false,
+    });
+    if (report.kind !== "deploy") throw new Error("expected a deploy report");
+    const [changed, lineEndings] = report.problems;
+    expect(changed).toContain("put the change in a new migration");
+    expect(lineEndings).toBe(
+      "app my-app's active deployment has 0000_migration with the same SQL as this checkout commits, but other line endings (CRLF or LF). The app's start treats either line ending as the same file, but verify compares bytes: check it out with the line endings that were deployed, or run `databricks apps deploy` to deploy it as committed",
+    );
+  });
+
   const JOURNAL = `${SNAPSHOT}/${MIGRATIONS}/meta/_journal.json`;
   test.each([
     [
