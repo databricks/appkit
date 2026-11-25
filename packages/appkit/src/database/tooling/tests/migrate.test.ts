@@ -436,7 +436,9 @@ describe("runMigrate", () => {
       (caught: unknown) => caught,
     )) as Error;
 
-    expect(error.message).toBe("Could not load config/database/schema.ts.");
+    expect(error.message).toMatch(
+      /^Database schema ".*config\/database\/schema\.ts" threw while loading$/,
+    );
     expect((error.cause as Error).message).toMatch(/schema\.ts:\d+:\d+/);
     expect(resolveEnvBranch).not.toHaveBeenCalled();
   });

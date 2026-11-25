@@ -1,12 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import {
-  DEFAULT_SCHEMA_FILE,
-  loadDefaultDatabaseSchema,
-} from "../../plugins/database/load-schema";
+import { DEFAULT_SCHEMA_FILE } from "../../plugins/database/load-schema";
 import {
   DATABASE_TYPES_FILE,
+  loadDatabaseSchema,
   writeDatabaseTypes,
 } from "../../type-generator/database";
 import {
@@ -173,9 +171,9 @@ async function migrateHolding(
   lock: HistoryLock,
   options: MigrateOptions,
 ): Promise<MigrateReport> {
-  const schema = await loadDefaultDatabaseSchema(ctx.root, {
-    showImportError: true,
-  });
+  const schema = await loadDatabaseSchema(
+    path.join(ctx.root, DEFAULT_SCHEMA_FILE),
+  );
   const generated = await generateMigrationFiles(lock, {
     schema,
     interactive: options.interactive,
@@ -194,7 +192,7 @@ async function migrateHolding(
     // Nothing ran. A kept migration would create the empty copies the refusal
     // warns about, and the next run would diff schema.ts against it.
     if (error instanceof TablesLeftInPublicError) {
-      discardMigrationFiles(lock, generated);
+      await discardMigrationFiles(lock, generated);
       throw error;
     }
     const file = path.relative(ctx.root, generated.file);
@@ -206,7 +204,7 @@ async function migrateHolding(
       error.code &&
       !RETRYABLE_AS_WRITTEN.has(error.code)
     ) {
-      discardMigrationFiles(lock, generated);
+      await discardMigrationFiles(lock, generated);
       throw new Error(
         `${error.message} Removed ${file}, so the next run writes it again from ${DEFAULT_SCHEMA_FILE}. Change ${DEFAULT_SCHEMA_FILE} or the branch's data, then rerun \`appkit db migrate\`.`,
         { cause: error },

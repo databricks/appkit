@@ -9,8 +9,11 @@ import { walkSchema } from "./walk-schema";
 
 /** Safe diagnostic raised when database declarations cannot be generated. */
 export class DatabaseTypegenError extends Error {
-  constructor(message = "Database schema generation failed") {
-    super(message);
+  constructor(
+    message = "Database schema generation failed",
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
     this.name = "DatabaseTypegenError";
   }
 }
@@ -137,8 +140,11 @@ export async function loadDatabaseSchema(schemaFile: string): Promise<Schema> {
   try {
     module = await importSchema(schemaFile);
   } catch (error) {
+    // The message stays bounded; only a caller that prints causes, the local
+    // `appkit db` CLI, shows the import error to the developer.
     throw new DatabaseTypegenError(
       `Database schema "${schemaLabel(schemaFile)}" ${importFailureReason(error)}`,
+      { cause: error },
     );
   }
   if (typeof module !== "object" || module === null || !("schema" in module)) {
