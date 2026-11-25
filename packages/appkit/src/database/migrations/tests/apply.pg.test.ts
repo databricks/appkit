@@ -201,6 +201,52 @@ describe.skipIf(!url)("applyPendingMigrations against Postgres", () => {
     expect(result.applied).toEqual(["0001_broken"]);
   });
 
+  test.each([
+    [
+      "a NOT NULL the rows break (class 23)",
+      `ALTER TABLE NOTES ALTER COLUMN "body" SET NOT NULL;`,
+      "23502",
+    ],
+    [
+      "a retype the rows cannot take (class 22)",
+      `ALTER TABLE NOTES ALTER COLUMN "body" TYPE integer USING "body"::integer;`,
+      "22P02",
+    ],
+  ])(
+    "%s: the error says to repair the rows and deploy the same migration again",
+    async (_label, statement, code) => {
+      const created = {
+        tag: "0000_notes",
+        when: 1000,
+        sql: [`CREATE TABLE ${q("notes")} ("id" integer, "body" text);`],
+      };
+      const pool = newPool();
+      await applyPendingMigrations(pool, options(writeMigrations([created])));
+      await admin.query(
+        `insert into ${q("notes")} values (1, null), (2, 'not a number')`,
+      );
+      const folder = writeMigrations([
+        created,
+        {
+          tag: "0001_tighten",
+          when: 2000,
+          sql: [statement.replace("NOTES", q("notes"))],
+        },
+      ]);
+
+      const error = await applyPendingMigrations(pool, options(folder)).catch(
+        (caught: unknown) => caught,
+      );
+
+      expect(error).toBeInstanceOf(MigrationApplyError);
+      expect(error).toMatchObject({ failed: "0001_tighten", code });
+      expect((error as Error).message).toContain(
+        "It failed on rows already in the database, not on its SQL. Repair those rows, then apply the same migration again. " +
+          "On the deploy branch, repair them as a role with the DATABRICKS_SUPERUSER membership, which someone with CAN USE on the Lakebase project creates, and deploy again.",
+      );
+    },
+  );
+
   test("a migration merged behind the last recorded one fails closed and changes nothing", async () => {
     const a = {
       tag: "0000_a",
@@ -413,6 +459,24 @@ describe.skipIf(!url)("applyPendingMigrations against Postgres", () => {
       await admin.query(`drop owned by "${app}"`);
       await admin.query(`drop role "${app}"`);
       await admin.query(`drop role "${owner}"`);
+    }
+  });
+
+  test("a schema the app already owns needs no CREATE on the database", async () => {
+    const app = `appkit_app_${schema.slice(-8)}`;
+    await admin.query(`create role "${app}" login password '${ROLE_PASSWORD}'`);
+    await admin.query(`create schema "${schema}" authorization "${app}"`);
+    try {
+      const result = await applyPendingMigrations(
+        newPool({ user: app }),
+        options(notes()),
+      );
+
+      expect(result.applied).toEqual(["0000_notes", "0001_body"]);
+    } finally {
+      await Promise.all(pools.splice(0).map((pool) => pool.end()));
+      await admin.query(`drop schema if exists "${schema}" cascade`);
+      await admin.query(`drop role "${app}"`);
     }
   });
 

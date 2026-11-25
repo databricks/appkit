@@ -104,7 +104,7 @@ describe("readDeployBoundary", () => {
         "projects/p/branches/production/databases/databricks-postgres",
       ),
     });
-    expect(readDeployBoundary(root)).toEqual({
+    expect(readDeployBoundary(root, {})).toEqual({
       branches: new Set(["projects/p/branches/production"]),
       unresolved: [],
     });
@@ -126,7 +126,7 @@ targets:
       postgres_branch: projects/p/branches/staging
 `,
     });
-    expect(readDeployBoundary(root).branches).toEqual(
+    expect(readDeployBoundary(root, {}).branches).toEqual(
       new Set([
         "projects/p/branches/main",
         "projects/p/branches/dev-alice-1a2b3c",
@@ -160,7 +160,7 @@ resources:
             database: projects/p/branches/reports/databases/db
 `,
     });
-    expect(readDeployBoundary(root)).toEqual({
+    expect(readDeployBoundary(root, {})).toEqual({
       branches: new Set([
         "projects/p/branches/production",
         "projects/p/branches/archive",
@@ -182,7 +182,7 @@ resources:
             branch: projects/p/branches/production
 `,
     });
-    expect(() => readDeployBoundary(root)).toThrow(
+    expect(() => readDeployBoundary(root, {})).toThrow(
       'Cannot read include pattern "resources/[ab]*.yml", so the branches it deploys to are unknown: only * and ? are supported, not [, ] or \\.',
     );
   });
@@ -195,7 +195,7 @@ resources:
       )}  prod: {}
 `,
     });
-    expect(readDeployBoundary(root)).toEqual({
+    expect(readDeployBoundary(root, {})).toEqual({
       branches: new Set(["projects/p/branches/production"]),
       unresolved: [
         {
@@ -227,7 +227,7 @@ resources:
             branch: main
 `,
     });
-    expect(readDeployBoundary(root)).toEqual({
+    expect(readDeployBoundary(root, {})).toEqual({
       branches: new Set(),
       unresolved: [
         {
@@ -268,7 +268,7 @@ resources:
 `,
     });
 
-    const boundary = readDeployBoundary(root);
+    const boundary = readDeployBoundary(root, {});
 
     expect(boundary).toEqual({
       branches: new Set(),
@@ -316,7 +316,7 @@ resources:
       }),
     });
 
-    const boundary = readDeployBoundary(root);
+    const boundary = readDeployBoundary(root, {});
 
     expect(boundary).toEqual({
       branches: new Set(["projects/p/branches/production", dev]),
@@ -335,6 +335,84 @@ resources:
     });
   });
 
+  test("a BUNDLE_VAR_ value in the environment binds every target too, ahead of variable-overrides.json", () => {
+    const dev = `projects/p/branches/${devBranchId("alice@example.com")}`;
+    const root = tempApp({
+      "databricks.yml": databricksYml(
+        "projects/p/branches/production",
+        "projects/p/branches/production/databases/db",
+      ),
+      ".databricks/bundle/default/variable-overrides.json": JSON.stringify({
+        postgres_branch: "projects/p/branches/staging",
+      }),
+    });
+
+    const boundary = readDeployBoundary(root, {
+      BUNDLE_VAR_postgres_branch: dev,
+    });
+
+    expect(boundary).toEqual({
+      branches: new Set([
+        "projects/p/branches/production",
+        "projects/p/branches/staging",
+        dev,
+      ]),
+      unresolved: [],
+    });
+    expect(
+      classifyBranch({
+        branch: { name: dev, status: {} },
+        userName: "alice@example.com",
+        sessionId: null,
+        boundary,
+      }),
+    ).toEqual({
+      kind: "deploy-target",
+      reason: "it is a branch databricks.yml deploys to",
+    });
+  });
+
+  test("a set BUNDLE_VAR_ value that is not a branch name is unresolved, and names the variable", () => {
+    const root = tempApp({
+      "databricks.yml": databricksYml(
+        "projects/p/branches/production",
+        "projects/p/branches/production/databases/db",
+      ),
+    });
+
+    const boundary = readDeployBoundary(root, {
+      BUNDLE_VAR_postgres_branch: "",
+    });
+
+    expect(boundary.unresolved).toEqual([
+      {
+        target: "default",
+        at: "resources.apps.app.resources[0].postgres.branch",
+        written: "${var.postgres_branch}",
+        environment: "BUNDLE_VAR_postgres_branch",
+      },
+      {
+        target: "default",
+        at: "variables.postgres_branch",
+        written: "",
+        environment: "BUNDLE_VAR_postgres_branch",
+      },
+    ]);
+    expect(
+      classifyBranch({
+        branch: {
+          name: `projects/p/branches/${devBranchId("alice@example.com")}`,
+          status: {},
+        },
+        userName: "alice@example.com",
+        sessionId: null,
+        boundary,
+      }).reason,
+    ).toBe(
+      'databricks.yml may deploy to it: the files do not resolve resources.apps.app.resources[0].postgres.branch in target default with BUNDLE_VAR_postgres_branch ("${var.postgres_branch}"), variables.postgres_branch in target default with BUNDLE_VAR_postgres_branch (no value); give them values in databricks.yml or the BUNDLE_VAR_ variable named',
+    );
+  });
+
   test("a variable-overrides.json value that is not a branch name is unresolved, and names the file", () => {
     const root = tempApp({
       "databricks.yml": databricksYml(
@@ -346,7 +424,7 @@ resources:
       }),
     });
 
-    expect(readDeployBoundary(root).unresolved).toEqual([
+    expect(readDeployBoundary(root, {}).unresolved).toEqual([
       {
         target: "default",
         at: "resources.apps.app.resources[0].postgres.branch",
@@ -381,21 +459,24 @@ resources:
         ),
         ".databricks/bundle/default/variable-overrides.json": contents,
       });
-      expect(() => readDeployBoundary(root)).toThrow(message);
+      expect(() => readDeployBoundary(root, {})).toThrow(message);
     },
   );
 
   test("empty without databricks.yml or without a postgres binding", () => {
     const empty = { branches: new Set(), unresolved: [] };
-    expect(readDeployBoundary(tempApp())).toEqual(empty);
+    expect(readDeployBoundary(tempApp(), {})).toEqual(empty);
     expect(
-      readDeployBoundary(tempApp({ "databricks.yml": "bundle:\n  name: x\n" })),
+      readDeployBoundary(
+        tempApp({ "databricks.yml": "bundle:\n  name: x\n" }),
+        {},
+      ),
     ).toEqual(empty);
   });
 
   test("an invalid databricks.yml throws instead of reading as no binding", () => {
     const root = tempApp({ "databricks.yml": "targets:\n  default: [\n" });
-    expect(() => readDeployBoundary(root)).toThrow(
+    expect(() => readDeployBoundary(root, {})).toThrow(
       /^Cannot read databricks\.yml, so the branches it deploys to are unknown: .+\(\d+:\d+\)$/,
     );
   });

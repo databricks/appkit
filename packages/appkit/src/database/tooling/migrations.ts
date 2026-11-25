@@ -30,8 +30,24 @@ interface GenerateOptions {
   readonly tag?: string;
   /** false: an ambiguous rename throws instead of prompting. */
   readonly interactive: boolean;
-  /** Sees the SQL before anything is written; throwing writes nothing. */
-  readonly beforeWrite?: (statements: readonly string[]) => void;
+  /** Sees the migration before anything is written; throwing writes nothing. */
+  readonly beforeWrite?: (migration: PlannedMigration) => void;
+}
+
+/** An object of the app schema, by raw catalog name. */
+export interface SchemaObject {
+  readonly kind: "table" | "column" | "default" | "constraint" | "type";
+  /** The table, or the enum type for "type". */
+  readonly name: string;
+  /** The column for "column" and "default", the constraint for "constraint". */
+  readonly member?: string;
+}
+
+/** A migration generateMigrationFiles is about to write. */
+export interface PlannedMigration {
+  readonly statements: readonly string[];
+  /** Whether it removes the object: the latest snapshot has it and the new one does not. */
+  removes(object: SchemaObject): boolean;
 }
 
 export interface GeneratedMigration {
@@ -83,9 +99,53 @@ const TAG_NAME = /^[a-z0-9_]+$/;
 /** The parts of a drizzle-kit PostgreSQL snapshot this module reads. */
 interface Snapshot {
   id: string;
-  tables: Record<string, { columns: Record<string, unknown> }>;
+  /** Keyed "<schema>.<table>", public included. */
+  tables: Record<string, SnapshotTable>;
+  /** Keyed "<schema>.<type>", public included. */
   enums: Record<string, unknown>;
   [key: string]: unknown;
+}
+
+interface SnapshotTable {
+  columns: Record<string, { default?: unknown }>;
+  foreignKeys?: Record<string, unknown>;
+  uniqueConstraints?: Record<string, unknown>;
+  checkConstraints?: Record<string, unknown>;
+  compositePrimaryKeys?: Record<string, unknown>;
+}
+
+function snapshotHas(
+  snapshot: Snapshot,
+  schemaName: string,
+  object: SchemaObject,
+): boolean {
+  const key = `${schemaName}.${object.name}`;
+  if (object.kind === "type") return Object.hasOwn(snapshot.enums, key);
+  const table = Object.hasOwn(snapshot.tables, key)
+    ? snapshot.tables[key]
+    : undefined;
+  if (!table) return false;
+  const member = object.member ?? "";
+  const column = Object.hasOwn(table.columns, member)
+    ? table.columns[member]
+    : undefined;
+  switch (object.kind) {
+    case "table":
+      return true;
+    case "column":
+      return column !== undefined;
+    case "default":
+      return column?.default !== undefined;
+    case "constraint":
+      return [
+        table.foreignKeys,
+        table.uniqueConstraints,
+        table.checkConstraints,
+        table.compositePrimaryKeys,
+      ].some(
+        (constraints) => !!constraints && Object.hasOwn(constraints, member),
+      );
+  }
 }
 
 /** drizzle-kit's empty starting snapshot (its `dryPg`). */
@@ -106,13 +166,16 @@ function originSnapshot(): Snapshot {
   };
 }
 
-function latestSnapshot(folder: string, journal: Journal | null): Snapshot {
-  const last = journal?.entries.at(-1);
-  if (!last) return originSnapshot();
-  const file = snapshotFile(folder, last.idx);
+/** The snapshot after `entry`; the origin before the first migration. */
+function snapshotAfter(
+  folder: string,
+  entry: JournalEntry | undefined,
+): Snapshot {
+  if (!entry) return originSnapshot();
+  const file = snapshotFile(folder, entry.idx);
   if (!fs.existsSync(file)) {
     throw new Error(
-      `Missing ${file} for migration ${last.tag}. Restore it from version control; it is the baseline for the next migration.`,
+      `Missing ${file} for migration ${entry.tag}. Restore it from version control; it is the baseline for the next migration.`,
     );
   }
   return readJsonFile<Snapshot>(file);
@@ -314,6 +377,7 @@ const MAY_FAIL_ON_EXISTING_ROWS: readonly StatementPredicate[] = [
   matches(/\bSET DATA TYPE\b/i),
   addsRequiredColumn,
   matches(/\bADD CONSTRAINT\b/i),
+  matches(/\bADD PRIMARY KEY\b/i),
   addsConstrainedColumn,
   matches(/^CREATE UNIQUE INDEX\b/i),
 ];
@@ -342,6 +406,63 @@ export function dataDependentStatements(
   return statementsWhere(MAY_FAIL_ON_EXISTING_ROWS, statements);
 }
 
+/** drizzle-kit's diff from `prev` to the schema: the new snapshot and its SQL. */
+async function diffSchema(
+  prev: Snapshot,
+  schema: Schema,
+  interactive: boolean,
+): Promise<{ cur: Snapshot; statements: string[] }> {
+  const { generateDrizzleJson, generateMigration } = await loadDrizzleKit();
+  const cur = generateDrizzleJson(drizzleKitImports(schema), prev.id, [
+    schema.$schemaName,
+  ]) as unknown as Snapshot;
+
+  if (!interactive) {
+    const ambiguity = findRenameAmbiguity(prev, cur, schema.$schemaName);
+    if (ambiguity) throw ambiguity;
+  }
+
+  type KitSnapshot = Parameters<typeof generateMigration>[0];
+  const statements = await generateMigration(
+    prev as unknown as KitSnapshot,
+    cur as unknown as KitSnapshot,
+  );
+  return { cur, statements };
+}
+
+/**
+ * Whether the files of `tags`, the newest committed migrations, hold the SQL
+ * generation writes for the schema on top of the migrations before them.
+ */
+export async function generatesPending(
+  folder: string,
+  schema: Schema,
+  tags: readonly string[],
+  interactive: boolean,
+): Promise<boolean> {
+  const entries = readJournal(folder)?.entries ?? [];
+  const first = entries.findIndex((entry) => entry.tag === tags[0]);
+  if (first < 0) return false;
+  const { statements } = await diffSchema(
+    snapshotAfter(folder, entries[first - 1]),
+    schema,
+    interactive,
+  );
+  const normalized = (text: string) => text.replace(/\r\n/g, "\n");
+  const committed = tags.flatMap((tag) =>
+    normalized(fs.readFileSync(migrationFile(folder, tag), "utf-8")).split(
+      BREAKPOINT,
+    ),
+  );
+  return (
+    committed.length === statements.length &&
+    committed.every(
+      (statement, index) =>
+        statement.trim() === normalized(statements[index] ?? "").trim(),
+    )
+  );
+}
+
 /**
  * Diff the schema against the latest committed snapshot with drizzle-kit and
  * write the next v7 migration: `NNNN_<tag>.sql`, `meta/NNNN_snapshot.json`,
@@ -357,31 +478,23 @@ export async function generateMigrationFiles(
       `Migration tag "${name}" must use lowercase letters, digits and underscores`,
     );
   }
-  const { generateDrizzleJson, generateMigration } = await loadDrizzleKit();
   const { folder } = lock;
 
   const journal = readJournal(folder);
-  const prev = latestSnapshot(folder, journal);
-  const cur = generateDrizzleJson(drizzleKitImports(options.schema), prev.id, [
-    options.schema.$schemaName,
-  ]) as unknown as Snapshot;
-
-  if (!options.interactive) {
-    const ambiguity = findRenameAmbiguity(
-      prev,
-      cur,
-      options.schema.$schemaName,
-    );
-    if (ambiguity) throw ambiguity;
-  }
-
-  type KitSnapshot = Parameters<typeof generateMigration>[0];
-  const statements = await generateMigration(
-    prev as unknown as KitSnapshot,
-    cur as unknown as KitSnapshot,
+  const prev = snapshotAfter(folder, journal?.entries.at(-1));
+  const { cur, statements } = await diffSchema(
+    prev,
+    options.schema,
+    options.interactive,
   );
   if (statements.length === 0) return null;
-  options.beforeWrite?.(statements);
+  const schemaName = options.schema.$schemaName;
+  options.beforeWrite?.({
+    statements,
+    removes: (object) =>
+      snapshotHas(prev, schemaName, object) &&
+      !snapshotHas(cur, schemaName, object),
+  });
 
   const entries = journal?.entries ?? [];
   const last = entries.at(-1);

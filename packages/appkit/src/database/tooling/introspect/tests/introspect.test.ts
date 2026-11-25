@@ -178,7 +178,11 @@ const authorsPkey: ConstraintRow = {
 /** A catalog with authors(id) plus the given authors columns, and any extra tables. */
 const authorsOnly = (
   columns: ColumnRow[] = [],
-  extra: { tables: TableRow[]; columns: ColumnRow[] } = {
+  extra: {
+    tables: TableRow[];
+    columns: ColumnRow[];
+    constraints?: ConstraintRow[];
+  } = {
     tables: [],
     columns: [],
   },
@@ -190,8 +194,43 @@ const authorsOnly = (
       ...columns,
       ...extra.columns,
     ],
-    constraints: [authorsPkey],
+    constraints: [authorsPkey, ...(extra.constraints ?? [])],
     indexes: [],
+  });
+
+/** A schema.ts of authors and posts, whose author_id is a foreign key to authors. */
+const postsOfAuthors = (schemaOption?: string) =>
+  `import { defineSchema, fk, id } from ${JSON.stringify(BUILDER)};
+export const schema = defineSchema(({ table }) => {
+  const authors = table("authors", { id: id() });
+  const posts = table("posts", { id: id(), author_id: fk(() => authors.id).notNull() });
+  return { authors, posts };
+}${schemaOption ? `, ${schemaOption}` : ""});
+`;
+
+/** postsOfAuthors' tables, with a foreign key the builder cannot declare: SET NULL on a NOT NULL column. */
+const setNullOnNotNull = (schemaName: string) =>
+  authorsOnly([], {
+    tables: [{ name: "posts", partitioned: false }],
+    columns: [
+      columnRow("posts", "id", "integer", { not_null: true, identity: "d" }),
+      columnRow("posts", "author_id", "integer", { not_null: true }),
+    ],
+    constraints: [
+      { ...authorsPkey, table_name: "posts", name: "posts_pkey" },
+      {
+        ...authorsPkey,
+        table_name: "posts",
+        name: "posts_author_id_fkey",
+        kind: "f",
+        columns: ["author_id"],
+        ref_schema: schemaName,
+        ref_table: "authors",
+        ref_columns: ["id"],
+        on_delete: "n",
+        on_update: "a",
+      },
+    ],
   });
 
 /** Commit a migration of the current schema.ts; `applied`: the branch has recorded it. */
@@ -310,7 +349,7 @@ describe("runIntrospect", () => {
       expect(error).toBeInstanceOf(IntrospectRefusedError);
       expect(error.message).toBe(
         "Refusing to introspect: production is not your dev or session branch (it is the project's default branch). Introspect records the migration it writes as applied, so it runs only on branches `appkit db init` created for you. " +
-          "Run `appkit db init`: it creates your dev branch from the project's default branch, and introspects it when there is no config/database/schema.ts.",
+          "Run `appkit db init`: it creates your dev branch from the branch the default databricks.yml target binds, else the project's default branch, and introspects it when there is no config/database/schema.ts.",
       );
       expect(withBranchPool).not.toHaveBeenCalled();
       expect(tree(root)).toEqual(before);
@@ -455,6 +494,29 @@ describe("runIntrospect", () => {
     expect(error).toBeInstanceOf(IntrospectRefusedError);
     expect(error.message).toBe(
       'Refusing to introspect dev-alice-3f9a2c: it has not applied 0000_baseline in schema "app". Its tables differ from what it describes. Run `appkit db migrate` first.',
+    );
+    expect(tree(root)).toEqual(before);
+    expect(markMigrationsApplied).not.toHaveBeenCalled();
+  });
+
+  test("a pending introspect migration someone edited after introspect wrote it is refused, and nothing changes", async () => {
+    const root = tempApp({ [SCHEMA]: previousSchema });
+    await commitMigration(root);
+    // A teammate introspected their branch, then edited 0001_introspect before committing it.
+    await introspect(root);
+    recorded = recorded.slice(0, 1);
+    fs.appendFileSync(
+      path.join(root, MIGRATIONS, "0001_introspect.sql"),
+      `--> statement-breakpoint\nUPDATE "app"."posts" SET "status" = 'closed';`,
+    );
+    markMigrationsApplied.mockClear();
+    const before = tree(root);
+
+    const error = await refusal(root);
+
+    expect(error).toBeInstanceOf(IntrospectRefusedError);
+    expect(error.message).toBe(
+      'Refusing to introspect dev-alice-3f9a2c: it has not applied 0001_introspect in schema "app". Its SQL is not what introspect would write for the branch now, so recording it without running it could skip a change. Run `appkit db migrate` first.',
     );
     expect(tree(root)).toEqual(before);
     expect(markMigrationsApplied).not.toHaveBeenCalled();
@@ -823,7 +885,7 @@ export const schema = defineSchema(({ table }) => ({
       "a column it cannot declare",
       previousSchema,
       authorsOnly([columnRow("authors", "email", "numeric")]),
-      'ALTER TABLE "app"."authors" DROP COLUMN "email"; (type "numeric" is not supported)',
+      'column app.authors.email (type "numeric" is not supported)',
     ],
     [
       "a default it cannot declare",
@@ -831,7 +893,7 @@ export const schema = defineSchema(({ table }) => ({
       authorsOnly([
         columnRow("authors", "email", "text", { default_expr: "lower('X')" }),
       ]),
-      `ALTER TABLE "app"."authors" ALTER COLUMN "email" DROP DEFAULT; (default lower('X') is not supported)`,
+      "the default of app.authors.email (default lower('X') is not supported)",
     ],
     [
       "a table it cannot key",
@@ -843,13 +905,49 @@ export const schema = defineSchema(({ table }) => ({
         tables: [{ name: "tags", partitioned: false }],
         columns: [columnRow("tags", "id", "integer", { not_null: true })],
       }),
-      'DROP TABLE "app"."tags" CASCADE; (it has no primary key)',
+      "table app.tags (it has no primary key)",
     ],
     [
       "a column in the public schema",
       previousSchema.replace("}));", '}), { schemaName: "public" });'),
       authorsOnly([columnRow("authors", "email", "numeric")]),
-      'ALTER TABLE "authors" DROP COLUMN "email"; (type "numeric" is not supported)',
+      'column public.authors.email (type "numeric" is not supported)',
+    ],
+    [
+      "an enum type in the public schema",
+      `import { defineSchema, id } from ${JSON.stringify(BUILDER)};
+export const schema = defineSchema(
+  ({ table, enum: enumType }) => ({
+    authors: table("authors", { id: id(), mood: enumType("mood", ["a", "b"]) }),
+  }),
+  { schemaName: "public" },
+);
+`,
+      // Only a table introspect cannot key still uses the type.
+      authorsOnly([], {
+        tables: [{ name: "events", partitioned: false }],
+        columns: [
+          columnRow("events", "kind", "mood", {
+            type_kind: "e",
+            type_schema: "public",
+            type_name: "mood",
+            enum_values: ["a", "b"],
+          }),
+        ],
+      }),
+      "type public.mood (only what schema.ts leaves out uses it)",
+    ],
+    [
+      "a foreign key it cannot declare",
+      postsOfAuthors(),
+      setNullOnNotNull("app"),
+      "constraint posts_author_id_authors_id_fk of app.posts (foreign key to authors(id) is not kept: SET NULL on a NOT NULL column)",
+    ],
+    [
+      "a foreign key in the public schema",
+      postsOfAuthors('{ schemaName: "public" }'),
+      setNullOnNotNull("public"),
+      "constraint posts_author_id_authors_id_fk of public.posts (foreign key to authors(id) is not kept: SET NULL on a NOT NULL column)",
     ],
   ])(
     "with history, a migration that drops %s the branch still has is refused and nothing changes",
@@ -869,7 +967,7 @@ export const schema = defineSchema(({ table }) => ({
 
       expect(error).toBeInstanceOf(IntrospectRefusedError);
       expect(error.message).toBe(
-        `Refusing to write a migration that drops what the branch still has but schema.ts cannot express: ${refused}. The deployed app would run it on start.`,
+        `Refusing to write a migration that drops what the branch still has but schema.ts cannot express: ${refused}. The deployed app would drop it on start.`,
       );
       expect(tree(root)).toEqual(before);
       expect(markMigrationsApplied).not.toHaveBeenCalled();
@@ -896,6 +994,20 @@ export const schema = defineSchema(({ table }) => ({
     expect(report.recorded).toEqual(["0001_introspect"]);
     expect(report.warnings).toEqual([
       '0001_introspect breaks instances still running the previous release, which keep serving while the new one migrates on start: ALTER TABLE "app"."authors" DROP COLUMN "email";',
+    ]);
+  });
+
+  test("the warning about statements that break the previous release escapes catalog names", async () => {
+    const root = tempApp({
+      [SCHEMA]: previousSchema.replace("email: text()", '"e\\u2028x": text()'),
+    });
+    await commitMigration(root);
+    catalog = authorsOnly();
+
+    const report = await introspect(root);
+
+    expect(report.warnings).toEqual([
+      '0001_introspect breaks instances still running the previous release, which keep serving while the new one migrates on start: ALTER TABLE "app"."authors" DROP COLUMN "e\\u2028x";',
     ]);
   });
 

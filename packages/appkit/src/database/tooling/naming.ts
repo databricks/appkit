@@ -1,17 +1,18 @@
 import { createHash, randomInt } from "node:crypto";
 
+import {
+  DEV_PREFIX,
+  HASH_LENGTH,
+  MAX_BRANCH_ID,
+  SESSION_ID_LENGTH,
+  SESSION_PREFIX,
+} from "../branch-names";
+
 // Branch names AppKit creates. Branch IDs: 1-63 chars, start with a
 // lowercase letter, lowercase letters, digits and hyphens only.
 
-const MAX_BRANCH_ID = 63;
-const DEV_PREFIX = "dev-";
-const SESSION_PREFIX = "session-";
-const HASH_LENGTH = 6;
-
 /** Seven days: a session branch outlives a working week, then expires on its own. */
 export const SESSION_BRANCH_TTL = "604800s";
-const SESSION_ID_LENGTH =
-  MAX_BRANCH_ID - SESSION_PREFIX.length - HASH_LENGTH - 1;
 const SESSION_ID = new RegExp(`^[a-z0-9]{1,${SESSION_ID_LENGTH}}$`);
 
 function slug(value: string): string {

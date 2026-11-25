@@ -380,7 +380,7 @@ describe("generateMigrationFiles", () => {
       folder,
       schema: blog(),
       interactive: false,
-      beforeWrite: (statements) => {
+      beforeWrite: ({ statements }) => {
         seen.push([...statements]);
         throw new Error("refused");
       },
@@ -432,6 +432,7 @@ describe("dataDependentStatements", () => {
       'ALTER TABLE "app"."notes" ALTER COLUMN "n" SET DATA TYPE integer;',
       'ALTER TABLE "app"."authors" ADD CONSTRAINT "authors_email_unique" UNIQUE("email");',
       'ALTER TABLE "app"."notes" ADD CONSTRAINT "notes_id_pk" PRIMARY KEY("id");',
+      'ALTER TABLE "app"."notes" ADD PRIMARY KEY ("id");',
       'ALTER TABLE "app"."notes" ADD CONSTRAINT "notes_score_check" CHECK ("app"."notes"."score" >= 0);',
       'ALTER TABLE "app"."notes" ADD CONSTRAINT "notes_author_authors_id_fk" FOREIGN KEY ("author") REFERENCES "app"."authors"("id") ON DELETE no action ON UPDATE no action;',
       'ALTER TABLE "app"."bookings" ADD CONSTRAINT "bookings_room_during_excl" EXCLUDE USING gist ("room" WITH =, "during" WITH &&);',
