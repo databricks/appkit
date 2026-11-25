@@ -56,6 +56,20 @@ describe("drizzleKitInstall", () => {
     );
   });
 
+  test("the lookup stops at the repository root: a lockfile above it belongs to another project", () => {
+    const home = tempApp({
+      "yarn.lock": "",
+      "repo/.git/HEAD": "ref: refs/heads/main\n",
+      "repo/package.json": "{}",
+      "repo/apps/web/package.json": "{}",
+    });
+    vi.stubEnv("npm_config_user_agent", undefined);
+
+    expect(drizzleKitInstall(path.join(home, "repo/apps/web")).command).toBe(
+      "npm",
+    );
+  });
+
   test("without a field or lockfile anywhere, the launcher's manager is used, else npm", () => {
     const root = tempApp({ "package.json": "{}" });
     vi.stubEnv("npm_config_user_agent", "yarn/4.0.0 npm/? node/v22");
@@ -84,13 +98,30 @@ describe("ensureDrizzleKit", () => {
     ]);
   });
 
-  test("does nothing when drizzle-kit resolves, or there is no package.json", () => {
+  test("installs over a drizzle-kit of another version", () => {
+    const root = tempApp({
+      "package.json": "{}",
+      "pnpm-lock.yaml": "",
+      "node_modules/drizzle-kit/package.json": JSON.stringify({
+        name: "drizzle-kit",
+        version: "0.30.0",
+      }),
+    });
+    const run = vi.fn();
+
+    expect(ensureDrizzleKit(root, run, () => undefined)).toBe(
+      `pnpm add -D -E ${SPEC}`,
+    );
+    expect(run).toHaveBeenCalledWith("pnpm", ["add", "-D", "-E", SPEC], root);
+  });
+
+  test("does nothing when the pinned drizzle-kit resolves, or there is no package.json", () => {
     const run = vi.fn();
     const installed = tempApp({
       "package.json": "{}",
       "node_modules/drizzle-kit/package.json": JSON.stringify({
         name: "drizzle-kit",
-        version: "0.30.0",
+        version: DRIZZLE_KIT_VERSION,
         main: "index.js",
       }),
       "node_modules/drizzle-kit/index.js": "",
