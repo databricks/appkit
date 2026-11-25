@@ -232,10 +232,15 @@ export function memoryDatabase(schema: Schema): MemoryDatabase {
         if (row) remove(table, row);
         return row !== undefined;
       },
-      // Setup runs `select 1`, then reads pg_catalog to confirm that every
-      // declared column exists. This database holds exactly the declared ones.
-      raw: async (strings) =>
-        strings.join("?").includes("pg_catalog")
+      // Setup runs `select 1`, reads whether its role may use the app schema,
+      // then reads pg_catalog to confirm that every declared column exists.
+      // The role may, and this database holds exactly the declared columns.
+      raw: async (strings) => {
+        const sql = strings.join("?");
+        if (sql.includes("has_schema_privilege")) {
+          return [{ owner: "app", current_user: "app", usage: true }];
+        }
+        return sql.includes("pg_catalog")
           ? tables.flatMap((table) =>
               Object.values(table.$columns).map((meta) => ({
                 table_name: table.$name,
@@ -243,7 +248,8 @@ export function memoryDatabase(schema: Schema): MemoryDatabase {
                 relation_kind: "r",
               })),
             )
-          : [{ "?column?": 1 }],
+          : [{ "?column?": 1 }];
+      },
       // AppKit joins nested transactions itself; one never reaches the edge.
       transaction: async () => {
         throw new Error("memory database: nested transaction");
