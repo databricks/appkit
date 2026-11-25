@@ -426,6 +426,24 @@ describe.skipIf(!url)("applyPendingMigrations against Postgres", () => {
     }
   });
 
+  test("a schema the app already owns needs no CREATE on the database", async () => {
+    const app = `appkit_app_${schema.slice(-8)}`;
+    await admin.query(`create role "${app}" login password '${ROLE_PASSWORD}'`);
+    await admin.query(`create schema "${schema}" authorization "${app}"`);
+    try {
+      const result = await applyPendingMigrations(
+        newPool({ user: app }),
+        options(notes()),
+      );
+
+      expect(result.applied).toEqual(["0000_notes", "0001_body"]);
+    } finally {
+      await Promise.all(pools.splice(0).map((pool) => pool.end()));
+      await admin.query(`drop schema if exists "${schema}" cascade`);
+      await admin.query(`drop role "${app}"`);
+    }
+  });
+
   test("the app's own journal in a schema another role owns (public) is read and recorded into on every start", async () => {
     // Like `public` under CAN_CONNECT_AND_CREATE: the schema belongs to the
     // database owner, the app may create in it, and the journal it creates

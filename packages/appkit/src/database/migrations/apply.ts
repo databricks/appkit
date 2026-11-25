@@ -670,9 +670,17 @@ async function ensureJournalTable(
   schemaName: string,
 ): Promise<void> {
   if (await journalTableExists(client, schemaName, "record")) return;
-  await client.query(
-    `CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(schemaName)}`,
+  // CREATE SCHEMA checks CREATE on the database before IF NOT EXISTS, which
+  // an app that only owns its schema does not have.
+  const { rows } = await client.query(
+    "select 1 from pg_catalog.pg_namespace where nspname = $1",
+    [schemaName],
   );
+  if (rows.length === 0) {
+    await client.query(
+      `CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(schemaName)}`,
+    );
+  }
   // Not IF NOT EXISTS: a relation that appeared at this name since the check
   // fails the transaction instead of receiving the record.
   await client.query(

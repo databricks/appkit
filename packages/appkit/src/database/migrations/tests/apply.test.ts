@@ -205,6 +205,8 @@ function steps(statements: readonly string[]): string[] {
     if (statement.includes("pg_catalog.pg_attribute"))
       return "baseline tables?";
     if (statement.startsWith("select hash, created_at")) return "recorded?";
+    if (statement.startsWith("select 1 from pg_catalog.pg_namespace"))
+      return "schema?";
     if (statement.startsWith(`CREATE SCHEMA IF NOT EXISTS`))
       return "create schema";
     if (statement.startsWith(`CREATE TABLE "app"."__drizzle_migrations"`))
@@ -251,6 +253,7 @@ describe("applyPendingMigrations", () => {
       "journal table?",
       "begin",
       "journal table?",
+      "schema?",
       "create schema",
       "create journal",
       `CREATE TABLE "app"."notes" ("id" integer);`,
