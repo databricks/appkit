@@ -191,6 +191,32 @@ describe("runClean", () => {
   });
 });
 
+describe("clean on the fork's untouched copy", () => {
+  const untouched =
+    'Refusing to clean: dev-alice-3f9a2c still holds the rows the fork copied into schema "app", which "app-sp" still owns, so your role cannot drop it. Run `appkit db init` to take it over and rebuild it from the committed migrations.';
+
+  test("runClean refuses before dropping anything, and says to run init", async () => {
+    const ctx = fakeContext({
+      root: tempApp({ "config/database/schema.ts": schemaFile("app") }),
+    });
+    writableEnvBranch.mockResolvedValue(devBranch);
+    const { statements } = recordingPool({ schemaOwner: "app-sp" });
+
+    await expect(runClean(ctx)).rejects.toThrow(untouched);
+    expect(statements.some((text) => text.includes("DROP"))).toBe(false);
+  });
+
+  test("previewClean refuses too, so the CLI does not ask first", async () => {
+    const ctx = fakeContext({
+      root: tempApp({ "config/database/schema.ts": schemaFile("app") }),
+    });
+    writableEnvBranch.mockResolvedValue(devBranch);
+    recordingPool({ schemaOwner: "app-sp" });
+
+    await expect(previewClean(ctx)).rejects.toThrow(untouched);
+  });
+});
+
 describe("previewClean", () => {
   test("reads the dependents without opening a transaction or dropping anything", async () => {
     const ctx = fakeContext({
