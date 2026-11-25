@@ -245,7 +245,7 @@ describe("runMigrate", () => {
     expect(withBranchPool).not.toHaveBeenCalled();
     expect(applyPendingMigrations).not.toHaveBeenCalled();
     expect(report.notApplied).toBe(
-      "production is not your dev or session branch (it is the project's default branch). Migrations are applied only to branches `appkit db init` created for you; the deployed app applies committed migrations to its own branch",
+      "production is not your dev or session branch (it is the project's default branch). Migrations are applied only to branches `appkit db init` created for you; the deployed app applies committed migrations to its own branch. The check for tables left in public was skipped too; the deployed app runs it before it migrates",
     );
     expect(fs.existsSync(report.typesFile)).toBe(true);
   });
