@@ -27,7 +27,7 @@ type CatalogRow = {
 
 const OFF = { kind: "off" } as const;
 
-/** Answer the catalog query with the given tables and columns, and the lookup in public with `inPublic`. */
+/** Answer the catalog query with the given tables and columns, on a schema the role may use, and the lookup in public with `inPublic`. */
 function catalog(
   tables: Record<string, string[]>,
   kinds: Record<string, string> = {},
@@ -50,9 +50,11 @@ function catalog(
           })),
   );
   const raw = vi.fn(async (strings: TemplateStringsArray) =>
-    strings.join("?").includes("'public'")
-      ? inPublic.map((table_name) => ({ schema_name: "public", table_name }))
-      : rows,
+    strings.join("?").includes("has_schema_privilege")
+      ? [{ owner: "app-sp", current_user: "app-sp", usage: true }]
+      : strings.join("?").includes("'public'")
+        ? inPublic.map((table_name) => ({ schema_name: "public", table_name }))
+        : rows,
   );
   return { raw, path: { raw } as unknown as DataPath };
 }
@@ -78,6 +80,27 @@ describe("assertSchemaMatchesDatabase — tables left in public", () => {
     expect(error.message).not.toContain("commit migrations");
   });
 
+  test('schemaName "app" named explicitly: the usual advice, whatever public holds', async () => {
+    const explicit = defineSchema(
+      ({ table }) => ({
+        boards: table("boards", { id: id() }),
+        notes: table("notes", { id: id() }),
+      }),
+      { schemaName: "app" },
+    );
+    const { path } = catalog({}, {}, ["boards", "notes"]);
+
+    const error = await assertSchemaMatchesDatabase(path, explicit, OFF).catch(
+      (caught) => caught,
+    );
+
+    expect(error.message).toContain("table app.boards does not exist");
+    expect(error.message).toContain(
+      "commit migrations under config/database/migrations",
+    );
+    expect(error.message).not.toContain("unless told otherwise");
+  });
+
   test("only some missing tables are in public: the usual advice", async () => {
     const { path } = catalog({}, {}, ["boards"]);
 
@@ -92,7 +115,7 @@ describe("assertSchemaMatchesDatabase — tables left in public", () => {
     await expect(
       assertSchemaMatchesDatabase(path, schema, OFF),
     ).rejects.toThrow("commit migrations");
-    expect(raw).toHaveBeenCalledTimes(1);
+    expect(raw).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -174,8 +197,8 @@ describe("assertSchemaMatchesDatabase", () => {
 
     await assertSchemaMatchesDatabase(path, scoped, OFF);
 
-    expect(raw).toHaveBeenCalledTimes(1);
-    const [strings, ...values] = raw.mock.calls[0] as unknown as [
+    expect(raw).toHaveBeenCalledTimes(2);
+    const [strings, ...values] = raw.mock.calls[1] as unknown as [
       TemplateStringsArray,
       ...unknown[],
     ];

@@ -43,6 +43,12 @@ interface ApplyMigrationsOptions {
   /** Longest wait for each table lock a migration takes, in milliseconds. */
   readonly lockTimeoutMs?: number;
   readonly onDrift?: DriftPolicy;
+  /**
+   * Runs on the migrating connection, under the migration lock, once a
+   * migration is pending and before any is applied. What it throws reaches
+   * the caller unchanged, and nothing is applied.
+   */
+  readonly beforeApply?: (client: PoolClient) => Promise<void>;
 }
 
 interface ApplyMigrationsResult {
@@ -76,6 +82,8 @@ const CONNECTION_CHECK_INTERVAL = "10s";
 
 /** lock_not_available: a table lock was not granted within the lock timeout. */
 const LOCK_NOT_AVAILABLE = "55P03";
+/** SQLSTATE classes of failures the existing rows cause: data_exception and integrity_constraint_violation. */
+const DATA_FAILURE_CLASSES = ["22", "23"];
 
 /**
  * A step of applying migrations failed. Each migration commits in its own
@@ -431,6 +439,32 @@ function lineEndingHashes(content: string, hash: string): string[] {
   return [...new Set([hash, sha256(lf), sha256(crlf)])];
 }
 
+/**
+ * drizzle-orm reports any read failure as "No file … found", so read the files
+ * again to name the one that fails and why.
+ */
+function unreadableMigrationError(
+  folder: string,
+  journal: Journal,
+  error: unknown,
+): MigrationFilesError {
+  for (const entry of journal.entries) {
+    const file = path.join(folder, `${entry.tag}.sql`);
+    try {
+      fs.readFileSync(file);
+    } catch (cause) {
+      return new MigrationFilesError(
+        `Cannot read ${file}: ${cause instanceof Error ? cause.message : String(cause)}. Check that the app can read it.`,
+        { cause },
+      );
+    }
+  }
+  return new MigrationFilesError(
+    `Cannot read the migrations in ${folder}: ${error instanceof Error ? error.message : String(error)}.`,
+    { cause: error },
+  );
+}
+
 /** Every committed migration, in journal order. Fails on a missing file before connecting. */
 function readMigrations(folder: string, journal: Journal): MigrationFile[] {
   for (const entry of journal.entries) {
@@ -441,8 +475,13 @@ function readMigrations(folder: string, journal: Journal): MigrationFile[] {
       );
     }
   }
-  // drizzle-orm's reader, so `hash` matches what drizzle-kit records.
-  const files = readMigrationFiles({ migrationsFolder: folder });
+  let files: ReturnType<typeof readMigrationFiles>;
+  try {
+    // drizzle-orm's reader, so `hash` matches what drizzle-kit records.
+    files = readMigrationFiles({ migrationsFolder: folder });
+  } catch (error) {
+    throw unreadableMigrationError(folder, journal, error);
+  }
   return journal.entries.map((entry, index) => {
     const file = files[index];
     if (!file) {
@@ -669,9 +708,17 @@ async function ensureJournalTable(
   schemaName: string,
 ): Promise<void> {
   if (await journalTableExists(client, schemaName, "record")) return;
-  await client.query(
-    `CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(schemaName)}`,
+  // CREATE SCHEMA checks CREATE on the database before IF NOT EXISTS, which
+  // an app that only owns its schema does not have.
+  const { rows } = await client.query(
+    "select 1 from pg_catalog.pg_namespace where nspname = $1",
+    [schemaName],
   );
+  if (rows.length === 0) {
+    await client.query(
+      `CREATE SCHEMA IF NOT EXISTS ${quoteIdentifier(schemaName)}`,
+    );
+  }
   // Not IF NOT EXISTS: a relation that appeared at this name since the check
   // fails the transaction instead of receiving the record.
   await client.query(
@@ -910,6 +957,7 @@ export async function applyPendingMigrations(
   let pending: string[] = [];
   let step = "Reading the recorded migrations";
   let failed: string | undefined;
+  let inBeforeApply = false;
   try {
     let history = reconcileMigrations(
       files,
@@ -952,6 +1000,11 @@ export async function applyPendingMigrations(
 
     const toApply = [...history.pending];
     pending = tags(toApply);
+    if (toApply.length > 0 && options.beforeApply) {
+      inBeforeApply = true;
+      await options.beforeApply(client);
+      inBeforeApply = false;
+    }
     const baseline = toApply[0];
     if (history.lastRecorded === null && baseline?.tag === BASELINE_TAG) {
       failed = BASELINE_TAG;
@@ -992,6 +1045,7 @@ export async function applyPendingMigrations(
     };
   } catch (error) {
     if (
+      inBeforeApply ||
       error instanceof MigrationBaselineMismatchError ||
       error instanceof MigrationFilesError ||
       error instanceof MigrationHistoryError ||
@@ -1013,6 +1067,10 @@ export async function applyPendingMigrations(
         () => undefined,
       );
       hint = ownershipHint(code, ownership);
+    } else if (code && DATA_FAILURE_CLASSES.includes(code.slice(0, 2))) {
+      hint =
+        "It failed on rows already in the database, not on its SQL. Repair those rows, then apply the same migration again. " +
+        "On the deploy branch, repair them as a role with the DATABRICKS_SUPERUSER membership, which someone with CAN USE on the Lakebase project creates, and deploy again.";
     }
     throw new MigrationApplyError({
       step,
