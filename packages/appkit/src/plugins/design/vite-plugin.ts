@@ -387,8 +387,11 @@ createRoot(document.getElementById("root")).render(
   }
 
   return `${shared}
-import { createBrowserRouter, RouterProvider } from "react-router";
+import { ErrorPage } from "@databricks/appkit-ui/react";
+import { createBrowserRouter, RouterProvider, useRouteError } from "react-router";
 
+// AppKit's page, not React Router's default, for a page that fails to load or doesn't exist.
+const RouteErrorPage = () => createElement(ErrorPage, { error: useRouteError() });
 const lazyPages = import.meta.glob(${JSON.stringify(PAGE_GLOBS)});
 const routes = Object.keys(lazyPages).map((file) => {
   const name = pageName(file);
@@ -397,7 +400,7 @@ const routes = Object.keys(lazyPages).map((file) => {
     ? { path, Component: withReady(initial, name) }
     : { path, lazy: async () => ({ Component: withReady(await lazyPages[file](), name) }) };
 });
-const router = createBrowserRouter(routes, { basename: "/design" });
+const router = createBrowserRouter([{ ErrorBoundary: RouteErrorPage, children: routes }], { basename: "/design" });
 createRoot(document.getElementById("root")).render(createElement(RouterProvider, { router }));
 `;
 }

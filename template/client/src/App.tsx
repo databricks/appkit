@@ -1,4 +1,13 @@
-import { createBrowserRouter, RouterProvider, Link, NavLink, Outlet, useLocation } from 'react-router';
+import {
+  createBrowserRouter,
+  isRouteErrorResponse,
+  RouterProvider,
+  Link,
+  NavLink,
+  Outlet,
+  useLocation,
+  useRouteError,
+} from 'react-router';
 import { useState } from 'react';
 import {
   Button,
@@ -18,7 +27,7 @@ import {
   SheetTitle,
   useIsMobile,
 } from '@databricks/appkit-ui/react';
-import { FileQuestionMark, Menu } from 'lucide-react';
+import { FileQuestionMark, Menu, TriangleAlert } from 'lucide-react';
 {{- if .plugins.agents}}
 import { AgentChat } from './pages/agents/AgentChat';
 {{- end}}
@@ -149,6 +158,8 @@ function Layout() {
 const router = createBrowserRouter([
   {
     element: <Layout />,
+    // Replaces React Router's default error page; a route's own errorElement wins over it.
+    errorElement: <RouteErrorPage />,
     children: [
       { path: '/', element: <HomePage /> },
 {{- if .plugins.agents}}
@@ -228,6 +239,41 @@ function HomePage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+// A route that throws (or a loader's 404 response) renders this instead of the page.
+function RouteErrorPage() {
+  const error = useRouteError();
+  if (isRouteErrorResponse(error) && error.status === 404) return <NotFoundPage />;
+  const details = isRouteErrorResponse(error)
+    ? `${error.status} ${error.statusText}`
+    : error instanceof Error
+      ? (error.stack ?? error.message)
+      : String(error);
+
+  return (
+    <Empty>
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <TriangleAlert />
+        </EmptyMedia>
+        <EmptyTitle>Something went wrong</EmptyTitle>
+        <EmptyDescription>An unexpected error occurred. Reload the page, or go back to the home page.</EmptyDescription>
+      </EmptyHeader>
+      {/* The error's details help while developing; a deployed app never shows them. */}
+      {import.meta.env.DEV && (
+        <pre className="max-h-80 w-full max-w-2xl overflow-auto rounded-md bg-muted p-3 text-left text-xs whitespace-pre-wrap text-muted-foreground">
+          {details}
+        </pre>
+      )}
+      <EmptyContent className="flex-row justify-center">
+        <Button onClick={() => window.location.reload()}>Reload</Button>
+        <Button variant="outline" asChild>
+          <Link to="/">Back to home</Link>
+        </Button>
+      </EmptyContent>
+    </Empty>
   );
 }
 
