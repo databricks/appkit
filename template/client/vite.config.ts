@@ -19,7 +19,15 @@ export default defineConfig({
     sourcemap: process.env.NODE_ENV === 'development',
   },
   optimizeDeps: {
-    include: ['react', 'react-dom', 'react/jsx-dev-runtime', 'react/jsx-runtime'],
+    include: [
+      'react',
+      'react-dom',
+      'react/jsx-dev-runtime',
+      'react/jsx-runtime',
+      '@databricks/appkit-ui/react',
+      '@databricks/appkit-ui/react/beta',
+      'lucide-react',
+    ],
   },
   resolve: {
     alias: {
