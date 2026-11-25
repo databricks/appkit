@@ -30,4 +30,5 @@ export type {
   SubmitRunResponse,
   WorkspaceClient,
   WorkspaceClientOptions,
+  WorkspaceRequest,
 } from "shared/workspace-client";
