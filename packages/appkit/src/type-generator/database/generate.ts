@@ -134,17 +134,27 @@ async function importSchema(schemaFile: string): Promise<unknown> {
   return createJiti(import.meta.url, { moduleCache: false }).import(schemaFile);
 }
 
+interface LoadDatabaseSchemaOptions {
+  /**
+   * Keep the import error as the failure's `cause`. Only the local `appkit db`
+   * CLI sets it, to show the developer where schema.ts broke; every other
+   * caller gets the bounded message alone.
+   */
+  readonly showImportError?: boolean;
+}
+
 /** Load the named, finalized `schema` export; every failure is a safe diagnostic. */
-export async function loadDatabaseSchema(schemaFile: string): Promise<Schema> {
+export async function loadDatabaseSchema(
+  schemaFile: string,
+  options: LoadDatabaseSchemaOptions = {},
+): Promise<Schema> {
   let module: unknown;
   try {
     module = await importSchema(schemaFile);
   } catch (error) {
-    // The message stays bounded; only a caller that prints causes, the local
-    // `appkit db` CLI, shows the import error to the developer.
     throw new DatabaseTypegenError(
       `Database schema "${schemaLabel(schemaFile)}" ${importFailureReason(error)}`,
-      { cause: error },
+      options.showImportError ? { cause: error } : undefined,
     );
   }
   if (typeof module !== "object" || module === null || !("schema" in module)) {
