@@ -43,7 +43,8 @@ describe("runDoctor", () => {
     // saying why (no .env, no manifest), which is the point of that directory.
     expect(report.summary.ok).toBe(1);
     expect(report.summary.error).toBe(0);
-    expect(report.summary.skipped).toBe(0);
+    // The one skip is the "no databricks.yml: bundle checks skipped" note.
+    expect(report.summary.skipped).toBe(1);
     expect(report.exitCode).toBe(0);
     spy.mockRestore();
   });

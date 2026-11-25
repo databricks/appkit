@@ -18,6 +18,13 @@ function makeTempDir(): string {
   return dir;
 }
 
+/** A temp app with an empty-but-present databricks.yml to patch. */
+function makeBundleDir(): string {
+  const dir = makeTempDir();
+  fs.writeFileSync(path.join(dir, "databricks.yml"), "");
+  return dir;
+}
+
 afterEach(() => {
   for (const dir of tempDirs) {
     try {
@@ -64,7 +71,7 @@ describe("writeConfig — golden fixtures (analytics)", () => {
   });
 
   it("databricks.yml variables + binding match the fixture's shapes", () => {
-    const cwd = makeTempDir();
+    const cwd = makeBundleDir();
     const plan = buildConfigPlan([WAREHOUSE], {
       DATABRICKS_WAREHOUSE_ID: "abc123warehouse",
     });
@@ -184,8 +191,20 @@ describe("writeConfig — additive patching", () => {
     expect(fs.existsSync(path.join(cwd, "databricks.yml"))).toBe(false);
   });
 
-  it("produces valid round-trippable YAML", () => {
+  it("creates no databricks.yml when the app has none", () => {
     const cwd = makeTempDir();
+    const result = writeConfig(
+      cwd,
+      buildConfigPlan([WAREHOUSE], { DATABRICKS_WAREHOUSE_ID: "w1" }),
+    );
+    expect(result.databricksYmlSkipped).toBe(true);
+    expect(result.databricksYmlChanged).toBe(false);
+    expect(result.appYamlChanged).toBe(true);
+    expect(fs.existsSync(path.join(cwd, "databricks.yml"))).toBe(false);
+  });
+
+  it("produces valid round-trippable YAML", () => {
+    const cwd = makeBundleDir();
     writeConfig(
       cwd,
       buildConfigPlan([WAREHOUSE], { DATABRICKS_WAREHOUSE_ID: "w1" }),

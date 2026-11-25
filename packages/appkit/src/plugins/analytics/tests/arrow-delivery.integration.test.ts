@@ -3,7 +3,10 @@ import { describe, expect, test } from "vitest";
 
 import { SQLWarehouseConnector } from "../../../connectors";
 import { createWorkspaceClient } from "../../../workspace-client";
-import { deliverArrowBytes, type QueryExecutor } from "../result-delivery";
+import {
+  deliverArrowBytesWithFallback,
+  type QueryExecutor,
+} from "../result-delivery";
 
 /**
  * Gated live integration test for the Arrow delivery fallback against a REAL
@@ -52,7 +55,7 @@ describe.runIf(!!warehouseId)("arrow delivery (live warehouse)", () => {
 
     const out: { columnNames?: string[]; statementId?: string } = {};
     const chunks: Buffer[] = [];
-    for await (const bytes of deliverArrowBytes(
+    for await (const bytes of deliverArrowBytesWithFallback(
       executor,
       connector,
       "SELECT id AS my_id, cast(id AS string) AS my_name FROM range(1000)",

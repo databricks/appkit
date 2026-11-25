@@ -1,12 +1,15 @@
-import { transformWithOxc } from "vite";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { parseAst, transformWithOxc } from "vite";
 import { describe, expect, test } from "vitest";
 
 import {
   closeOpen,
-  mockImports,
+  importsMock,
   placeholderKind,
   renderablePartial,
-  stubMock,
 } from "../stream";
 
 const parses = async (code: string) => {
@@ -143,14 +146,45 @@ describe("placeholderKind", () => {
   });
 });
 
-describe("stubMock", () => {
-  test("stubs the values a page imports that the mock doesn't export yet", () => {
-    expect(mockImports(PAGE)).toEqual(["trips"]);
-    // The contract comment lists trips before it is defined.
-    const mock =
-      "export type Trip = { id: number };\n// export const trips: Trip[]\nexport const kpis = {};";
-    const code = stubMock(mock, ["trips", "kpis"]);
-    expect(code).toContain("export const trips: any = __draftValue;");
-    expect(code).not.toContain("export const kpis: any");
+describe("importsMock", () => {
+  // Compiled as Vite serves a page, under a tsconfig without verbatimModuleSyntax.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "design-mock-"));
+  fs.writeFileSync(path.join(dir, "tsconfig.json"), "{}");
+  const usesMock = async (code: string) => {
+    const js = await transformWithOxc(code, path.join(dir, "page.tsx"), {
+      lang: "tsx",
+      jsx: { runtime: "automatic" },
+    });
+    return importsMock(parseAst(js.code));
+  };
+
+  test("a value import, re-export, bare or dynamic import of the mock counts", async () => {
+    for (const code of [
+      PAGE,
+      'import {\n  trips,\n  kpis,\n} from "../mock.ts";\nconsole.log(trips, kpis);',
+      "import * as data from '../mock';\nconsole.log(data);",
+      'import mock from "../mock.js";\nconsole.log(mock);',
+      'import { trips } /* ; */ from "../mock";\nconsole.log(trips);',
+      'export { trips } from "../mock";',
+      'import "../mock";',
+      'const load = () => import("../mock");\nconsole.log(load);',
+      'import { trips } from "/src/design/mock.ts";\nconsole.log(trips);',
+    ]) {
+      expect(await usesMock(code), code).toBe(true);
+    }
+  });
+
+  test("type-only imports, strings, comments and other modules don't", async () => {
+    for (const code of [
+      'import type { Trip } from "../mock";\nlet t: Trip;',
+      'import { type Trip } from "../mock";\nlet t: Trip;',
+      'export type { Trip } from "../mock";',
+      'export default () => "../mock";',
+      '// import { trips } from "../mock";',
+      'import { trips } from "../mocks";\nconsole.log(trips);',
+      'import { trips } from "./mock";\nconsole.log(trips);',
+    ]) {
+      expect(await usesMock(code), code).toBe(false);
+    }
   });
 });

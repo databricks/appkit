@@ -210,6 +210,114 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+# Changelog
+
+## [0.104.1](https://github.com/databricks/appkit/compare/v0.104.0...v0.104.1) (2026-11-24)
+
+### appkit
+
+* **appkit:** publish a streamed design page only once its mock is final ([#746](https://github.com/databricks/appkit/issues/746)) ([dc20841](https://github.com/databricks/appkit/commit/dc2084134b563e4bf157c6295e61d6e709a8f642))
+
+
+## [0.104.0](https://github.com/databricks/appkit/compare/v0.103.0...v0.104.0) (2026-11-23)
+
+### template
+
+* **template:** lint every plugin's code and ban type escape hatches ([#743](https://github.com/databricks/appkit/issues/743)) ([11c2c56](https://github.com/databricks/appkit/commit/11c2c5640e653d1137eeafe5ff9cc74c67aa2940))
+
+
+## [0.103.0](https://github.com/databricks/appkit/compare/v0.102.0...v0.103.0) (2026-11-23)
+
+### appkit
+
+* **appkit:** design pages report render failures and success ([#745](https://github.com/databricks/appkit/issues/745)) ([fda3830](https://github.com/databricks/appkit/commit/fda383040aad839892fd6836b7045a54f1ce18e8))
+
+
+## [0.102.0](https://github.com/databricks/appkit/compare/v0.101.0...v0.102.0) (2026-11-20)
+
+### appkit-ui
+
+* **appkit-ui:** call named database operations from the client and hooks ([#691](https://github.com/databricks/appkit/issues/691)) ([9819f8d](https://github.com/databricks/appkit/commit/9819f8db8e88eaf7f5707f86a015881ad93f59ff))
+
+
+## [0.101.0](https://github.com/databricks/appkit/compare/v0.100.0...v0.101.0) (2026-11-20)
+
+### template
+
+* **template:** enable the React Compiler ([#741](https://github.com/databricks/appkit/issues/741)) ([18f093e](https://github.com/databricks/appkit/commit/18f093e556dc9cebb3d0cfca64cdaa549d2a8a03))
+
+
+## [0.100.0](https://github.com/databricks/appkit/compare/v0.99.0...v0.100.0) (2026-11-20)
+
+### appkit
+
+* **appkit:** generate the database operation registry and browser contracts ([#690](https://github.com/databricks/appkit/issues/690)) ([691501d](https://github.com/databricks/appkit/commit/691501d6297f1c13be5ccdf55dd9dd578ecc989e))
+
+
+## [0.99.0](https://github.com/databricks/appkit/compare/v0.98.0...v0.99.0) (2026-11-20)
+
+### appkit
+
+* **appkit:** verify database callers and authorize named operations ([#689](https://github.com/databricks/appkit/issues/689)) ([5b2d4ad](https://github.com/databricks/appkit/commit/5b2d4ad077410a54ad68607899af7fa7ecf533a2))
+
+
+## [0.98.0](https://github.com/databricks/appkit/compare/v0.97.3...v0.98.0) (2026-11-18)
+
+### appkit
+
+* **appkit:** make Remote Bridge opt-in, and never on in production ([#742](https://github.com/databricks/appkit/issues/742)) ([fd341ec](https://github.com/databricks/appkit/commit/fd341ec90843fcd433608c7668256e4eeedc5ac7))
+
+
+## [0.97.3](https://github.com/databricks/appkit/compare/v0.97.2...v0.97.3) (2026-11-17)
+
+### appkit
+
+* **appkit:** fall back to inline results when a Cloud Fetch download fails ([#723](https://github.com/databricks/appkit/issues/723)) ([93fa058](https://github.com/databricks/appkit/commit/93fa058de487694d616dc189a1bb580c6f4b3211))
+
+
+## [0.97.2](https://github.com/databricks/appkit/compare/v0.97.1...v0.97.2) (2026-11-17)
+
+### shared
+
+* **shared:** don't create databricks.yml in plugin add when the app has none ([#740](https://github.com/databricks/appkit/issues/740)) ([c6cefc0](https://github.com/databricks/appkit/commit/c6cefc068a1dbac42773e45f28e5fcc43dd60188))
+
+
+## [0.97.1](https://github.com/databricks/appkit/compare/v0.97.0...v0.97.1) (2026-11-16)
+
+### shared
+
+* **shared:** end workspace retry waits when the request aborts ([#738](https://github.com/databricks/appkit/issues/738)) ([a535cc9](https://github.com/databricks/appkit/commit/a535cc927ac58d0d03279b21c4fdbbe776b572ee))
+
+
+## [0.97.0](https://github.com/databricks/appkit/compare/v0.96.0...v0.97.0) (2026-11-16)
+
+### appkit
+
+* **appkit:** define named database operations and policies ([#688](https://github.com/databricks/appkit/issues/688)) ([cc2f276](https://github.com/databricks/appkit/commit/cc2f276cd30da7aa10dc8263c635d3590d94e7fd))
+
+
 ## [0.96.0](https://github.com/databricks/appkit/compare/v0.95.0...v0.96.0) (2026-11-16)
 
 ### appkit

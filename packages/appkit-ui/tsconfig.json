@@ -2,8 +2,8 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "outDir": "dist",
-    // Sources from shared are compiled in.
-    "rootDir": "..",
+    // Sources from shared and tools are compiled in.
+    "rootDir": "../..",
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM"],
     "paths": {

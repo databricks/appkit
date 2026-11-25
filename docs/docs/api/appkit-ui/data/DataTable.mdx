@@ -56,7 +56,7 @@ a `Table` from `useAnalyticsQuery` rows instead.
 | `parameters` | `Record<string, any>` | ✓ | - | The parameters to pass to the query |
 | `filterColumn` | `string` |  | - | The column to filter by |
 | `filterPlaceholder` | `string` |  | - | Optional placeholder for the filter input |
-| `transform` | `((data: any[]) => any[])` |  | - | Optional function to transform data before creating table. A new function reference re-runs it and resets the table to the first page, so define it outside the component or wrap it in `useCallback`. |
+| `transform` | `((data: any[]) => any[])` |  | - | Optional function to transform data before creating table. A new function reference re-runs it and resets the table to the first page, so keep it stable: define it outside the component, or rely on the React Compiler (enabled in the AppKit template); without the compiler, wrap it in `useCallback`. |
 | `labels` | `DataTableLabels` |  | - | Optional labels for the DataTable component |
 | `ariaLabel` | `string` |  | - | Optional accessibility label for the DataTable component |
 | `testId` | `string` |  | - | Optional test ID for the DataTable component |

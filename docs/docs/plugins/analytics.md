@@ -286,7 +286,7 @@ Editing `definitions.json` is picked up on the next request — no server restar
 
 ### useAnalyticsQuery
 
-React hook that subscribes to an analytics query over SSE and returns its latest result. Wrap `parameters` in `useMemo` (see [Memoization](#memoization)): the query re-runs whenever the parameters object is a new reference.
+React hook that subscribes to an analytics query over SSE and returns its latest result. Pass `parameters` inline: they're compared by value, so the query re-runs only when a value changes (see [Memoization](#memoization)).
 
 ```ts
 import { useAnalyticsQuery } from "@databricks/appkit-ui/react";
@@ -470,15 +470,10 @@ import { sql } from "@databricks/appkit-ui/js";
 import { Skeleton } from "@databricks/appkit-ui";
 
 function SpendTable() {
-  const params = useMemo(
-    () => ({
-      startDate: sql.date("2025-01-01"),
-      endDate: sql.date("2025-12-31"),
-    }),
-    [],
-  );
-
-  const { data, loading, error } = useAnalyticsQuery("spend_summary", params);
+  const { data, loading, error } = useAnalyticsQuery("spend_summary", {
+    startDate: sql.date("2025-01-01"),
+    endDate: sql.date("2025-12-31"),
+  });
 
   if (loading) return <Skeleton className="h-32 w-full" />;
   if (error) return <div className="text-destructive">{error}</div>;
@@ -518,16 +513,13 @@ See [Type generation](../development/type-generation.md) for automatic generatio
 
 ### Memoization
 
-**Always wrap parameters in `useMemo`** to avoid refetch loops. The hook re-executes whenever the parameters reference changes:
+Parameters don't need `useMemo`. The hook compares them by value, so a new object with the same values on every render doesn't refetch; the query re-runs only when a value changes:
 
 ```ts
-// Good
-const params = useMemo(() => ({ status: sql.string("active") }), []);
-const { data } = useAnalyticsQuery("users", params);
-
-// Bad - creates a new object every render, causing infinite refetches
-const { data } = useAnalyticsQuery("users", { status: sql.string("active") });
+const { data } = useAnalyticsQuery("users", { status: sql.string(status) });
 ```
+
+The AppKit template also runs the React Compiler, which memoizes components, and its lint config rejects hand-written `useMemo` and `useCallback`.
 
 ### useMetricView
 

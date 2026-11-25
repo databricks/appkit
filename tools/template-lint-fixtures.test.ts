@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   compareLintResults,
+  configuredSeverities,
   enabledRules,
   fixturePath,
   LINT_FIXTURES,
@@ -70,6 +71,22 @@ describe("ruleOf", () => {
     ["", ""],
   ])("%j → %j", (code, rule) => {
     expect(ruleOf(code)).toBe(rule);
+  });
+});
+
+describe("configuredSeverities", () => {
+  test("keeps the rules set to one level everywhere", () => {
+    expect(
+      configuredSeverities({
+        rules: { a: "warn", b: ["error", {}], c: "off" },
+        overrides: [{ files: ["*.js"], rules: { b: "warn", c: "error" } }],
+      }),
+    ).toEqual(
+      new Map([
+        ["a", "warning"],
+        ["c", "error"],
+      ]),
+    );
   });
 });
 
@@ -154,6 +171,20 @@ describe("compareLintResults", () => {
     ).toEqual([]);
   });
 
+  test("flags a rule reporting at another severity than configured", () => {
+    const severities = new Map([["no-debugger", "error"]]);
+    expect(compareLintResults(fixtures, passing, severities)).toEqual([]);
+    expect(
+      compareLintResults(
+        fixtures,
+        [{ ...passing[0], severity: "warning" }, ...passing.slice(1)],
+        severities,
+      ),
+    ).toEqual([
+      `${debuggerFile}: no-debugger reports as warning, configured as error`,
+    ]);
+  });
+
   test("flags diagnostics outside the fixtures", () => {
     expect(
       compareLintResults(fixtures, [
@@ -165,6 +196,13 @@ describe("compareLintResults", () => {
 });
 
 describe("template lint setup", () => {
+  test("checks indexed access, which the template code is written for", () => {
+    const tsconfig = readJsonc<{
+      compilerOptions: { noUncheckedIndexedAccess?: boolean };
+    }>(join(template, "tsconfig.shared.json"));
+    expect(tsconfig.compilerOptions.noUncheckedIndexedAccess).toBe(true);
+  });
+
   test("enables rules explicitly instead of through categories", () => {
     // A category default would silently decide which rules run; the list in the config is the contract.
     expect(

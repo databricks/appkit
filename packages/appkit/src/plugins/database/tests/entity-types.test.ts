@@ -58,6 +58,13 @@ interface TestRegistry {
       comments: { to: "comments"; many: true };
     };
     hasPrimaryKey: true;
+    api: {
+      insert: { body: string; rank: number };
+      update: { body?: string; rank?: number };
+      filters: { body?: string; rank?: number };
+      orderable: "id" | "body" | "rank";
+      key: "id";
+    };
   };
   users: {
     row: { id: string; name: string; token: string };
@@ -67,6 +74,13 @@ interface TestRegistry {
     filters: { name?: TextFilter };
     includes: Record<never, never>;
     hasPrimaryKey: true;
+    api: {
+      insert: { name: string };
+      update: { name?: string };
+      filters: { name?: string };
+      orderable: "id" | "name";
+      key: "id";
+    };
   };
   comments: {
     row: { id: string; text: string; internal: string };
@@ -76,6 +90,13 @@ interface TestRegistry {
     filters: { text?: TextFilter };
     includes: { author: { to: "users"; many: false } };
     hasPrimaryKey: true;
+    api: {
+      insert: { text: string };
+      update: { text?: string };
+      filters: { text?: string };
+      orderable: "id" | "text";
+      key: "id";
+    };
   };
   events: {
     row: { message: string };
@@ -85,6 +106,13 @@ interface TestRegistry {
     filters: { message?: TextFilter };
     includes: Record<never, never>;
     hasPrimaryKey: false;
+    api: {
+      insert: { message: string };
+      update: { message?: string };
+      filters: { message?: string };
+      orderable: "message";
+      key: never;
+    };
   };
 }
 

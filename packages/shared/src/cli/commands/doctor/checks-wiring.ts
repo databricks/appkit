@@ -21,7 +21,16 @@ export function checkWiring(
   info: BundleInfo,
   targets: ResourceTarget[],
 ): WiringFinding[] {
-  if (!info.present) return [];
+  if (!info.present) {
+    return [
+      {
+        status: "skipped",
+        code: "NO_BUNDLE",
+        label: "databricks.yml",
+        detail: "no databricks.yml: bundle checks skipped",
+      },
+    ];
+  }
 
   const findings: WiringFinding[] = [];
 

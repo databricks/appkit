@@ -66,10 +66,10 @@ describe("createMockWorkspaceClient — build the fake client yourself", () => {
       responses: { "jobs.getRun": { state: "TERMINATED" } },
     });
 
-    await expect(client.jobs.getRun({ run_id: 1 })).resolves.toEqual({
+    await expect(client.jobs.getRun({ runId: 1n })).resolves.toEqual({
       state: "TERMINATED",
     });
-    expect(getMock(client, "jobs.getRun")).toHaveBeenCalledWith({ run_id: 1 });
+    expect(getMock(client, "jobs.getRun")).toHaveBeenCalledWith({ runId: 1n });
     await expect(
       client.genie.genieGetConversationMessage({ messageId: "m-1" }),
     ).resolves.toBeUndefined();

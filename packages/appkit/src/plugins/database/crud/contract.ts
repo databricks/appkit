@@ -35,6 +35,7 @@ type MutableCrudTable = Omit<CrudTable, "relations"> & {
 
 interface SanitizeState {
   nodes: number;
+  readonly maxNodes: number;
   readonly ancestors: Set<object>;
 }
 
@@ -54,7 +55,7 @@ function rejectUnboundedJson(): never {
 
 function countNode(depth: number, state: SanitizeState): void {
   state.nodes += 1;
-  if (state.nodes > MAX_SERIALIZED_NODES || depth > MAX_SERIALIZED_DEPTH) {
+  if (state.nodes > state.maxNodes || depth > MAX_SERIALIZED_DEPTH) {
     rejectUnboundedJson();
   }
 }
@@ -110,8 +111,11 @@ function sanitizeJson(
 }
 
 /** Copy finite acyclic JSON, bounded by depth and node count. */
-export function boundedJson(value: unknown): JsonValue {
-  return sanitizeJson(value, 0, { nodes: 0, ancestors: new Set() });
+export function boundedJson(
+  value: unknown,
+  maxNodes: number = MAX_SERIALIZED_NODES,
+): JsonValue {
+  return sanitizeJson(value, 0, { nodes: 0, maxNodes, ancestors: new Set() });
 }
 
 /** Project an included row through its own table; absent to-one reads null. */

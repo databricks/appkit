@@ -44,7 +44,7 @@ If your `tsconfig.json` uses `"verbatimModuleSyntax": true`, **always use `impor
 
 ```ts
 import type { ReactNode } from "react";
-import { useMemo } from "react";
+import { useState } from "react";
 ```
 
 ## API documentation
@@ -84,7 +84,7 @@ Examples:
 
 ### Frontend
 
-- `useMemo` wraps parameters objects
+- Parameters objects are passed inline (the hook compares them by value; no `useMemo`)
 - Loading/error/empty states are explicit
 - Charts use `format="auto"` unless you have a reason to force `"json"`/`"arrow"`
 - Charts use props (`xKey`, `yKey`, `colors`) NOT children (they're ECharts-based, not Recharts)
