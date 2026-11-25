@@ -148,11 +148,6 @@ export function planStart(
       confirm: false,
     };
   }
-  if (interrupted && !hasSchema && requested === undefined) {
-    throw new Error(
-      "The rebuild of the app schema on your branch stopped before it finished, and this checkout has no config/database/schema.ts to rebuild from. Restore schema.ts, then rerun `appkit db init`. `appkit db init --schema introspect` writes schema.ts from the branch and keeps the rows the fork copied.",
-    );
-  }
   return {
     ...NOTHING_ELSE,
     kind: requested ?? (hasSchema ? "clean" : "introspect"),
