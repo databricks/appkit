@@ -70,6 +70,14 @@ export function createDbContext(
   return ctx;
 }
 
+/** The workspace host a Databricks config profile names, as the SDK resolves it; no API call. */
+export function profileHost(profile: string): Promise<string> {
+  return createWorkspaceClient({
+    profile,
+    clientOptions: getClientOptions(),
+  }).getHost();
+}
+
 /**
  * The guard checks the branch named by LAKEBASE_ENDPOINT, but the pool connects
  * to PGHOST. The runtime only warns when it cannot verify that PGHOST serves that

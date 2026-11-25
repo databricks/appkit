@@ -94,13 +94,13 @@ function record(value: unknown): Yaml {
 }
 
 /**
- * A branch, database, workspace host or source path databricks.yml names, as
- * far as the checkout's files resolve it. A reference that is not declared at
- * all has no value: the binding, variable or host that holds it is absent
- * instead.
+ * A branch, database, workspace host or profile, or source path databricks.yml
+ * names, as far as the checkout's files resolve it. A reference that is not
+ * declared at all has no value: the binding, variable or host that holds it is
+ * absent instead.
  */
 type BundleValue =
-  /** A full resource name, e.g. "projects/p/branches/b", a workspace host, or a path. */
+  /** A full resource name, e.g. "projects/p/branches/b", a workspace host or profile, or a path. */
   | { readonly kind: "resolved"; readonly name: string }
   /** As written: a `${…}` only a deploy resolves, no value, or not a resource name. */
   | { readonly kind: "unresolved"; readonly written: string };
@@ -140,6 +140,8 @@ export interface BundleApp {
 interface TargetBindings {
   /** workspace.host of the target, else of the bundle; null when neither declares one. */
   readonly host: BundleValue | null;
+  /** workspace.profile of the target, else of the bundle; null when neither declares one. */
+  readonly profile: BundleValue | null;
   readonly apps: readonly BundleApp[];
   /** The target's postgres_branch variable; null when the bundle declares none. */
   readonly postgresBranch: BundleValue | null;
@@ -553,6 +555,11 @@ export function readBundle(root: string): Bundle | null {
         return {
           host: declaredValue(
             record(target?.workspace)?.host ?? record(bundle.workspace)?.host,
+            resolve,
+          ),
+          profile: declaredValue(
+            record(target?.workspace)?.profile ??
+              record(bundle.workspace)?.profile,
             resolve,
           ),
           apps: bundleApps(apps ?? {}, resolve),

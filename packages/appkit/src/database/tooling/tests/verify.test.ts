@@ -1240,6 +1240,67 @@ describe("runVerify --deployed", () => {
     expect(lakebase.calls).toEqual([]);
   });
 
+  describe("a target with workspace.profile and no host", () => {
+    const STAGING = "https://staging.cloud.databricks.com";
+    const ymlWithProfile = (profile: string) =>
+      `${databricksYml(PRODUCTION, DATABASE)}    workspace:\n      profile: ${profile}\n`;
+
+    beforeEach(() => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "appkit-db-cfg-"));
+      roots.push(dir);
+      const config = path.join(dir, ".databrickscfg");
+      fs.writeFileSync(
+        config,
+        `[acme]\nhost = ${HOST}\n\n[staging]\nhost = ${STAGING}/\n`,
+      );
+      vi.stubEnv("DATABRICKS_CONFIG_FILE", config);
+      vi.stubEnv("DATABRICKS_HOST", "");
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    test("is checked against that profile's host from the Databricks config", async () => {
+      const { ctx } = deployedApp({ yml: ymlWithProfile("acme") });
+
+      expect(await runVerify(ctx, DEPLOYED)).toMatchObject({ ok: true });
+    });
+
+    test("is refused before any API call when this shell is authenticated against another workspace", async () => {
+      const { ctx, lakebase, requests } = deployedApp({
+        yml: ymlWithProfile("staging"),
+      });
+
+      await expect(runVerify(ctx, DEPLOYED)).rejects.toThrow(
+        `Target default deploys with profile staging to ${STAGING}, but this shell is authenticated against ${HOST}. Set DATABRICKS_CONFIG_PROFILE=staging, then rerun.`,
+      );
+      expect(requests).toEqual([]);
+      expect(lakebase.calls).toEqual([]);
+    });
+
+    test("is refused when the Databricks config has no such profile", async () => {
+      const { ctx, requests } = deployedApp({ yml: ymlWithProfile("gone") });
+
+      await expect(runVerify(ctx, DEPLOYED)).rejects.toThrow(
+        /^Target default deploys with profile gone, which this machine's Databricks config does not resolve to a workspace host: .*profile not found.*\. Add the profile, or set workspace\.host in target default, then rerun\.$/,
+      );
+      expect(requests).toEqual([]);
+    });
+  });
+
+  test("a target with neither workspace.host nor workspace.profile runs against this shell's workspace", async () => {
+    const { ctx } = deployedApp({
+      yml: databricksYml(PRODUCTION, DATABASE),
+      authenticatedHost: "https://other.cloud.databricks.com",
+    });
+
+    expect(await runVerify(ctx, DEPLOYED)).toMatchObject({
+      host: null,
+      ok: true,
+    });
+  });
+
   test("a branch that only variable-overrides.json sets is the one verify checks, as a deploy from this checkout uses it", async () => {
     // The target gives the variables no value; only the overrides file does.
     const yml = `${databricksYml(PRODUCTION, DATABASE).replace(

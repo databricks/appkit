@@ -57,9 +57,9 @@ APPKIT_DB_MIGRATE_ON_START=true applies them on start, and a migration that
 fails stops it; \`databricks apps logs\` shows why. When the checkout has
 .databricks/bundle/<target>/variable-overrides.json, the branch and database
 come from it, as a deploy from this checkout uses them. When verify cannot
-read that source, it fails. It refuses when the target's workspace.host is
-not the workspace this shell is authenticated against, or when this
-checkout's files do not resolve it.
+read that source, it fails. It refuses when the target's workspace.host, or
+without one the host of its workspace.profile, is not the workspace this
+shell is authenticated against, or when it cannot resolve either.
 
 Exits 1 on any finding. Nothing is written or created.
 

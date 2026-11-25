@@ -16,7 +16,12 @@ import {
   readJournal,
 } from "../migrations/paths";
 import type { DataPath } from "../runtime";
-import { type DbContext, NO_ENV_BRANCH, withBranchPool } from "./context";
+import {
+  type DbContext,
+  NO_ENV_BRANCH,
+  profileHost,
+  withBranchPool,
+} from "./context";
 import { resolveEnvBranch, takesWrites } from "./guard";
 import { requireSchemaFile } from "./migrate";
 import {
@@ -599,17 +604,37 @@ function hostOf(url: string): string {
   }
 }
 
-/** The API calls go to the workspace this shell is authenticated against, which must be the target's. */
+/**
+ * The API calls go to the workspace this shell is authenticated against, which
+ * must be the target's: its workspace.host, else the host of its
+ * workspace.profile. With neither, a deploy uses this shell's auth too.
+ */
 async function assertTargetWorkspace(
   ctx: DbContext,
   target: string,
   host: string | null,
+  profile: string | null,
 ): Promise<void> {
-  if (!host) return;
+  if (!host && !profile) return;
+  let expected = host;
+  if (!expected && profile) {
+    try {
+      expected = await profileHost(profile);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Target ${target} deploys with profile ${profile}, which this machine's Databricks config does not resolve to a workspace host: ${message.replace(/\.+$/, "")}. Add the profile, or set workspace.host in target ${target}, then rerun.`,
+        { cause: error },
+      );
+    }
+  }
+  if (!expected) return;
   const authenticated = await ctx.workspace().getHost();
-  if (hostOf(authenticated) === hostOf(host)) return;
+  if (hostOf(authenticated) === hostOf(expected)) return;
   throw new Error(
-    `Target ${target} deploys to ${host}, but this shell is authenticated against ${authenticated}. Set DATABRICKS_CONFIG_PROFILE to a profile for ${host}, then rerun.`,
+    host
+      ? `Target ${target} deploys to ${host}, but this shell is authenticated against ${authenticated}. Set DATABRICKS_CONFIG_PROFILE to a profile for ${host}, then rerun.`
+      : `Target ${target} deploys with profile ${profile} to ${expected}, but this shell is authenticated against ${authenticated}. Set DATABRICKS_CONFIG_PROFILE=${profile}, then rerun.`,
   );
 }
 
@@ -704,9 +729,16 @@ async function verifyDeploy(
       `No target workspace: workspace.host in target ${target.name}${withFile} is "${deploy.host.written}", which this checkout's files do not resolve to a host. Give the variable it names a value in ${file}, or in .databricks/bundle/${target.name}/variable-overrides.json, then rerun.`,
     );
   }
+  if (!deploy.host && deploy.profile?.kind === "unresolved") {
+    throw new Error(
+      `No target workspace: workspace.profile in target ${target.name}${withFile} is "${deploy.profile.written}", which this checkout's files do not resolve to a profile. Give the variable it names a value in ${file}, or in .databricks/bundle/${target.name}/variable-overrides.json, then rerun.`,
+    );
+  }
   const branch = branchValue.name;
   const database = databaseValue?.name ?? null;
   const host = deploy.host?.name ?? null;
+  const profile =
+    deploy.profile?.kind === "resolved" ? deploy.profile.name : null;
   const committed = readCommitted(migrationsFolder(ctx.root));
   const report = (
     name: string | null,
@@ -742,7 +774,7 @@ async function verifyDeploy(
   }
   const name = app.name;
 
-  await assertTargetWorkspace(ctx, target.name, host);
+  await assertTargetWorkspace(ctx, target.name, host, profile);
   const api = ctx.api();
   const [branchFound, databaseFound, deployed] = await Promise.all([
     api.getBranch(branch),
