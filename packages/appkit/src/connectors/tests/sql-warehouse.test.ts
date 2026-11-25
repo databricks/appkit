@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { runInCallerContext } from "../../context/execution-context";
+import { ExecutionError, IdentityExpiredError } from "../../errors";
 import { SQLWarehouseConnector } from "../sql-warehouse";
 
 // Mock telemetry to pass through span callbacks
@@ -196,6 +198,94 @@ describe("SQLWarehouseConnector", () => {
       ).rejects.toMatchObject({ errorCode: "INVALID_PARAMETER_VALUE" });
 
       errorSpy.mockRestore();
+    });
+  });
+
+  // LA-2048: the ExecutionError wrapper drops the HTTP status, so a rejected
+  // user token used to surface as a 500 EXECUTION_ERROR instead of
+  // IdentityExpiredError.
+  describe("caller token rejection", () => {
+    let connector: SQLWarehouseConnector;
+    const caller = {
+      principal: { type: "user" as const, userId: "alice" },
+      client: {} as any,
+      workspaceId: Promise.resolve("workspace"),
+      tokenFingerprint: "1234567890abcdef",
+    };
+    const rejected = () =>
+      Object.assign(new Error("Credential was not sent [secret-detail]"), {
+        statusCode: 401,
+      });
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      connector = new SQLWarehouseConnector({ timeout: 5000 });
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    test("surfaces a 401 from executeStatement as IdentityExpiredError under a caller", async () => {
+      const client = {
+        statementExecution: {
+          executeStatement: vi.fn().mockRejectedValue(rejected()),
+        },
+      };
+
+      const error = await runInCallerContext(caller, () =>
+        connector.executeStatement(client as any, {
+          statement: "SELECT 1",
+          warehouseId: "test-warehouse",
+        }),
+      ).catch((err) => err);
+
+      expect(error).toBeInstanceOf(IdentityExpiredError);
+      expect(error).toMatchObject({
+        code: "IDENTITY_EXPIRED",
+        statusCode: 401,
+        tokenFingerprint: caller.tokenFingerprint,
+      });
+      expect(JSON.stringify(error)).not.toContain("secret-detail");
+    });
+
+    test("surfaces a 401 while polling as IdentityExpiredError under a caller", async () => {
+      const client = {
+        statementExecution: {
+          executeStatement: vi.fn().mockResolvedValue({
+            statementId: "stmt-123",
+            status: { state: "RUNNING" },
+          }),
+          getStatementResult: vi.fn().mockRejectedValue(rejected()),
+        },
+      };
+
+      await expect(
+        runInCallerContext(caller, () =>
+          connector.executeStatement(client as any, {
+            statement: "SELECT 1",
+            warehouseId: "test-warehouse",
+          }),
+        ),
+      ).rejects.toBeInstanceOf(IdentityExpiredError);
+    });
+
+    test("keeps a 401 as ExecutionError outside a caller (service principal)", async () => {
+      const client = {
+        statementExecution: {
+          executeStatement: vi.fn().mockRejectedValue(rejected()),
+        },
+      };
+
+      const error = await connector
+        .executeStatement(client as any, {
+          statement: "SELECT 1",
+          warehouseId: "test-warehouse",
+        })
+        .catch((err) => err);
+
+      expect(error).toBeInstanceOf(ExecutionError);
+      expect(error).toMatchObject({ code: "EXECUTION_ERROR", statusCode: 500 });
     });
   });
 

@@ -41,6 +41,7 @@ const migrate = {
   generated: null,
   applied: ["0000_migration"],
   typesFile: `${process.cwd()}/shared/appkit-types/database.d.ts`,
+  operationsTypesFile: `${process.cwd()}/shared/appkit-types/database-operations.d.ts`,
 };
 const report = {
   mode: "dev",
@@ -356,6 +357,7 @@ describe("appkit db init", () => {
           },
           recorded: ["0000_baseline"],
           typesFile: migrate.typesFile,
+          operationsTypesFile: migrate.operationsTypesFile,
         },
         rebuilt: {
           clean: {

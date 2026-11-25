@@ -121,6 +121,31 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
       const result = await transform(connector, response);
       expect(result.result.data[0].metadata).toEqual({ key: "value" });
     });
+
+    test("attaches manifest column names and types, leaving cells as delivered", async () => {
+      const connector = createConnector();
+      const response = {
+        statementId: "stmt-1",
+        status: { state: "SUCCEEDED" },
+        manifest: {
+          format: "JSON_ARRAY",
+          schema: {
+            columns: [
+              { name: "trips", typeText: "BIGINT", typeName: "LONG" },
+              { name: "", typeText: "BOOLEAN", typeName: "BOOLEAN" },
+            ],
+          },
+        },
+        result: {
+          dataArray: [["42", "true"]],
+        },
+      } as unknown as StatementResponse;
+
+      const result = await transform(connector, response);
+      expect(result.result.data).toEqual([{ trips: "42", column_1: "true" }]);
+      expect(result.result.columnNames).toEqual(["trips", "column_1"]);
+      expect(result.result.columnTypes).toEqual(["LONG", "BOOLEAN"]);
+    });
   });
 
   describe("classic warehouse (EXTERNAL_LINKS + ARROW_STREAM)", () => {
@@ -424,6 +449,86 @@ describe("SQLWarehouseConnector._transformDataArray", () => {
       // Should pass attachment through (client decodes), not transform dataArray
       expect(result.result.attachment).toBe(REAL_ARROW_ATTACHMENT);
       expect(result.result.data).toBeUndefined();
+    });
+  });
+
+  describe("INLINE + JSON_ARRAY as Arrow", () => {
+    const columns = [{ name: "n", typeName: "INT", typeText: "INT" }];
+    const inlineAsArrow = (
+      connector: SQLWarehouseConnector,
+      response: unknown,
+      workspaceClient: unknown = {},
+    ) =>
+      (connector as any)._transformDataArray(
+        response,
+        workspaceClient,
+        undefined,
+        true,
+      );
+
+    test("reads every inline chunk into one Arrow attachment", async () => {
+      const getResultData = vi
+        .fn()
+        .mockResolvedValueOnce({ dataArray: [["3"]] });
+      const result = await inlineAsArrow(
+        createConnector(),
+        {
+          statementId: "stmt-inline",
+          status: { state: "SUCCEEDED" },
+          manifest: {
+            format: "JSON_ARRAY",
+            totalChunkCount: 2,
+            schema: { columns },
+          },
+          result: { dataArray: [["1"], ["2"]], nextChunkIndex: 1 },
+        },
+        { statementExecution: { getResultData } },
+      );
+
+      expect(getResultData).toHaveBeenCalledWith(
+        { statementId: "stmt-inline", chunkIndex: 1 },
+        expect.anything(),
+      );
+      const table = tableFromIPC(
+        Buffer.from(result.result.attachment, "base64"),
+      );
+      expect([...(table.getChild("n") ?? [])]).toEqual([1, 2, 3]);
+      expect(result.result.columnNames).toEqual(["n"]);
+      expect(result.result.statement_id).toBe("stmt-inline");
+    });
+
+    test("reads a chunk with more rows than a function call takes arguments", async () => {
+      const many = Array.from({ length: 200_000 }, () => ["7"]);
+      const getResultData = vi.fn().mockResolvedValueOnce({ dataArray: many });
+      const result = await inlineAsArrow(
+        createConnector(),
+        {
+          statementId: "stmt-inline",
+          status: { state: "SUCCEEDED" },
+          manifest: { format: "JSON_ARRAY", schema: { columns } },
+          result: { dataArray: [["1"]], nextChunkIndex: 1 },
+        },
+        { statementExecution: { getResultData } },
+      );
+
+      const table = tableFromIPC(
+        Buffer.from(result.result.attachment, "base64"),
+      );
+      expect(table.numRows).toBe(200_001);
+    });
+
+    test("a cell that does not parse as its column type fails with a code and a message", async () => {
+      await expect(
+        inlineAsArrow(createConnector(), {
+          statementId: "stmt-inline",
+          status: { state: "SUCCEEDED" },
+          manifest: { format: "JSON_ARRAY", schema: { columns } },
+          result: { dataArray: [["not-a-number"]] },
+        }),
+      ).rejects.toMatchObject({
+        errorCode: "ARROW_REBUILD_FAILED",
+        clientMessage: expect.stringMatching(/JSON_ARRAY/),
+      });
     });
   });
 

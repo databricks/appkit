@@ -26,6 +26,8 @@ export interface ConfigPlan {
   appYamlEnv: AppYamlEnvEntry[];
   bundleVariables: BundleVariable[];
   resourceBindings: ResourceBinding[];
+  /** Entries for resources.apps.app.user_api_scopes (added if absent). */
+  userApiScopes?: string[];
   /** Resource types encountered that have no verified binding spec. */
   unverifiedTypes: string[];
 }
@@ -178,6 +180,7 @@ export function planHasContent(plan: ConfigPlan): boolean {
   return (
     plan.appYamlEnv.length > 0 ||
     plan.bundleVariables.length > 0 ||
-    plan.resourceBindings.length > 0
+    plan.resourceBindings.length > 0 ||
+    (plan.userApiScopes?.length ?? 0) > 0
   );
 }

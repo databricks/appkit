@@ -3,8 +3,9 @@ import path from "node:path";
 
 import type { PoolClient } from "pg";
 
-import { loadDefaultDatabaseSchema } from "../../plugins/database/load-schema";
+import { DEFAULT_SCHEMA_FILE } from "../../plugins/database/load-schema";
 import { diagnoseSchema } from "../../plugins/database/schema-check";
+import { loadDatabaseSchema } from "../../type-generator/database";
 import { readMigrationDrift } from "../migrations/apply";
 import {
   journalFile,
@@ -141,9 +142,9 @@ async function verifyLocal(ctx: DbContext): Promise<LocalVerifyReport> {
   const env = await resolveEnvBranch(ctx);
   if (!env) throw new Error(`Did not verify: ${NO_ENV_BRANCH}.`);
   const branch = env.branch.name;
-  const schema = await loadDefaultDatabaseSchema(ctx.root, {
-    showImportError: true,
-  });
+  const schema = await loadDatabaseSchema(
+    path.join(ctx.root, DEFAULT_SCHEMA_FILE),
+  );
   return withBranchPool(ctx, async (pool) => {
     const client = await pool.connect();
     try {

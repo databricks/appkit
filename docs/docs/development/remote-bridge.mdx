@@ -18,6 +18,26 @@ Use remote bridge when:
 - Developing UI without running backend locally
 - Collaborating with team members on the same backend
 
+## Enabling Remote Bridge on your app
+
+Remote Bridge is off by default in deployed apps, and it never runs when `NODE_ENV` is `production`. To use it on a development app, change two things in the app's `app.yaml`, then redeploy:
+
+1. Start the server without `NODE_ENV=production`. The template's `npm run start` sets it, so run the built server directly instead.
+2. Set `DISABLE_REMOTE_SERVING` to `"false"`. It defaults to `"true"`.
+
+```yaml
+command: ["node", "--env-file-if-exists=./.env", "./dist/server.js"]
+env:
+  - name: DISABLE_REMOTE_SERVING
+    value: "false"
+```
+
+Only the exact value `"false"` turns it on. If the variable is unset or has any other value, Remote Bridge stays off.
+
+Running without `NODE_ENV=production` also turns on other development behavior: error responses include the raw error message, and MCP connections to `localhost` are allowed. Use this setup only on apps you use for development, not on apps you've shared with other users, and switch back to `npm run start` (then redeploy) when you're done.
+
+If you open `<app-url>?dev` on an app that hasn't opted in, the app loads normally and logs a warning explaining how to enable Remote Bridge.
+
 ## Starting and stopping Remote Bridge
 
 To start the remote bridge, run the following command:

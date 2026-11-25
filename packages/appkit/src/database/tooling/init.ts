@@ -4,7 +4,8 @@ import path from "node:path";
 import dotenv from "dotenv";
 import type { PoolClient } from "pg";
 
-import { loadDefaultDatabaseSchema } from "../../plugins/database/load-schema";
+import { DEFAULT_SCHEMA_FILE } from "../../plugins/database/load-schema";
+import { loadDatabaseSchema } from "../../type-generator/database";
 import { DEFAULT_SCHEMA_NAME } from "../schema-builder/define-schema";
 import { type CleanReport, cleanHolding } from "./clean";
 import { type DbContext, withBranchPool } from "./context";
@@ -670,7 +671,7 @@ async function initHolding(
   const hasSchema = hasSchemaFile(ctx.root);
   const schemaName =
     hasSchema && request.kind === "locked"
-      ? (await loadDefaultDatabaseSchema(ctx.root, { showImportError: true }))
+      ? (await loadDatabaseSchema(path.join(ctx.root, DEFAULT_SCHEMA_FILE)))
           .$schemaName
       : DEFAULT_SCHEMA_NAME;
 

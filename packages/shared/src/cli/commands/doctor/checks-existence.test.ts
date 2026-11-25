@@ -363,6 +363,33 @@ describe("runExistenceProbe — per-type coverage with real manifest keys", () =
     expect(getFunction).toHaveBeenCalledWith({ fullNameArg: "cat.sch.fn" });
   });
 
+  it("model_service: ok via `name`", async () => {
+    const request = vi.fn(async () => new Response("{}"));
+    const r = await runExistenceProbe(
+      { request },
+      target({ type: "model_service", fieldValues: { name: "cat.sch.llm" } }),
+    );
+    expect(r.status).toBe("ok");
+    expect(request).toHaveBeenCalledWith({
+      method: "GET",
+      path: "/api/2.1/unity-catalog/model-services/cat.sch.llm",
+    });
+  });
+
+  it("model_service: a 404 response is NOT_FOUND", async () => {
+    const request = vi.fn(
+      async () =>
+        new Response('{"message":"Model service does not exist"}', {
+          status: 404,
+        }),
+    );
+    const r = await runExistenceProbe(
+      { request },
+      target({ type: "model_service", fieldValues: { name: "cat.sch.nope" } }),
+    );
+    expect(r).toMatchObject({ status: "error", code: "NOT_FOUND" });
+  });
+
   it("vector_search_index: probes via camelCase `indexName`", async () => {
     const getVectorIndex = vi.fn(async () => ({}));
     const client = { vectorSearch: { getVectorIndex } };

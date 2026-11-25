@@ -139,39 +139,33 @@ describe("TelemetryInterceptor", () => {
     expect(mockSpan.end).toHaveBeenCalledTimes(1);
   });
 
-  test("should set execution context as 'service' when not in user context", async () => {
-    vi.spyOn(executionContext, "isInUserContext").mockReturnValue(false);
-    vi.spyOn(executionContext, "getCurrentPrincipalId").mockReturnValue(
-      "sp-123",
-    );
-    const interceptor = new TelemetryInterceptor(mockTelemetry);
-    const fn = vi.fn().mockResolvedValue("result");
+  test.each([
+    [false, "sp-123"],
+    [true, "user-123"],
+  ])(
+    "should not set legacy execution.context or caller.id attributes (user context: %s)",
+    async (inUserContext, principalId) => {
+      vi.spyOn(executionContext, "isInUserContext").mockReturnValue(
+        inUserContext,
+      );
+      vi.spyOn(executionContext, "getCurrentPrincipalId").mockReturnValue(
+        principalId,
+      );
+      const interceptor = new TelemetryInterceptor(mockTelemetry);
+      const fn = vi.fn().mockResolvedValue("result");
 
-    await interceptor.intercept(fn, context);
+      await interceptor.intercept(fn, context);
 
-    expect(mockSpan.setAttribute).toHaveBeenCalledWith(
-      "execution.context",
-      "service",
-    );
-    expect(mockSpan.setAttribute).toHaveBeenCalledWith("caller.id", "sp-123");
-  });
-
-  test("should set execution context as 'user' when in user context", async () => {
-    vi.spyOn(executionContext, "isInUserContext").mockReturnValue(true);
-    vi.spyOn(executionContext, "getCurrentPrincipalId").mockReturnValue(
-      "user-123",
-    );
-    const interceptor = new TelemetryInterceptor(mockTelemetry);
-    const fn = vi.fn().mockResolvedValue("result");
-
-    await interceptor.intercept(fn, context);
-
-    expect(mockSpan.setAttribute).toHaveBeenCalledWith(
-      "execution.context",
-      "user",
-    );
-    expect(mockSpan.setAttribute).toHaveBeenCalledWith("caller.id", "user-123");
-  });
+      expect(mockSpan.setAttribute).not.toHaveBeenCalledWith(
+        "execution.context",
+        expect.anything(),
+      );
+      expect(mockSpan.setAttribute).not.toHaveBeenCalledWith(
+        "caller.id",
+        expect.anything(),
+      );
+    },
+  );
 
   test("should set execution.obo_dev_fallback when in dev OBO fallback", async () => {
     vi.spyOn(executionContext, "isInUserContext").mockReturnValue(false);
@@ -181,10 +175,6 @@ describe("TelemetryInterceptor", () => {
 
     await interceptor.intercept(fn, context);
 
-    expect(mockSpan.setAttribute).toHaveBeenCalledWith(
-      "execution.context",
-      "service",
-    );
     expect(mockSpan.setAttribute).toHaveBeenCalledWith(
       "execution.obo_dev_fallback",
       true,

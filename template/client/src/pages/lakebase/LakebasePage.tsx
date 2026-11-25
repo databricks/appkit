@@ -10,13 +10,16 @@ import {
 } from '@databricks/appkit-ui/react';
 import { useState, useEffect } from 'react';
 import { Check, X } from 'lucide-react';
+import { z } from 'zod';
+import { fetchJson, fetchOrThrow } from '../../lib/fetch-or-throw';
 
-interface Todo {
-  id: number;
-  title: string;
-  completed: boolean;
-  created_at: string;
-}
+const Todo = z.object({
+  id: z.number(),
+  title: z.string(),
+  completed: z.boolean(),
+  created_at: z.string(),
+});
+type Todo = z.infer<typeof Todo>;
 
 export function LakebasePage() {
   const [todos, setTodos] = useState<Todo[]>([]);
@@ -26,11 +29,12 @@ export function LakebasePage() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    fetch('/api/lakebase/todos')
-      .then((res) => {
-        if (!res.ok) throw new Error(`Failed to fetch todos: ${res.statusText}`);
-        return res.json() as Promise<Todo[]>;
-      })
+    fetchJson(
+      '/api/lakebase/todos',
+      undefined,
+      z.array(Todo),
+      (r) => `Failed to fetch todos: ${r.statusText}`,
+    )
       .then(setTodos)
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load todos'))
       .finally(() => setLoading(false));
@@ -43,27 +47,32 @@ export function LakebasePage() {
 
     setSubmitting(true);
     try {
-      const res = await fetch('/api/lakebase/todos', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title }),
-      });
-      if (!res.ok) throw new Error(`Failed to create todo: ${res.statusText}`);
-      const created = (await res.json()) as Todo;
+      const created = await fetchJson(
+        '/api/lakebase/todos',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title }),
+        },
+        Todo,
+        (r) => `Failed to create todo: ${r.statusText}`,
+      );
       setTodos((prev) => [created, ...prev]);
       setNewTitle('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add todo');
-    } finally {
-      setSubmitting(false);
     }
+    setSubmitting(false);
   };
 
   const toggleTodo = async (id: number) => {
     try {
-      const res = await fetch(`/api/lakebase/todos/${id}`, { method: 'PATCH' });
-      if (!res.ok) throw new Error(`Failed to update todo: ${res.statusText}`);
-      const updated = (await res.json()) as Todo;
+      const updated = await fetchJson(
+        `/api/lakebase/todos/${id}`,
+        { method: 'PATCH' },
+        Todo,
+        (r) => `Failed to update todo: ${r.statusText}`,
+      );
       setTodos((prev) => prev.map((t) => (t.id === id ? updated : t)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update todo');
@@ -72,8 +81,11 @@ export function LakebasePage() {
 
   const deleteTodo = async (id: number) => {
     try {
-      const res = await fetch(`/api/lakebase/todos/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(`Failed to delete todo: ${res.statusText}`);
+      await fetchOrThrow(
+        `/api/lakebase/todos/${id}`,
+        { method: 'DELETE' },
+        (r) => `Failed to delete todo: ${r.statusText}`,
+      );
       setTodos((prev) => prev.filter((t) => t.id !== id));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete todo');
@@ -93,7 +105,7 @@ export function LakebasePage() {
             A simple CRUD example powered by Databricks Lakebase (PostgreSQL).
           </p>
 
-          <form onSubmit={addTodo} className="flex gap-2 mb-6">
+          <form onSubmit={(e) => void addTodo(e)} className="flex gap-2 mb-6">
             <Input
               placeholder="What needs to be done?"
               value={newTitle}
@@ -138,7 +150,7 @@ export function LakebasePage() {
                 >
                   <button
                     type="button"
-                    onClick={() => toggleTodo(todo.id)}
+                    onClick={() => void toggleTodo(todo.id)}
                     className={`h-5 w-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
                       todo.completed
                         ? 'bg-primary border-primary text-primary-foreground'
@@ -156,7 +168,7 @@ export function LakebasePage() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => deleteTodo(todo.id)}
+                    onClick={() => void deleteTodo(todo.id)}
                     className="text-muted-foreground hover:text-destructive shrink-0"
                     aria-label="Delete todo"
                   >
