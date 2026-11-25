@@ -336,7 +336,7 @@ describe("runIntrospect", () => {
       expect(error).toBeInstanceOf(IntrospectRefusedError);
       expect(error.message).toBe(
         "Refusing to introspect: production is not your dev or session branch (it is the project's default branch). Introspect records the migration it writes as applied, so it runs only on branches `appkit db init` created for you. " +
-          "Run `appkit db init`: it creates your dev branch from the project's default branch, and introspects it when there is no config/database/schema.ts.",
+          "Run `appkit db init`: it creates your dev branch from the branch the default databricks.yml target binds, else the project's default branch, and introspects it when there is no config/database/schema.ts.",
       );
       expect(withBranchPool).not.toHaveBeenCalled();
       expect(tree(root)).toEqual(before);
