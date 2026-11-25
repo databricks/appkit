@@ -1016,6 +1016,41 @@ describe("applyPendingMigrations", () => {
 
   test.each([
     [
+      "is a directory",
+      (file: string) => {
+        fs.rmSync(file);
+        fs.mkdirSync(file);
+      },
+      "EISDIR",
+    ],
+    [
+      "has no read permission",
+      (file: string) => fs.chmodSync(file, 0o000),
+      "EACCES",
+    ],
+  ])(
+    "a .sql file that %s fails before connecting, naming the file and the reason",
+    async (_label, breakFile, reason) => {
+      if (reason === "EACCES" && process.getuid?.() === 0) return;
+      const folder = twoMigrations();
+      const file = path.join(folder, "0001_migration.sql");
+      breakFile(file);
+      const fake = fakePool({ recorded: null });
+
+      const error = await applyPendingMigrations(
+        fake.pool,
+        options(folder),
+      ).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(MigrationFilesError);
+      expect((error as Error).message).toContain(`Cannot read ${file}: `);
+      expect((error as Error).message).toContain(reason);
+      expect(fake.connects()).toBe(0);
+    },
+  );
+
+  test.each([
+    [
       "not JSON",
       "{",
       /^Cannot read .*_journal\.json: .*Restore it from version control\.$/,

@@ -432,6 +432,32 @@ function lineEndingHashes(content: string, hash: string): string[] {
   return [...new Set([hash, sha256(lf), sha256(crlf)])];
 }
 
+/**
+ * drizzle-orm reports any read failure as "No file … found", so read the files
+ * again to name the one that fails and why.
+ */
+function unreadableMigrationError(
+  folder: string,
+  journal: Journal,
+  error: unknown,
+): MigrationFilesError {
+  for (const entry of journal.entries) {
+    const file = path.join(folder, `${entry.tag}.sql`);
+    try {
+      fs.readFileSync(file);
+    } catch (cause) {
+      return new MigrationFilesError(
+        `Cannot read ${file}: ${cause instanceof Error ? cause.message : String(cause)}. Check that the app can read it.`,
+        { cause },
+      );
+    }
+  }
+  return new MigrationFilesError(
+    `Cannot read the migrations in ${folder}: ${error instanceof Error ? error.message : String(error)}.`,
+    { cause: error },
+  );
+}
+
 /** Every committed migration, in journal order. Fails on a missing file before connecting. */
 function readMigrations(folder: string, journal: Journal): MigrationFile[] {
   for (const entry of journal.entries) {
@@ -442,8 +468,13 @@ function readMigrations(folder: string, journal: Journal): MigrationFile[] {
       );
     }
   }
-  // drizzle-orm's reader, so `hash` matches what drizzle-kit records.
-  const files = readMigrationFiles({ migrationsFolder: folder });
+  let files: ReturnType<typeof readMigrationFiles>;
+  try {
+    // drizzle-orm's reader, so `hash` matches what drizzle-kit records.
+    files = readMigrationFiles({ migrationsFolder: folder });
+  } catch (error) {
+    throw unreadableMigrationError(folder, journal, error);
+  }
   return journal.entries.map((entry, index) => {
     const file = files[index];
     if (!file) {
