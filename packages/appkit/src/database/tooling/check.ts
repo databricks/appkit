@@ -9,6 +9,7 @@ import {
 } from "../../plugins/database/load-schema";
 import {
   type JournalEntry,
+  MigrationFilesError,
   migrationFile,
   migrationsFolder,
   readJournal,
@@ -77,6 +78,21 @@ const snapshotShape = z.object({
   schemas: z.record(z.string(), z.unknown()),
 });
 
+/** The snapshot's JSON, or undefined when it is not JSON, as when a merge left conflict markers in it. */
+function readSnapshotJson(file: string): unknown {
+  try {
+    return readJsonFile<unknown>(file);
+  } catch (error) {
+    if (
+      error instanceof MigrationFilesError &&
+      error.cause instanceof SyntaxError
+    ) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
 /** The empty database drizzle-kit diffs the first migration from. */
 const ORIGIN: SnapshotLink = { id: ORIGIN_ID, prevId: "" };
 
@@ -136,7 +152,7 @@ export async function runCheck(ctx: DbContext): Promise<CheckReport> {
       );
       return null;
     }
-    const snapshot = snapshotShape.safeParse(readJsonFile<unknown>(file));
+    const snapshot = snapshotShape.safeParse(readSnapshotJson(file));
     if (snapshot.success) {
       return { id: snapshot.data.id, prevId: snapshot.data.prevId };
     }
