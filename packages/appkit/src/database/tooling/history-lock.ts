@@ -30,6 +30,9 @@ interface LockOwner {
 
 const LOCK_FILE = ".appkit-db.lock";
 
+/** Ctrl+C and a plain kill; SIGKILL cannot be caught and leaves the file. */
+const RELEASE_SIGNALS = ["SIGINT", "SIGTERM"] as const;
+
 function readOwner(file: string): Partial<LockOwner> | null {
   try {
     const owner: unknown = JSON.parse(fs.readFileSync(file, "utf-8"));
@@ -78,9 +81,9 @@ function heldError(root: string, file: string): Error {
  * Run fn as the only writer of the checkout's migration history. The lock is
  * config/database/.appkit-db.lock, created exclusively; a second command in
  * the same checkout, in this process or another, fails with who holds it.
- * Released when fn settles or the process exits. A process killed by a signal
- * leaves the file behind: the next command reports it as stale, and it is
- * deleted by hand, never taken over.
+ * Released when fn settles, the process exits, or SIGINT or SIGTERM arrives.
+ * A process killed otherwise leaves the file behind: the next command reports
+ * it as stale, and it is deleted by hand, never taken over.
  */
 export async function withHistoryLock<T>(
   root: string,
@@ -118,10 +121,19 @@ export async function withHistoryLock<T>(
     if (released) return;
     released = true;
     process.removeListener("exit", release);
+    for (const signal of RELEASE_SIGNALS)
+      process.removeListener(signal, onSignal);
     if (readOwner(file)?.token === owner.token)
       fs.rmSync(file, { force: true });
   };
+  // A listener replaces the signal's default exit, so re-raise it once the lock
+  // is gone; when other listeners remain, ending the process is theirs.
+  const onSignal = (signal: NodeJS.Signals) => {
+    release();
+    if (process.listenerCount(signal) === 0) process.kill(process.pid, signal);
+  };
   process.on("exit", release);
+  for (const signal of RELEASE_SIGNALS) process.on(signal, onSignal);
   const lock = {
     folder,
     assertHeld() {
