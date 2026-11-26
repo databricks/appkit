@@ -1,7 +1,13 @@
 command: ['{{or .packageManager "pnpm"}}', 'run', 'start']
 health_check:
   path: /health
-{{- if .appEnv}}
+{{- if or .appEnv .plugins.database}}
 env:
+{{- end}}
+{{- if .appEnv}}
 {{.appEnv}}
+{{- end}}
+{{- if .plugins.database}}
+  - name: APPKIT_DB_MIGRATE_ON_START
+    value: "true"
 {{- end}}

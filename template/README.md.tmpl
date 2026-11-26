@@ -10,7 +10,7 @@ A Databricks App powered by [AppKit](https://developers.databricks.com/docs/appk
 - **Lakebase** -- Fully managed Postgres database for transactional (OLTP) workloads on Databricks
 {{- end}}
 {{- if .plugins.database}}
-- **Database** -- Schema-driven PostgreSQL access through named operations, each with its own authorization
+- **Database** -- Schema-driven PostgreSQL tables with committed migrations, and named operations, each with its own authorization
 {{- end}}
 {{- if .plugins.genie}}
 - **Genie** -- AI/BI Genie conversational interface for natural language data queries
@@ -54,10 +54,9 @@ The Lakebase plugin requires additional environment variables for PostgreSQL con
 
 #### Database schema and operations
 
-`database()` loads `config/database/schema.ts`. The generated schema starts empty,
-so initialization does not require sample tables or expose existing data.
-Add your table declarations after creating the corresponding PostgreSQL tables;
-AppKit does not create or migrate them. Server code reads and writes declared
+`database()` loads `config/database/schema.ts`, whose tables live in the Postgres
+schema `app`. Committed migrations in `config/database/migrations/` create and
+change those tables, as the steps below show. Server code reads and writes declared
 tables through `appkit.database`.
 
 The plugin serves no HTTP endpoint until you add operations. Write each one with
@@ -66,6 +65,56 @@ or start the dev server to generate `server/database/routes.gen.ts`.
 `database()` discovers that registry automatically; use `routes: false` for server-only access.
 To learn how, see the
 [Database plugin documentation](https://developers.databricks.com/docs/appkit/v0/plugins/database).
+
+Local development runs against a Lakebase branch of your own, never the deployed one.
+Run `npx appkit db init` once after scaffolding, and again after cloning. It asks
+nothing: it points `.env` at your branch and sets up its schema.
+
+```bash
+npx appkit db init             # your dev branch, a fork of the branch the app deploys to
+npx appkit db init --session   # a branch for this checkout that expires after 7 days
+npx appkit db init --dev       # back to your dev branch
+```
+
+A new branch is a copy of its source, production data included. On a branch
+`db init` just created, or whose app schema still belongs to the copied service
+principal, `db init` hands the schema to you and rebuilds it from the committed
+migrations, so its tables start empty. Other schemas keep the copied rows. A
+branch whose app schema was already yours before that run keeps its rows, and
+`db init` migrates it. To keep the copied rows in the app schema on a new branch
+too, run `npx appkit db init --schema migrate`. The rows are yours from then on,
+and `npx appkit db init --schema clean` removes them. `db migrate`,
+`db introspect` and `db seed` refuse a copy until `db init` rebuilt it or kept
+its rows.
+
+To change the schema, edit `config/database/schema.ts`, then:
+
+```bash
+npx appkit db migrate   # writes config/database/migrations/NNNN_migration.sql and applies it to your branch
+npx appkit db verify    # read-only check of your branch against schema.ts and the migrations
+```
+
+Commit the migrations. The deployed app applies them on start, because `app.yaml`
+sets `APPKIT_DB_MIGRATE_ON_START=true`, and only when `PGUSER` is set and equals
+`DATABRICKS_CLIENT_ID`, which Databricks Apps sets for the deployed app. `db init`
+writes your user name to `PGUSER` in `.env`, so a local start, `databricks apps
+run-local` included, connects as you and never migrates. The app serves `/health`
+only after its migrations. When Databricks Apps enforces the `health_check` in
+`app.yaml`, the deploy waits for `/health` for up to 300 seconds, so a failed
+migration fails the deploy. Otherwise, the deploy succeeds once the app process
+has lived 2 seconds, even while it is still migrating.
+To adopt tables that already exist, run
+`npx appkit db init --schema introspect`. It writes `schema.ts` from the branch's
+tables, and a `0000_baseline` migration (or `NNNN_introspect` when migrations
+already exist).
+`npx appkit db clean` drops the app schema on your branch, and `npx appkit db seed`
+runs `config/database/seed.sql` on it; both refuse any branch `db init` did not
+create for you, such as the deployed one.
+
+In CI, `npx appkit db check` fails a pull request whose `schema.ts` change has no
+migration, or whose migrations are out of order or missing files. It needs no
+Databricks credentials, and it imports `schema.ts`, so give the job that runs it
+no secrets.
 {{- end}}
 
 ### CLI Authentication
@@ -193,6 +242,14 @@ databricks apps deploy
 ```bash
 databricks apps deploy -t prod
 ```
+{{- if .plugins.database}}
+
+Then check that the app's deployed source has every committed migration:
+
+```bash
+npx appkit db verify --deployed -t prod
+```
+{{- end}}
 
 > **Restarting a stopped app:** apps stop after a period of inactivity. To start one again without redeploying, run `databricks apps start <APP_NAME>`.
 
@@ -206,9 +263,14 @@ databricks apps deploy -t prod
   * server.ts      # Server entry point
   * routes/        # Routes
 * shared/          # Shared types
-{{- if .plugins.analytics}}
+{{- if or .plugins.analytics .plugins.database}}
 * config/          # Configuration
+{{- end}}
+{{- if .plugins.analytics}}
   * queries/       # SQL query files
+{{- end}}
+{{- if .plugins.database}}
+  * database/      # schema.ts and its migrations
 {{- end}}
 * databricks.yml   # Bundle configuration
 * app.yaml         # App configuration

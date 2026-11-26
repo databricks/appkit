@@ -87,6 +87,28 @@ const placeholders = {
   '{{or .packageManager "pnpm"}}': packageManager,
 };
 
+const keepPluginBlocks = values["all-plugins"];
+const GO_CONDITIONALS: Record<
+  string,
+  { pattern: RegExp; render: (block: string, ...groups: string[]) => string }
+> = {
+  ifOrAppEnvOrPlugin: {
+    pattern:
+      /{{-?\s*if\s+or((?:\s+\.(?:appEnv|plugins\.[a-zA-Z0-9_-]+))+)\s*-?\s*}}([\s\S]*?){{-?\s*end\s*-?\s*}}/g,
+    render: (_block, terms, body) =>
+      keepPluginBlocks && terms.includes(".plugins.") ? body : "",
+  },
+  ifAppEnv: {
+    pattern: /{{-?\s*if\s+\.appEnv\s*}}[\s\S]*?{{-?\s*end\s*}}/g,
+    render: () => "",
+  },
+  ifPlugin: {
+    pattern:
+      /{{-?\s*if\s+\.plugins\.[a-zA-Z0-9_-]+\s*-?\s*}}([\s\S]*?){{-?\s*end\s*-?\s*}}/g,
+    render: (_block, body) => (keepPluginBlocks ? body : ""),
+  },
+};
+
 /**
  * Recursively process all files in the scaffold directory to:
  * 1. Replace simple placeholders ({{.projectName}}, {{.appDescription}})
@@ -132,26 +154,10 @@ function processAllFiles(dir: string): void {
         }
       }
 
-      // Remove Go template conditionals: {{- if .appEnv}} blocks
-      if (content.includes("{{") && content.includes(".appEnv")) {
-        const beforeLen = content.length;
-        content = content.replace(
-          /{{-?\s*if\s+\.appEnv\s*}}[\s\S]*?{{-?\s*end\s*}}/g,
-          "",
-        );
-        if (beforeLen !== content.length) {
-          modified = true;
-        }
-      }
-
-      // Remove Go template conditionals: {{- if .plugins.*}} blocks, or keep their content
-      if (content.includes("{{") && content.includes(".plugins.")) {
-        const beforeLen = content.length;
-        content = content.replace(
-          /{{-?\s*if\s+\.plugins\.[a-zA-Z0-9_-]+\s*-?\s*}}([\s\S]*?){{-?\s*end\s*-?\s*}}/g,
-          values["all-plugins"] ? "$1" : "",
-        );
-        if (beforeLen !== content.length) {
+      for (const { pattern, render } of Object.values(GO_CONDITIONALS)) {
+        const rendered = content.replace(pattern, render);
+        if (rendered !== content) {
+          content = rendered;
           modified = true;
         }
       }
