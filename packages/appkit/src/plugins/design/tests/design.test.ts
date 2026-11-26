@@ -158,10 +158,21 @@ describe("entryModule", () => {
       'import * as initial from "/src/design/pages/orders.tsx"',
     );
     expect(code).toContain(
-      'createBrowserRouter(routes, { basename: "/design" })',
+      'createBrowserRouter([{ ErrorBoundary: RouteErrorPage, children: routes }], { basename: "/design" })',
     );
     expect(code).toContain("lazy: async () =>");
     expect(code).not.toContain("eager: true }),");
+  });
+
+  test("router mode: AppKit's error page for route errors", () => {
+    const code = entryModule("index.tsx", [], true);
+    expect(code).toContain(
+      'import { ErrorPage } from "@databricks/appkit-ui/react"',
+    );
+    expect(code).toContain(
+      'createElement(ErrorPage, { error: useRouteError(), homeLink: createElement(Link, { to: "/" }, "Back to home") })',
+    );
+    expect(code).toContain("ErrorBoundary: RouteErrorPage");
   });
 
   test("routes and lists only non-reserved page files", () => {

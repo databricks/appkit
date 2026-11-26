@@ -1,4 +1,13 @@
-import { createBrowserRouter, RouterProvider, Link, NavLink, Outlet, useLocation } from 'react-router';
+import {
+  createBrowserRouter,
+  isRouteErrorResponse,
+  RouterProvider,
+  Link,
+  NavLink,
+  Outlet,
+  useLocation,
+  useRouteError,
+} from 'react-router';
 import { useState } from 'react';
 import {
   Button,
@@ -18,7 +27,7 @@ import {
   SheetTitle,
   useIsMobile,
 } from '@databricks/appkit-ui/react';
-import { FileQuestionMark, Menu } from 'lucide-react';
+import { FileQuestionMark, Menu, TriangleAlert } from 'lucide-react';
 {{- if .plugins.agents}}
 import { AgentChat } from './pages/agents/AgentChat';
 {{- end}}
@@ -149,6 +158,8 @@ function Layout() {
 const router = createBrowserRouter([
   {
     element: <Layout />,
+    // Replaces React Router's default error page; a route's own errorElement wins over it.
+    errorElement: <RouteErrorPage />,
     children: [
       { path: '/', element: <HomePage /> },
 {{- if .plugins.agents}}
@@ -229,6 +240,64 @@ function HomePage() {
       </Card>
     </div>
   );
+}
+
+// A route that throws, or a route error response such as a loader's 404, renders this instead of the page.
+function RouteErrorPage() {
+  const error = useRouteError();
+  const notFound = isNotFound(error);
+
+  return (
+    <Empty>
+      <EmptyHeader>
+        <EmptyMedia variant="icon">{notFound ? <FileQuestionMark /> : <TriangleAlert />}</EmptyMedia>
+        <EmptyTitle>{notFound ? 'Page not found' : 'Something went wrong'}</EmptyTitle>
+        <EmptyDescription>
+          {notFound
+            ? 'There is no page at this address.'
+            : 'An unexpected error occurred. Reload the page, or go back to the home page.'}
+        </EmptyDescription>
+      </EmptyHeader>
+      {/* The error's details help while developing; a deployed app never shows them. */}
+      {import.meta.env.DEV && (
+        <pre className="max-h-80 w-full max-w-2xl overflow-auto rounded-md bg-muted p-3 text-left text-xs whitespace-pre-wrap text-muted-foreground">
+          {errorDetails(error)}
+        </pre>
+      )}
+      <EmptyContent className="flex-row justify-center">
+        {/* A reload can recover from a thrown error; on a 404 it repeats the miss. */}
+        <Button variant={notFound ? 'outline' : 'default'} onClick={() => window.location.reload()}>
+          Reload
+        </Button>
+        <Button variant={notFound ? 'default' : 'outline'} asChild>
+          <Link to="/">Back to home</Link>
+        </Button>
+      </EmptyContent>
+    </Empty>
+  );
+}
+
+// Runs in production too: a thrown object's getter (e.g. `status`) can throw, then it's a plain error.
+function isNotFound(error: unknown): boolean {
+  try {
+    return isRouteErrorResponse(error) && error.status === 404;
+  } catch {
+    return false;
+  }
+}
+
+function errorDetails(error: unknown): string {
+  try {
+    if (isRouteErrorResponse(error)) {
+      const data = typeof error.data === 'string' ? `\n${error.data}` : '';
+      return `${error.status} ${error.statusText}${data}`;
+    }
+    if (error instanceof Error) return error.stack ?? error.message;
+    return String(error);
+  } catch {
+    // String() throws for a value without toString (Object.create(null)), and so can a getter on it.
+    return "The error can't be shown as text.";
+  }
 }
 
 function NotFoundPage() {

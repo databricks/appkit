@@ -16,6 +16,7 @@ import {
   ServerIcon,
   ShieldIcon,
   SigmaIcon,
+  TriangleAlertIcon,
   Wand2Icon,
   ZapIcon,
 } from "lucide-react";
@@ -193,6 +194,13 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         description:
           "Author UI in variants, pick one live in the browser, and let the agent finalize it into source.",
         icon: Wand2Icon,
+      },
+      {
+        to: "/error-page",
+        label: "Error Page",
+        description:
+          "A route that throws, caught by AppKit's ErrorPage instead of the router's default.",
+        icon: TriangleAlertIcon,
       },
     ],
   },
