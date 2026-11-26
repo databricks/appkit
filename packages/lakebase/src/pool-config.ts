@@ -5,6 +5,73 @@ import { type DriverTelemetry, initTelemetry } from "./telemetry";
 import { createTokenRefreshCallback } from "./token-refresh";
 import type { LakebasePoolConfig, Logger } from "./types";
 
+/** Default connection lifetime: 30 minutes. */
+const DEFAULT_MAX_LIFETIME_SECONDS = 30 * 60;
+
+/**
+ * Longest connection lifetime that's safe for OAuth tokens. Access granted
+ * through Unity Catalog claims stops working 4 hours after a token is minted
+ * (observed on a live endpoint; the connection stays open, and queries fail
+ * with "permission denied"). Lakebase rejects expired tokens at login, so a
+ * token is at most an hour old when a connection opens. That leaves 3 hours,
+ * less a 30-minute margin for a client held past its lifetime, login time and
+ * clock skew.
+ */
+const MAX_SAFE_LIFETIME_SECONDS = 4 * 3600 - 3600 - 30 * 60;
+
+/**
+ * Longest delay Node's `setTimeout` accepts (about 24.8 days). pg-pool passes
+ * `maxLifetimeSeconds * 1000` to it, and a longer delay fires after 1 ms, so
+ * every connection would close after a single use.
+ */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+/**
+ * Resolve the connection lifetime, keeping an explicit 0 (never recycle), and
+ * warn when connections could outlive a token's Unity Catalog claims.
+ *
+ * pg-pool closes a connection right after it opens when the lifetime is
+ * negative or overflows Node's timer, and never recycles it when the lifetime
+ * is NaN, so an invalid value falls back to the default instead of reaching
+ * pg-pool.
+ */
+function resolveMaxLifetimeSeconds(
+  userConfig: Partial<LakebasePoolConfig>,
+  logger?: Logger,
+): number {
+  const maxLifetimeSeconds =
+    userConfig.maxLifetimeSeconds ?? DEFAULT_MAX_LIFETIME_SECONDS;
+
+  if (
+    !Number.isFinite(maxLifetimeSeconds) ||
+    maxLifetimeSeconds < 0 ||
+    maxLifetimeSeconds * 1000 > MAX_TIMER_MS
+  ) {
+    logger?.warn(
+      "maxLifetimeSeconds must be a number of seconds from 0 to %d, but is %s. Using the default of %d seconds.",
+      Math.floor(MAX_TIMER_MS / 1000),
+      String(maxLifetimeSeconds),
+      DEFAULT_MAX_LIFETIME_SECONDS,
+    );
+    return DEFAULT_MAX_LIFETIME_SECONDS;
+  }
+
+  if (maxLifetimeSeconds === 0) {
+    logger?.warn(
+      "maxLifetimeSeconds is 0, so pool connections are never recycled. Access granted through Unity Catalog claims in the OAuth token can stop working on connections that stay open for hours. Set a lifetime of at most %d seconds.",
+      MAX_SAFE_LIFETIME_SECONDS,
+    );
+  } else if (maxLifetimeSeconds > MAX_SAFE_LIFETIME_SECONDS) {
+    logger?.warn(
+      "maxLifetimeSeconds is %d. Access granted through Unity Catalog claims in the OAuth token can stop working on connections that live this long. Use at most %d seconds.",
+      maxLifetimeSeconds,
+      MAX_SAFE_LIFETIME_SECONDS,
+    );
+  }
+
+  return maxLifetimeSeconds;
+}
+
 /**
  * Map an SSL mode string to the corresponding `pg` SSL configuration.
  *
@@ -77,6 +144,11 @@ export function getLakebasePgConfig(
     statement_timeout: userConfig.statement_timeout,
     idle_in_transaction_session_timeout:
       userConfig.idle_in_transaction_session_timeout,
+    maxLifetimeSeconds: resolveMaxLifetimeSeconds(userConfig, logger),
+    application_name: userConfig.application_name,
+    keepAlive: userConfig.keepAlive,
+    query_timeout: userConfig.query_timeout,
+    options: userConfig.options,
   };
 }
 
