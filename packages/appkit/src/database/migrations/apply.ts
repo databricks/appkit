@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
-import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { readMigrationFiles } from "drizzle-orm/migrator";
@@ -25,8 +24,10 @@ import {
   type Journal,
   MIGRATIONS_TABLE,
   MigrationFilesError,
+  migrationFile,
   readJournal,
   readJsonFile,
+  snapshotFile,
 } from "./paths";
 
 const logger = createLogger("database");
@@ -131,7 +132,7 @@ export class MigrationBaselineMismatchError extends Error {
   constructor(schemaName: string, problems: readonly string[]) {
     super(
       `Cannot adopt ${BASELINE_TAG}: schema "${schemaName}" has no recorded migrations and only part of the baseline: ${problems.join("; ")}. ` +
-        "Create the missing tables and columns (or drop the partial ones), or regenerate the baseline against this database.",
+        "Create the missing tables and columns (or drop the partial ones), or regenerate the baseline with `appkit db introspect` against this database.",
     );
     this.name = "MigrationBaselineMismatchError";
     this.problems = Object.freeze([...problems]);
@@ -240,7 +241,7 @@ interface JournalRelation {
   readonly trusted: boolean;
 }
 
-type JournalUse = "read" | "record";
+export type JournalUse = "read" | "record";
 
 type JournalRefusal =
   | "not-a-table"
@@ -254,7 +255,7 @@ type JournalRefusal =
  * an ordinary table is used, and one of an untrusted owner's only for a read
  * without row-level security.
  */
-function journalRefusal(
+export function journalRefusal(
   relation: JournalRelation,
   use: JournalUse,
 ): JournalRefusal | undefined {
@@ -351,7 +352,7 @@ function systemCodeOf(error: unknown): string | undefined {
   return findCode(error, (code) => SYSTEM_CODE.test(code));
 }
 
-function quoteIdentifier(name: string): string {
+export function quoteIdentifier(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
 
@@ -396,7 +397,7 @@ function unreadableMigrationError(
   error: unknown,
 ): MigrationFilesError {
   for (const entry of journal.entries) {
-    const file = path.join(folder, `${entry.tag}.sql`);
+    const file = migrationFile(folder, entry.tag);
     try {
       fs.readFileSync(file);
     } catch (cause) {
@@ -414,7 +415,7 @@ function unreadableMigrationError(
 
 function readMigrations(folder: string, journal: Journal): MigrationFile[] {
   for (const entry of journal.entries) {
-    const file = path.join(folder, `${entry.tag}.sql`);
+    const file = migrationFile(folder, entry.tag);
     if (!fs.existsSync(file)) {
       throw new MigrationFilesError(
         `Missing ${file}, listed in meta/_journal.json. Restore it from version control.`,
@@ -480,7 +481,7 @@ function divergence(history: MigrationHistory): HistoryRefusal {
   };
 }
 
-async function readJournalRelation(
+export async function readJournalRelation(
   client: QueryClient,
   schemaName: string,
 ): Promise<JournalRelation | null> {
@@ -628,14 +629,15 @@ async function acquireMigrationLock(
   }
 }
 
-async function inTransaction(
+export async function inTransaction<T>(
   client: QueryClient,
-  work: () => Promise<void>,
-): Promise<void> {
+  work: () => Promise<T>,
+): Promise<T> {
   await client.query("begin");
   try {
-    await work();
+    const result = await work();
     await client.query("commit");
+    return result;
   } catch (error) {
     await client.query("rollback").catch(() => undefined);
     throw error;
@@ -725,11 +727,7 @@ function snapshotTables(
   idx: number,
   schemaName: string,
 ): Map<string, string[]> {
-  const file = path.join(
-    folder,
-    "meta",
-    `${String(idx).padStart(4, "0")}_snapshot.json`,
-  );
+  const file = snapshotFile(folder, idx);
   if (!fs.existsSync(file)) {
     throw new MigrationFilesError(
       `Missing ${file} for ${BASELINE_TAG}. Restore it from version control; it lists the tables the baseline adopts.`,
@@ -846,6 +844,124 @@ function duration(ms: number): string {
   }
   if (ms >= 1_000) return `${Math.round(ms / 1_000)}s`;
   return `${ms}ms`;
+}
+
+interface MigrationDrift {
+  readonly pending: readonly string[];
+  readonly stranded: readonly string[];
+  readonly edited: readonly string[];
+  readonly unknownRecordedCount: number;
+}
+
+function driftOf(
+  history: ReturnType<typeof reconcileMigrations>,
+): MigrationDrift {
+  return {
+    pending: tags(history.pending),
+    stranded: tags(history.stranded),
+    edited: tags(history.edited),
+    unknownRecordedCount: history.unknown.length,
+  };
+}
+
+function committedMigrations(folder: string): MigrationFile[] {
+  const journal = readJournal(folder);
+  return journal ? readMigrations(folder, journal) : [];
+}
+
+export async function readMigrationDriftUnlocked(
+  client: QueryClient,
+  options: ApplyMigrationsOptions & {
+    readonly ignoreHashes?: readonly string[];
+  },
+): Promise<MigrationDrift> {
+  const ignored = new Set(options.ignoreHashes);
+  const recorded = await readRecordedMigrations(client, options.schemaName);
+  return driftOf(
+    reconcileMigrations(
+      committedMigrations(options.migrationsFolder),
+      recorded.filter((row) => !ignored.has(row.hash)),
+    ),
+  );
+}
+
+export function editedReason(edited: readonly string[]): string {
+  return `it applied ${edited.join(", ")} before ${edited.length === 1 ? "its file" : "their files"} changed`;
+}
+
+function driftReason(
+  drift: MigrationDrift,
+  toRecord: readonly string[],
+): string | undefined {
+  const notApplied = drift.pending.filter((tag) => !toRecord.includes(tag));
+  const recorded = toRecord.filter((tag) => !drift.pending.includes(tag));
+  const reasons = [
+    drift.unknownRecordedCount > 0
+      ? `it records ${drift.unknownRecordedCount} migration${drift.unknownRecordedCount === 1 ? "" : "s"} this checkout does not have`
+      : "",
+    drift.stranded.length > 0 ? `it skipped ${drift.stranded.join(", ")}` : "",
+    drift.edited.length > 0 ? editedReason(drift.edited) : "",
+    notApplied.length > 0 ? `it has not applied ${notApplied.join(", ")}` : "",
+    recorded.length > 0 ? `it already records ${recorded.join(", ")}` : "",
+  ].filter(Boolean);
+  return reasons.length > 0 ? reasons.join("; ") : undefined;
+}
+
+export async function markMigrationsApplied(
+  pool: Pick<Pool, "connect">,
+  options: ApplyMigrationsOptions,
+  toRecord: readonly string[],
+): Promise<void> {
+  const files = committedMigrations(options.migrationsFolder);
+  const missing = toRecord.filter(
+    (tag) => !files.some((file) => file.tag === tag),
+  );
+  if (missing.length > 0) {
+    throw new MigrationFilesError(
+      `Cannot record ${missing.join(", ")} as applied: not in ${options.migrationsFolder}/meta/_journal.json.`,
+    );
+  }
+  const { schemaName } = options;
+  const client = await pool.connect();
+  const reset: string[] = [];
+  let locked = false;
+  try {
+    await prepareMigrationSession(client, reset);
+    await acquireMigrationLock(
+      client,
+      schemaName,
+      options.lockWaitMs ?? LOCK_WAIT_MS,
+    );
+    locked = true;
+    const history = reconcileMigrations(
+      files,
+      await readRecordedMigrations(client, schemaName),
+    );
+    const reason = driftReason(driftOf(history), toRecord);
+    if (reason) {
+      throw new Error(
+        `Schema "${schemaName}" changed while this ran (${reason}), so nothing was recorded.`,
+      );
+    }
+    await inTransaction(client, async () => {
+      await ensureJournalTable(client, schemaName);
+      for (const file of history.pending) {
+        await recordMigration(client, schemaName, file);
+      }
+    });
+  } catch (error) {
+    if (!(error instanceof MigrationLockWaitError)) throw error;
+    throw new Error(
+      `${error.holder ? `Session ${error.holder}` : "Another session"} held the migration lock of schema "${schemaName}" for over ${duration(options.lockWaitMs ?? LOCK_WAIT_MS)}, so nothing was recorded. Rerun once it finishes.`,
+      { cause: error },
+    );
+  } finally {
+    await releaseMigrationClient(
+      client,
+      locked ? migrationLockKey(schemaName) : undefined,
+      reset,
+    );
+  }
 }
 
 interface ApplyRun {

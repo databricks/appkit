@@ -23,8 +23,24 @@ export function migrationsFolder(root: string): string {
   return path.resolve(root, MIGRATIONS_DIR);
 }
 
+export function metaFolder(folder: string): string {
+  return path.join(folder, "meta");
+}
+
 export function journalFile(folder: string): string {
-  return path.join(folder, "meta", "_journal.json");
+  return path.join(metaFolder(folder), "_journal.json");
+}
+
+export function migrationPrefix(idx: number): string {
+  return String(idx).padStart(4, "0");
+}
+
+export function migrationFile(folder: string, tag: string): string {
+  return path.join(folder, `${tag}.sql`);
+}
+
+export function snapshotFile(folder: string, idx: number): string {
+  return path.join(metaFolder(folder), `${migrationPrefix(idx)}_snapshot.json`);
 }
 
 export class MigrationFilesError extends Error {
@@ -45,14 +61,18 @@ export function readJsonFile<T>(file: string): T {
   }
 }
 
-export function readJournal(folder: string): Journal | null {
-  const file = journalFile(folder);
-  if (!fs.existsSync(file)) return null;
-  const parsed = readJsonFile<Partial<Journal>>(file);
-  if (parsed.dialect !== "postgresql" || !Array.isArray(parsed.entries)) {
+export function parseJournal(json: unknown, nameInError: string): Journal {
+  const parsed = json as Partial<Journal> | null;
+  if (parsed?.dialect !== "postgresql" || !Array.isArray(parsed.entries)) {
     throw new MigrationFilesError(
-      `${file} is not a drizzle-kit PostgreSQL migration journal`,
+      `${nameInError} is not a drizzle-kit PostgreSQL migration journal`,
     );
   }
   return parsed as Journal;
+}
+
+export function readJournal(folder: string): Journal | null {
+  const file = journalFile(folder);
+  if (!fs.existsSync(file)) return null;
+  return parseJournal(readJsonFile<unknown>(file), file);
 }

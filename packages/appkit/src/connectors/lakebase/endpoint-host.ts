@@ -145,7 +145,7 @@ async function compareHosts(
 }
 
 /** Read every host the endpoint serves, read-write and read-only. */
-function endpointHosts(response: unknown): string[] {
+export function endpointHosts(response: unknown): string[] {
   if (!response || typeof response !== "object") return [];
   const status = Reflect.get(response, "status");
   if (!status || typeof status !== "object") return [];

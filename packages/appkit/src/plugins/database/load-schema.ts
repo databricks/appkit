@@ -6,7 +6,7 @@ import type { Schema } from "../../database/schema-builder";
 import { assertFinalizedSchema } from "../../database/schema-builder/define-schema";
 
 /** Same application-relative convention used by appkit generate-types. */
-const DEFAULT_SCHEMA_FILE = "config/database/schema.ts";
+export const DEFAULT_SCHEMA_FILE = "config/database/schema.ts";
 
 /** Load application-owned declarations during setup, never during registration. */
 export async function loadDefaultDatabaseSchema(

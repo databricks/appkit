@@ -4,9 +4,43 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { detectPackageManager, PM_COMMANDS } from "./package-manager";
+import {
+  declaredPackageManager,
+  detectPackageManager,
+  PM_COMMANDS,
+} from "./package-manager";
 
 describe("package-manager", () => {
+  describe("declaredPackageManager", () => {
+    let cwd: string;
+
+    beforeEach(() => {
+      cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pm-declared-"));
+      vi.stubEnv("npm_config_user_agent", "pnpm/11.0.8");
+    });
+
+    afterEach(() => {
+      fs.rmSync(cwd, { recursive: true, force: true });
+      vi.unstubAllEnvs();
+    });
+
+    it("is null without a field or lockfile, whatever launched the command", () => {
+      expect(declaredPackageManager(cwd)).toBeNull();
+      fs.writeFileSync(path.join(cwd, "package.json"), "{}");
+      expect(declaredPackageManager(cwd)).toBeNull();
+    });
+
+    it("prefers the packageManager field over a lockfile", () => {
+      fs.writeFileSync(path.join(cwd, "yarn.lock"), "");
+      expect(declaredPackageManager(cwd)).toBe("yarn");
+      fs.writeFileSync(
+        path.join(cwd, "package.json"),
+        JSON.stringify({ packageManager: "bun@1.1.0" }),
+      );
+      expect(declaredPackageManager(cwd)).toBe("bun");
+    });
+  });
+
   describe("detectPackageManager", () => {
     let cwd: string;
 

@@ -30,7 +30,8 @@
         "@databricks/sdk-statementexecution",
         "@databricks/sdk-warehouses",
         "@mlflow/core",
-        "autoevals"
+        "autoevals",
+        "drizzle-kit"
       ]
     },
     "packages/appkit-ui": {

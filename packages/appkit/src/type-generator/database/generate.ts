@@ -9,8 +9,11 @@ import { walkSchema } from "./walk-schema";
 
 /** Safe diagnostic raised when database declarations cannot be generated. */
 export class DatabaseTypegenError extends Error {
-  constructor(message = "Database schema generation failed") {
-    super(message);
+  constructor(
+    message = "Database schema generation failed",
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
     this.name = "DatabaseTypegenError";
   }
 }
@@ -117,20 +120,35 @@ export async function writeIfChanged(
   }
 }
 
+export function writeDatabaseTypes(
+  schema: Schema,
+  outFile: string,
+): Promise<void> {
+  return writeIfChanged(outFile, render(schema));
+}
+
 /** Disable Jiti's module cache so watch-mode runs observe schema edits. */
 async function importSchema(schemaFile: string): Promise<unknown> {
   const { createJiti } = await import("jiti");
   return createJiti(import.meta.url, { moduleCache: false }).import(schemaFile);
 }
 
+interface LoadDatabaseSchemaOptions {
+  readonly keepImportErrorAsCause?: boolean;
+}
+
 /** Load the named, finalized `schema` export; every failure is a safe diagnostic. */
-export async function loadDatabaseSchema(schemaFile: string): Promise<Schema> {
+export async function loadDatabaseSchema(
+  schemaFile: string,
+  options: LoadDatabaseSchemaOptions = {},
+): Promise<Schema> {
   let module: unknown;
   try {
     module = await importSchema(schemaFile);
   } catch (error) {
     throw new DatabaseTypegenError(
       `Database schema "${schemaLabel(schemaFile)}" ${importFailureReason(error)}`,
+      options.keepImportErrorAsCause ? { cause: error } : undefined,
     );
   }
   if (typeof module !== "object" || module === null || !("schema" in module)) {

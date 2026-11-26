@@ -30,6 +30,7 @@ async function fixture(files: Record<string, string> = {}) {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   await Promise.all(
     roots
       .splice(0)
@@ -94,6 +95,19 @@ describe("default database routes", () => {
     await expect(loadDefaultDatabaseRoutes(root)).rejects.toThrow(
       "appkit generate-types",
     );
+  });
+
+  test("a schema that fails to load in development fails without its import error", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    const root = await fixture({
+      "config/database/schema.ts": 'throw new Error("private details");',
+      "server/database/routes/notes.ts": "export {};",
+    });
+    const error = await loadDefaultDatabaseRoutes(root).catch(
+      (caught) => caught,
+    );
+    expect(error.message).toMatch(/schema\.ts" threw while loading$/);
+    expect(error.cause).toBeUndefined();
   });
 
   test.each([

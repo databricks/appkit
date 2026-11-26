@@ -55,7 +55,7 @@ async function assertSchemaUsable(
 function migrationAdvice(migration: MigrateOnStartDecision): string {
   switch (migration.kind) {
     case "off":
-      return "Create them, or commit migrations under config/database/migrations and set APPKIT_DB_MIGRATE_ON_START=true in app.yaml so the deployed app applies them on start.";
+      return "Run `npx appkit db migrate` locally, or commit migrations under config/database/migrations and set APPKIT_DB_MIGRATE_ON_START=true in app.yaml so the deployed app applies them on start.";
     case "skipped":
       return "APPKIT_DB_MIGRATE_ON_START is true, but this process did not migrate on start. The warning logged before this error says why.";
     case "migrate":
@@ -63,20 +63,39 @@ function migrationAdvice(migration: MigrateOnStartDecision): string {
   }
 }
 
+interface SchemaCheck {
+  readonly problems: string[];
+  readonly absentTables: string[];
+}
+
+interface SchemaDiagnosis {
+  readonly problems: readonly string[];
+  readonly tablesInPublicAdvice: string | null;
+}
+
+export async function diagnoseSchema(
+  dataPath: Pick<DataPath, "raw">,
+  schema: Schema,
+): Promise<SchemaDiagnosis> {
+  const { problems, absentTables } = await checkSchema(dataPath, schema);
+  return {
+    problems,
+    tablesInPublicAdvice:
+      (await inPublicInstead(dataPath, schema, absentTables)) ?? null,
+  };
+}
+
 /**
- * Confirm every declared table and column exists before routes are published.
  * pg_catalog is read rather than information_schema, which hides objects the
  * role cannot access and would report a privilege gap as a missing column.
  */
-export async function assertSchemaMatchesDatabase(
-  dataPath: DataPath,
+async function checkSchema(
+  dataPath: Pick<DataPath, "raw">,
   schema: Schema,
-  migration: MigrateOnStartDecision,
-): Promise<void> {
+): Promise<SchemaCheck> {
   const tables = Object.values(schema.$tables);
-  if (tables.length === 0) return;
+  if (tables.length === 0) return { problems: [], absentTables: [] };
   const schemaName = schema.$schemaName;
-  await assertSchemaUsable(dataPath, schemaName);
   const tableNames = tables.map((table) => table.$name);
   // Include non-tables so setup can report their kind instead of claiming they are absent.
   const rows = await dataPath.raw<CatalogColumn>`
@@ -129,19 +148,37 @@ export async function assertSchemaMatchesDatabase(
       );
     }
   }
+  return {
+    problems,
+    absentTables: tableNames.filter((name) => !found.has(name)),
+  };
+}
+
+/**
+ * Confirm every declared table and column exists before routes are published.
+ */
+export async function assertSchemaMatchesDatabase(
+  dataPath: DataPath,
+  schema: Schema,
+  migration: MigrateOnStartDecision,
+): Promise<void> {
+  if (Object.keys(schema.$tables).length === 0) return;
+  await assertSchemaUsable(dataPath, schema.$schemaName);
+  const { problems, tablesInPublicAdvice } = await diagnoseSchema(
+    dataPath,
+    schema,
+  );
   if (problems.length > 0) {
-    const absent = tableNames.filter((name) => !found.has(name));
-    const advice =
-      (await inPublicInstead(dataPath, schema, absent)) ??
-      migrationAdvice(migration);
     throw databaseSetupFailed(
-      `the declared schema does not match the database: ${problems.join("; ")}. ${advice}`,
+      `the declared schema does not match the database: ${problems.join("; ")}. ${
+        tablesInPublicAdvice ?? migrationAdvice(migration)
+      }`,
     );
   }
 }
 
 async function inPublicInstead(
-  dataPath: DataPath,
+  dataPath: Pick<DataPath, "raw">,
   schema: Schema,
   absent: readonly string[],
 ): Promise<string | undefined> {

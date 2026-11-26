@@ -10,6 +10,11 @@ build/
 test-results/
 playwright-report/
 
+config/database/*.bak
+
+config/database/.appkit-db.lock
+..env.*.tmp
+
 # Auto-generated types (endpoint-specific, varies per developer)
 shared/appkit-types/serving.d.ts
 

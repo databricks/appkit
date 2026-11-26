@@ -75,9 +75,24 @@ function assertName(value: string, label: string): void {
   }
 }
 
+export function isReservedTableName(name: string): boolean {
+  return (
+    !name ||
+    RESERVED_OBJECT_KEYS.has(name) ||
+    RESERVED_DATABASE_EXPORT_KEYS.has(name)
+  );
+}
+
+function collidesWithMetadata(key: string): boolean {
+  return key.startsWith("$") || key === "and" || key === "or";
+}
+
+export function isReservedColumnName(name: string): boolean {
+  return !name || RESERVED_OBJECT_KEYS.has(name) || collidesWithMetadata(name);
+}
+
 function assertTableName(value: string): void {
-  assertName(value, "Table name");
-  if (RESERVED_DATABASE_EXPORT_KEYS.has(value)) {
+  if (isReservedTableName(value)) {
     throw new SchemaBuildError(`Table name "${value}" is reserved`);
   }
 }
@@ -123,7 +138,7 @@ function declareTable<C extends Record<string, ColumnBuilder>>(
   const handle = Object.create(null) as Record<string, ColumnRef>;
   for (const [key, column] of Object.entries(columns)) {
     assertName(key, `Column name on table "${name}"`);
-    if (key.startsWith("$") || key === "and" || key === "or") {
+    if (collidesWithMetadata(key)) {
       throw new SchemaBuildError(
         `Column "${name}.${key}" collides with AppKit runtime metadata`,
       );
@@ -355,7 +370,7 @@ export function schemaNameIsExplicit(schema: Schema): boolean {
  * the deployed app's service principal can create and own a schema of its
  * own, but has no CREATE on `public`.
  */
-const DEFAULT_SCHEMA_NAME = "app";
+export const DEFAULT_SCHEMA_NAME = "app";
 
 /**
  * Compile one declared schema. The returned type keeps the table names the

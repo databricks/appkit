@@ -19,6 +19,8 @@ coverage
 
 .databricks
 
+**/config/database/.appkit-db.lock
+
 .claude/scheduled_tasks.lock
 internal
 
