@@ -37,7 +37,6 @@ function run(
 // 1. Update template package.json
 const templatePath = join(ROOT, "template", "package.json");
 const templateJson = JSON.parse(readFileSync(templatePath, "utf-8"));
-// The packages this release just published.
 const pinned = ["@databricks/appkit", "@databricks/appkit-ui"].filter(
   (name) => name in (templateJson.dependencies ?? {}),
 );

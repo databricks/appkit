@@ -1,5 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -55,7 +61,6 @@ test("tags the released code even when the branch moved meanwhile", () => {
   git(runner, "push", "-q", "origin", "main");
   const released = git(runner, "rev-parse", "HEAD");
 
-  // A change merged to main after the release was cut.
   git(directory, "clone", "-q", origin, other);
   commitFile(other, "template/app.ts", "unreleased\n", "feat: after release");
   git(other, "push", "-q", "origin", "main");
@@ -71,4 +76,27 @@ test("tags the released code even when the branch moved meanwhile", () => {
   expect(git(origin, "rev-parse", "template-v2.0.0^{commit}^")).toBe(released);
   expect(show("main:template/app.ts")).toBe("unreleased");
   expect(show("main:template/package.json")).toBe('{"v":"2.0.0"}');
+});
+
+test("pushes from a checkout with an unrelated modified file", () => {
+  const origin = join(directory, "origin.git");
+  const runner = join(directory, "runner");
+  git(directory, "init", "-q", "--bare", "-b", "main", origin);
+  git(directory, "clone", "-q", origin, runner);
+  commitFile(runner, "template/lock.json", "committed\n", "chore: release v2");
+  git(runner, "push", "-q", "origin", "main");
+  writeFileSync(join(runner, "template/lock.json"), "rewritten by install\n");
+
+  writeFileSync(join(runner, "template/package.json"), '{"v":"2.0.0"}\n');
+  expect(pushTemplateTag("2.0.0", ["template/package.json"], runner)).toBe(
+    true,
+  );
+
+  expect(git(origin, "show", "template-v2.0.0:template/package.json")).toBe(
+    '{"v":"2.0.0"}',
+  );
+  expect(git(origin, "show", "main:template/lock.json")).toBe("committed");
+  expect(readFileSync(join(runner, "template/lock.json"), "utf-8")).toBe(
+    "rewritten by install\n",
+  );
 });

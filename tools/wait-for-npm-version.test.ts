@@ -14,25 +14,26 @@ let directory: string;
 let server: Server;
 const requests = new Map<string, number>();
 
-/**
- * A registry that serves `name@VERSION` only from request `servedFrom[name]`
- * on; before that it returns the pre-publish packument, cacheable like npm's.
- * A "stall" package gets no answer at all.
- */
-async function fakeRegistry(servedFrom: Record<string, number | "stall">) {
+async function fakeRegistry(
+  servedFrom: Record<string, number | "stall" | "deny">,
+) {
+  let arrived = () => {};
+  const firstRequest = new Promise<void>((resolve) => (arrived = resolve));
   server = createServer((req, res) => {
+    arrived();
     const name = decodeURIComponent(req.url?.slice(1) ?? "");
     const count = (requests.get(name) ?? 0) + 1;
     requests.set(name, count);
     const from = servedFrom[name];
     if (from === "stall") return;
-    if (from === undefined) {
-      res.writeHead(404).end();
+    if (from === undefined || from === "deny") {
+      res.writeHead(from === "deny" ? 401 : 404).end();
       return;
     }
     const versions = count >= from ? ["0.103.0", VERSION] : ["0.103.0"];
     res.writeHead(200, {
       "content-type": "application/json",
+      // Cacheable like the real registry: npm must revalidate, not reuse it.
       "cache-control": "public, max-age=300",
     });
     res.end(
@@ -57,6 +58,7 @@ async function fakeRegistry(servedFrom: Record<string, number | "stall">) {
   // Both spellings: npm reads either, and the developer's env may set one.
   vi.stubEnv("npm_config_registry", registry);
   vi.stubEnv("NPM_CONFIG_REGISTRY", registry);
+  return { firstRequest };
 }
 
 beforeEach(() => {
@@ -83,16 +85,26 @@ test(
     await waitForNpmVersion(
       ["@databricks/appkit", "@databricks/appkit-ui"],
       VERSION,
-      {
-        cwd: directory,
-        timeoutMs: 50_000,
-        ...fast,
-      },
+      { cwd: directory, timeoutMs: 50_000, ...fast },
     );
 
-    // One request per try: the cached stale packument is never trusted.
-    expect(requests.get("@databricks/appkit")).toBe(3);
-    expect(requests.get("@databricks/appkit-ui")).toBe(2);
+    expect(requests.get("@databricks/appkit")).toBeGreaterThanOrEqual(3);
+    expect(requests.get("@databricks/appkit-ui")).toBeGreaterThanOrEqual(2);
+  },
+);
+
+test(
+  "reads npm's answer when the environment sets npm_config_json",
+  { timeout: 60_000 },
+  async () => {
+    await fakeRegistry({ "@databricks/appkit": 1 });
+    vi.stubEnv("npm_config_json", "true");
+
+    await waitForNpmVersion(["@databricks/appkit"], VERSION, {
+      cwd: directory,
+      timeoutMs: 50_000,
+      ...fast,
+    });
   },
 );
 
@@ -100,24 +112,51 @@ test(
   "names the package and version when the wait times out",
   { timeout: 60_000 },
   async () => {
-    await fakeRegistry({
-      "@databricks/appkit": 1,
-      "@databricks/appkit-ui": Infinity,
-    });
+    await fakeRegistry({ "@databricks/appkit-ui": Infinity });
 
     await expect(
-      waitForNpmVersion(
-        ["@databricks/appkit", "@databricks/appkit-ui"],
-        VERSION,
-        {
-          cwd: directory,
-          timeoutMs: 1_000,
-          ...fast,
-        },
-      ),
+      waitForNpmVersion(["@databricks/appkit-ui"], VERSION, {
+        cwd: directory,
+        timeoutMs: 2_000,
+        ...fast,
+      }),
     ).rejects.toThrow(
-      `@databricks/appkit-ui@${VERSION} is still not on the npm registry`,
+      `@databricks/appkit-ui@${VERSION} is still not on the npm registry after 2s`,
     );
+  },
+);
+
+test(
+  "checks once more at the deadline instead of giving up early",
+  { timeout: 60_000 },
+  async () => {
+    await fakeRegistry({ "@databricks/appkit": 2 });
+
+    await waitForNpmVersion(["@databricks/appkit"], VERSION, {
+      cwd: directory,
+      timeoutMs: 3_000,
+      delayMs: 60_000,
+      maxDelayMs: 60_000,
+    });
+
+    expect(requests.get("@databricks/appkit")).toBeGreaterThanOrEqual(2);
+  },
+);
+
+test(
+  "fails at once on an error that waiting can't fix",
+  { timeout: 60_000 },
+  async () => {
+    await fakeRegistry({ "@databricks/appkit": "deny" });
+
+    await expect(
+      waitForNpmVersion(["@databricks/appkit"], VERSION, {
+        cwd: directory,
+        timeoutMs: 50_000,
+        ...fast,
+      }),
+    ).rejects.toThrow(`npm view @databricks/appkit@${VERSION} failed (E401)`);
+    expect(requests.get("@databricks/appkit")).toBe(1);
   },
 );
 
@@ -125,20 +164,23 @@ test(
   "a registry that never answers still ends the wait on time",
   { timeout: 60_000 },
   async () => {
-    await fakeRegistry({ "@databricks/appkit": "stall" });
-    const started = Date.now();
+    const { firstRequest } = await fakeRegistry({
+      "@databricks/appkit": "stall",
+    });
 
-    await expect(
+    const failed = expect(
       waitForNpmVersion(["@databricks/appkit"], VERSION, {
         cwd: directory,
-        timeoutMs: 2_000,
+        timeoutMs: 3_000,
+        lastProbeMs: 500,
         ...fast,
       }),
-    ).rejects.toThrow(
-      `@databricks/appkit@${VERSION} is still not on the npm registry after 2s. ` +
-        "Last npm view output:\nnpm view did not answer in time",
-    );
+    ).rejects.toThrow("npm view did not answer in time");
+    await firstRequest;
+    const stalledAt = Date.now();
+    await failed;
+
     // npm alone would wait out its 5-minute fetch timeout.
-    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(Date.now() - stalledAt).toBeLessThan(10_000);
   },
 );

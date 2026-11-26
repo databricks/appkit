@@ -29,7 +29,8 @@ export function pushTemplateTag(
     // through the release pipeline, so they must not ship in the template.
     git("tag", "-a", tag, "-m", `Template v${version}`) &&
     // The branch may have moved while we waited for the registry.
-    git("pull", "--rebase", "origin", branch) &&
+    // --autostash: the job's own install can leave unrelated files modified.
+    git("pull", "--rebase", "--autostash", "origin", branch) &&
     // --atomic: never leave the tag pushed without the branch (or the reverse).
     git("push", "--atomic", "origin", "HEAD", `refs/tags/${tag}`)
   );
