@@ -15,8 +15,8 @@ The DatabasePlugin (`@databricks/appkit/beta`) provides typed server access to L
 operations. Table declarations alone expose no HTTP endpoint.
 
 This design covers branch ownership, migrations and deployment. [Design 002](./002_DatabaseRouteOperations.md) defines
-the operation contract. The migration implementation in #654–#678 and the operation implementation in #687–#692 are
-separate PR chains; integrating them is required before both flows ship together. The operation stack alone checks
+the operation contract. The migration implementation (#654, #666, #675) and the operation implementation (#687–#692)
+are separate PR chains; integrating them is required before both flows ship together. The operation stack alone checks
 existing tables at startup and never creates or migrates them. This design adds the opt-in migration step before that
 check.
 
@@ -584,7 +584,7 @@ object, says why introspect left it out, and says the deployed app would drop it
 
 Not flagged:
 
-- The `app` default (#655). The plugin is beta, which allows API changes in a minor release, and the startup hint
+- The `app` default (#654). The plugin is beta, which allows API changes in a minor release, and the startup hint
   plus the upgrade note cover existing apps.
 - `appkit db check`, `verify` and `introspect` on your own branch. They are read-only or write only local files and
   your own branch.
@@ -808,7 +808,7 @@ start and the schema check passes. Keep the expand and contract migration checks
 Three PRs follow this doc, each on the one before. Each is safe to deploy alone. #654 migrates only an app that sets
 `APPKIT_DB_MIGRATE_ON_START`. Its one unflagged change, the `app` default, makes an app whose tables are in `public`
 fail setup with an error that says so, and the upgrade note covers that case. #666 adds local commands, hidden from
-`appkit --help`, that change only branches `init` created. Its runtime changes are startup errors that name the command
+`appkit --help`, that change only your own dev and session branches. Its runtime changes are startup errors that name the command
 to run, and exports the commands use. #675 changes only what a scaffolded app gets and the template's smoke test, and
 `apps init` does not offer the plugin until the reveal.
 

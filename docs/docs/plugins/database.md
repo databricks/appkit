@@ -378,8 +378,8 @@ repair the rows, as
 
 When the deployed app starts with `APPKIT_DB_MIGRATE_ON_START=true` in `app.yaml`,
 `database()` applies the committed migrations the deploy branch has not recorded
-yet, before it checks the tables and serves requests. The flag is off by
-default. Set it in the `env` of `app.yaml`:
+yet, before it checks the tables and serves requests. Apps scaffolded with the
+plugin set it; add it to the `env` of an app that predates it:
 
 ```yaml
 env:
