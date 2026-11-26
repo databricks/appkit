@@ -31,48 +31,34 @@ const logger = createLogger("database");
 export type MigrateOnStartDecision =
   | {
       readonly kind: "off";
-      /** A non-empty flag value other than "true", which turns nothing on. */
-      readonly ignored?: string;
+      readonly ignoredFlagValue?: string;
     }
   | { readonly kind: "skipped"; readonly reason: string }
   | { readonly kind: "migrate" };
 
-/**
- * Migrate on start only when the app opted in with APPKIT_DB_MIGRATE_ON_START=true
- * (app.yaml) and the process has the identity Databricks Apps gives a deployed
- * app with a bound database. That is DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET
- * and PGUSER set to the client id. A local start, or `databricks apps run-local`
- * with exported M2M credentials, has the developer's PGUSER from `.env` or none
- * at all, and must not migrate. An unset PGUSER skips because the Lakebase pool
- * then falls back to the client id, and a developer's process would migrate as
- * the service principal.
- */
+function deployedAppIdentityGap(env: NodeJS.ProcessEnv): string | undefined {
+  for (const name of ["DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"]) {
+    if (!env[name]) return `${name} is not set.`;
+  }
+  if (!env.PGUSER) {
+    return "PGUSER is not set. The deployed app gets it from its database resource.";
+  }
+  if (env.PGUSER !== env.DATABRICKS_CLIENT_ID) {
+    return `PGUSER is "${env.PGUSER}", not the app's client id in DATABRICKS_CLIENT_ID.`;
+  }
+  return undefined;
+}
+
 export function decideMigrateOnStart(
   env: NodeJS.ProcessEnv = process.env,
 ): MigrateOnStartDecision {
   const flag = env.APPKIT_DB_MIGRATE_ON_START;
   if (flag !== "true")
-    return flag ? { kind: "off", ignored: flag } : { kind: "off" };
-  for (const name of ["DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET"]) {
-    if (!env[name]) return { kind: "skipped", reason: `${name} is not set.` };
-  }
-  if (!env.PGUSER) {
-    return {
-      kind: "skipped",
-      reason:
-        "PGUSER is not set. The deployed app gets it from its database resource.",
-    };
-  }
-  if (env.PGUSER !== env.DATABRICKS_CLIENT_ID) {
-    return {
-      kind: "skipped",
-      reason: `PGUSER is "${env.PGUSER}", not the app's client id in DATABRICKS_CLIENT_ID.`,
-    };
-  }
-  return { kind: "migrate" };
+    return flag ? { kind: "off", ignoredFlagValue: flag } : { kind: "off" };
+  const gap = deployedAppIdentityGap(env);
+  return gap ? { kind: "skipped", reason: gap } : { kind: "migrate" };
 }
 
-/** The branch id in LAKEBASE_ENDPOINT (projects/<p>/branches/<b>/endpoints/<e>). */
 function endpointBranch(endpoint: string | undefined): string | undefined {
   return endpoint?.match(
     /^projects\/[^/]+\/branches\/([^/]+)\/endpoints\/[^/]+$/,
@@ -84,11 +70,6 @@ const DEVELOPMENT_BRANCH_OWNERS: Record<DevelopmentBranchKind, string> = {
   session: "an agent session",
 };
 
-/**
- * Apply pending committed migrations from <root>/config/database/migrations as
- * the app's identity (see database/migrations/ownership.ts). No journal →
- * no-op. Every migration failure becomes a setup failure that names it.
- */
 export async function migrateOnStart(
   pool: Pick<Pool, "connect">,
   schema: Schema,
@@ -118,8 +99,6 @@ export async function migrateOnStart(
     logger.info("No committed migrations at %s; nothing to apply", folder);
     return;
   }
-  // A transaction-mode pooler hands each statement to any server session, so
-  // the session-level migration lock would not exclude other instances.
   if (env.PGHOST?.includes("-pooler.")) {
     throw databaseSetupFailed(
       `PGHOST ${env.PGHOST} is a pooled endpoint, and migrations need a direct connection. Use the host without "-pooler".`,
@@ -161,7 +140,7 @@ export async function migrateOnStart(
     result.applied.length,
     result.adopted.length,
     result.edited.length,
-    result.unknown,
+    result.unknownRecordedCount,
     result.lockWaitMs,
     Date.now() - started,
   );

@@ -1,19 +1,11 @@
-// Apps from before the default schema moved to `app` keep their tables in
-// `public`. With the schema name left to its default, a migration would create
-// a second, empty copy of each table in `app`, the startup check would pass,
-// and the app would serve the empty copy. The check and the migration guard
-// below share one catalog lookup so they name that case the same way.
-
 import type { Schema } from "../schema-builder";
 import { schemaNameIsExplicit } from "../schema-builder/define-schema";
 
-/** Tagged SQL whose interpolations are parameter values; `DataPath.raw` has this shape. */
 export type CatalogSql = <T>(
   strings: TemplateStringsArray,
   ...values: unknown[]
 ) => Promise<readonly T[]>;
 
-/** The one method of a pg Pool or PoolClient the lookup needs. */
 interface CatalogClient {
   query(
     text: string,
@@ -21,7 +13,6 @@ interface CatalogClient {
   ): Promise<{ readonly rows: readonly unknown[] }>;
 }
 
-/** Run tagged SQL on a pg pool or client, for callers that have no DataPath yet. */
 export function catalogSqlOf(client: CatalogClient): CatalogSql {
   return async <T>(strings: TemplateStringsArray, ...values: unknown[]) => {
     const text = strings.reduce((sql, part, index) => `${sql}$${index}${part}`);
@@ -30,11 +21,8 @@ export function catalogSqlOf(client: CatalogClient): CatalogSql {
   };
 }
 
-/** Where the declared tables are, in declaration order. */
 interface TablePlacement {
-  /** Declared tables that exist in the schema the app targets. */
   readonly inSchema: readonly string[];
-  /** Declared tables that exist in `public`. */
   readonly inPublic: readonly string[];
 }
 
@@ -67,7 +55,6 @@ export async function locateTables(
   return { inSchema: within(schemaName), inPublic: within("public") };
 }
 
-/** How to keep using the tables in `public`; the sentence every caller ends with. */
 export function keepInPublicAdvice(schemaName: string): string {
   return (
     `defineSchema() puts tables in schema "${schemaName}" unless told otherwise. ` +
@@ -75,12 +62,6 @@ export function keepInPublicAdvice(schemaName: string): string {
   );
 }
 
-/**
- * Why migrating this schema must not proceed, or undefined when it may: the
- * schema name is explicit, some declared table already exists in it, or
- * `public` holds none of them. Run before any migration is applied, by the
- * deployed app and by the CLI alike.
- */
 export async function detectTablesLeftInPublic(
   sql: CatalogSql,
   schema: Schema,

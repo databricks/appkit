@@ -35,7 +35,6 @@ import {
   translateWhere,
 } from "../engine/translate";
 
-// Explicitly public: the assertions expect unqualified column SQL ("users"."name").
 const schema = defineSchema(
   (builder) => {
     const users = builder.table("users", {

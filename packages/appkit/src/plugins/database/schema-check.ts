@@ -65,8 +65,6 @@ function migrationAdvice(migration: MigrateOnStartDecision): string {
 
 /**
  * Confirm every declared table and column exists before routes are published.
- * Even after a deployed app applies its migrations, drift would surface on each
- * request as an undefined-table or undefined-column failure, so check up front.
  * pg_catalog is read rather than information_schema, which hides objects the
  * role cannot access and would report a privilege gap as a missing column.
  */
@@ -142,12 +140,6 @@ export async function assertSchemaMatchesDatabase(
   }
 }
 
-/**
- * Apps from before the default schema moved to `app` keep their tables in
- * `public`. Name that case when the schema name is the default and every
- * absent table is there; the migration guard in
- * database/migrations/tables-left-in-public.ts refuses it up front.
- */
 async function inPublicInstead(
   dataPath: DataPath,
   schema: Schema,

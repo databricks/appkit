@@ -3,7 +3,6 @@ import { describe, expect, test } from "vitest";
 import { developmentBranchKind } from "../branch-names";
 
 describe("developmentBranchKind", () => {
-  // The names `appkit db init` generates, at the edges of its naming rules.
   test.each([
     ["a person's dev branch", "dev-jane-a1b2c3"],
     ["a dev branch from a dotted local part", "dev-jane-doe-2-a1b2c3"],

@@ -10,7 +10,6 @@ import {
 import { defineSchema, id, text } from "../../../database/schema-builder";
 import { assertSchemaMatchesDatabase } from "../schema-check";
 
-// See database/migrations/tests/apply.pg.test.ts for APPKIT_TEST_PG_URL.
 const url = process.env.APPKIT_TEST_PG_URL;
 const ROLE_PASSWORD = "appkit-test";
 

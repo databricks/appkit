@@ -33,8 +33,11 @@ as described in [Lakebase configuration](./lakebase.md#environment-variables).
 Apps scaffolded with the Database plugin selected include an empty
 `config/database/schema.ts`, so `database()` can start without requiring sample
 tables. Replace the empty declaration with your tables once they exist in
-PostgreSQL. The plugin never creates or migrates tables. At startup, it checks
-that every declared table and column exists and fails setup if one is missing.
+PostgreSQL. The plugin creates and migrates tables only in a deployed app that
+sets `APPKIT_DB_MIGRATE_ON_START=true`. That app applies the committed migrations
+in `config/database/migrations` at startup, as its service principal. After any
+migrations, setup checks that every declared table and column exists and fails
+if one is missing.
 
 For local development, the PostgreSQL username is resolved from your Databricks
 credentials when `PGUSER` and `DATABRICKS_CLIENT_ID` are absent. An explicitly

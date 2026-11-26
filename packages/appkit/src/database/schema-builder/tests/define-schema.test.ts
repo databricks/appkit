@@ -80,7 +80,6 @@ describe("defineSchema finalization", () => {
   });
 
   it("defaults to app and supports a safe custom schema", () => {
-    // Not public: the deployed app's service principal has no CREATE there.
     expect(schema.$schemaName).toBe("app");
     expect(schema.$tables.users.$schemaName).toBe("app");
     const options: DefineSchemaOptions = { schemaName: "application" };

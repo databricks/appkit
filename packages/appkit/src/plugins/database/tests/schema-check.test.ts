@@ -4,7 +4,6 @@ import type { DataPath } from "../../../database/runtime";
 import { defineSchema, fk, id, text } from "../../../database/schema-builder";
 import { assertSchemaMatchesDatabase } from "../schema-check";
 
-// Explicitly public: the assertions name the tables public.boards and public.notes.
 const schema = defineSchema(
   ({ table }) => {
     const boards = table("boards", { id: id(), title: text().notNull() });
@@ -27,7 +26,6 @@ type CatalogRow = {
 
 const OFF = { kind: "off" } as const;
 
-/** Answer the catalog query with the given tables and columns, on a schema the role may use, and the lookup in public with `inPublic`. */
 function catalog(
   tables: Record<string, string[]>,
   kinds: Record<string, string> = {},

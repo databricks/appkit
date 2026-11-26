@@ -23,7 +23,6 @@ vi.mock("../../../database/runtime/engine/drizzle-data-path", () => ({
 vi.mock("../schema-check", () => ({
   assertSchemaMatchesDatabase: mocks.assertSchemaMatchesDatabase,
 }));
-// The migrator has its own suite; here only its place in setup matters.
 vi.mock("../migrate-on-start", () => ({
   decideMigrateOnStart: mocks.decideMigrateOnStart,
   migrateOnStart: mocks.migrateOnStart,
@@ -102,7 +101,6 @@ function arrange(path = fakePath()) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // clearAllMocks keeps implementations; a test that turns migration on must not leak it.
   mocks.decideMigrateOnStart.mockReturnValue({ kind: "off" });
 });
 afterEach(() => vi.restoreAllMocks());
@@ -292,7 +290,7 @@ describe("createDatabaseState", () => {
   test("a flag other than true warns once that it was ignored, and migrates nothing", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { execute } = arrange();
-    const decision = { kind: "off", ignored: "1" } as const;
+    const decision = { kind: "off", ignoredFlagValue: "1" } as const;
     mocks.decideMigrateOnStart.mockReturnValue(decision);
 
     await createDatabaseState(schema, execute);

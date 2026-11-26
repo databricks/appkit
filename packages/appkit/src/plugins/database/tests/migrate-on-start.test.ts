@@ -21,7 +21,6 @@ import { MigrationFilesError } from "../../../database/migrations/paths";
 import { defineSchema, id } from "../../../database/schema-builder";
 import { decideMigrateOnStart, migrateOnStart } from "../migrate-on-start";
 
-// The default schema, app, holds the journal too.
 const schema = defineSchema(({ table }) => ({
   notes: table("notes", { id: id() }),
 }));
@@ -38,7 +37,6 @@ function appRoot(): string {
   return root;
 }
 
-/** An app root with a committed (empty) journal. */
 function appRootWithMigrations(): string {
   const root = appRoot();
   const meta = path.join(root, "config/database/migrations/meta");
@@ -54,7 +52,7 @@ const nothingDone = {
   applied: [],
   adopted: [],
   edited: [],
-  unknown: 0,
+  unknownRecordedCount: 0,
   lockWaitMs: 0,
 };
 
@@ -66,7 +64,6 @@ beforeEach(async () => {
   applyPendingMigrations.mockImplementation(actual.applyPendingMigrations);
   pool.connect.mockReset();
   pool.query.mockReset();
-  // A fresh database: the catalog holds none of the declared tables anywhere.
   pool.query.mockResolvedValue({ rows: [] });
 });
 
@@ -114,7 +111,7 @@ describe("decideMigrateOnStart", () => {
           ...credentials,
           PGUSER: "sp-client-id",
         }),
-      ).toEqual({ kind: "off", ignored: value });
+      ).toEqual({ kind: "off", ignoredFlagValue: value });
     },
   );
 
@@ -335,7 +332,7 @@ describe("migrateOnStart", () => {
           rowSecurity: false,
           trusted: false,
         },
-        "kind",
+        "not-a-table",
       ),
       '"app"."__drizzle_migrations" is a view owned by "mallory"',
     ],
@@ -368,7 +365,6 @@ describe("migrateOnStart", () => {
       expect(error).toBeInstanceOf(DatabasePluginError);
       expect(error).toMatchObject({ category: "SETUP_FAILED", phase: "setup" });
       expect((error as Error).message).toContain(reason);
-      // Only the stable message crosses a request boundary.
       expect((error as DatabasePluginError).clientMessage).toBe(
         "Database setup failed",
       );
@@ -388,10 +384,8 @@ describe("migrateOnStart", () => {
 describe("migrateOnStart: tables an earlier release left in public", () => {
   const NOTES_SQL = 'CREATE TABLE "app"."notes" ("id" integer);';
   const NOTES_WHEN = 1000;
-  // An upgraded app: public.notes holds its rows, app.notes does not exist.
   const notesInPublic = [{ schema_name: "public", table_name: "notes" }];
 
-  /** An app root whose one committed migration, 0000_notes, creates app.notes. */
   function appRootWithNotesMigration(): { root: string; hash: string } {
     const root = appRoot();
     const folder = path.join(root, "config/database/migrations");
@@ -419,10 +413,6 @@ describe("migrateOnStart: tables an earlier release left in public", () => {
     };
   }
 
-  /**
-   * The deploy branch's one connection. Its journal records `recorded`, and
-   * the catalog lookup of the declared tables in app and public finds `catalog`.
-   */
   function deployBranch(
     recorded: readonly string[],
     catalog: readonly { schema_name: string; table_name: string }[],

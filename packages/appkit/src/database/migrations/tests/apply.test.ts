@@ -30,33 +30,23 @@ interface JournalRow {
 }
 
 interface FakeState {
-  /** Rows of the journal table; null while the table does not exist. */
   recorded: JournalRow[] | null;
   failOn?: RegExp;
-  /** SQLSTATE of the failOn error; defaults to 42P07 (duplicate_table). */
   failCode?: string;
-  /** How many failOn matches fail before one succeeds; all of them when unset. */
   failTimes?: number;
   failCleanupOn?: RegExp;
-  /** pg_catalog (table, column) pairs the baseline check sees. */
   catalog?: Array<[string, string]>;
-  /** What pg_catalog holds at the journal's name; the connecting role's own table when unset. */
   journal?: {
     relkind: string;
     owner: string;
     schema_owner?: string;
     row_security?: boolean;
   };
-  /** Another session holds the migration lock. */
   lockHeld?: boolean;
   lockHolder?: { pid: number; application_name: string; state: string };
   ownership?: { owner: string | null; current_user: string };
 }
 
-/**
- * A pg PoolClient that records every statement and keeps journal inserts
- * only when their transaction commits.
- */
 class RecordingClient {
   readonly statements: string[] = [];
   released: { error: unknown } | undefined;
@@ -104,8 +94,6 @@ class RecordingClient {
     }
     if (text.includes("c.relowner")) {
       if (this.state.recorded === null) return { rows: [] };
-      // The fake connects as "app-sp" and, like the server, trusts the
-      // relation's owner when it is that role or the schema's owner.
       const journal = {
         relkind: "r",
         owner: "app-sp",
@@ -195,7 +183,6 @@ const options = (folder: string) => ({
   schemaName: "app",
 });
 
-/** Collapse the recorded statements into readable steps. */
 function steps(statements: readonly string[]): string[] {
   return statements.map((statement) => {
     if (statement.includes("pg_try_advisory_lock(")) return "try lock";
@@ -245,7 +232,7 @@ describe("applyPendingMigrations", () => {
       applied: ["0000_migration", "0001_migration"],
       adopted: [],
       edited: [],
-      unknown: 0,
+      unknownRecordedCount: 0,
       lockWaitMs: expect.any(Number),
     });
     expect(steps(client.statements)).toEqual([
@@ -268,7 +255,6 @@ describe("applyPendingMigrations", () => {
       "commit",
       ...SESSION_CLEANUP,
     ]);
-    // The rows drizzle-orm's migrator would have written.
     expect(state.recorded).toEqual([
       { hash: hashOf(folder, "0000_migration"), created_at: 1000 },
       { hash: hashOf(folder, "0001_migration"), created_at: 2000 },
@@ -395,7 +381,7 @@ describe("applyPendingMigrations", () => {
       applied: [],
       adopted: [],
       edited: [],
-      unknown: 0,
+      unknownRecordedCount: 0,
       lockWaitMs: 0,
     });
     expect(fake.connects()).toBe(0);
@@ -542,7 +528,7 @@ describe("applyPendingMigrations", () => {
 
     const result = await applyPendingMigrations(pool, options(folder));
 
-    expect(result).toMatchObject({ applied: [], unknown: 1 });
+    expect(result).toMatchObject({ applied: [], unknownRecordedCount: 1 });
     expect(warn.mock.calls.flat().map(String).join(" ")).toContain(
       "Schema app recorded 1 migration(s) that are not committed here",
     );
@@ -621,7 +607,11 @@ describe("applyPendingMigrations", () => {
 
         const result = await applyPendingMigrations(pool, refusing(folder));
 
-        expect(result).toMatchObject({ applied: [], edited: [], unknown: 0 });
+        expect(result).toMatchObject({
+          applied: [],
+          edited: [],
+          unknownRecordedCount: 0,
+        });
         expect(steps(client.statements)).toEqual([
           "journal table?",
           "recorded?",
@@ -738,7 +728,7 @@ describe("applyPendingMigrations", () => {
 
       const result = await applyPendingMigrations(pool, refusing(folder));
 
-      expect(result).toMatchObject({ applied: [], unknown: 1 });
+      expect(result).toMatchObject({ applied: [], unknownRecordedCount: 1 });
       expect(warn.mock.calls.flat().map(String).join(" ")).toContain(
         "Schema app recorded 1 migration(s) that are not committed here",
       );
@@ -761,7 +751,7 @@ describe("applyPendingMigrations", () => {
       expect(result).toMatchObject({
         applied: ["0001_migration"],
         edited: ["0000_migration"],
-        unknown: 1,
+        unknownRecordedCount: 1,
       });
       expect(warn).toHaveBeenCalledTimes(2);
     });
@@ -827,7 +817,6 @@ describe("applyPendingMigrations", () => {
       "Waiting for the migration lock failed. Not applied: 0000_migration, 0001_migration. " +
         "Session pid 42 (appkit-migrate, active) held the migration lock for over 0ms. Deploy again once it finishes; if it is stuck, end it with pg_terminate_backend.",
     );
-    // Never locked, so never unlocked; the session settings are still reset.
     expect(steps(client.statements).slice(-3)).toEqual([
       "RESET client_connection_check_interval",
       "RESET application_name",
@@ -1054,7 +1043,6 @@ describe("applyPendingMigrations", () => {
 
     await applyPendingMigrations(pool, options(folder));
 
-    // The remaining cleanup still runs.
     expect(steps(client.statements).slice(-5)).toEqual(SESSION_CLEANUP);
     expect(client.released?.error).toBeInstanceOf(Error);
   });
@@ -1157,7 +1145,6 @@ const BASELINE_SQL = [
   `CREATE TABLE "app"."tags" ("id" integer PRIMARY KEY);`,
 ];
 
-/** 0000_baseline (notes, tags) followed by one ordinary migration. */
 const baselineThenMigration = () =>
   migrations([
     {
@@ -1211,7 +1198,6 @@ describe("applyPendingMigrations — baseline adoption", () => {
     expect(client.statements).toContain(
       `ALTER TABLE "app"."notes" ADD COLUMN "title" text;`,
     );
-    // The adopted row carries exactly what drizzle-orm's migrator would have written.
     expect(state.recorded?.[0]).toEqual({
       hash: hashOf(folder, "0000_baseline"),
       created_at: 1000,
@@ -1263,7 +1249,6 @@ describe("applyPendingMigrations — baseline adoption", () => {
     const { pool, client } = fakePool({
       recorded: null,
       catalog: BASELINE_CATALOG,
-      // The schema belongs to another role, so the journal table cannot be created in it.
       failOn: /^CREATE TABLE "app"\."__drizzle_migrations"/,
       failCode: "42501",
       ownership: { owner: "someone-else", current_user: "app-sp" },

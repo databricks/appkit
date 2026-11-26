@@ -105,7 +105,6 @@ describe("reconcileMigrations", () => {
   });
 
   test("one row and two unmatched files at one `when`: ambiguous, so nothing is edited, pending or stranded", () => {
-    // A was applied and edited since; B was added by hand with A's timestamp.
     const twins = [
       file("0000_a", 1000, "hash-a-after-the-edit"),
       file("0001_b", 1000),

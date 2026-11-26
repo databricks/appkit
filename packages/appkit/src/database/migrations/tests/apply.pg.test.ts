@@ -24,9 +24,6 @@ import {
 import { schemaOwnership } from "../ownership";
 import { hashOf, removeMigrationFolders, writeMigrations } from "./fixtures";
 
-// A real server, for what a fake cannot show: transactions, enum rules, locks
-// and catalogs. Point it at a scratch database, e.g.
-// APPKIT_TEST_PG_URL=postgres://localhost:5432/postgres
 const url = process.env.APPKIT_TEST_PG_URL;
 const ROLE_PASSWORD = "appkit-test";
 
@@ -478,9 +475,6 @@ describe.skipIf(!url)("applyPendingMigrations against Postgres", () => {
   });
 
   test("the app's own journal in a schema another role owns (public) is read and recorded into on every start", async () => {
-    // Like `public` under CAN_CONNECT_AND_CREATE: the schema belongs to the
-    // database owner, the app may create in it, and the journal it creates
-    // there is the app's.
     const suffix = schema.slice(-8);
     const owner = `appkit_owner_${suffix}`;
     const app = `appkit_app_${suffix}`;
@@ -571,7 +565,11 @@ describe.skipIf(!url)("applyPendingMigrations against Postgres", () => {
       onDrift: "refuse",
     });
 
-    expect(again).toMatchObject({ applied: [], edited: [], unknown: 0 });
+    expect(again).toMatchObject({
+      applied: [],
+      edited: [],
+      unknownRecordedCount: 0,
+    });
     expect(await recorded()).toEqual([
       { hash: hashOf(folder, "0000_notes"), createdAt: 1000 },
       { hash: hashOf(folder, "0001_body", "lf"), createdAt: 2000 },

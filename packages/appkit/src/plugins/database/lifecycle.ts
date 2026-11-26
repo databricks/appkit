@@ -169,11 +169,6 @@ function buildDatabaseExports(context: ExportContext): DatabaseExports {
   return result;
 }
 
-/**
- * Validate the schema, create one pool-backed API, apply committed migrations
- * when deployed, and verify connectivity and that every declared table and
- * column exists.
- */
 export async function createDatabaseState<TSchema extends Schema>(
   schema: TSchema,
   execute: EntityExecute,
@@ -206,12 +201,11 @@ export async function createDatabaseState<TSchema extends Schema>(
       hint: RAISE_POOL_MAX_HINT,
       logger,
     })(pool);
-    // A deployed app applies committed migrations as its own identity before the checks below.
     const migration = decideMigrateOnStart();
-    if (migration.kind === "off" && migration.ignored !== undefined) {
+    if (migration.kind === "off" && migration.ignoredFlagValue !== undefined) {
       logger.warn(
         'APPKIT_DB_MIGRATE_ON_START is %s, and only "true" turns migrate on start on, so this process ignored it and did not migrate.',
-        JSON.stringify(migration.ignored),
+        JSON.stringify(migration.ignoredFlagValue),
       );
     }
     if (migration.kind === "skipped") {

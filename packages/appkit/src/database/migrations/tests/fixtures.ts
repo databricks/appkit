@@ -9,13 +9,11 @@ interface MigrationFixture {
   tag: string;
   when: number;
   sql: string[];
-  /** Tables (name → columns) for meta/NNNN_snapshot.json. */
   snapshot?: Record<string, string[]>;
 }
 
 const folders: string[] = [];
 
-/** Write a v7 journal with one SQL file per entry, the way drizzle-kit lays them out. */
 export function writeMigrations(
   entries: MigrationFixture[],
   schemaName = "app",

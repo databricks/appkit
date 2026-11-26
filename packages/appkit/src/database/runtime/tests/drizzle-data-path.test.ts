@@ -23,7 +23,6 @@ import {
 } from "../engine/drizzle-data-path";
 import { returningColumns } from "../engine/translate";
 
-// Explicitly public: the order-by assertion expects unqualified SQL ("users"."secret").
 const schema = defineSchema(
   (builder) => {
     const users = builder.table("users", {

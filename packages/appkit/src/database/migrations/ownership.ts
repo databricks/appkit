@@ -1,25 +1,14 @@
-// Ownership model: each branch has one owner, the identity its migrations run
-// as, and that identity owns the app's objects there. On the deploy branch it
-// is the app's service principal, which creates the app schema on first start.
-// There is no shared owner role and no SET ROLE: a shared role needs someone
-// holding ADMIN OPTION on it to grant it to every new app, which a deployed
-// app cannot do for itself.
-
 import type { PoolClient } from "pg";
 
-/** insufficient_privilege: "must be owner of …", "permission denied for …". */
 export const INSUFFICIENT_PRIVILEGE = "42501";
 
-/** Who owns the app schema, next to who is connected; owner and canCreate are null when the schema does not exist. */
 interface SchemaOwnership {
   readonly schemaName: string;
   readonly owner: string | null;
   readonly currentUser: string;
-  /** Whether the connecting role holds CREATE on the schema. */
   readonly canCreate: boolean | null;
 }
 
-/** Read the app schema's owner and the connecting role's CREATE on it. pg_catalog needs no privileges. */
 export async function schemaOwnership(
   client: Pick<PoolClient, "query">,
   schemaName: string,
@@ -44,7 +33,6 @@ export async function schemaOwnership(
   };
 }
 
-/** How to fix a migration that failed for lack of privileges; undefined for any other SQLSTATE. */
 export function ownershipHint(
   code: string | undefined,
   ownership?: SchemaOwnership,
@@ -60,7 +48,6 @@ export function ownershipHint(
     ownership?.schemaName === "public" &&
     ownership.owner !== ownership.currentUser
   ) {
-    // Nobody owns public as an app, so the fault is either CREATE or an object another role owns.
     if (ownership.canCreate === false) {
       return (
         `Schema public belongs to "${ownership.owner}", and the app's role "${ownership.currentUser}" has no CREATE on it. ` +

@@ -10,7 +10,6 @@ import {
 
 type PlacementRow = { schema_name: string; table_name: string };
 
-/** A catalog that answers every lookup with the given (schema, table) rows. */
 function catalog(rows: PlacementRow[]) {
   const sql = vi.fn(async () => rows) as unknown as CatalogSql;
   return { sql, calls: sql as unknown as ReturnType<typeof vi.fn> };

@@ -572,7 +572,7 @@ refuses before it reads the branch, because it could not keep the columns the fi
 |---|---|---|---|
 | `APPKIT_DB_MIGRATE_ON_START` (app env) | Off. #675's `template/app.yaml.tmpl` renders `true` for apps that select the plugin, which `apps init` does not offer until the reveal. | #654 | The app never migrates. The startup schema check still runs. |
 | `hidden` in the plugin manifest | `true` | Already on `main` | `apps init` does not offer the plugin. #675 keeps `hidden: true` and leaves the plugin out of `template/appkit.plugins.json`. `beta.ts` exports `database` by hand, because the generated barrel skips hidden plugins. The reveal removes the flag and moves the `database` export into the generated barrel. |
-| `appkit db` hidden from `--help` | Hidden | #666 | Discoverability only. The commands are local tools and change only branches `init` created. #675 keeps it hidden. The reveal shows it. |
+| `appkit db` hidden from `--help` | Hidden | #666 | Discoverability only. The commands are local tools and change only your own dev branch and this checkout's session branch, never the default, a protected or the deploy branch. #675 keeps it hidden. The reveal shows it. |
 
 Not flagged:
 

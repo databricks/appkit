@@ -10,9 +10,6 @@ import {
   locateTables,
 } from "../tables-left-in-public";
 
-// A real server, for what a fake cannot show: the catalog query, the array
-// parameter binding through pg, and the relkind filter. Point it at a scratch
-// database, e.g. APPKIT_TEST_PG_URL=postgres://localhost:5432/postgres
 const url = process.env.APPKIT_TEST_PG_URL;
 
 describe.skipIf(!url)("tables left in public, against Postgres", () => {
