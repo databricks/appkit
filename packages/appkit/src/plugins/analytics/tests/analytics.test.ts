@@ -31,7 +31,7 @@ import type { IAnalyticsConfig } from "../types";
 
 // Real in-memory cache so the plugin's caching path runs under test — no mock
 // of the internal cache module. Boots and clears the cache before each test.
-useTestCache();
+const testCache = useTestCache();
 
 describe("Analytics Plugin", () => {
   let config: IAnalyticsConfig;
@@ -1880,6 +1880,97 @@ describe("Analytics Plugin", () => {
         error: "Query not found",
       });
     });
+  });
+
+  describe("cache config", () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    });
+
+    const warehouseResults = {
+      JSON_ARRAY: { result: { data: [{ id: 1 }] } },
+      ARROW_STREAM: {
+        result: {
+          attachment: Buffer.from([1, 2, 3]).toString("base64"),
+          row_count: 1,
+          columnNames: ["id"],
+        },
+      },
+    } as const;
+
+    // Sends the same request once per offset (seconds after the first) and
+    // returns the warehouse call count observed after each one.
+    async function warehouseCallsAt(
+      pluginConfig: IAnalyticsConfig,
+      format: keyof typeof warehouseResults,
+      offsetsSeconds: number[],
+    ): Promise<number[]> {
+      const plugin = new AnalyticsPlugin(pluginConfig);
+      const { router, getHandler } = createMockRouter();
+      (plugin as any).app.getAppQuery = vi.fn().mockResolvedValue({
+        query: "SELECT * FROM test",
+        isAsUser: false,
+      });
+      const executeMock = vi.fn().mockResolvedValue(warehouseResults[format]);
+      (plugin as any).SQLClient.executeStatement = executeMock;
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/query/:query_key");
+
+      const start = Date.now();
+      const counts: number[] = [];
+      for (const offset of offsetsSeconds) {
+        vi.setSystemTime(start + offset * 1000);
+        await handler(
+          createMockRequest({
+            params: { query_key: "test_query" },
+            body: { parameters: {}, format },
+          }),
+          createMockResponse(),
+        );
+        counts.push(executeMock.mock.calls.length);
+      }
+      return counts;
+    }
+
+    test.each(["JSON_ARRAY", "ARROW_STREAM"] as const)(
+      "%s: a configured ttl expires cached results after that many seconds",
+      async (format) => {
+        const counts = await warehouseCallsAt(
+          { ...config, cache: { ttl: 300 } },
+          format,
+          [0, 299, 301],
+        );
+        expect(counts).toEqual([1, 1, 2]);
+      },
+    );
+
+    test.each(["JSON_ARRAY", "ARROW_STREAM"] as const)(
+      "%s: without cache config, results stay cached for one hour",
+      async (format) => {
+        const counts = await warehouseCallsAt(config, format, [0, 3599, 3601]);
+        expect(counts).toEqual([1, 1, 2]);
+      },
+    );
+
+    test.each(["JSON_ARRAY", "ARROW_STREAM"] as const)(
+      "%s: enabled false sends every request to the warehouse",
+      async (format) => {
+        const getOrExecute = vi.spyOn(testCache.current, "getOrExecute");
+        const counts = await warehouseCallsAt(
+          { ...config, cache: { enabled: false } },
+          format,
+          [0, 0],
+        );
+        expect(counts).toEqual([1, 2]);
+        expect(getOrExecute).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe("toolkit()", () => {

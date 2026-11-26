@@ -1013,10 +1013,11 @@ export class AnalyticsPlugin extends Plugin implements ToolProvider {
   ): QueryExecutor {
     const hashedQuery = this.queryProcessor.hashQuery(query);
     const cache = this.cache;
-    const ttl = queryDefaults.cache?.ttl;
+    const enabled = this.config.cache?.enabled ?? queryDefaults.cache?.enabled;
+    const ttl = this.config.cache?.ttl ?? queryDefaults.cache?.ttl;
     return {
       query: (q, params, formatParameters, signal) => {
-        if (formatParameters.disposition !== "INLINE") {
+        if (!enabled || formatParameters.disposition !== "INLINE") {
           return executor.query(q, params, formatParameters, signal);
         }
         // The shared signal dedupes concurrent renders (e.g. React StrictMode
