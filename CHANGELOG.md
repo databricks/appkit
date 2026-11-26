@@ -238,6 +238,16 @@ All notable changes to this project will be documented in this file.
 
 # Changelog
 
+# Changelog
+
+## [0.106.0](https://github.com/databricks/appkit/compare/v0.105.0...v0.106.0) (2026-11-26)
+
+### appkit
+
+* **appkit:** add cache option to analytics plugin ([#751](https://github.com/databricks/appkit/issues/751)) ([5fb33a4](https://github.com/databricks/appkit/commit/5fb33a42d36b06bb9aca63392dbed122ff9d7e07))
+* **appkit:** replace React Router's default error page with an AppKit error page ([#749](https://github.com/databricks/appkit/issues/749)) ([b32da8e](https://github.com/databricks/appkit/commit/b32da8e0ef5c6f0179c5bf4573fff395052e25b8))
+
+
 ## [0.105.0](https://github.com/databricks/appkit/compare/v0.104.2...v0.105.0) (2026-11-25)
 
 ### appkit
