@@ -31,14 +31,11 @@ Configure a Lakebase `postgres` resource and its connection environment variable
 as described in [Lakebase configuration](./lakebase.md#environment-variables).
 
 Apps scaffolded with the Database plugin selected include an empty
-`config/database/schema.ts`, so `database()` can start without requiring sample
-tables. Replace the empty declaration with your tables once they exist in
-PostgreSQL. The plugin creates and migrates tables only in a deployed app that
-sets `APPKIT_DB_MIGRATE_ON_START=true`. That app applies the committed migrations
-in `config/database/migrations` at startup, as its service principal. On your
-own branch, `npx appkit db migrate` creates them instead (see
-[Development workflow](#development-workflow)). After any migrations, setup
-checks that every declared table and column exists and fails if one is missing.
+`config/database/schema.ts` in the Postgres schema `app`, and set
+`APPKIT_DB_MIGRATE_ON_START=true` in `app.yaml` so the deployed app applies its
+migrations on start. Run `npx appkit db init` once to point `.env` at a branch of
+your own, declare your tables, then run `npx appkit db migrate` to create them there
+(see [Development workflow](#development-workflow)).
 
 For local development, the PostgreSQL username is resolved from your Databricks
 credentials when `PGUSER` and `DATABRICKS_CLIENT_ID` are absent. An explicitly

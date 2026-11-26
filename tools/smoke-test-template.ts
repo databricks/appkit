@@ -132,6 +132,18 @@ function processAllFiles(dir: string): void {
         }
       }
 
+      // Remove Go template conditionals: {{- if or .appEnv .plugins.*}} blocks
+      if (content.includes("{{") && content.includes("if or")) {
+        const beforeLen = content.length;
+        content = content.replace(
+          /{{-?\s*if\s+or(?:\s+\.(?:appEnv|plugins\.[a-zA-Z0-9_-]+))+\s*-?\s*}}[\s\S]*?{{-?\s*end\s*-?\s*}}/g,
+          "",
+        );
+        if (beforeLen !== content.length) {
+          modified = true;
+        }
+      }
+
       // Remove Go template conditionals: {{- if .appEnv}} blocks
       if (content.includes("{{") && content.includes(".appEnv")) {
         const beforeLen = content.length;
