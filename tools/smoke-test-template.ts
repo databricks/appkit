@@ -132,12 +132,13 @@ function processAllFiles(dir: string): void {
         }
       }
 
-      // Remove Go template conditionals: {{- if or .appEnv .plugins.*}} blocks
+      // Remove Go template conditionals: {{- if or .appEnv .plugins.*}} blocks, or with --all-plugins keep the content of one that names a plugin
       if (content.includes("{{") && content.includes("if or")) {
         const beforeLen = content.length;
         content = content.replace(
-          /{{-?\s*if\s+or(?:\s+\.(?:appEnv|plugins\.[a-zA-Z0-9_-]+))+\s*-?\s*}}[\s\S]*?{{-?\s*end\s*-?\s*}}/g,
-          "",
+          /{{-?\s*if\s+or((?:\s+\.(?:appEnv|plugins\.[a-zA-Z0-9_-]+))+)\s*-?\s*}}([\s\S]*?){{-?\s*end\s*-?\s*}}/g,
+          (_block, terms: string, body: string) =>
+            values["all-plugins"] && terms.includes(".plugins.") ? body : "",
         );
         if (beforeLen !== content.length) {
           modified = true;
