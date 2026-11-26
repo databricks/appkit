@@ -245,7 +245,7 @@ function HomePage() {
 // A route that throws, or a route error response such as a loader's 404, renders this instead of the page.
 function RouteErrorPage() {
   const error = useRouteError();
-  const notFound = isRouteErrorResponse(error) && error.status === 404;
+  const notFound = isNotFound(error);
 
   return (
     <Empty>
@@ -265,26 +265,38 @@ function RouteErrorPage() {
         </pre>
       )}
       <EmptyContent className="flex-row justify-center">
-        <Button onClick={() => window.location.reload()}>Reload</Button>
-        <Button variant="outline" asChild>
-          <a href="/">Back to home</a>
+        {/* A reload can recover from a thrown error; on a 404 it repeats the miss. */}
+        <Button variant={notFound ? 'outline' : 'default'} onClick={() => window.location.reload()}>
+          Reload
+        </Button>
+        <Button variant={notFound ? 'default' : 'outline'} asChild>
+          <Link to="/">Back to home</Link>
         </Button>
       </EmptyContent>
     </Empty>
   );
 }
 
-function errorDetails(error: unknown): string {
-  if (isRouteErrorResponse(error)) {
-    const data = typeof error.data === 'string' ? `\n${error.data}` : '';
-    return `${error.status} ${error.statusText}${data}`;
-  }
-  if (error instanceof Error) return error.stack ?? error.message;
+// Runs in production too: a thrown object's getter (e.g. `status`) can throw, then it's a plain error.
+function isNotFound(error: unknown): boolean {
   try {
+    return isRouteErrorResponse(error) && error.status === 404;
+  } catch {
+    return false;
+  }
+}
+
+function errorDetails(error: unknown): string {
+  try {
+    if (isRouteErrorResponse(error)) {
+      const data = typeof error.data === 'string' ? `\n${error.data}` : '';
+      return `${error.status} ${error.statusText}${data}`;
+    }
+    if (error instanceof Error) return error.stack ?? error.message;
     return String(error);
   } catch {
-    // String() throws for a value without toString (Object.create(null)): the page must still render.
-    return Object.prototype.toString.call(error);
+    // String() throws for a value without toString (Object.create(null)), and so can a getter on it.
+    return "The error can't be shown as text.";
   }
 }
 
