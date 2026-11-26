@@ -1,3 +1,9 @@
+/**
+ * Stages a standalone workspace package (one without bundled workspace
+ * dependencies, such as @databricks/lakebase) in `tmp/` for `npm pack`:
+ * applies `publishConfig.exports`, an optional prerelease version, and copies
+ * dist, README, LICENSE, and DCO.
+ */
 import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
