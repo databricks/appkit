@@ -4,16 +4,20 @@ import type { DataPath } from "../../../database/runtime";
 import { defineSchema, fk, id, text } from "../../../database/schema-builder";
 import { assertSchemaMatchesDatabase } from "../schema-check";
 
-const schema = defineSchema(({ table }) => {
-  const boards = table("boards", { id: id(), title: text().notNull() });
-  const notes = table("notes", {
-    id: id(),
-    board_id: fk(() => boards.id).notNull(),
-    author_email: text().private(),
-    body: text().notNull(),
-  });
-  return { boards, notes };
-});
+// Explicitly public: the assertions name the tables public.boards and public.notes.
+const schema = defineSchema(
+  ({ table }) => {
+    const boards = table("boards", { id: id(), title: text().notNull() });
+    const notes = table("notes", {
+      id: id(),
+      board_id: fk(() => boards.id).notNull(),
+      author_email: text().private(),
+      body: text().notNull(),
+    });
+    return { boards, notes };
+  },
+  { schemaName: "public" },
+);
 
 type CatalogRow = {
   table_name: string;
@@ -21,10 +25,13 @@ type CatalogRow = {
   relation_kind: string;
 };
 
-/** Answer the catalog query with the given tables and columns. */
+const OFF = { kind: "off" } as const;
+
+/** Answer the catalog query with the given tables and columns, on a schema the role may use, and the lookup in public with `inPublic`. */
 function catalog(
   tables: Record<string, string[]>,
   kinds: Record<string, string> = {},
+  inPublic: string[] = [],
 ) {
   const rows: CatalogRow[] = Object.entries(tables).flatMap(
     ([name, columns]): CatalogRow[] =>
@@ -42,9 +49,75 @@ function catalog(
             relation_kind: kinds[name] ?? "r",
           })),
   );
-  const raw = vi.fn(async () => rows);
+  const raw = vi.fn(async (strings: TemplateStringsArray) =>
+    strings.join("?").includes("has_schema_privilege")
+      ? [{ owner: "app-sp", current_user: "app-sp", usage: true }]
+      : strings.join("?").includes("'public'")
+        ? inPublic.map((table_name) => ({ schema_name: "public", table_name }))
+        : rows,
+  );
   return { raw, path: { raw } as unknown as DataPath };
 }
+
+describe("assertSchemaMatchesDatabase — tables left in public", () => {
+  const appSchema = defineSchema(({ table }) => ({
+    boards: table("boards", { id: id() }),
+    notes: table("notes", { id: id() }),
+  }));
+
+  test("every missing table is in public: says so and how to keep them there, not to migrate", async () => {
+    const { path } = catalog({}, {}, ["boards", "notes"]);
+
+    const error = await assertSchemaMatchesDatabase(path, appSchema, OFF).catch(
+      (caught) => caught,
+    );
+
+    expect(error.message).toContain("table app.boards does not exist");
+    expect(error.message).toContain(
+      `Schema public has those tables, but defineSchema() puts tables in schema "app" unless told otherwise. ` +
+        'To keep them in public, pass { schemaName: "public" } as the second argument of defineSchema()',
+    );
+    expect(error.message).not.toContain("commit migrations");
+  });
+
+  test('schemaName "app" named explicitly: the usual advice, whatever public holds', async () => {
+    const explicit = defineSchema(
+      ({ table }) => ({
+        boards: table("boards", { id: id() }),
+        notes: table("notes", { id: id() }),
+      }),
+      { schemaName: "app" },
+    );
+    const { path } = catalog({}, {}, ["boards", "notes"]);
+
+    const error = await assertSchemaMatchesDatabase(path, explicit, OFF).catch(
+      (caught) => caught,
+    );
+
+    expect(error.message).toContain("table app.boards does not exist");
+    expect(error.message).toContain(
+      "commit migrations under config/database/migrations",
+    );
+    expect(error.message).not.toContain("unless told otherwise");
+  });
+
+  test("only some missing tables are in public: the usual advice", async () => {
+    const { path } = catalog({}, {}, ["boards"]);
+
+    await expect(
+      assertSchemaMatchesDatabase(path, appSchema, OFF),
+    ).rejects.toThrow("commit migrations under config/database/migrations");
+  });
+
+  test("a schema declared as public never looks in public twice", async () => {
+    const { raw, path } = catalog({ boards: ["id", "title"] });
+
+    await expect(
+      assertSchemaMatchesDatabase(path, schema, OFF),
+    ).rejects.toThrow("commit migrations");
+    expect(raw).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe("assertSchemaMatchesDatabase", () => {
   test("accepts a database with every declared column, and extra ones", async () => {
@@ -53,7 +126,7 @@ describe("assertSchemaMatchesDatabase", () => {
       notes: ["id", "board_id", "author_email", "body"],
     });
     await expect(
-      assertSchemaMatchesDatabase(path, schema),
+      assertSchemaMatchesDatabase(path, schema, OFF),
     ).resolves.toBeUndefined();
   });
 
@@ -61,7 +134,7 @@ describe("assertSchemaMatchesDatabase", () => {
     // The shape a same-named table from another app leaves behind.
     const { path } = catalog({ notes: ["id", "case_id", "author", "content"] });
 
-    const error = await assertSchemaMatchesDatabase(path, schema).catch(
+    const error = await assertSchemaMatchesDatabase(path, schema, OFF).catch(
       (caught) => caught,
     );
 
@@ -79,9 +152,9 @@ describe("assertSchemaMatchesDatabase", () => {
       boards: ["id", "title"],
       notes: ["id", "board_id", "body"],
     });
-    await expect(assertSchemaMatchesDatabase(path, schema)).rejects.toThrow(
-      "table public.notes is missing column author_email",
-    );
+    await expect(
+      assertSchemaMatchesDatabase(path, schema, OFF),
+    ).rejects.toThrow("table public.notes is missing column author_email");
   });
 
   test("reports a table with no readable columns as missing them all", async () => {
@@ -89,9 +162,9 @@ describe("assertSchemaMatchesDatabase", () => {
       boards: [],
       notes: ["id", "board_id", "author_email", "body"],
     });
-    await expect(assertSchemaMatchesDatabase(path, schema)).rejects.toThrow(
-      "table public.boards is missing columns id, title",
-    );
+    await expect(
+      assertSchemaMatchesDatabase(path, schema, OFF),
+    ).rejects.toThrow("table public.boards is missing columns id, title");
   });
 
   test.each([
@@ -109,9 +182,9 @@ describe("assertSchemaMatchesDatabase", () => {
         { boards: kind },
       );
 
-      await expect(assertSchemaMatchesDatabase(path, schema)).rejects.toThrow(
-        `public.boards is a ${description}, not a table`,
-      );
+      await expect(
+        assertSchemaMatchesDatabase(path, schema, OFF),
+      ).rejects.toThrow(`public.boards is a ${description}, not a table`);
     },
   );
 
@@ -122,10 +195,10 @@ describe("assertSchemaMatchesDatabase", () => {
     );
     const { raw, path } = catalog({ tags: ["id"] });
 
-    await assertSchemaMatchesDatabase(path, scoped);
+    await assertSchemaMatchesDatabase(path, scoped, OFF);
 
-    expect(raw).toHaveBeenCalledTimes(1);
-    const [strings, ...values] = raw.mock.calls[0] as unknown as [
+    expect(raw).toHaveBeenCalledTimes(2);
+    const [strings, ...values] = raw.mock.calls[1] as unknown as [
       TemplateStringsArray,
       ...unknown[],
     ];
@@ -139,7 +212,45 @@ describe("assertSchemaMatchesDatabase", () => {
     await assertSchemaMatchesDatabase(
       path,
       defineSchema(() => ({})),
+      OFF,
     );
     expect(raw).not.toHaveBeenCalled();
+  });
+
+  describe("the advice says how the missing objects get created", () => {
+    const missingColumn = () =>
+      catalog({ boards: ["id", "title"], notes: ["id", "board_id", "body"] })
+        .path;
+
+    test("without the flag: create them, or commit migrations and set the flag", async () => {
+      await expect(
+        assertSchemaMatchesDatabase(missingColumn(), schema, OFF),
+      ).rejects.toThrow(
+        "Create them, or commit migrations under config/database/migrations and set APPKIT_DB_MIGRATE_ON_START=true in app.yaml so the deployed app applies them on start.",
+      );
+    });
+
+    test("with the flag, on a start that did not migrate: point at the startup warning, never at the flag", async () => {
+      const error = await assertSchemaMatchesDatabase(missingColumn(), schema, {
+        kind: "skipped",
+        reason: "DATABRICKS_CLIENT_ID is not set.",
+      }).catch((caught) => caught);
+
+      expect(error.message).toContain(
+        "APPKIT_DB_MIGRATE_ON_START is true, but this process did not migrate on start. The warning logged before this error says why.",
+      );
+      expect(error.message).not.toContain("set APPKIT_DB_MIGRATE_ON_START");
+    });
+
+    test("after the start migrated: the committed migrations leave them missing", async () => {
+      const error = await assertSchemaMatchesDatabase(missingColumn(), schema, {
+        kind: "migrate",
+      }).catch((caught) => caught);
+
+      expect(error.message).toContain(
+        "The committed migrations under config/database/migrations were applied on start and leave them missing. Commit a migration that creates them and deploy again.",
+      );
+      expect(error.message).not.toContain("set APPKIT_DB_MIGRATE_ON_START");
+    });
   });
 });

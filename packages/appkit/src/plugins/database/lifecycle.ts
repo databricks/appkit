@@ -28,6 +28,7 @@ import type {
   SqlTag,
   TransactionClient,
 } from "./entity-types";
+import { decideMigrateOnStart, migrateOnStart } from "./migrate-on-start";
 import { assertSchemaMatchesDatabase } from "./schema-check";
 import { createTransactionScope, type TransactionScope } from "./scope";
 import type { DatabasePoolConfig } from "./types";
@@ -169,8 +170,9 @@ function buildDatabaseExports(context: ExportContext): DatabaseExports {
 }
 
 /**
- * Validate the schema, create one pool-backed API, and verify connectivity and
- * that every declared table and column exists.
+ * Validate the schema, create one pool-backed API, apply committed migrations
+ * when deployed, and verify connectivity and that every declared table and
+ * column exists.
  */
 export async function createDatabaseState<TSchema extends Schema>(
   schema: TSchema,
@@ -204,6 +206,21 @@ export async function createDatabaseState<TSchema extends Schema>(
       hint: RAISE_POOL_MAX_HINT,
       logger,
     })(pool);
+    // A deployed app applies committed migrations as its own identity before the checks below.
+    const migration = decideMigrateOnStart();
+    if (migration.kind === "off" && migration.ignored !== undefined) {
+      logger.warn(
+        'APPKIT_DB_MIGRATE_ON_START is %s, and only "true" turns migrate on start on, so this process ignored it and did not migrate.',
+        JSON.stringify(migration.ignored),
+      );
+    }
+    if (migration.kind === "skipped") {
+      logger.warn(
+        "APPKIT_DB_MIGRATE_ON_START is true, but this process is not the deployed app, so it did not migrate. %s Databricks Apps sets DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET and PGUSER for the deployed app.",
+        migration.reason,
+      );
+    }
+    if (migration.kind === "migrate") await migrateOnStart(pool, schema);
     const db = createDrizzleDb(pool, schema);
     const dataPath = createDrizzleDataPath(db, schema, {
       columnAccess: "trusted",
@@ -219,7 +236,7 @@ export async function createDatabaseState<TSchema extends Schema>(
     });
     // Do not publish exports until an authenticated statement succeeds.
     await dataPath.raw`select 1`;
-    await assertSchemaMatchesDatabase(dataPath, schema);
+    await assertSchemaMatchesDatabase(dataPath, schema, migration);
     return {
       pool,
       exports,

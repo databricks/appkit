@@ -46,6 +46,11 @@ const RESERVED_OBJECT_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 const RESERVED_DATABASE_EXPORT_KEYS = new Set(["sql", "transaction"]);
 // A global symbol lets typegen recognize schemas loaded through another AppKit instance.
 const FINALIZED_SCHEMA = Symbol.for("@databricks/appkit.database.schema");
+// Whether defineSchema() was told the schema name, read by the migration guard
+// that refuses to create tables in the default schema next to an older copy in public.
+const EXPLICIT_SCHEMA_NAME = Symbol.for(
+  "@databricks/appkit.database.schema.explicitSchemaName",
+);
 const TABLE_METADATA_KEYS = [
   "$name",
   "$schemaName",
@@ -291,6 +296,7 @@ function publishSchema(
   raw: ReadonlyMap<string, RawTable>,
   candidates: ReadonlyMap<string, FinalizedTableCandidate>,
   schemaName: string,
+  explicitSchemaName: boolean,
 ): Schema {
   const publications = [...raw.values()].map((table) => {
     const candidate = candidates.get(table.name);
@@ -325,6 +331,9 @@ function publishSchema(
     $engine: Object.freeze(engine),
   };
   Object.defineProperty(schema, FINALIZED_SCHEMA, { value: true });
+  Object.defineProperty(schema, EXPLICIT_SCHEMA_NAME, {
+    value: explicitSchemaName,
+  });
   return Object.freeze(schema);
 }
 
@@ -339,6 +348,18 @@ export function assertFinalizedSchema(value: unknown): asserts value is Schema {
   }
 }
 
+/** @internal True when `defineSchema()` was given `schemaName` rather than defaulting to `app`. */
+export function schemaNameIsExplicit(schema: Schema): boolean {
+  return Reflect.get(schema, EXPLICIT_SCHEMA_NAME) === true;
+}
+
+/**
+ * Postgres schema of every table when `schemaName` is omitted. Not `public`:
+ * the deployed app's service principal can create and own a schema of its
+ * own, but has no CREATE on `public`.
+ */
+const DEFAULT_SCHEMA_NAME = "app";
+
 /**
  * Compile one declared schema. The returned type keeps the table names the
  * builder returned, so `api.tables` can name only real tables.
@@ -347,7 +368,7 @@ export function defineSchema<TTables extends Record<string, AppKitTable>>(
   builder: (context: SchemaBuilderContext) => TTables,
   options?: DefineSchemaOptions,
 ): Schema<Extract<keyof TTables, string>> {
-  const schemaName = options?.schemaName ?? "public";
+  const schemaName = options?.schemaName ?? DEFAULT_SCHEMA_NAME;
   if (!schemaName) throw new SchemaBuildError("Schema name cannot be empty");
 
   const state: DeclarationState = {
@@ -366,5 +387,10 @@ export function defineSchema<TTables extends Record<string, AppKitTable>>(
   const relations = buildRelations(state.raw);
   validateRelationKeys(state.raw, relations);
   const candidates = prepareTables(state.raw, schemaName, relations);
-  return publishSchema(state.raw, candidates, schemaName);
+  return publishSchema(
+    state.raw,
+    candidates,
+    schemaName,
+    options?.schemaName !== undefined,
+  );
 }

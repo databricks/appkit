@@ -117,6 +117,18 @@ jobs:
     runs-on:
       group: databricks-ghec-untrusted-runner-group
       labels: linux-ubuntu-latest-untrusted-2core-8gb
+    services:
+      postgres:
+        image: postgres:17@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -131,6 +143,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Run Tests
         run: pnpm test
+        env:
+          APPKIT_TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
 
   playground-integration-test:
     name: Playground Integration Tests

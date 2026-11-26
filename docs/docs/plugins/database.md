@@ -86,6 +86,44 @@ identifier-only messages for known missing-column or missing-table errors (for
 example, `column notes.board_id does not exist`). Other driver messages, details,
 and hints are omitted because they may contain row values.
 
+Tables live in the Postgres schema `app` unless the second argument of
+`defineSchema()` names another one, for example `{ schemaName: "public" }`. The
+default is not `public` because the deployed app's service principal creates and
+owns `app`, but has no `CREATE` privilege on `public`.
+
+Give each app its own `schemaName`. Two apps bound to one database with the same
+schema are unsupported. They would share the schema, its migration journal and
+the migration lock, and the second app's service principal cannot change the
+tables the first one owns.
+
+### Apps with tables in `public`
+
+Earlier releases put tables in `public` by default. An app that created its
+tables there fails setup after the upgrade, and the error says the tables are in
+`public`. With `APPKIT_DB_MIGRATE_ON_START=true`, startup refuses before any
+migration runs when `defineSchema()` was given no `schemaName`, none of the
+declared tables exist in `app`, and some exist in `public`. Otherwise the first
+migration would create empty copies in `app`, the check would pass, and the app
+would serve the empty tables. Keep the tables in `public` with:
+
+```ts
+export const schema = defineSchema(
+  ({ table }) => ({
+    notes: table("notes", { id: id(), body: text().notNull() }),
+  }),
+  { schemaName: "public" },
+);
+```
+
+To use `app` instead, move the tables first
+(`ALTER TABLE public.notes SET SCHEMA app`). When the tables in `public` belong
+to another app, pass `{ schemaName: "app" }` explicitly and startup does not
+refuse.
+
+Migrations applied on start into `public` also need
+`GRANT CREATE ON SCHEMA public` to the app's service principal, because it does
+not own `public`.
+
 ## Schema discovery and overrides
 
 During setup, `database()` loads the discovered routes registry's schema. Without

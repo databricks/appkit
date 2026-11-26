@@ -79,8 +79,10 @@ describe("defineSchema finalization", () => {
     expect(Object.getPrototypeOf(schema.$tables.users.$columns)).toBeNull();
   });
 
-  it("defaults to public and supports a safe custom schema", () => {
-    expect(schema.$schemaName).toBe("public");
+  it("defaults to app and supports a safe custom schema", () => {
+    // Not public: the deployed app's service principal has no CREATE there.
+    expect(schema.$schemaName).toBe("app");
+    expect(schema.$tables.users.$schemaName).toBe("app");
     const options: DefineSchemaOptions = { schemaName: "application" };
     const custom = defineSchema(
       (builder) => ({ widgets: builder.table("widgets", { id: id() }) }),
@@ -88,6 +90,26 @@ describe("defineSchema finalization", () => {
     );
     expect(custom.$schemaName).toBe("application");
     expect(custom.$tables.widgets.$schemaName).toBe("application");
+  });
+
+  it.each([
+    ["by default, in app", undefined, "app"],
+    ['with schemaName "public", unqualified', "public", undefined],
+  ] as const)("creates tables and enums %s", (_label, schemaName, expected) => {
+    const schema = defineSchema(
+      (builder) => ({
+        tickets: builder.table("tickets", {
+          status: builder.enum("ticket_status", ["open", "closed"]),
+        }),
+      }),
+      schemaName ? { schemaName } : undefined,
+    );
+    const config = getTableConfig(pgOf(schema.$tables.tickets.$engine));
+    expect(config.schema).toBe(expected);
+    expect(
+      (config.columns[0] as unknown as { enum?: { schema?: string } }).enum
+        ?.schema,
+    ).toBe(expected);
   });
 
   it("accepts the explicit builder context type", () => {
