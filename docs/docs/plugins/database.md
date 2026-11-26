@@ -105,7 +105,8 @@ Earlier releases put tables in `public` by default. An app that created its
 tables there fails setup after the upgrade, and the error says the tables are in
 `public`. With `APPKIT_DB_MIGRATE_ON_START=true`, startup refuses before any
 migration runs when `defineSchema()` was given no `schemaName`, none of the
-declared tables exist in `app`, and some exist in `public`. Otherwise the first
+declared tables exist in `app`, and some exist in `public`; `npx appkit db migrate`
+refuses to apply on a dev branch in the same case. Otherwise the first
 migration would create empty copies in `app`, the check would pass, and the app
 would serve the empty tables. Keep the tables in `public` with:
 
@@ -120,12 +121,572 @@ export const schema = defineSchema(
 
 To use `app` instead, move the tables first
 (`ALTER TABLE public.notes SET SCHEMA app`). When the tables in `public` belong
-to another app, pass `{ schemaName: "app" }` explicitly and startup does not
-refuse.
+to another app, pass `{ schemaName: "app" }` explicitly and neither startup nor
+`migrate` refuses.
 
 Migrations applied on start into `public` also need
 `GRANT CREATE ON SCHEMA public` to the app's service principal, because it does
 not own `public`.
+
+## Development workflow
+
+:::note
+`appkit db` is hidden from `appkit --help` while the database development flow is
+in beta. Its logic ships in `@databricks/appkit/beta/database-tooling`, which
+only the AppKit CLI of the same release imports. It has no semver guarantee.
+:::
+
+You develop against a Lakebase branch of your own, never the deployed one. Tables
+are created and changed through migrations: generated locally from `schema.ts`,
+committed with your code, and applied by the deployed app when it starts.
+
+### Set up your branch
+
+Run `npx appkit db init` once after scaffolding, and again after cloning. Until
+`databricks apps init` runs it for you, the scaffolded `.env` points at the branch
+you picked in its prompts, usually the branch the app deploys to, and
+`npx appkit db verify` warns about that.
+
+`db init` asks nothing:
+
+1. It keeps this checkout's session branch when `.env` points at one, and
+   otherwise uses your dev branch, `dev-<you>-<hash>`. When the branch does not
+   exist yet, it forks the branch that the default `databricks.yml` target
+   binds, or the project's default branch when that target does not resolve,
+   and prints which one it forked. `--session` uses a branch for this checkout
+   that expires after 7 days (`--ttl` changes that), and `--dev` goes back to
+   your dev branch.
+2. It makes sure the branch has an endpoint and your Postgres role, and points
+   `.env` at the branch.
+3. It sets up the schema, and reads the branch to decide how. When the app
+   schema still belongs to the fork's copy of the app's service principal, the
+   branch is an untouched copy. `init` then tags the copied migration journal,
+   hands you the schema (see [One owner per branch](#one-owner-per-branch)),
+   drops it, and rebuilds it from the committed migrations, so the tables start
+   without the copied rows. Without `schema.ts`, it first writes `schema.ts`
+   and a `0000_baseline` migration from the fork's tables (`introspect`), then
+   rebuilds from that baseline. A branch this run created is rebuilt the same
+   way even when its app schema is already yours, because every row on it is
+   the fork's copy. In schema `public`, which no app owns, a rebuild drops only
+   the tables you own, and lists the tables that keep their copied rows. When
+   the app schema was already yours on a branch that existed before this run,
+   `init` keeps the rows. With `schema.ts` it runs `migrate`, which writes a
+   migration when `schema.ts` changed since the last one, then applies the
+   committed migrations. Without `schema.ts`, it runs `introspect`. To keep
+   the copied rows on a new branch, pass `--schema migrate`, or
+   `--schema introspect` without `schema.ts`, and `init` says that they stay.
+   The rows are yours from then on, so a later plain `init` keeps them, and
+   `--schema clean` removes them. `--schema clean` drops the app schema first,
+   after a confirmation. Without a terminal, it needs `--yes`. `--schema none`
+   only sets up the branch and `.env`. It reads no `schema.ts`, hands over no
+   schema, and leaves the schema and its owner as the fork copied them. The
+   next plain `init` still rebuilds a copy the app's service principal owns.
+   If you already owned the schema on the source, that later run sees your
+   working branch, so run `--schema clean` then.
+4. Unless `--schema none`, it installs the drizzle-kit version AppKit pins as a
+   dev dependency when the app does not have it. `migrate` and `introspect`
+   generate migrations with it.
+
+`db init` never changes the project's default branch, a protected branch or a
+branch `databricks.yml` deploys to, and never edits `databricks.yml`.
+
+:::caution[A new branch copies the branch the app deploys to]
+A new branch forks the branch the default `databricks.yml` target binds, or the
+project's default branch when `init` cannot resolve that target, so it starts
+with a copy of its rows, production data included. By default, `db init` drops
+the copy in the app schema. Until it does, and in other schemas, the rows stay
+on the branch. Your role there is a member of `DATABRICKS_SUPERUSER`, which
+reads and writes every table on the branch and bypasses row-level security.
+Creating a branch needs CAN MANAGE on the Lakebase project, which also allows
+deleting any branch, the deploy branch included. Use a project whose deploy
+branch holds only data every developer may see.
+:::
+
+### Commands
+
+| Command | What it does |
+| --- | --- |
+| `npx appkit db init` | Points `.env` at your dev branch, or with `--session` at a branch for this checkout that expires, then sets up the schema. |
+| `npx appkit db migrate` | Writes `config/database/migrations/NNNN_migration.sql` when `schema.ts` changed, regenerates `shared/appkit-types/database.d.ts` and `database-operations.d.ts`, and applies pending migrations to your branch. |
+| `npx appkit db introspect` | Writes `schema.ts` from tables that already exist, and a `0000_baseline` migration (or `NNNN_introspect` when migrations already exist), and regenerates both type files. |
+| `npx appkit db clean` | Drops the app schema on your branch; `migrate` then rebuilds it from the migrations. `--delete-branch` deletes your session branch instead. |
+| `npx appkit db seed` | Runs `config/database/seed.sql` on your branch in one transaction. |
+| `npx appkit db verify` | Read-only check of your branch: missing tables or columns, pending migrations, migrations that will never run there, and migrations it ran that this checkout does not commit. `--deployed` checks a target's deployed app instead. |
+| `npx appkit db check` | Offline check of the committed migrations, for CI: their order and files, and no `schema.ts` change without a migration. |
+
+`migrate`, `clean` and `seed` change only branches `db init` created for you (your
+dev branch, or this checkout's session branch). A session branch name includes a
+hash of the user who created it, so a `.env` copied from another developer does
+not make their session branch yours. On any other branch, including the
+project's default branch, a protected branch, or a branch `databricks.yml`
+deploys to, `clean` and `seed` refuse, and `migrate` only writes the migration
+files and the generated types in `shared/appkit-types/`.
+
+A typical change:
+
+```bash
+# edit config/database/schema.ts
+npx appkit db migrate            # writes and applies NNNN_migration.sql on your branch
+git add config/database          # commit schema.ts with its migrations
+databricks apps deploy           # the deployed app applies it on start
+npx appkit db verify --deployed  # the app runs, and its source has every committed migration
+```
+
+### Warnings about a generated migration
+
+`migrate` prints a warning for each of two classes of statement in the
+migration it wrote, and names the statements. One statement can be in both
+classes.
+
+Statements that break instances still running the previous release. Drops,
+renames, type changes, `SET NOT NULL` and a new `NOT NULL` column without a
+default are in this class. Those instances can still serve while the new one
+migrates on start, and a code rollback does not undo a migration. Deploy code
+that works with both the old and the new schema first, then this change in a
+later deploy.
+
+Statements that may fail on existing rows. `SET NOT NULL`, a new `NOT NULL`
+column without a default, a type change, a new constraint (`UNIQUE`,
+`PRIMARY KEY`, `CHECK`, `FOREIGN KEY` or `EXCLUDE`) and a unique index are in
+this class. Postgres checks them against the rows already in the table. A new
+dev branch has no rows, so they pass there and can fail on the deploy branch.
+Test the migration on a branch that has a copy of the deploy branch's data
+before you deploy, for example a session branch created with
+`npx appkit db init --session --schema migrate`.
+
+### Your branch's data
+
+`npx appkit db init` creates your dev branch, or this checkout's session branch
+with `--session`, as a fork of the branch `databricks.yml` deploys to, else of
+the project's default branch, and points `.env` at it. A fork copies every row
+of its source, production data included. `init` reads from the branch what its
+app schema is. While the app's service principal still owns the schema, it is
+the fork's untouched copy. `init` hands it to you, drops it and recreates it
+from the committed migrations, so the branch starts without the copied rows.
+A branch `init` forked in this run holds only what the fork copied, whoever
+owns its schema. So a schema you already owned on the source is rebuilt too,
+with no hand-off to make. Without `config/database/schema.ts`, `init` first
+writes it and `0000_baseline.sql` from the fork's schema, then rebuilds the
+schema from that baseline.
+
+Before the hand-off, `init` inserts one row with the hash `appkit:fork-copy`
+into the copied `__drizzle_migrations` journal. It writes the row only where
+the migrator would record. That is a journal owned by your role, by a role it
+inherits, or by the schema's owner, which is what a fork's copy has. A journal
+another role owns could run that role's code as you through a trigger, a rule,
+a default or a policy, so `init` leaves it alone. It then warns that it could
+not mark the copy and rebuilds anyway. A copy with no journal gets the same
+warning. If such a run stops before the rebuild finishes, the next `init` sees
+a schema that looks like your working branch and keeps the copied rows. Run
+`npx appkit db init --schema clean` then. Dropping the schema removes the row. A
+run that stops between the hand-off and the drop leaves a schema you own whose
+journal still carries that row, and the next `init`, from any checkout,
+finishes the rebuild.
+
+`npx appkit db migrate`, `npx appkit db introspect` and `npx appkit db seed` refuse a
+schema that is still a copy. That is one the service principal still owns, with
+no row yet, or one handed to you whose journal still carries the row. The message
+says to run `npx appkit db init` to rebuild it, or `npx appkit db init --schema
+migrate` (`introspect` for introspect) to keep the copied rows. Schema `public`
+is never refused.
+`npx appkit db verify` reports both kinds of copy with the same advice.
+
+To keep the copied rows, pass `--schema migrate`, or `--schema introspect`.
+`init` then hands the schema to you, removes the row, keeps the data, and says
+where it came from. From then on the schema is your working branch. A plain
+`init` migrates it and keeps the rows. `npx appkit db init --schema clean` drops
+the app schema with everything in it and rebuilds it from the committed
+migrations, after a confirmation or with `--yes`. On a branch an earlier run
+created, a schema you own with no such row is your working branch. `init`
+migrates it, or introspects it without `schema.ts`. A copy's rebuild asks
+nothing, because `migrate` refuses a copy and a fresh fork holds only what it
+copied, so none of your work can be on it. `--schema none` touches nothing.
+The next plain `init` still rebuilds a copy the service principal owns. A fresh
+fork of a schema you already owned looks like your working branch to that
+later run, so run `npx appkit db init --schema clean` then.
+
+In schema `public`, `init` and `clean` remove only the objects your role owns,
+and `init` never hands `public` off or tags it. On a fork of the deploy branch
+the app's service principal owns the tables, so `init` migrates the schema, the
+tables stay with their rows, and the report lists them as kept.
+
+### Branches `databricks.yml` deploys to
+
+`migrate` never applies migrations to a branch that `databricks.yml` deploys to.
+It reads every target, every `postgres` resource of every app, the
+`postgres_branch` variable, and the files that `include:` names. It also reads
+the variable values `databricks bundle` keeps for a target in
+`.databricks/bundle/<target>/variable-overrides.json`. A branch named there
+counts as well as the one `databricks.yml` names, because a deploy from this
+checkout uses the file's value.
+
+If a branch or database reference has no value in those files, `migrate` cannot
+tell which branch the reference names. Examples are a target that leaves
+`postgres_branch` unset and `${workspace.current_user.short_name}`. The same
+holds for a `${var.…}` reference in place of an app's `resources` list, one of
+its entries, or a `postgres` block, because the files do not say what it binds.
+While any such reference exists, `migrate` applies migrations to no branch, and
+`init`, `introspect`, `clean` and `seed` refuse every branch. The message names
+the target and where the reference is. To continue, give the reference a value
+in `databricks.yml`, or in the `variable-overrides.json` the message names. A
+`variable-overrides.json` that is not a JSON object stops these commands too.
+
+The check reads only this checkout's files. It does not see values passed at
+deploy time with `--var` or `BUNDLE_VAR_*`, or resources defined in Python. It
+protects branches from the CLI, and does not replace Lakebase permissions or
+protected branches.
+
+### One command at a time
+
+While `migrate`, `introspect`, `clean` or `init` runs, it holds
+`config/database/.appkit-db.lock`. Another of these commands in the same
+checkout fails and names the process that holds the lock. `seed`, `verify`,
+`check` and `clean --delete-branch` change no migration history and take no
+lock. The lock goes when the command finishes or exits. `init` holds it for its
+whole run, including the clean and migrate it starts. `init --schema none`
+changes no migration history, so it takes no lock.
+
+A command stopped by a signal, such as SIGKILL, can leave the file behind. The
+next command then names the holder. When that process no longer runs, the
+message says the holder stopped. When its pid runs on this machine, the message
+says to wait for it. A pid can also belong to an unrelated process, for example
+after a reboot reused it. In either case, if no `appkit db` command runs in the
+checkout, delete `config/database/.appkit-db.lock` and run the command again.
+AppKit never deletes a lock it does not hold. Scaffolded apps list the file in
+`.gitignore`.
+
+### Changing tables in use
+
+A migration must work with the code that is still running or may run again. On
+no-downtime compute, instances of the previous release keep serving while the
+new release migrates on start. On classic compute the old process stops first,
+but a [rollback](#rolling-back) redeploys the previous release against the
+migrated schema. A change that drops or renames a table or column, changes a
+column's type, or makes a column required breaks that code, and `db migrate`
+warns when it writes one. Split such a change over two deploys. First deploy
+code that works with both the old and the new schema, with a migration that
+only adds. Then, in a later deploy, drop what the old code used.
+
+`db migrate` warns separately when a migration has a statement that may fail
+on rows the deploy branch already has. Your dev branch starts without the
+copied rows, so a `SET NOT NULL` on a column with NULL rows, or a `UNIQUE`
+constraint on a column with duplicates, passes there and fails on deploy. Test
+such a migration on a session branch that keeps the copied rows,
+`npx appkit db init --session --schema migrate`. If it still fails on deploy,
+repair the rows, as
+[When a migration fails on deploy](#when-a-migration-fails-on-deploy) describes.
+
+### Migrations on deploy
+
+When the deployed app starts with `APPKIT_DB_MIGRATE_ON_START=true` in `app.yaml`,
+`database()` applies the committed migrations the deploy branch has not recorded
+yet, before it checks the tables and serves requests. Apps scaffolded with the
+plugin set it; add it to the `env` of an app that predates it:
+
+```yaml
+env:
+  - name: APPKIT_DB_MIGRATE_ON_START
+    value: "true"
+```
+
+The flag alone does not migrate. A start migrates only when `PGUSER` is set
+and equals `DATABRICKS_CLIENT_ID`, so that the process connects as the deployed
+app's own service principal. Databricks Apps sets both for an app with a bound
+database. `npx appkit db init` writes your user name to `PGUSER` in `.env`, so
+a local start (`npm run dev`, `npm start`, `databricks apps run-local`)
+connects as you and never migrates, with or without exported M2M credentials.
+Before `db init` writes `.env`, `PGUSER` is unset, and the start skips for that
+reason. A start that skips logs why. Use `npx appkit db migrate` on your
+branch instead. A deployed app bound to a branch with the exact shape of a dev
+branch, `dev-<slug>-<6 hex>`, or of a session branch refuses to start, because
+`appkit db` owns those branches.
+
+Migrations run as the app's service principal, one instance at a time, each in
+its own transaction. If one fails, it is rolled back, the ones before it stay
+applied, and the app does not start. The server log names the migration and the
+SQLSTATE, or the missing migration file. An instance waits up to 5 minutes for
+another one to finish migrating. A migration that waits more than 5 seconds for a
+table lock, for example behind a long transaction of the running app, is rolled
+back and retried twice, then fails instead of blocking that table.
+
+A deploy start also refuses two histories. One is an edited migration, a
+committed migration the deploy branch recorded with different content. A
+checkout that turned its line endings into CRLF does not count as edited. The
+other is a diverged history, where the checkout has migrations the branch never
+recorded while the branch recorded migrations the checkout lacks. On your dev
+branch, `npx appkit db migrate` only warns about both. See
+[When a migration fails on deploy](#when-a-migration-fails-on-deploy) for the
+first and [Rolling back](#rolling-back) for the second.
+
+A `0000_baseline` from `introspect` is recorded without running when its tables
+already exist on the deploy branch and no migration was ever applied there. If
+only some of them exist, the app does not start, and nothing is changed.
+
+#### What a deploy waits for
+
+Databricks Apps counts a deploy as succeeded once the app process has lived for
+2 seconds, unless `app.yaml` declares a `health_check`. Then the health check
+must pass within its timeout, 300 seconds by default and at most. The template
+declares `health_check` on `/health`, and AppKit binds `/health` only after the
+database plugin's setup, migrations included. So with the health check, a
+deploy succeeds only after the migrations ran, and fails when they fail or do
+not finish within 300 seconds. Keep it. Without it, a deploy succeeds while the
+app is still migrating, and a failed migration shows up only as a crashed app.
+
+What happens to the running app depends on its compute:
+
+- On classic compute, Apps stops the old process before it starts the new one.
+  A failed migration takes the app down.
+- On no-downtime compute, which horizontally scaled apps use, the old instance
+  keeps serving while the new one starts, and keeps serving when the health
+  check fails.
+- A crashed process is not restarted. The app stays down until the next deploy.
+- An app that scales to zero runs its start again on every cold start,
+  migrations included.
+
+#### When a migration fails on deploy
+
+`databricks apps logs` names the migration and the SQLSTATE. The migration was
+rolled back and is not recorded. On classic compute the app is down. On
+no-downtime compute the previous release still serves.
+
+Never edit a migration a deploy branch has applied. A deploy start refuses an
+edited migration. Edit a migration in place only while no deploy branch
+recorded it. Otherwise, write the change as a new migration.
+
+A migration that failed because of the data, for example `SET NOT NULL` on a
+column with NULL rows, needs the rows repaired, not the migration. Repair them
+on the deploy branch, then redeploy the same commit, and the app applies the
+same migration. The app's service principal owns the tables, but a role with
+the `DATABRICKS_SUPERUSER` membership on the deploy branch reads and writes its
+rows. Someone with CAN USE on the Lakebase project creates that role with
+`databricks postgres create-role`.
+
+#### Long backfills
+
+A migration runs inside the start, so it has to finish within the 300 second
+health-check limit. A backfill that needs longer is not one migration. Split it
+in three steps:
+
+1. An expand migration, for example a new nullable column.
+2. A batched DML job that fills the rows, run as a role with the
+   `DATABRICKS_SUPERUSER` membership on the deploy branch. On a Lakebase branch
+   such a role can `SELECT`, `INSERT`, `UPDATE`, `DELETE` and `TRUNCATE` the
+   service principal's tables and create new tables in its schema. It cannot
+   `ALTER`, `DROP` or index them, so the schema stays the app's.
+3. A contract migration, for example `SET NOT NULL`, once every row has a value.
+
+#### A stuck start
+
+While an instance migrates, its session has `application_name` set to
+`appkit-migrate` and holds the migration lock, and other instances wait for it.
+A role with the `DATABRICKS_SUPERUSER` membership on the deploy branch can end
+that session, because `databricks_superuser` inherits `pg_signal_backend` and
+the app's service principal is not a superuser. Find the session, then cancel
+its statement or end it:
+
+```sql
+select pid, state, query_start from pg_stat_activity
+ where application_name = 'appkit-migrate';
+select pg_cancel_backend(<pid>);
+select pg_terminate_backend(<pid>);
+```
+
+When that does not free the branch, restart its compute, which needs CAN
+MANAGE on the Lakebase project.
+
+### Existing apps
+
+- **Tables created by hand or by earlier code.** Without `schema.ts`,
+  `npx appkit db init` creates your dev branch from the branch the app deploys to
+  and introspects it. It writes `schema.ts` from the tables in schema `app` and a
+  `0000_baseline` migration. When schema `app` on the branch still belongs to the
+  fork's copy of the app's service principal, init then rebuilds it from that
+  baseline, so the tables start without the rows the fork copied. With a
+  `schema.ts` already, run
+  `npx appkit db init --schema introspect`. On a new branch, a plain `db init`
+  drops the app schema and rebuilds it from the committed migrations, so it keeps
+  only the tables those migrations create. Commit `schema.ts` and the baseline. The
+  deployed app records the baseline without running it, because the tables already
+  exist on the deploy branch. Once the baseline is committed,
+  `db init --schema migrate` keeps the rows a new branch copied.
+- **Tables in `public`.** Earlier releases used `public` by default. Keep them there
+  with `schemaName: "public"`, as [Apps with tables in `public`](#apps-with-tables-in-public)
+  shows. With a `schema.ts`, `npx appkit db introspect` reads the schema it sets in
+  `schemaName`. Without one, `db init` and `db introspect` read schema `app`, so run
+  `npx appkit db init --schema none`, then
+  `npx appkit db introspect --schema-name public`. The `schema.ts` it writes
+  sets `schemaName: "public"`, so later runs read `public` without the flag. The
+  tables keep the rows the fork copied.
+- **No migrate-on-start flag.** Add `APPKIT_DB_MIGRATE_ON_START=true` to `app.yaml`,
+  as [Migrations on deploy](#migrations-on-deploy) shows. Without it, the app checks
+  its tables on start but creates none.
+
+### Rolling back
+
+Migrations only go forward. There are no down migrations, and the app never undoes
+one. Redeploying an older commit leaves the newer tables and their recorded
+migrations in place. The app logs that the branch recorded migrations the older
+code does not have, and applies nothing. It starts when every table and column the
+older `schema.ts` declares still exists. It refuses to start only when the
+checkout also has committed migrations the branch never recorded, because then
+the two histories diverged, and a rollback alone does not produce that. Deploy
+from one branch, usually `main`, and merge a feature's migrations unchanged into
+it before it deploys again.
+
+You can roll back only to a commit whose code works with the current schema. A
+migration that only adds, as the first step of a
+[two-step change](#changing-tables-in-use) does, keeps the previous release
+working. A migration that drops or renames a table or column ends rollbacks to
+every commit whose `schema.ts` declares it, because that code no longer starts.
+The second step of a two-step change is such a migration, so deploy it only when
+you no longer need to roll back past the first step. To undo a schema change,
+commit a new migration that reverses it, and deploy it.
+
+### One owner per branch
+
+Each branch has one owner of the app schema, and only the owner can change its
+tables:
+
+- On the deploy branch, the app's service principal creates schema `app` on its
+  first start and owns everything in it. The `postgres` resource's
+  `CAN_CONNECT_AND_CREATE` permission is all it needs; no grants are required.
+- On your dev or session branch, you own it. A fork copies its parent's objects
+  with their owners, so `db init` hands the app schema to you: it deletes the
+  branch's copy of the role that owns it, with its objects reassigned to you.
+  `db init --schema none` hands over nothing. Schema `public` is never handed
+  over, because it belongs to the database rather than to an app.
+
+Do not apply migrations to the deploy branch yourself. You would own those
+objects, and the app could no longer change them.
+
+If the app schema on the deploy branch already belongs to another role, the app
+cannot migrate it, and the server log names both roles. Two apps bound to the
+same database each need their own `schemaName` in `defineSchema()`. Otherwise
+the app was recreated with a new service principal, or its database resource
+was removed and added again. Lakebase then leaves the objects with a role the
+app no longer has, the old service principal's role or the role of the person
+who removed the resource. No Postgres role can hand them back. `ALTER ... OWNER
+TO` the new service principal fails with `must be able to SET ROLE`, because
+nobody holds that role. Only Lakebase moves them, by deleting the owning role
+and reassigning what it owns. The delete reassigns the objects the role owns
+on the branch, drops the role's memberships and grants, and removes the role. If
+the role still owns objects in another database of the branch, the delete can
+fail. So first take the inventory `db init` takes before it hands a
+schema over. In each database of the branch, list what the role owns there:
+
+```sql
+select o.type, o.identity
+  from pg_shdepend s
+  cross join lateral pg_identify_object(s.classid, s.objid, s.objsubid) o
+ where s.refclassid = 'pg_authid'::regclass
+   and s.refobjid = (select oid from pg_roles where rolname = '<role>')
+   and s.deptype = 'o'
+   and s.dbid = (select oid from pg_database where datname = current_database())
+ order by 1, 2;
+```
+
+Then count what else depends on the role, grants included, in the other
+databases and in shared objects such as a database it owns. Run the first query
+in each database this one names:
+
+```sql
+select coalesce(d.datname, 'shared objects') as database, count(*)
+  from pg_shdepend s
+  left join pg_database d on d.oid = s.dbid
+ where s.refclassid = 'pg_authid'::regclass
+   and s.refobjid = (select oid from pg_roles where rolname = '<role>')
+   and not (s.deptype = 'o'
+            and s.dbid = (select oid from pg_database where datname = current_database()))
+ group by 1
+ order by 1;
+```
+
+Reassign or drop anything unrelated to the app before you delete the role.
+Then someone with CAN MANAGE on the Lakebase project moves the objects:
+
+```bash
+# Both roles, by their client IDs or user names
+databricks postgres list-roles projects/<project>/branches/<branch>
+databricks postgres delete-role projects/<project>/branches/<branch>/roles/<old-role> \
+  --reassign-owned-to projects/<project>/branches/<branch>/roles/<new-role>
+```
+
+### Verify the deployed app
+
+`npx appkit db verify --deployed` checks a `databricks.yml` target's app through
+the Databricks API: the app exists, its `postgres` resource names the target's
+branch and database with `CAN_CONNECT_AND_CREATE`, its service principal has a role
+on the branch, and the app is running. When the checkout has
+`.databricks/bundle/<target>/variable-overrides.json`, the branch and database
+come from it, as a deploy from this checkout uses them. It also reads the source
+the app's active deployment runs: every committed migration must be there with
+the same journal entry and SQL, and the deployment must have no migration this
+checkout does not commit. It compares the deployment's journal entry by entry,
+so a duplicated, malformed or reordered entry fails too. When verify cannot read
+that source, or the API reports no service principal for the app, it fails and
+says why.
+
+It reads no database, so it does not check that the migrations ran on the
+deploy branch. An app with `APPKIT_DB_MIGRATE_ON_START=true` applies them on
+start, and a migration that fails stops the start; `databricks apps logs` shows
+why.
+
+`-t, --target` picks the target; without it, verify uses the bundle's default
+target. When the target's `workspace.host` is not the workspace your shell is
+authenticated against, verify refuses and names the profile to set. A
+`workspace.host` the checkout's files cannot resolve, such as a `${var.…}` with
+no value, is refused before any API call. It needs no
+access to the deploy branch's database and changes nothing. A failed check names
+`databricks apps logs`, `start` or `deploy`.
+
+### CI
+
+`appkit db init` sets up branches for developers, and CI does not need one. On
+every pull request, run the offline check after installing the app's
+dependencies:
+
+```bash
+npx appkit db check
+```
+
+It needs no Databricks or Lakebase credentials. It is not a sandbox, though. To
+load `schema.ts` it imports that file and everything the file imports, so it
+runs the pull request's code. Give the CI job that runs it no secrets. It
+compares the snapshots with each other and with `schema.ts`, and does not read
+the `.sql` files, so SQL edited by hand is not checked against its snapshot. It
+exits 1 when:
+
+- `schema.ts` changed and no committed migration has the change;
+- a migration is listed after one generated later, which a branch that ran the
+  later one never runs;
+- two migrations were generated from the same snapshot on parallel git branches;
+- the first migration was not generated from an empty database, so the ones
+  before it are missing;
+- an entry's `idx` is not its position in the journal, or its `when` is not an
+  integer timestamp;
+- a migration's `.sql` or snapshot is not committed, a snapshot is not a
+  drizzle-kit snapshot, or a `.sql` is not in the journal.
+
+Two pull requests that each add a migration conflict in
+`config/database/migrations` once one of them is merged, and keeping both sides
+fails the check. Resolve the conflict with `main`'s migrations instead. Save any
+SQL you wrote by hand in your migration, such as a backfill. Merge `main`, reset
+`config/database/migrations` to `main`'s, then run `npx appkit db clean` and
+`npx appkit db migrate`. `migrate` writes your schema change again after
+`main`'s migrations. Add the saved SQL back to the migration it writes and
+review it before you commit.
+
+After a deploy, check the deployed app with workspace credentials:
+
+```bash
+databricks apps deploy -t prod
+npx appkit db verify --deployed -t prod
+```
+
+It exits 1 when the app is not running or is bound to another branch, when
+verify cannot confirm that its deployment has every committed migration with the
+same SQL, and when the deployment has a migration this checkout does not commit.
 
 ## Schema discovery and overrides
 

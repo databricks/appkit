@@ -55,7 +55,7 @@ async function assertSchemaUsable(
 function migrationAdvice(migration: MigrateOnStartDecision): string {
   switch (migration.kind) {
     case "off":
-      return "Create them, or commit migrations under config/database/migrations and set APPKIT_DB_MIGRATE_ON_START=true in app.yaml so the deployed app applies them on start.";
+      return "Run `npx appkit db migrate` locally, or commit migrations under config/database/migrations and set APPKIT_DB_MIGRATE_ON_START=true in app.yaml so the deployed app applies them on start.";
     case "skipped":
       return "APPKIT_DB_MIGRATE_ON_START is true, but this process did not migrate on start. The warning logged before this error says why.";
     case "migrate":
@@ -63,20 +63,51 @@ function migrationAdvice(migration: MigrateOnStartDecision): string {
   }
 }
 
+interface SchemaCheck {
+  readonly problems: string[];
+  /** Declared tables with no relation of that name in the schema. */
+  readonly absent: string[];
+}
+
+/** What the database lacks, and the one cause the check can name. */
+interface SchemaDiagnosis {
+  readonly problems: readonly string[];
+  /**
+   * Every absent table is in schema public, with how to keep it there;
+   * migrating would create a second, empty copy. null when that is not the
+   * cause.
+   */
+  readonly advice: string | null;
+}
+
 /**
- * Confirm every declared table and column exists before routes are published.
+ * Every declared table or column the database lacks, and every declared table
+ * that is a view or another non-table relation, as human-readable problems,
+ * with the advice for tables left in public. Setup and `appkit db verify`
+ * share it so both name that cause.
+ */
+export async function diagnoseSchema(
+  dataPath: Pick<DataPath, "raw">,
+  schema: Schema,
+): Promise<SchemaDiagnosis> {
+  const { problems, absent } = await checkSchema(dataPath, schema);
+  return {
+    problems,
+    advice: (await inPublicInstead(dataPath, schema, absent)) ?? null,
+  };
+}
+
+/**
  * pg_catalog is read rather than information_schema, which hides objects the
  * role cannot access and would report a privilege gap as a missing column.
  */
-export async function assertSchemaMatchesDatabase(
-  dataPath: DataPath,
+async function checkSchema(
+  dataPath: Pick<DataPath, "raw">,
   schema: Schema,
-  migration: MigrateOnStartDecision,
-): Promise<void> {
+): Promise<SchemaCheck> {
   const tables = Object.values(schema.$tables);
-  if (tables.length === 0) return;
+  if (tables.length === 0) return { problems: [], absent: [] };
   const schemaName = schema.$schemaName;
-  await assertSchemaUsable(dataPath, schemaName);
   const tableNames = tables.map((table) => table.$name);
   // Include non-tables so setup can report their kind instead of claiming they are absent.
   const rows = await dataPath.raw<CatalogColumn>`
@@ -129,19 +160,35 @@ export async function assertSchemaMatchesDatabase(
       );
     }
   }
+  return {
+    problems,
+    absent: tableNames.filter((name) => !found.has(name)),
+  };
+}
+
+/**
+ * Confirm every declared table and column exists before routes are published.
+ * `migration` says what this start did about migrations, so the advice fits.
+ */
+export async function assertSchemaMatchesDatabase(
+  dataPath: DataPath,
+  schema: Schema,
+  migration: MigrateOnStartDecision,
+): Promise<void> {
+  if (Object.keys(schema.$tables).length === 0) return;
+  await assertSchemaUsable(dataPath, schema.$schemaName);
+  const { problems, advice } = await diagnoseSchema(dataPath, schema);
   if (problems.length > 0) {
-    const absent = tableNames.filter((name) => !found.has(name));
-    const advice =
-      (await inPublicInstead(dataPath, schema, absent)) ??
-      migrationAdvice(migration);
     throw databaseSetupFailed(
-      `the declared schema does not match the database: ${problems.join("; ")}. ${advice}`,
+      `the declared schema does not match the database: ${problems.join("; ")}. ${
+        advice ?? migrationAdvice(migration)
+      }`,
     );
   }
 }
 
 async function inPublicInstead(
-  dataPath: DataPath,
+  dataPath: Pick<DataPath, "raw">,
   schema: Schema,
   absent: readonly string[],
 ): Promise<string | undefined> {

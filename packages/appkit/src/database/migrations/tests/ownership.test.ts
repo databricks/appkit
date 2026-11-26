@@ -37,6 +37,9 @@ describe("ownership: one owner per branch", () => {
       "That moves every object the role owns on the branch and deletes the role, so first check what it owns in each database.",
     );
     expect(hint).not.toContain("ALTER");
+    expect(hint).toContain(
+      "On your dev or session branch, rerun `appkit db init`, which hands you the schema.",
+    );
   });
 
   test("a schema that does not exist yet points at CREATE on the database", () => {

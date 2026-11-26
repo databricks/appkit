@@ -70,7 +70,8 @@ export function ownershipHint(
       `and Lakebase handed the objects to "${ownership.owner}". No Postgres role can hand them back to "${ownership.currentUser}"; only Lakebase can move them. ` +
       `If "${ownership.owner}" belonged to a deleted app, or is the role of the person who removed the resource, someone with CAN MANAGE on the Lakebase project moves its objects with ` +
       `\`databricks postgres delete-role <its role> --reassign-owned-to <the role of "${ownership.currentUser}">\` (\`databricks postgres list-roles <branch>\` names both). ` +
-      "That moves every object the role owns on the branch and deletes the role, so first check what it owns in each database."
+      "That moves every object the role owns on the branch and deletes the role, so first check what it owns in each database. " +
+      "On your dev or session branch, rerun `appkit db init`, which hands you the schema."
     );
   }
   return (

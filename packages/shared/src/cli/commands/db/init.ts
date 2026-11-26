@@ -1,0 +1,213 @@
+import { Command, Option } from "commander";
+
+import { loadDatabaseTooling } from "./load-tooling";
+import {
+  fail,
+  info,
+  isInteractive,
+  ok,
+  printCleanReport,
+  printIntrospectReport,
+  printMigrateReport,
+  shortName,
+  warn,
+} from "./output";
+import type {
+  InitOptions,
+  InitReport,
+  InitStart,
+  Rebuild,
+  SchemaStart,
+} from "./tooling-contract";
+
+interface InitFlags {
+  readonly session?: boolean;
+  readonly dev?: boolean;
+  readonly ttl?: string;
+  readonly schema?: SchemaStart;
+  readonly yes?: boolean;
+}
+
+const confirmClean: NonNullable<InitOptions["confirmClean"]> = async ({
+  branch,
+  schemaName,
+}) => {
+  const where = `schema ${schemaName} on ${shortName(branch)}`;
+  if (!isInteractive()) {
+    throw new Error(
+      `Refusing to drop ${where}, your working branch's, without confirmation in a non-interactive shell. Pass --yes. .env already points at the branch.`,
+    );
+  }
+  const { confirm, isCancel } = await import("@clack/prompts");
+  const answer = await confirm({
+    message:
+      schemaName === "public"
+        ? `Remove your objects in ${where}, with their rows, then apply the committed migrations?`
+        : `Drop ${where}, with every table and row in it, then apply the committed migrations?`,
+    initialValue: false,
+  });
+  return !isCancel(answer) && answer;
+};
+
+function rebuildOf(start: InitStart): Rebuild | null {
+  if (start.kind === "clean") return start;
+  if (start.kind === "introspect") return start.rebuilt;
+  return null;
+}
+
+function printRebuild(rebuild: Rebuild): void {
+  printCleanReport(rebuild.clean);
+  printMigrateReport(rebuild.migrate);
+}
+
+function printInitReport(
+  report: InitReport,
+  schemaFlag: SchemaStart | undefined,
+): void {
+  const branch = shortName(report.branch);
+  const expires = report.expireTime ? `, expires ${report.expireTime}` : "";
+  ok(
+    report.created
+      ? `Branch ${branch} (created from ${shortName(report.sourceBranch ?? "the default branch")}${expires})`
+      : `Branch ${branch} (reused${expires})`,
+  );
+  ok(
+    `Endpoint ${shortName(report.endpoint)}${report.endpointCreated ? " (created)" : ""}: ${report.host}`,
+  );
+  const role = {
+    created: "created",
+    updated: "added to DATABRICKS_SUPERUSER",
+    kept: "DATABRICKS_SUPERUSER",
+  }[report.role.action];
+  ok(`Role ${report.user} (${role})`);
+  if (report.handedOff) {
+    ok(`The app schema is yours: it belonged to ${report.handedOff}`);
+  }
+  ok(`Pointed .env at ${branch} (database ${report.database})`);
+  if (report.installed) ok(`Installed drizzle-kit (${report.installed})`);
+
+  const { start, keptCopy } = report;
+  if (rebuildOf(start)?.reason === "fork-copy") {
+    info(
+      "The branch still held the rows the fork copied, so the app schema was rebuilt from the committed migrations without them.",
+    );
+  }
+  if (start.kind === "introspect") {
+    printIntrospectReport(start.introspect, {
+      rebuilt: start.rebuilt !== null,
+    });
+    if (start.rebuilt) printRebuild(start.rebuilt);
+  } else if (start.kind === "migrate") printMigrateReport(start.migrate);
+  else if (start.kind === "clean") printRebuild(start);
+  else if (start.kind === "none") info("Left the schema as it is");
+
+  if (keptCopy?.reason === "requested") {
+    warn(
+      `Kept the rows the fork copied${keptCopy.from ? ` from ${shortName(keptCopy.from)}` : ""}, as --schema ${schemaFlag} asks. The app schema is yours now, so a plain \`appkit db init\` keeps them. \`appkit db init --schema clean\` drops the app schema with everything in it and rebuilds it from the committed migrations, after a confirmation or with --yes.`,
+    );
+  } else if (keptCopy?.reason === "public") {
+    warn(
+      `Kept in schema public, with their rows, because other roles own them: ${keptCopy.objects.join(", ")}`,
+    );
+  }
+}
+
+async function runDbInit(flags: InitFlags): Promise<void> {
+  try {
+    const tooling = await loadDatabaseTooling();
+    const mode = flags.session ? "session" : flags.dev ? "dev" : undefined;
+    const options: InitOptions = {
+      ...(mode ? { mode } : {}),
+      ...(flags.schema ? { schema: flags.schema } : {}),
+      ...(flags.ttl !== undefined ? { ttl: flags.ttl } : {}),
+      ...(flags.schema === "clean" && !flags.yes ? { confirmClean } : {}),
+      interactive: !flags.yes && isInteractive(),
+      onStep: info,
+      onWarning: warn,
+    };
+    const report = await tooling.runInit(tooling.createDbContext(), options);
+    if (report.start.kind === "cancelled") {
+      info(
+        `Cancelled. Schema ${report.start.schemaName} on ${shortName(report.branch)} is as it was, and .env points at the branch.`,
+      );
+      process.exitCode = 1;
+      return;
+    }
+    printInitReport(report, flags.schema);
+  } catch (error) {
+    fail(error);
+  }
+}
+
+export const dbInitCommand = new Command("init")
+  .description(
+    "Set up your Lakebase dev or session branch for local development: create or reuse it, ensure an endpoint and your role, point .env at it, then set up the schema",
+  )
+  .addOption(
+    new Option(
+      "--session",
+      "use this checkout's session branch, created with a TTL",
+    ).conflicts("dev"),
+  )
+  .addOption(
+    new Option(
+      "--dev",
+      "use your dev branch, even when .env points at a session branch",
+    ),
+  )
+  .option(
+    "--ttl <duration>",
+    "TTL of a new session branch, e.g. 30m, 1h or 7d (default 7d)",
+  )
+  .addOption(
+    new Option(
+      "--schema <start>",
+      "how the schema starts (default: a schema that still holds the fork's copy is rebuilt from the migrations, your working branch is migrated; introspect without schema.ts)",
+    ).choices(["migrate", "introspect", "clean", "none"]),
+  )
+  .option(
+    "-y, --yes",
+    "confirm --schema clean, and fail instead of prompting on an ambiguous rename",
+  )
+  .addHelpText(
+    "after",
+    `
+init asks nothing. It keeps this checkout's session branch when .env points at
+one, or when a --session run stopped before .env did, and otherwise uses your
+dev branch (dev-<you>-<hash>). A new branch forks
+the branch databricks.yml deploys to, else the project's default branch, which
+copies its rows, production data included. init reads from the branch whether
+the app schema is still that copy. If it is, init takes the schema over and
+rebuilds it from the committed migrations (written first by introspect when
+there is no schema.ts), so the branch starts without the copied rows. A branch
+init forked in this run is rebuilt even when you already owned its schema on
+the source. init marks the copy in its migration journal first, so a run that
+stops before the rebuild finishes is finished by the next init, from any
+checkout. When the copy has no journal init can write, init warns instead,
+and after a stop you run --schema clean yourself. --schema migrate, or
+--schema introspect, keeps the copied rows and says so. Your working branch
+keeps its data: init migrates it. --schema clean
+rebuilds your working branch too, after a confirmation or with --yes; a copy's
+rebuild asks nothing. In schema public only your own objects go; what other
+roles own stays with its rows, and init lists it. init never changes the
+default branch, a protected branch or a branch databricks.yml deploys to, and
+never edits databricks.yml.
+
+With --schema none, init only sets up the branch and .env: the schema and its
+owner stay as the fork copied them. The next plain init still rebuilds a copy
+the service principal owns. A fresh fork of a schema you already owned looks
+like your working branch to that later run, so run --schema clean then.
+init never hands off schema public, which belongs to the database rather than
+to an app.
+
+The project comes from LAKEBASE_PROJECT in .env (projects/<id> or <id>), else
+from LAKEBASE_ENDPOINT, else from the bundle's postgres_branch variable. When
+.env names neither DATABRICKS_CONFIG_PROFILE nor DATABRICKS_HOST, init adds the
+one it authenticated with.
+
+Examples:
+  $ appkit db init
+  $ appkit db init --schema migrate
+  $ appkit db init --session --ttl 1h --schema clean --yes`,
+  )
+  .action(runDbInit);

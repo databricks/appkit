@@ -19,6 +19,9 @@ coverage
 
 .databricks
 
+# `appkit db` holds it while a command changes the migration history
+**/config/database/.appkit-db.lock
+
 .claude/scheduled_tasks.lock
 internal
 

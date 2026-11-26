@@ -1,0 +1,33 @@
+/**
+ * `@databricks/appkit/beta/database-tooling` — CLI-only logic behind `appkit db`.
+ * Loaded lazily by the shared CLI; it may import drizzle-kit, so the runtime
+ * plugin never imports it.
+ *
+ * Beta and internal to the AppKit CLI: it has no semver guarantee, and only
+ * the CLI of the same AppKit release should import it.
+ */
+export { type CheckReport, runCheck } from "./check";
+export {
+  type CleanReport,
+  deleteSessionBranch,
+  previewClean,
+  runClean,
+} from "./clean";
+export { createDbContext, type DbContext } from "./context";
+export {
+  type InitOptions,
+  type InitReport,
+  type InitStart,
+  type KeptCopy,
+  runInit,
+  type SchemaStart,
+} from "./init";
+export {
+  type IntrospectOptions,
+  type IntrospectReport,
+  runIntrospect,
+} from "./introspect";
+export { type MigrateOptions, type MigrateReport, runMigrate } from "./migrate";
+export { runSeed } from "./seed";
+export type { BranchMode } from "./targets";
+export { runVerify, type VerifyOptions, type VerifyReport } from "./verify";

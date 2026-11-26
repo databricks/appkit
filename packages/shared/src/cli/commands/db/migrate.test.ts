@@ -1,0 +1,256 @@
+import path from "node:path";
+
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  type MockInstance,
+  test,
+  vi,
+} from "vitest";
+
+const { createDbContext, runMigrate } = vi.hoisted(() => ({
+  createDbContext: vi.fn(() => ({ root: "/app", env: {} })),
+  runMigrate: vi.fn(),
+}));
+
+// The tooling is an ambient module loaded with a dynamic import; mock it so the
+// command never touches drizzle-kit or a database.
+vi.mock("@databricks/appkit/beta/database-tooling", () => ({
+  createDbContext,
+  runMigrate,
+}));
+
+import { dbCommand } from "./index";
+
+let log: MockInstance;
+let error: MockInstance;
+
+function output(spy: MockInstance): string {
+  return spy.mock.calls.map((call) => call.join(" ")).join("\n");
+}
+
+beforeEach(() => {
+  runMigrate.mockReset();
+  createDbContext.mockClear();
+  log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+  error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  process.exitCode = undefined;
+});
+
+const typesFile = path.join(process.cwd(), "shared/appkit-types/database.d.ts");
+const operationsTypesFile = path.join(
+  process.cwd(),
+  "shared/appkit-types/database-operations.d.ts",
+);
+
+describe("appkit db migrate", () => {
+  test("is registered under the db group", () => {
+    expect(dbCommand.commands.map((command) => command.name())).toContain(
+      "migrate",
+    );
+  });
+
+  test("prints the generated file, the applied tags and the types file", async () => {
+    runMigrate.mockResolvedValue({
+      generated: {
+        tag: "0001_migration",
+        file: path.join(
+          process.cwd(),
+          "config/database/migrations/0001_migration.sql",
+        ),
+        statements: ["a", "b"],
+      },
+      applied: ["0001_migration"],
+      typesFile,
+      operationsTypesFile,
+    });
+
+    await dbCommand.parseAsync(["migrate"], { from: "user" });
+
+    expect(createDbContext).toHaveBeenCalledWith();
+    expect(runMigrate).toHaveBeenCalledWith(
+      { root: "/app", env: {} },
+      // Vitest workers have no TTY, so the run is non-interactive.
+      { interactive: false },
+    );
+    const printed = output(log);
+    expect(printed).toContain(
+      `Generated ${path.join("config/database/migrations/0001_migration.sql")} (2 statements)`,
+    );
+    expect(printed).toContain("Applied 0001_migration to the .env branch");
+    expect(printed).toContain(
+      `Generated ${path.join("shared/appkit-types/database.d.ts")}`,
+    );
+    expect(printed).toContain(
+      `Generated ${path.join("shared/appkit-types/database-operations.d.ts")}`,
+    );
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  test("reports an unchanged schema and an up-to-date branch", async () => {
+    runMigrate.mockResolvedValue({
+      generated: null,
+      applied: [],
+      typesFile,
+      operationsTypesFile,
+    });
+
+    await dbCommand.parseAsync(["migrate"], { from: "user" });
+
+    const printed = output(log);
+    expect(printed).toContain("No schema changes since the last migration");
+    expect(printed).toContain("The .env branch is up to date");
+  });
+
+  test("reports a baseline adopted without running it", async () => {
+    runMigrate.mockResolvedValue({
+      generated: null,
+      applied: ["0001_migration"],
+      adopted: ["0000_baseline"],
+      typesFile,
+      operationsTypesFile,
+    });
+
+    await dbCommand.parseAsync(["migrate"], { from: "user" });
+
+    const printed = output(log);
+    expect(printed).toContain(
+      "Adopted 0000_baseline: its tables already existed, so it was recorded without running",
+    );
+    expect(printed).toContain("Applied 0001_migration to the .env branch");
+  });
+
+  test("warns when the migration breaks instances of the previous release", async () => {
+    const drop = 'ALTER TABLE "app"."notes" DROP COLUMN "body";';
+    runMigrate.mockResolvedValue({
+      generated: {
+        tag: "0002_migration",
+        file: path.join(
+          process.cwd(),
+          "config/database/migrations/0002_migration.sql",
+        ),
+        statements: [drop],
+      },
+      breaking: [drop],
+      applied: ["0002_migration"],
+      typesFile,
+      operationsTypesFile,
+    });
+
+    await dbCommand.parseAsync(["migrate"], { from: "user" });
+
+    expect(output(log)).toContain(
+      `0002_migration breaks instances still running the previous release, which can still serve while the new one migrates on start: ${drop} Deploy code that works with both the old and the new schema first, then this change in a later deploy.`,
+    );
+    expect(output(log)).not.toContain("may fail on rows");
+  });
+
+  test("warns when the migration may fail on rows the deploy branch has", async () => {
+    const unique =
+      'ALTER TABLE "app"."notes" ADD CONSTRAINT "notes_body_unique" UNIQUE("body");';
+    runMigrate.mockResolvedValue({
+      generated: {
+        tag: "0002_migration",
+        file: path.join(
+          process.cwd(),
+          "config/database/migrations/0002_migration.sql",
+        ),
+        statements: [unique],
+      },
+      dataDependent: [unique],
+      applied: ["0002_migration"],
+      typesFile,
+      operationsTypesFile,
+    });
+
+    await dbCommand.parseAsync(["migrate"], { from: "user" });
+
+    expect(output(log)).toContain(
+      `0002_migration may fail on rows the deploy branch has and a new branch does not: ${unique} Test the migration on a branch that has a copy of the deploy branch's data before you deploy.`,
+    );
+    expect(output(log)).not.toContain("breaks instances");
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  test("says why nothing was applied", async () => {
+    runMigrate.mockResolvedValue({
+      generated: null,
+      applied: [],
+      notApplied: "no branch configured — run appkit db init",
+      typesFile,
+      operationsTypesFile,
+    });
+
+    await dbCommand.parseAsync(["migrate"], { from: "user" });
+
+    expect(output(log)).toContain(
+      "Not applied: no branch configured — run appkit db init",
+    );
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  test("when applying fails after a migration was written, it still warns about that migration", async () => {
+    const setNotNull =
+      'ALTER TABLE "app"."notes" ALTER COLUMN "body" SET NOT NULL;';
+    runMigrate.mockRejectedValue(
+      Object.assign(
+        new Error(
+          "Wrote config/database/migrations/0002_migration.sql, but did not apply it: 403 Forbidden",
+        ),
+        {
+          generated: {
+            tag: "0002_migration",
+            file: path.join(
+              process.cwd(),
+              "config/database/migrations/0002_migration.sql",
+            ),
+            statements: [setNotNull],
+          },
+          breaking: [setNotNull],
+          dataDependent: [setNotNull],
+        },
+      ),
+    );
+
+    await dbCommand.parseAsync(["migrate"], { from: "user" });
+
+    expect(output(error)).toContain(
+      "Wrote config/database/migrations/0002_migration.sql, but did not apply it: 403 Forbidden",
+    );
+    expect(output(log)).toContain(
+      `0002_migration breaks instances still running the previous release, which can still serve while the new one migrates on start: ${setNotNull} Deploy code that works with both the old and the new schema first, then this change in a later deploy.`,
+    );
+    expect(output(log)).toContain(
+      `0002_migration may fail on rows the deploy branch has and a new branch does not: ${setNotNull} Test the migration on a branch that has a copy of the deploy branch's data before you deploy.`,
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("prints the error and its root cause, and exits 1", async () => {
+    const driverError = new Error('relation "notes" already exists');
+    const wrapped = new Error("Failed query: CREATE TABLE ...", {
+      cause: driverError,
+    });
+    runMigrate.mockRejectedValue(
+      new Error(
+        "Applying migration 0000_migration failed (SQLSTATE 42P07); none were applied.",
+        { cause: wrapped },
+      ),
+    );
+
+    await dbCommand.parseAsync(["migrate"], { from: "user" });
+
+    const printed = output(error);
+    expect(printed).toContain(
+      "Applying migration 0000_migration failed (SQLSTATE 42P07); none were applied.",
+    );
+    expect(printed).toContain('relation "notes" already exists');
+    expect(process.exitCode).toBe(1);
+  });
+});

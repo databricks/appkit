@@ -1,8 +1,8 @@
-const LAKEBASE_MAX_BRANCH_ID_LENGTH = 63;
-const DEV_PREFIX = "dev-";
-const SESSION_PREFIX = "session-";
-const USER_HASH_HEX_LENGTH = 6;
-const SESSION_ID_LENGTH =
+export const LAKEBASE_MAX_BRANCH_ID_LENGTH = 63;
+export const DEV_PREFIX = "dev-";
+export const SESSION_PREFIX = "session-";
+export const USER_HASH_HEX_LENGTH = 6;
+export const SESSION_ID_LENGTH =
   LAKEBASE_MAX_BRANCH_ID_LENGTH -
   SESSION_PREFIX.length -
   USER_HASH_HEX_LENGTH -

@@ -372,8 +372,10 @@ and `clean --delete-branch` take none. A second `appkit db` command that needs t
 says who holds it. `init` holds one lock for its whole run, so no other command that takes the lock runs between its
 clean and its migrate. `init --schema none` changes no migration history and takes no lock.
 
-A command killed by a signal leaves the file behind. The next command fails the same way and says whether the
-holder's pid still runs on this machine. AppKit never takes over or deletes a lock it does not hold. Once no
+A command releases the lock when it finishes or exits, and on SIGINT or SIGTERM when nothing else in the process handles
+the signal. When another handler keeps the process running, the command keeps the lock until it exits. A command that
+ends any other way, such as SIGKILL, can leave the file behind. The next command fails the same way, reports the lock as
+stale, and says whether the holder's pid still runs on this machine. AppKit never takes over or deletes a lock it does not hold. Once no
 `appkit db` command runs in the checkout, the developer deletes the file and reruns the command. The template's
 `.gitignore` lists the file.
 
@@ -566,6 +568,12 @@ Introspect keeps the `.private()` an existing `schema.ts` declares, because the 
 columns from its reads by default. Every other column it writes is public. When `schema.ts` does not load, introspect
 refuses before it reads the branch, because it could not keep the columns the file marks private.
 
+Before it replaces `schema.ts`, introspect copies the old file to `schema.ts.bak`. It writes the backup only when the
+new file differs, so a second run with the same catalog keeps the first backup. With history, introspect refuses to
+write a migration that drops an object the branch still has but `schema.ts` cannot express, such as a skipped column.
+It would record that migration as applied, and the deployed app would run the drop on start. The refusal names each
+object, says why introspect left it out, and says the deployed app would drop it.
+
 ### Flag Strategy
 
 | Flag | Default | Introduced in | Turning it off |
@@ -603,7 +611,8 @@ scaffold to deploy in six steps:
    committed migrations, so the new branch holds no copied app rows. With `--schema none`, init stops after it writes
    `.env`, and a later plain init still rebuilds.
 3. The developer declares a table in `schema.ts` and runs `appkit db migrate`. It writes `0000_migration.sql`,
-   regenerates `shared/appkit-types/database.d.ts`, and applies the migration to the dev branch.
+   regenerates `shared/appkit-types/database.d.ts` and `database-operations.d.ts`, and applies the migration to the
+   dev branch.
 4. The developer adds authorized operations in `server/database/routes/` and uses them in the UI, as design 002
    describes. Changes to storage still require `appkit db migrate`, and editing an operation never applies DDL.
 5. The developer commits `config/database/`, the operations with their generated contracts, and the UI changes. After
@@ -749,6 +758,9 @@ the `applied`, `adopted`, `edited` and `unknown` (the `ahead` rows) counts, `loc
   is missing, init writes its own keys and the profile or host it authenticated with. It never copies `.env.example`,
   whose `DATABRICKS_HOST` is a placeholder. It replaces a `PGSSLMODE` of `prefer` or `disable` with `require` and says
   so, because `prefer` does not verify the server's certificate.
+- **`appkit db` connects only with TLS that verifies.** Of the modes the Lakebase pool takes, only `PGSSLMODE=require`
+  verifies the server's certificate, and an unset `PGSSLMODE` means `require`. The CLI refuses `prefer`, `disable` and
+  `allow`, says why, and does not connect.
 - **Session branches are bound to a user.** With the user hash in the name, a copied `.env` fails the guard for
   everyone but its creator.
 

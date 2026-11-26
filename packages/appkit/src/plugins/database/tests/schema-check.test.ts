@@ -2,7 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 
 import type { DataPath } from "../../../database/runtime";
 import { defineSchema, fk, id, text } from "../../../database/schema-builder";
-import { assertSchemaMatchesDatabase } from "../schema-check";
+import { assertSchemaMatchesDatabase, diagnoseSchema } from "../schema-check";
 
 const schema = defineSchema(
   ({ table }) => {
@@ -224,7 +224,7 @@ describe("assertSchemaMatchesDatabase", () => {
       await expect(
         assertSchemaMatchesDatabase(missingColumn(), schema, OFF),
       ).rejects.toThrow(
-        "Create them, or commit migrations under config/database/migrations and set APPKIT_DB_MIGRATE_ON_START=true in app.yaml so the deployed app applies them on start.",
+        "Run `npx appkit db migrate` locally, or commit migrations under config/database/migrations and set APPKIT_DB_MIGRATE_ON_START=true in app.yaml so the deployed app applies them on start.",
       );
     });
 
@@ -250,5 +250,65 @@ describe("assertSchemaMatchesDatabase", () => {
       );
       expect(error.message).not.toContain("set APPKIT_DB_MIGRATE_ON_START");
     });
+  });
+});
+
+describe("diagnoseSchema", () => {
+  test("returns every problem without throwing; the assert reports the same ones", async () => {
+    const { path } = catalog(
+      { boards: ["id", "title"], notes: ["id", "body"] },
+      { boards: "v" },
+    );
+
+    const { problems, advice } = await diagnoseSchema(path, schema);
+
+    expect(problems).toEqual([
+      "table public.boards is a view, not a table",
+      "table public.notes is missing columns board_id, author_email",
+    ]);
+    expect(advice).toBeNull();
+    await expect(
+      assertSchemaMatchesDatabase(path, schema, OFF),
+    ).rejects.toThrow(
+      `the declared schema does not match the database: ${problems.join("; ")}.`,
+    );
+  });
+
+  test("names tables left in public as the cause, the same advice the assert gives", async () => {
+    const appSchema = defineSchema(({ table }) => ({
+      notes: table("notes", { id: id() }),
+    }));
+    const { path } = catalog({}, {}, ["notes"]);
+
+    const { problems, advice } = await diagnoseSchema(path, appSchema);
+
+    expect(problems).toEqual(["table app.notes does not exist"]);
+    expect(advice).toBe(
+      `Schema public has that table, but defineSchema() puts tables in schema "app" unless told otherwise. ` +
+        'To keep them in public, pass { schemaName: "public" } as the second argument of defineSchema() in config/database/schema.ts.',
+    );
+    await expect(
+      assertSchemaMatchesDatabase(path, appSchema, OFF),
+    ).rejects.toThrow(advice as string);
+  });
+
+  test("returns no problems for a matching database or an empty schema", async () => {
+    const { path } = catalog({
+      boards: ["id", "title"],
+      notes: ["id", "board_id", "author_email", "body"],
+    });
+    expect(await diagnoseSchema(path, schema)).toEqual({
+      problems: [],
+      advice: null,
+    });
+
+    const empty = catalog({});
+    expect(
+      await diagnoseSchema(
+        empty.path,
+        defineSchema(() => ({})),
+      ),
+    ).toEqual({ problems: [], advice: null });
+    expect(empty.raw).not.toHaveBeenCalled();
   });
 });
