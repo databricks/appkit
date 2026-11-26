@@ -1,4 +1,5 @@
 import { FileQuestionMark, TriangleAlert } from "lucide-react";
+import type { ReactElement } from "react";
 
 import { Button } from "./ui/button";
 import {
@@ -17,6 +18,13 @@ export interface ErrorPageProps {
    * Router's 404 (`{ status, statusText, data }`), or any other value.
    */
   error: unknown;
+  /**
+   * The Back to home link, rendered as one of the page's buttons. Pass your
+   * router's link so it stays in the app and under its basename, e.g.
+   * `<Link to="/">Back to home</Link>`. Defaults to `<a href="/">`, a full
+   * page load of the app's root.
+   */
+  homeLink?: ReactElement;
 }
 
 interface RouteErrorResponse {
@@ -37,6 +45,15 @@ function isRouteErrorResponse(error: unknown): error is RouteErrorResponse {
   );
 }
 
+// Runs in production too: a getter that throws (e.g. `status`) makes it a plain error.
+function isNotFound(error: unknown): boolean {
+  try {
+    return isRouteErrorResponse(error) && error.status === 404;
+  } catch {
+    return false;
+  }
+}
+
 function details(error: unknown): string {
   try {
     if (isRouteErrorResponse(error)) {
@@ -50,8 +67,8 @@ function details(error: unknown): string {
     }
     return String(error);
   } catch {
-    // String() throws for a value without toString (Object.create(null)): the page must still render.
-    return Object.prototype.toString.call(error);
+    // String() throws for a value without toString (Object.create(null)), and so can a getter on it.
+    return "The error can't be shown as text.";
   }
 }
 
@@ -64,8 +81,11 @@ function details(error: unknown): string {
  * Works with any router: pass React Router's `useRouteError()`, or the `error`
  * TanStack Router gives an `errorComponent`.
  */
-export function ErrorPage({ error }: ErrorPageProps) {
-  const notFound = isRouteErrorResponse(error) && error.status === 404;
+export function ErrorPage({
+  error,
+  homeLink = <a href="/">Back to home</a>,
+}: ErrorPageProps) {
+  const notFound = isNotFound(error);
   return (
     <Empty>
       <EmptyHeader>
@@ -87,9 +107,15 @@ export function ErrorPage({ error }: ErrorPageProps) {
         </pre>
       )}
       <EmptyContent className="flex-row justify-center">
-        <Button onClick={() => window.location.reload()}>Reload</Button>
-        <Button variant="outline" asChild>
-          <a href="/">Back to home</a>
+        {/* A reload can recover from a thrown error; on a 404 it repeats the miss. */}
+        <Button
+          variant={notFound ? "outline" : "default"}
+          onClick={() => window.location.reload()}
+        >
+          Reload
+        </Button>
+        <Button variant={notFound ? "default" : "outline"} asChild>
+          {homeLink}
         </Button>
       </EmptyContent>
     </Empty>

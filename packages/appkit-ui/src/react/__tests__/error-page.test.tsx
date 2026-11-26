@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import {
   createMemoryRouter,
+  Link,
   Outlet,
   type RouteObject,
   RouterProvider,
@@ -15,6 +16,16 @@ function RouteErrorPage() {
   return <ErrorPage error={useRouteError()} />;
 }
 
+// Wired like the design plugin's router (basename /design).
+function RouteErrorPageWithHome() {
+  return (
+    <ErrorPage
+      error={useRouteError()}
+      homeLink={<Link to="/">Back to home</Link>}
+    />
+  );
+}
+
 function Orders(): never {
   throw new Error("orders failed to render");
 }
@@ -26,16 +37,26 @@ const pages: RouteObject[] = [
 
 function renderApp(
   path: string,
-  { children = pages, withDefault = true } = {},
+  {
+    children = pages,
+    withDefault = true,
+    errorElement = <RouteErrorPage />,
+    basename = undefined as string | undefined,
+  } = {},
 ) {
   const layout: RouteObject = { element: <Outlet />, children };
-  if (withDefault) layout.errorElement = <RouteErrorPage />;
+  if (withDefault) layout.errorElement = errorElement;
   render(
     <RouterProvider
-      router={createMemoryRouter([layout], { initialEntries: [path] })}
+      router={createMemoryRouter([layout], {
+        initialEntries: [path],
+        basename,
+      })}
     />,
   );
 }
+
+const isPrimary = (el: HTMLElement) => el.className.includes("bg-primary");
 
 beforeEach(() => {
   // React and React Router log every caught route error.
@@ -63,10 +84,13 @@ describe("ErrorPage as the default route error element", () => {
     expect(await screen.findByText("Something went wrong")).toBeTruthy();
     expect(screen.queryByText(/Unexpected Application Error/)).toBeNull();
     expect(screen.queryByText(/Hey developer/)).toBeNull();
-    expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy();
-    expect(
-      screen.getByRole("link", { name: "Back to home" }).getAttribute("href"),
-    ).toBe("/");
+    // A reload can recover from a thrown error: it is the primary action.
+    expect(isPrimary(screen.getByRole("button", { name: "Reload" }))).toBe(
+      true,
+    );
+    const home = screen.getByRole("link", { name: "Back to home" });
+    expect(home.getAttribute("href")).toBe("/");
+    expect(isPrimary(home)).toBe(false);
   });
 
   test("a 404 route error response renders it as page not found", async () => {
@@ -74,7 +98,13 @@ describe("ErrorPage as the default route error element", () => {
     expect(await screen.findByText("Page not found")).toBeTruthy();
     expect(screen.queryByText(/Unexpected Application Error/)).toBeNull();
     expect(screen.queryByText("Something went wrong")).toBeNull();
-    expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy();
+    // Reloading repeats the miss: Back to home is the primary action.
+    expect(isPrimary(screen.getByRole("button", { name: "Reload" }))).toBe(
+      false,
+    );
+    expect(isPrimary(screen.getByRole("link", { name: "Back to home" }))).toBe(
+      true,
+    );
     // Development: the status and React Router's message.
     expect(screen.getByText(/404 Not Found/).textContent).toMatch(
       /No route matches URL "\/no-such-page"/,
@@ -107,6 +137,17 @@ describe("ErrorPage as the default route error element", () => {
     expect(document.querySelector("pre")).toBeNull();
   });
 
+  test("a router link as homeLink keeps the basename, e.g. /design", async () => {
+    renderApp("/design/no-such-page", {
+      basename: "/design",
+      errorElement: <RouteErrorPageWithHome />,
+    });
+    expect(await screen.findByText("Page not found")).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: "Back to home" }).getAttribute("href"),
+    ).toBe("/design");
+  });
+
   test("an app's own errorElement wins over the default", async () => {
     renderApp("/orders", {
       children: [
@@ -125,16 +166,32 @@ describe("ErrorPage", () => {
     expect(screen.getByText("plain string")).toBeTruthy();
   });
 
-  // String() throws for it: the page must not crash into an outer boundary.
-  test.each([true, false])(
-    "renders a thrown value without toString (DEV: %s)",
-    (dev) => {
+  // Each one throws while the page reads it: the page must still render.
+  const hostile = {
+    "a value without toString": () => Object.create(null),
+    "one whose Symbol.toStringTag getter throws too": () =>
+      Object.create(null, {
+        [Symbol.toStringTag]: {
+          get() {
+            throw new Error("toStringTag");
+          },
+        },
+      }),
+    "one whose status getter throws": () => ({
+      get status() {
+        throw new Error("status");
+      },
+      statusText: "Not Found",
+    }),
+  };
+  describe.each([true, false])("DEV: %s", (dev) => {
+    test.each(Object.entries(hostile))("renders %s", (_, make) => {
       vi.stubEnv("DEV", dev);
-      render(<ErrorPage error={Object.create(null)} />);
+      render(<ErrorPage error={make()} />);
       expect(screen.getByText("Something went wrong")).toBeTruthy();
       expect(document.querySelector("pre")?.textContent ?? null).toBe(
-        dev ? "[object Object]" : null,
+        dev ? "The error can't be shown as text." : null,
       );
-    },
-  );
+    });
+  });
 });
