@@ -127,6 +127,22 @@ The analytics plugin exposes these endpoints (mounted under `/api/analytics`):
 - `format: "JSON"` (default) returns JSON rows
 - `format: "ARROW"` returns an Arrow "statement_id" payload over SSE, then the client fetches binary Arrow from `/api/analytics/arrow-result/:jobId`
 
+## Caching
+
+Query and metric results are cached for 1 hour by default. Set `cache.ttl`, in seconds, to change how long a result is served:
+
+```ts
+analytics({ cache: { ttl: 300 } }); // 5 minutes
+```
+
+Set `cache.enabled` to `false` to send every request to the warehouse:
+
+```ts
+analytics({ cache: { enabled: false } });
+```
+
+The global `createApp({ cache })` still decides where entries are stored (Lakebase persistent cache when healthy, otherwise in-memory) and is the global on/off switch. See [Caching](./caching.md).
+
 ## Metric views
 
 `POST /api/analytics/metric/:key` measures a [Unity Catalog Metric View](https://docs.databricks.com/en/metric-views/index.html) that you declared in `config/metric-views/definitions.json`. Instead of writing SQL, the caller sends a structured request — which measures to aggregate, which dimensions to group by, and an optional filter — and the plugin builds and runs the `SELECT MEASURE(...) ... GROUP BY ALL` for you against the view.

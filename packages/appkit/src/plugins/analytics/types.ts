@@ -16,6 +16,25 @@ export type {
 export interface IAnalyticsConfig extends BasePluginConfig {
   timeout?: number;
   /**
+   * Caching of query and metric results (`/query` JSON and ARROW_STREAM
+   * INLINE, and `/metric`). Where entries are stored, and the global on/off
+   * switch, stay with `createApp({ cache })`.
+   */
+  cache?: {
+    /**
+     * Set to `false` to stop caching analytics results.
+     *
+     * @default true
+     */
+    enabled?: boolean;
+    /**
+     * How long a cached result is served, in seconds.
+     *
+     * @default 3600
+     */
+    ttl?: number;
+  };
+  /**
    * Per-column display metadata. The metric route stamps the slice scoped to a
    * request's measures/dimensions into the SSE `result` message.
    */

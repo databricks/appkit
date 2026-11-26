@@ -1176,6 +1176,81 @@ describe("analytics metric route", () => {
     });
   });
 
+  describe("cache config", () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    });
+
+    // Sends the same metric request once per offset (seconds after the first)
+    // and returns the warehouse call count observed after each one.
+    async function warehouseCallsAt(
+      pluginConfig: IAnalyticsConfig,
+      offsetsSeconds: number[],
+    ): Promise<number[]> {
+      const plugin = pluginForDir(
+        pluginConfig,
+        registryDir({
+          revenue: {
+            key: "revenue",
+            source: "cat.sch.revenue_metrics",
+            lane: "sp",
+          },
+        }),
+      );
+      const executeMock = vi.fn().mockResolvedValue({
+        result: { data: [{ arr: 1 }] },
+      });
+      (plugin as any).SQLClient.executeStatement = executeMock;
+      const { router, getHandler } = createMockRouter();
+      plugin.injectRoutes(router);
+      const handler = getHandler("POST", "/metric/:key");
+
+      const start = Date.now();
+      const counts: number[] = [];
+      for (const offset of offsetsSeconds) {
+        vi.setSystemTime(start + offset * 1000);
+        await handler(
+          createMockRequest({
+            params: { key: "revenue" },
+            body: { measures: ["arr"] },
+          }),
+          createMockResponse(),
+        );
+        counts.push(executeMock.mock.calls.length);
+      }
+      return counts;
+    }
+
+    test("a configured ttl expires cached results after that many seconds", async () => {
+      const counts = await warehouseCallsAt(
+        { ...config, cache: { ttl: 300 } },
+        [0, 299, 301],
+      );
+      expect(counts).toEqual([1, 1, 2]);
+    });
+
+    test("without cache config, results stay cached for one hour", async () => {
+      const counts = await warehouseCallsAt(config, [0, 3599, 3601]);
+      expect(counts).toEqual([1, 1, 2]);
+    });
+
+    test("enabled false sends every request to the warehouse", async () => {
+      const getOrExecute = vi.spyOn(testCache.current, "getOrExecute");
+      const counts = await warehouseCallsAt(
+        { ...config, cache: { enabled: false } },
+        [0, 0],
+      );
+      expect(counts).toEqual([1, 2]);
+      expect(getOrExecute).not.toHaveBeenCalled();
+    });
+  });
+
   // ── 503-vs-404 latching + dormancy.
   describe("registry latching and dormancy", () => {
     test("unknown key against a valid registry → 404 (generic body)", async () => {

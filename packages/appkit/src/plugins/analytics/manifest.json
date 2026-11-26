@@ -44,6 +44,22 @@
           "default": 30000,
           "description": "Query execution timeout in milliseconds"
         },
+        "cache": {
+          "type": "object",
+          "description": "Caching of query and metric results. Storage and the global on/off switch stay with createApp({ cache }).",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true,
+              "description": "Set to false to stop caching analytics results"
+            },
+            "ttl": {
+              "type": "number",
+              "default": 3600,
+              "description": "How long a cached result is served, in seconds"
+            }
+          }
+        },
         "warehouseStartupTimeoutMs": {
           "type": "number",
           "default": 300000,
