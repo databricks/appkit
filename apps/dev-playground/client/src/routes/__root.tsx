@@ -122,7 +122,13 @@ function RootComponent() {
         onCatch={(error) => {
           console.error(error);
         }}
-        errorComponent={({ error }) => <ErrorPage error={error} />}
+        errorComponent={({ error }) => (
+          // The router's link: going home keeps the app's providers (no page load).
+          <ErrorPage
+            error={error}
+            homeLink={<Link to="/">Back to home</Link>}
+          />
+        )}
       >
         <Outlet />
       </CatchBoundary>
