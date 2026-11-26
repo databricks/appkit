@@ -18,11 +18,11 @@ importers:
   .:
     dependencies:
       '@databricks/appkit':
-        specifier: 0.104.1
-        version: 0.104.1(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)(@types/node@22.20.5)(@types/pg@8.15.6)(esbuild@0.25.12)(tsx@4.20.6)(vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@22.20.5)(rolldown-vite@7.1.14(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)(@types/node@22.20.5)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.9.1)))
+        specifier: 0.106.0
+        version: 0.106.0(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)(@types/node@22.20.5)(@types/pg@8.15.6)(esbuild@0.25.12)(tsx@4.20.6)(vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@22.20.5)(rolldown-vite@7.1.14(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)(@types/node@22.20.5)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.9.1)))
       '@databricks/appkit-ui':
-        specifier: 0.104.1
-        version: 0.104.1(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        specifier: 0.106.0
+        version: 0.106.0(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       clsx:
         specifier: 2.1.1
         version: 2.1.1
@@ -285,8 +285,8 @@ packages:
   '@clack/prompts@1.0.1':
     resolution: {integrity: sha512-/42G73JkuYdyWZ6m8d/CJtBrGl1Hegyc7Fy78m5Ob+jF85TOUmLR5XLce/U3LxYAw0kJ8CT5aI99RIvPHcGp/Q==}
 
-  '@databricks/appkit-ui@0.104.1':
-    resolution: {integrity: sha512-xYrRSXtPxPPvMYam9N3rHrpxxh7PwOLNPD6oOgfkaPMbRFtab46vKZ8uYsGXJ+oqLjAT9NSLpEEGkwANdWD/6A==}
+  '@databricks/appkit-ui@0.106.0':
+    resolution: {integrity: sha512-w3n052i7o5yozVzGzMXhiB9gywgOyLTVm+9r3eCtvPMxyEnyTYIGxHSY9/QaTtZwsEVTm8v3K/Mqgw2meme0rw==}
     hasBin: true
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
@@ -296,8 +296,8 @@ packages:
       - '@databricks/sdk-statementexecution'
       - '@databricks/sdk-vectorsearch'
 
-  '@databricks/appkit@0.104.1':
-    resolution: {integrity: sha512-d/OqSkpBWRTTf0zQEQwRQ+d2j+Nh+RgiNEdrFCU1egtC64ffr9v6OKo3kWHcm6EWo/gct7Y1qZekLBA24uMvQg==}
+  '@databricks/appkit@0.106.0':
+    resolution: {integrity: sha512-WO9uMazVGxzQ5PjdFrwXhHOLgMQeP5G26+eIoJxrUazlzTaTGGzG1iab89xRb3M+gHQBzWlfiZffgOrkg6C1uw==}
     hasBin: true
     peerDependencies:
       '@mlflow/core': 0.4.0
@@ -4681,7 +4681,7 @@ snapshots:
       picocolors: 1.1.1
       sisteransi: 1.0.5
 
-  '@databricks/appkit-ui@0.104.1(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
+  '@databricks/appkit-ui@0.106.0(@types/react-dom@19.2.2(@types/react@19.2.2))(@types/react@19.2.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
     dependencies:
       '@ast-grep/napi': 0.37.0
       '@clack/prompts': 1.0.1
@@ -4763,7 +4763,7 @@ snapshots:
       - '@types/react'
       - '@types/react-dom'
 
-  '@databricks/appkit@0.104.1(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)(@types/node@22.20.5)(@types/pg@8.15.6)(esbuild@0.25.12)(tsx@4.20.6)(vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@22.20.5)(rolldown-vite@7.1.14(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)(@types/node@22.20.5)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.9.1)))':
+  '@databricks/appkit@0.106.0(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)(@types/node@22.20.5)(@types/pg@8.15.6)(esbuild@0.25.12)(tsx@4.20.6)(vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@22.20.5)(rolldown-vite@7.1.14(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)(@types/node@22.20.5)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.20.6)(yaml@2.9.1)))':
     dependencies:
       '@ast-grep/napi': 0.37.0
       '@clack/prompts': 1.0.1
