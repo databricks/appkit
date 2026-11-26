@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   createDrizzleDb: vi.fn(),
   createDrizzleDataPath: vi.fn(),
   assertSchemaMatchesDatabase: vi.fn(),
+  decideMigrateOnStart: vi.fn(() => ({ kind: "off" })),
+  migrateOnStart: vi.fn(async () => undefined),
 }));
 vi.mock("../../../connectors/lakebase", () => ({
   initializeLakebasePool: mocks.initializeLakebasePool,
@@ -20,6 +22,10 @@ vi.mock("../../../database/runtime/engine/drizzle-data-path", () => ({
 // The catalog comparison has its own suite; these fakes answer no catalog.
 vi.mock("../schema-check", () => ({
   assertSchemaMatchesDatabase: mocks.assertSchemaMatchesDatabase,
+}));
+vi.mock("../migrate-on-start", () => ({
+  decideMigrateOnStart: mocks.decideMigrateOnStart,
+  migrateOnStart: mocks.migrateOnStart,
 }));
 
 import {
@@ -93,7 +99,10 @@ function arrange(path = fakePath()) {
   return { pool, db, path, execute };
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.decideMigrateOnStart.mockReturnValue({ kind: "off" });
+});
 afterEach(() => vi.restoreAllMocks());
 
 describe("createDatabaseState", () => {
@@ -211,7 +220,7 @@ describe("createDatabaseState", () => {
     const drift = new DatabasePluginError(
       "SETUP_FAILED",
       "setup",
-      "Database setup failed: table public.tags does not exist",
+      "Database setup failed: table app.tags does not exist",
     );
     mocks.assertSchemaMatchesDatabase.mockRejectedValueOnce(drift);
 
@@ -223,9 +232,146 @@ describe("createDatabaseState", () => {
     expect(mocks.assertSchemaMatchesDatabase).toHaveBeenCalledWith(
       path,
       schema,
+      { kind: "off" },
     );
     expect(error).toBe(drift);
-    expect(error.message).toContain("table public.tags does not exist");
+    expect(error.message).toContain("table app.tags does not exist");
+    expect(pool.end).toHaveBeenCalledTimes(1);
+  });
+
+  test("a deployed app applies migrations after the pool opens, before readiness and the catalog check", async () => {
+    const order: string[] = [];
+    const path = fakePath({
+      raw: vi.fn(async () => {
+        order.push("select 1");
+        return [];
+      }) as unknown as DataPath["raw"],
+    });
+    const { pool, execute } = arrange(path);
+    mocks.initializeLakebasePool.mockImplementationOnce(async () => {
+      order.push("pool");
+      return pool;
+    });
+    mocks.decideMigrateOnStart.mockReturnValue({ kind: "migrate" });
+    mocks.migrateOnStart.mockImplementationOnce(async () => {
+      order.push("migrate");
+    });
+    mocks.assertSchemaMatchesDatabase.mockImplementationOnce(async () => {
+      order.push("catalog");
+    });
+
+    await createDatabaseState(schema, execute);
+
+    expect(order).toEqual(["pool", "migrate", "select 1", "catalog"]);
+    expect(mocks.migrateOnStart).toHaveBeenCalledWith(pool, schema);
+    expect(mocks.assertSchemaMatchesDatabase).toHaveBeenCalledWith(
+      path,
+      schema,
+      { kind: "migrate" },
+    );
+  });
+
+  test("local runs never call the migrator, and say nothing", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { path, execute } = arrange();
+    mocks.decideMigrateOnStart.mockReturnValue({ kind: "off" });
+
+    await createDatabaseState(schema, execute);
+
+    expect(mocks.migrateOnStart).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+    expect(mocks.assertSchemaMatchesDatabase).toHaveBeenCalledWith(
+      path,
+      schema,
+      { kind: "off" },
+    );
+  });
+
+  test("a flag other than true warns once that it was ignored, and migrates nothing", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { execute } = arrange();
+    const decision = { kind: "off", ignoredFlagValue: "1" } as const;
+    mocks.decideMigrateOnStart.mockReturnValue(decision);
+
+    await createDatabaseState(schema, execute);
+
+    expect(mocks.migrateOnStart).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls.flat().map(String).join(" ")).toContain(
+      'APPKIT_DB_MIGRATE_ON_START is "1", and only "true" turns migrate on start on, so this process ignored it and did not migrate.',
+    );
+  });
+
+  test("a start the flag asks to migrate but that is not the deployed app warns once with the reason, and migrates nothing", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { path, execute } = arrange();
+    const decision = {
+      kind: "skipped",
+      reason: `PGUSER is "jane@example.com", not the app's client id in DATABRICKS_CLIENT_ID.`,
+    } as const;
+    mocks.decideMigrateOnStart.mockReturnValue(decision);
+
+    await createDatabaseState(schema, execute);
+
+    expect(mocks.migrateOnStart).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls.flat().map(String).join(" ")).toContain(
+      "APPKIT_DB_MIGRATE_ON_START is true, but this process is not the deployed app, so it did not migrate. " +
+        `PGUSER is "jane@example.com", not the app's client id in DATABRICKS_CLIENT_ID. ` +
+        "Databricks Apps sets DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET and PGUSER for the deployed app.",
+    );
+    expect(mocks.assertSchemaMatchesDatabase).toHaveBeenCalledWith(
+      path,
+      schema,
+      decision,
+    );
+  });
+
+  test("a migration failure keeps its reason, ends the pool and publishes nothing", async () => {
+    const { pool, path, execute } = arrange();
+    const errorLog = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    mocks.decideMigrateOnStart.mockReturnValue({ kind: "migrate" });
+    const failure = new DatabasePluginError(
+      "SETUP_FAILED",
+      "setup",
+      "Database setup failed: Applying migration 0001_migration failed (SQLSTATE 42501); none were applied.",
+    );
+    mocks.migrateOnStart.mockRejectedValueOnce(failure);
+
+    const error = await createDatabaseState(schema, execute).catch(
+      (caught) => caught,
+    );
+
+    expect(error).toBe(failure);
+    expect(errorLog.mock.calls.flat().map(String).join(" ")).toContain(
+      "0001_migration failed (SQLSTATE 42501)",
+    );
+    expect(pool.end).toHaveBeenCalledTimes(1);
+    expect(path.raw).not.toHaveBeenCalled();
+    expect(mocks.assertSchemaMatchesDatabase).not.toHaveBeenCalled();
+  });
+
+  test("an unexpected migrator error is sanitized like any driver error", async () => {
+    const { pool, execute } = arrange();
+    const errorLog = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    mocks.decideMigrateOnStart.mockReturnValue({ kind: "migrate" });
+    mocks.migrateOnStart.mockRejectedValueOnce(
+      new Error("secret connection string"),
+    );
+
+    const error = await createDatabaseState(schema, execute).catch(
+      (caught) => caught,
+    );
+
+    expect(error).toMatchObject({ category: "SETUP_FAILED", phase: "setup" });
+    expect(error.message).toBe("Database setup failed");
+    expect(errorLog.mock.calls.flat().map(String).join(" ")).not.toContain(
+      "secret connection string",
+    );
     expect(pool.end).toHaveBeenCalledTimes(1);
   });
 

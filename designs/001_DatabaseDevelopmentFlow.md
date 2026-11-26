@@ -225,9 +225,12 @@ uses your dev branch. `--session` and `--dev` switch between them.
 The plugin applies migrations in `setup()`, after the pool opens and before the schema check and `server.start()`. It
 runs only when `APPKIT_DB_MIGRATE_ON_START=true` and the process connects as the app's own service principal. Apps sets
 `DATABRICKS_CLIENT_ID` and `DATABRICKS_CLIENT_SECRET` for the app, and sets `PGUSER` to that client ID for every app
-with a bound database. So the plugin migrates only when `PGUSER` is set and equals `DATABRICKS_CLIENT_ID`. An unset
+with a bound database. So the plugin migrates only when `DATABRICKS_CLIENT_ID` and `DATABRICKS_CLIENT_SECRET` are set
+and `PGUSER` is set and equals `DATABRICKS_CLIENT_ID`. An unset
 `PGUSER` does not qualify, though the pool would then connect with the client ID. When the flag is set and the process
-does not qualify, the plugin logs why and does not migrate. The template's `app.yaml.tmpl` writes the flag for apps that
+does not qualify, the plugin logs why and does not migrate. A process that qualifies also needs `LAKEBASE_ENDPOINT` set
+to the endpoint's full resource name, `projects/<p>/branches/<b>/endpoints/<e>`, because the plugin reads the branch
+from it. When it is unset or has another form, startup fails and names the variable. The template's `app.yaml.tmpl` writes the flag for apps that
 select the plugin, which `apps init` offers only after the reveal. Until then, an app that adds the plugin by hand adds
 the flag to `app.yaml` too. `.env` never carries it.
 
@@ -240,7 +243,8 @@ deploy branch. This gap closes before the reveal.
 
 A deployed app bound to a branch with the exact shape of a dev or session branch, `dev-<user>-<hash6>` or
 `session-<hash6>-<id>`, refuses to start and names the branch. Only a developer migrates those branches. A deploy
-branch named `session-store` does not have that shape, so it migrates.
+branch named `session-store` does not have that shape, so it migrates. The refusal runs inside migrate on start, so it
+covers only a start that migrates. An app without the flag, or a process that does not qualify, starts on such a branch.
 
 Rejected alternatives:
 
@@ -343,11 +347,11 @@ Two limits are different and easy to confuse:
   and its transaction end.
 
 A killed instance is not cancelled for certain either. The migrating session also sets
-`client_connection_check_interval`, which Lakebase allows and sets to 60 seconds server-wide, so Postgres cancels a
-statement whose client went away. That is best effort. Postgres sees a closed connection only when the server's kernel
-reports it, and a host that vanished without closing the socket may not be seen until TCP keepalive gives up. When the
-server rejects the setting, the migrator logs a warning and goes on. Until Postgres notices, the killed instance's
-statement keeps running and holds its locks, the advisory lock included.
+`client_connection_check_interval` to 10 seconds, so Postgres cancels a statement whose client went away. Lakebase
+allows the setting and sets it to 60 seconds server-wide. That is best effort. Postgres sees a closed connection only
+when the server's kernel reports it, and a host that vanished without closing the socket may not be seen until TCP
+keepalive gives up. When the server rejects the setting, the migrator logs a warning and goes on. Until Postgres
+notices, the killed instance's statement keeps running and holds its locks, the advisory lock included.
 
 For a stuck start, the lock-wait log names the holder's pid. `select pg_cancel_backend(<pid>)` cancels its statement.
 `select pg_terminate_backend(<pid>)` ends its session, which releases the advisory lock. A role with the
@@ -390,12 +394,14 @@ again under it when an entry is pending and none is stranded:
 | `current` | Every entry recorded with its hash. | Nothing. |
 | `stranded` | An entry older than the last recorded one, not recorded. | Fail. Nothing changes. |
 | `edited` | A recorded entry whose file hash changed, with either line ending. | Fail. The CLI only warns. |
+| `ambiguous` | Entries and rows at one `when` that no exact hash pairs, other than one of each. | Fail. Nothing changes. |
 | `ahead` | A recorded row with no committed entry, for example after a code rollback. | Warn, or fail when an entry is also `pending`. |
 | `partial-baseline` | `0000_baseline` tables exist only in part. | Fail. Nothing changes. |
 
 Committed entries and recorded rows that share a `when` match one to one, exact hashes first. A committed entry left
-with no row is `pending` or `stranded`, never `edited`. So a migration that never ran cannot hide behind an edited
-one with the same timestamp.
+with no row is `pending` or `stranded`, never `edited`. So a migration that never ran cannot hide behind an edited one
+with the same timestamp. One entry and one row left at a `when` are `edited`. Any other remainder is `ambiguous`,
+because the migrator cannot tell which entries ran.
 
 Before it reads the rows, startup checks the journal relation itself. It refuses a `__drizzle_migrations` in the app
 schema that is not an ordinary table. It records only into a journal it trusts, one owned by its own role, by a role it
@@ -566,7 +572,7 @@ refuses before it reads the branch, because it could not keep the columns the fi
 |---|---|---|---|
 | `APPKIT_DB_MIGRATE_ON_START` (app env) | Off. #675's `template/app.yaml.tmpl` renders `true` for apps that select the plugin, which `apps init` does not offer until the reveal. | #654 | The app never migrates. The startup schema check still runs. |
 | `hidden` in the plugin manifest | `true` | Already on `main` | `apps init` does not offer the plugin. #675 keeps `hidden: true` and leaves the plugin out of `template/appkit.plugins.json`. `beta.ts` exports `database` by hand, because the generated barrel skips hidden plugins. The reveal removes the flag and moves the `database` export into the generated barrel. |
-| `appkit db` hidden from `--help` | Hidden | #666 | Discoverability only. The commands are local tools and change only branches `init` created. #675 keeps it hidden. The reveal shows it. |
+| `appkit db` hidden from `--help` | Hidden | #666 | Discoverability only. The commands are local tools and change only your own dev branch and this checkout's session branch, never the default, a protected or the deploy branch. #675 keeps it hidden. The reveal shows it. |
 
 Not flagged:
 

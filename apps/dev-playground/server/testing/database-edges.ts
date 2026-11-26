@@ -89,6 +89,24 @@ export function memoryDatabase(schema: Schema): MemoryDatabase {
   };
 
   /** One data path over the rows `store()` returns when it runs. */
+  const schemaAccessRows = () => [
+    { owner: "app", current_user: "app", usage: true },
+  ];
+  const catalogColumnRows = () =>
+    tables.flatMap((table) =>
+      Object.values(table.$columns).map((meta) => ({
+        table_name: table.$name,
+        column_name: meta.columnName,
+        relation_kind: "r",
+      })),
+    );
+  const setupResponders: ReadonlyArray<
+    readonly [marker: string, rows: () => Row[]]
+  > = [
+    ["has_schema_privilege", schemaAccessRows],
+    ["pg_catalog", catalogColumnRows],
+  ];
+
   const build = (store: () => Store): MemoryDataPath => {
     const rowsOf = (table: Table): Row[] => store()[table.$name] ?? [];
     const write = (table: Table, rows: Row[]) => {
@@ -232,18 +250,13 @@ export function memoryDatabase(schema: Schema): MemoryDatabase {
         if (row) remove(table, row);
         return row !== undefined;
       },
-      // Setup runs `select 1`, then reads pg_catalog to confirm that every
-      // declared column exists. This database holds exactly the declared ones.
-      raw: async (strings) =>
-        strings.join("?").includes("pg_catalog")
-          ? tables.flatMap((table) =>
-              Object.values(table.$columns).map((meta) => ({
-                table_name: table.$name,
-                column_name: meta.columnName,
-                relation_kind: "r",
-              })),
-            )
-          : [{ "?column?": 1 }],
+      raw: async (strings) => {
+        const sql = strings.join("?");
+        const respond = setupResponders.find(([marker]) =>
+          sql.includes(marker),
+        )?.[1];
+        return respond ? respond() : [{ "?column?": 1 }];
+      },
       // AppKit joins nested transactions itself; one never reaches the edge.
       transaction: async () => {
         throw new Error("memory database: nested transaction");
