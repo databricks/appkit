@@ -170,7 +170,7 @@ describe("entryModule", () => {
       'import { ErrorPage } from "@databricks/appkit-ui/react"',
     );
     expect(code).toContain(
-      "createElement(ErrorPage, { error: useRouteError() })",
+      'createElement(ErrorPage, { error: useRouteError(), homeLink: createElement(Link, { to: "/" }, "Back to home") })',
     );
     expect(code).toContain("ErrorBoundary: RouteErrorPage");
   });

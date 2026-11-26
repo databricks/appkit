@@ -388,10 +388,12 @@ createRoot(document.getElementById("root")).render(
 
   return `${shared}
 import { ErrorPage } from "@databricks/appkit-ui/react";
-import { createBrowserRouter, RouterProvider, useRouteError } from "react-router";
+import { createBrowserRouter, Link, RouterProvider, useRouteError } from "react-router";
 
 // AppKit's page, not React Router's default, for a page that fails to load or doesn't exist.
-const RouteErrorPage = () => createElement(ErrorPage, { error: useRouteError() });
+// Its home link is the router's, so it stays under /design.
+const RouteErrorPage = () =>
+  createElement(ErrorPage, { error: useRouteError(), homeLink: createElement(Link, { to: "/" }, "Back to home") });
 const lazyPages = import.meta.glob(${JSON.stringify(PAGE_GLOBS)});
 const routes = Object.keys(lazyPages).map((file) => {
   const name = pageName(file);
