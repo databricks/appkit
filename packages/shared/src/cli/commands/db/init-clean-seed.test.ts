@@ -1,3 +1,5 @@
+import { stripVTControlCharacters } from "node:util";
+
 import {
   afterEach,
   beforeEach,
@@ -29,7 +31,9 @@ import { dbCommand } from "./index";
 let log: MockInstance;
 let error: MockInstance;
 const output = (spy: MockInstance) =>
-  spy.mock.calls.map((call) => call.join(" ")).join("\n");
+  stripVTControlCharacters(
+    spy.mock.calls.map((call) => call.join(" ")).join("\n"),
+  );
 
 function setTTY(value: boolean | undefined) {
   Object.defineProperty(process.stdin, "isTTY", { value, configurable: true });
