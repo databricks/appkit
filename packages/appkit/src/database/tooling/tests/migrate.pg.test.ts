@@ -23,9 +23,6 @@ vi.mock("../context", async (importOriginal) => ({
 import type { DbContext } from "../context";
 import { runMigrate } from "../migrate";
 
-// drizzle-kit and the migrator against a real server: the branch guard and the
-// Lakebase pool are replaced, nothing else. APPKIT_TEST_PG_URL points at a
-// scratch database, e.g. postgres://localhost:5432/postgres
 const url = process.env.APPKIT_TEST_PG_URL;
 const builder = path.resolve(
   import.meta.dirname,

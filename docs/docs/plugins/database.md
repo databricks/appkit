@@ -35,9 +35,10 @@ Apps scaffolded with the Database plugin selected include an empty
 tables. Replace the empty declaration with your tables once they exist in
 PostgreSQL. The plugin creates and migrates tables only in a deployed app that
 sets `APPKIT_DB_MIGRATE_ON_START=true`. That app applies the committed migrations
-in `config/database/migrations` at startup, as its service principal. After any
-migrations, setup checks that every declared table and column exists and fails
-if one is missing.
+in `config/database/migrations` at startup, as its service principal. On your
+own branch, `npx appkit db migrate` creates them instead (see
+[Development workflow](#development-workflow)). After any migrations, setup
+checks that every declared table and column exists and fails if one is missing.
 
 For local development, the PostgreSQL username is resolved from your Databricks
 credentials when `PGUSER` and `DATABRICKS_CLIENT_ID` are absent. An explicitly
@@ -380,8 +381,8 @@ repair the rows, as
 
 When the deployed app starts with `APPKIT_DB_MIGRATE_ON_START=true` in `app.yaml`,
 `database()` applies the committed migrations the deploy branch has not recorded
-yet, before it checks the tables and serves requests. Apps scaffolded with the
-plugin set it; add it to the `env` of an app that predates it:
+yet, before it checks the tables and serves requests. The flag is off by
+default. Set it in the `env` of `app.yaml`:
 
 ```yaml
 env:

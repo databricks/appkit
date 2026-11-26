@@ -13,8 +13,6 @@ const { createDbContext, runVerify } = vi.hoisted(() => ({
   runVerify: vi.fn(),
 }));
 
-// The tooling is an ambient module loaded with a dynamic import; mock it so the
-// command never touches a database.
 vi.mock("@databricks/appkit/beta/database-tooling", () => ({
   createDbContext,
   runVerify,
@@ -36,7 +34,7 @@ const local = {
   notYours: null,
   refusesEveryBranch: null,
   schemaProblems: [],
-  schemaAdvice: null,
+  tablesInPublicAdvice: null,
   pendingMigrations: [],
   strandedMigrations: [],
   editedMigrations: [],
@@ -189,7 +187,7 @@ describe("appkit db verify", () => {
     runVerify.mockResolvedValue({
       ...local,
       schemaProblems: ["table app.notes does not exist"],
-      schemaAdvice: advice,
+      tablesInPublicAdvice: advice,
       editedMigrations: ["0000_migration"],
       ok: false,
     });

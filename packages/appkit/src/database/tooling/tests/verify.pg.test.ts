@@ -89,7 +89,6 @@ describe.skipIf(!url)("runVerify against Postgres", () => {
       `insert into ${journal} (hash, created_at) values ($1, $2)`,
       [createHash("sha256").update(sql).digest("hex"), MIGRATION.when],
     );
-    // The .env branch is classified through the API, as you.
     const lakebase = new FakeLakebase();
     lakebase.addBranch(BRANCH);
     lakebase.addBranch(PRODUCTION, { default: true });
@@ -157,7 +156,7 @@ describe.skipIf(!url)("runVerify against Postgres", () => {
       notYours: "databricks.yml deploys to it",
       refusesEveryBranch: null,
       schemaProblems: [],
-      schemaAdvice: null,
+      tablesInPublicAdvice: null,
       pendingMigrations: [],
       strandedMigrations: [],
       editedMigrations: [],
@@ -174,7 +173,7 @@ describe.skipIf(!url)("runVerify against Postgres", () => {
       notYours: null,
       refusesEveryBranch: null,
       schemaProblems: [],
-      schemaAdvice: null,
+      tablesInPublicAdvice: null,
       pendingMigrations: [],
       strandedMigrations: [],
       editedMigrations: [],
@@ -197,7 +196,7 @@ describe.skipIf(!url)("runVerify against Postgres", () => {
       notYours: null,
       refusesEveryBranch: null,
       schemaProblems: [],
-      schemaAdvice: null,
+      tablesInPublicAdvice: null,
       pendingMigrations: [],
       strandedMigrations: [],
       editedMigrations: [],

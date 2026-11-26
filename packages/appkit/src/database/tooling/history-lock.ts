@@ -7,19 +7,12 @@ import { migrationsFolder } from "../migrations/paths";
 
 declare const held: unique symbol;
 
-/**
- * Proof that the caller owns a checkout's migration history, from
- * withHistoryLock until its callback settles. Only withHistoryLock makes one.
- */
 export interface HistoryLock {
   readonly [held]: true;
-  /** The checkout's migrations folder, the one this lock lets the caller write. */
   readonly folder: string;
-  /** Throws once withHistoryLock's callback has settled. */
   assertHeld(): void;
 }
 
-/** The lock file's contents: who holds it, and the token only that holder knows. */
 interface LockOwner {
   readonly pid: number;
   readonly host: string;
@@ -77,15 +70,6 @@ function heldError(root: string, file: string): Error {
   );
 }
 
-/**
- * Run fn as the only writer of the checkout's migration history. The lock is
- * config/database/.appkit-db.lock, created exclusively; a second command in
- * the same checkout, in this process or another, fails with who holds it.
- * Released when fn settles, the process exits, or SIGINT or SIGTERM arrives
- * with nothing else listening for it. A process ended otherwise leaves the
- * file behind: the next command reports it as stale, and it is deleted by
- * hand, never taken over.
- */
 export async function withHistoryLock<T>(
   root: string,
   command: string,

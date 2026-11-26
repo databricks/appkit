@@ -49,12 +49,6 @@ export async function isForkCopy(
   return rows.length > 0;
 }
 
-/**
- * Tag the copied journal. On Lakebase your role can insert into the service
- * principal's tables before the hand-off. Returns false when the schema has no
- * journal the trust rule lets you write, which leaves the hand-off and the
- * clean unmarked between them.
- */
 export async function tagForkCopy(
   client: QueryClient,
   schemaName: string,

@@ -14,14 +14,12 @@ import type {
 } from "../lakebase-api";
 import { LakebaseApiError } from "../lakebase-api";
 
-/** In-memory Lakebase with the semantics init relies on: forks copy roles, endpoints come with new forks. */
 export class FakeLakebase {
   readonly branches = new Map<string, LakebaseBranch>();
   readonly endpoints = new Map<string, LakebaseEndpoint[]>();
   readonly roles = new Map<string, LakebaseRole[]>();
   readonly databases = new Map<string, LakebaseDatabase>();
   readonly calls: string[] = [];
-  /** New forks get a read-write `primary` endpoint, like Lakebase forks do. */
   autoEndpoint = true;
   createBranchError?: Error;
   deleteRoleError?: Error;
@@ -34,7 +32,6 @@ export class FakeLakebase {
     this.branches.set(name, branch);
     this.endpoints.set(name, [this.endpoint(name, "primary")]);
     this.roles.set(name, []);
-    // Every Lakebase branch has it.
     this.addDatabase(name, "databricks-postgres", "databricks_postgres");
     return branch;
   }
@@ -127,7 +124,6 @@ export class FakeLakebase {
           name,
           fake.autoEndpoint ? [fake.endpoint(name, "primary")] : [],
         );
-        // A fork copies the parent's roles and databases.
         fake.roles.set(
           name,
           (fake.roles.get(spec.source_branch) ?? []).map((role) => ({
@@ -209,7 +205,6 @@ export const forbidden = () =>
 
 const roots: string[] = [];
 
-/** A temp app root with optional files (relative path → contents). */
 export function tempApp(files: Record<string, string> = {}): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "appkit-db-tooling-"));
   roots.push(root);
@@ -230,7 +225,6 @@ export function fakeContext(options: {
   env?: NodeJS.ProcessEnv;
   userName?: string;
   api?: LakebaseApi;
-  /** The host the client resolved; empty when a test does not care. */
   host?: string;
 }): DbContext {
   const userName = options.userName ?? "alice@example.com";
@@ -251,7 +245,6 @@ export function fakeContext(options: {
   };
 }
 
-/** The bundle `databricks apps init` writes for a database app. */
 export function databricksYml(branch: string, database: string): string {
   return `bundle:
   name: my-app

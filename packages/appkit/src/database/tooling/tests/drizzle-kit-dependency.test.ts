@@ -19,7 +19,6 @@ afterEach(() => {
   }
 });
 
-/** Load ../migrations with `import("drizzle-kit/api")` failing like Node's resolver does. */
 async function failingImport(error: { message: string; code: string }) {
   vi.resetModules();
   vi.doMock("drizzle-kit/api", () => {
@@ -52,7 +51,6 @@ function generate(migrations: typeof import("../migrations")) {
   );
 }
 
-/** A file URL in an app whose node_modules holds these drizzle-kit and drizzle-orm versions. */
 function appWith(versions: { kit?: string; orm?: string }): string {
   const root = tempRoot();
   for (const [name, version] of [

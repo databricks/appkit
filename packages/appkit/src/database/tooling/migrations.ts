@@ -19,45 +19,30 @@ import { drizzleKitImports } from "./drizzle-exports";
 import { refuseSymlink } from "./files";
 import type { HistoryLock } from "./history-lock";
 
-/**
- * The drizzle-kit release the snapshots and SQL are written for; the optional
- * peer dependency in package.json pins the same version.
- */
 export const DRIZZLE_KIT_VERSION = "0.31.10";
 
 interface GenerateOptions {
   readonly schema: Schema;
-  /** Default "migration" → "NNNN_migration". */
   readonly tag?: string;
-  /** false: an ambiguous rename throws instead of prompting. */
   readonly interactive: boolean;
-  /** Sees the migration before anything is written; throwing writes nothing. */
   readonly beforeWrite?: (migration: PlannedMigration) => void;
 }
 
-/** An object of the app schema, by raw catalog name. */
 export interface SchemaObject {
   readonly kind: "table" | "column" | "default" | "constraint" | "type";
-  /** The table, or the enum type for "type". */
   readonly name: string;
-  /** The column for "column" and "default", the constraint for "constraint". */
   readonly member?: string;
 }
 
-/** A migration generateMigrationFiles is about to write. */
 export interface PlannedMigration {
   readonly statements: readonly string[];
-  /** Whether it removes the object: the latest snapshot has it and the new one does not. */
   removes(object: SchemaObject): boolean;
 }
 
 export interface GeneratedMigration {
-  /** e.g. "0001_migration". */
   readonly tag: string;
-  /** Absolute path of the written .sql file. */
   readonly file: string;
   readonly statements: readonly string[];
-  /** The journal's text this migration replaced; null when there was none. */
   readonly journalBefore: string | null;
 }
 
@@ -67,7 +52,6 @@ export interface GeneratedMigration {
  */
 export class MigrationRenameAmbiguityError extends Error {
   readonly kind: "table" | "column" | "enum";
-  /** The table whose columns changed, or the schema for table and enum changes. */
   readonly table: string;
   readonly created: readonly string[];
   readonly deleted: readonly string[];
@@ -92,13 +76,11 @@ export class MigrationRenameAmbiguityError extends Error {
   }
 }
 
-/** drizzle-kit's statement separator in v7 migration files. */
 const BREAKPOINT = "--> statement-breakpoint\n";
 /** id of drizzle-kit's empty starting snapshot, so the prevId of every first migration. */
 export const ORIGIN_ID = "00000000-0000-0000-0000-000000000000";
 const TAG_NAME = /^[a-z0-9_]+$/;
 
-/** The parts of a drizzle-kit PostgreSQL snapshot this module reads. */
 interface Snapshot {
   id: string;
   /** Keyed "<schema>.<table>", public included. */
@@ -168,7 +150,6 @@ function originSnapshot(): Snapshot {
   };
 }
 
-/** The snapshot after `entry`; the origin before the first migration. */
 function snapshotAfter(
   folder: string,
   entry: JournalEntry | undefined,
@@ -233,10 +214,6 @@ function findRenameAmbiguity(
   return null;
 }
 
-/**
- * Whether drizzle-kit itself is not installed, or is a release without the
- * `./api` export; module loaders may wrap that error.
- */
 function isDrizzleKitMissing(error: unknown): boolean {
   let current = error;
   for (let depth = 0; depth < 3 && current instanceof Error; depth++) {
@@ -256,11 +233,9 @@ function isDrizzleKitMissing(error: unknown): boolean {
 
 interface InstalledPackage {
   readonly version: string;
-  /** The resolved entry file, to resolve that package's own imports from. */
   readonly entry: string;
 }
 
-/** The package `name` resolves to from `from`; null when it does not resolve. */
 function installedPackage(name: string, from: string): InstalledPackage | null {
   let entry: string;
   try {
@@ -301,10 +276,8 @@ export function drizzleKitVersionAt(root: string): string | null {
 }
 
 /**
- * Why the drizzle-kit that resolves from `from` must not write migrations;
- * undefined when it may, or when it is not installed at all. drizzle-kit reads
- * the schema's tables through whichever drizzle-orm it resolves, and declares
- * no drizzle-orm dependency of its own.
+ * drizzle-kit reads the schema's tables through whichever drizzle-orm it
+ * resolves, and declares no drizzle-orm dependency of its own.
  */
 export function drizzleKitMismatch(
   from: string = import.meta.url,
@@ -322,10 +295,6 @@ export function drizzleKitMismatch(
   return undefined;
 }
 
-/**
- * drizzle-kit is large, so apps install it as a dev dependency and it is loaded
- * only when a migration is generated.
- */
 async function loadDrizzleKit(): Promise<typeof import("drizzle-kit/api")> {
   const mismatch = drizzleKitMismatch();
   if (mismatch) throw new Error(mismatch);
@@ -347,7 +316,6 @@ const matches =
   (statement) =>
     pattern.test(statement);
 
-/** A new column nothing fills: old instances insert without it, and existing rows have no value for it. */
 function addsRequiredColumn(statement: string): boolean {
   return (
     /\bADD COLUMN\b/i.test(statement) &&
@@ -356,7 +324,6 @@ function addsRequiredColumn(statement: string): boolean {
   );
 }
 
-/** A constraint declared on the new column itself. An identity fills every row with a distinct value, so its key holds. */
 function addsConstrainedColumn(statement: string): boolean {
   return (
     /\bADD COLUMN\b/i.test(statement) &&
@@ -393,11 +360,6 @@ function statementsWhere(
   );
 }
 
-/**
- * Statements that break instances still running the previous release. Apps
- * keeps them serving while the new instance migrates on start, and a code
- * rollback cannot undo a migration.
- */
 export function breakingStatements(statements: readonly string[]): string[] {
   return statementsWhere(BREAKS_PREVIOUS_RELEASE, statements);
 }
@@ -408,7 +370,6 @@ export function dataDependentStatements(
   return statementsWhere(MAY_FAIL_ON_EXISTING_ROWS, statements);
 }
 
-/** drizzle-kit's diff from `prev` to the schema: the new snapshot and its SQL. */
 async function diffSchema(
   prev: Snapshot,
   schema: Schema,
@@ -432,7 +393,6 @@ async function diffSchema(
   return { cur, statements };
 }
 
-/** Whether `appkit db migrate` would write a migration for the schema. Writes nothing. */
 export async function hasUnmigratedChanges(
   folder: string,
   schema: Schema,
@@ -450,10 +410,6 @@ export async function hasUnmigratedChanges(
   }
 }
 
-/**
- * Whether the files of `tags`, the newest committed migrations, hold the SQL
- * generation writes for the schema on top of the migrations before them.
- */
 export async function generatesPending(
   folder: string,
   schema: Schema,
@@ -483,11 +439,6 @@ export async function generatesPending(
   );
 }
 
-/**
- * Diff the schema against the latest committed snapshot with drizzle-kit and
- * write the next v7 migration: `NNNN_<tag>.sql`, `meta/NNNN_snapshot.json`,
- * and the appended `meta/_journal.json`. null when nothing changed.
- */
 export async function generateMigrationFiles(
   lock: HistoryLock,
   options: GenerateOptions,
@@ -549,30 +500,35 @@ export async function generateMigrationFiles(
     ),
   );
   fs.writeFileSync(file, statements.join(BREAKPOINT));
-  // The journal is written last: it is what makes the migration visible.
-  refuseSymlink(journalPath);
-  await writeIfChanged(journalPath, JSON.stringify(next, null, 2));
+  await publishJournal(folder, next);
   return { tag, file, statements, journalBefore };
 }
 
-/**
- * Remove a migration generateMigrationFiles wrote under the same lock and put
- * back the journal it replaced (none: the folders it created go too).
- */
+async function publishJournal(folder: string, journal: Journal): Promise<void> {
+  const journalPath = journalFile(folder);
+  refuseSymlink(journalPath);
+  await writeIfChanged(journalPath, JSON.stringify(journal, null, 2));
+}
+
+async function unpublishJournal(
+  folder: string,
+  journalBefore: string | null,
+): Promise<void> {
+  if (journalBefore === null) {
+    fs.rmSync(journalFile(folder), { force: true });
+    return;
+  }
+  refuseSymlink(journalFile(folder));
+  await writeIfChanged(journalFile(folder), journalBefore);
+}
+
 export async function discardMigrationFiles(
   lock: HistoryLock,
   migration: GeneratedMigration,
 ): Promise<void> {
   lock.assertHeld();
   const { folder } = lock;
-  // The journal goes back first, as it is what names the migration: a crash
-  // after this point leaves files no journal names, never the reverse.
-  if (migration.journalBefore === null) {
-    fs.rmSync(journalFile(folder), { force: true });
-  } else {
-    refuseSymlink(journalFile(folder));
-    await writeIfChanged(journalFile(folder), migration.journalBefore);
-  }
+  await unpublishJournal(folder, migration.journalBefore);
   fs.rmSync(migration.file, { force: true });
   fs.rmSync(snapshotFile(folder, Number.parseInt(migration.tag, 10)), {
     force: true,

@@ -72,7 +72,6 @@ describe("classifyBranch", () => {
     ).toBe("other");
     expect(verdict(`${P}/branches/session-other`).kind).toBe("other");
     expect(verdict(session, {}, null).kind).toBe("other");
-    // Bob's .env copied into Alice's checkout names Bob's session branch.
     expect(
       verdict(`${P}/branches/${sessionBranchId("bob@example.com", "k2x9q0ab")}`)
         .kind,

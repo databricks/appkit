@@ -1,4 +1,3 @@
-/** What the CLI reads from a tooling context; the rest belongs to the tooling. */
 export interface DbContext {
   readonly root: string;
   readonly env: NodeJS.ProcessEnv;
@@ -48,7 +47,6 @@ export type SchemaStart = "migrate" | "introspect" | "clean" | "none";
 export interface InitOptions {
   readonly mode?: BranchMode;
   readonly schema?: SchemaStart;
-  /** As `--ttl` takes it: 30m, 1h, 7d. */
   readonly ttl?: string;
   readonly interactive?: boolean;
   readonly onStep?: (message: string) => void;
@@ -63,11 +61,9 @@ export interface CleanReport {
   readonly branch: string;
   readonly schemaName: string;
   readonly dependents: readonly string[];
-  /** In schema public, the objects other roles own, which stay with their rows. */
-  readonly kept: readonly string[];
+  readonly keptOwnedByOthers: readonly string[];
 }
 
-/** The app schema dropped, then recreated from the committed migrations. */
 export interface Rebuild {
   readonly clean: CleanReport;
   readonly migrate: MigrateReport;
@@ -85,7 +81,6 @@ export type InitStart =
   | {
       readonly kind: "introspect";
       readonly introspect: IntrospectReport;
-      /** On a branch init forked: the schema introspect read, rebuilt from the migrations it wrote. */
       readonly rebuilt: Rebuild | null;
     }
   | ({ readonly kind: "clean" } & Rebuild);
@@ -101,7 +96,7 @@ export interface LocalVerifyReport {
   readonly notYours: string | null;
   readonly refusesEveryBranch: string | null;
   readonly schemaProblems: readonly string[];
-  readonly schemaAdvice: string | null;
+  readonly tablesInPublicAdvice: string | null;
   readonly pendingMigrations: readonly string[];
   readonly strandedMigrations: readonly string[];
   readonly editedMigrations: readonly string[];
@@ -161,22 +156,15 @@ export interface InitReport {
   readonly start: InitStart;
 }
 
-/**
- * What the error runMigrate throws after writing a migration carries. The
- * file stays for the next run, which generates nothing new to warn about.
- */
-export interface UnappliedMigration {
+export interface UnappliedMigrationError {
   readonly generated: GeneratedMigration;
   readonly breaking: readonly string[];
   readonly dataDependent: readonly string[];
 }
 
 /**
- * The exports of `@databricks/appkit/beta/database-tooling` the CLI calls. `shared`
- * must not depend on appkit, so the CLI imports the tooling dynamically and
- * types it with this interface, and appkit's typecheck checks its real exports
- * against it (`database/tooling/tests/contract.test.ts`). Function properties,
- * not methods, so a parameter narrowed in appkit fails that check.
+ * Function properties, not methods, so a parameter narrowed in appkit fails
+ * that check.
  */
 export interface DatabaseTooling<Ctx extends DbContext = DbContext> {
   readonly createDbContext: (options?: {

@@ -1,13 +1,13 @@
 import { Command } from "commander";
 
 import { loadDatabaseTooling } from "./load-tooling";
-import { fail, ok, relative, shortName } from "./output";
+import { fail, ok, relative, resourceId } from "./output";
 
 async function runDbSeed(): Promise<void> {
   try {
     const tooling = await loadDatabaseTooling();
     const report = await tooling.runSeed(tooling.createDbContext());
-    ok(`Ran ${relative(report.file)} on ${shortName(report.branch)}`);
+    ok(`Ran ${relative(report.file)} on ${resourceId(report.branch)}`);
   } catch (error) {
     fail(error);
   }

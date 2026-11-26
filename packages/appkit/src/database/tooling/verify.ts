@@ -6,7 +6,7 @@ import type { PoolClient } from "pg";
 import { DEFAULT_SCHEMA_FILE } from "../../plugins/database/load-schema";
 import { diagnoseSchema } from "../../plugins/database/schema-check";
 import { loadDatabaseSchema } from "../../type-generator/database";
-import { readMigrationDrift } from "../migrations/apply";
+import { readMigrationDriftUnlocked } from "../migrations/apply";
 import {
   journalFile,
   type JournalEntry,
@@ -40,79 +40,44 @@ import {
 } from "./targets";
 
 export interface VerifyOptions {
-  /** Check the deployed app of a databricks.yml target instead of the `.env` branch. */
   readonly deployed?: boolean;
-  /** The target to check; the bundle's default target without one. */
   readonly target?: string;
 }
 
-/** `appkit db verify`: the `.env` branch against schema.ts and the committed migrations. */
 interface LocalVerifyReport {
   readonly kind: "local";
   readonly branch: string;
-  /** Why the branch is not your dev or session branch, e.g. "it is the project's default branch"; null when it is. */
   readonly notYours: string | null;
-  /**
-   * While databricks.yml has a reference this checkout's files do not
-   * resolve, `migrate` applies migrations to no branch, and `init`,
-   * `introspect`, `clean` and `seed` refuse every branch: this says so and
-   * names the references and where to give them values. null when every
-   * reference resolves.
-   */
   readonly refusesEveryBranch: string | null;
-  /** Declared tables or columns the branch lacks (the plugin's startup check). */
   readonly schemaProblems: readonly string[];
-  /** The startup check's advice when every absent table is in public; null otherwise. */
-  readonly schemaAdvice: string | null;
-  /** Committed migrations the branch has not run yet, newer than every one it ran. */
+  readonly tablesInPublicAdvice: string | null;
   readonly pendingMigrations: readonly string[];
-  /** Committed migrations older than one the branch ran, never run: merged out of order. */
   readonly strandedMigrations: readonly string[];
-  /** Migrations the branch ran whose committed file changed since. */
   readonly editedMigrations: readonly string[];
-  /** Migrations the branch ran that this checkout does not commit, e.g. from another git branch. */
   readonly unknownMigrations: number;
-  /** On your own dev or session branch, the fork's copy init has not rebuilt yet, with its advice; null elsewhere. */
   readonly forkCopy: string | null;
   readonly ok: boolean;
 }
 
-/** The committed migrations against the snapshot of the source the active deployment runs. */
 type DeployedMigrations =
-  /** The snapshot has every committed migration, with the same journal entry and SQL. */
   | { readonly evidence: "verified" }
   | {
       readonly evidence: "differs";
-      /** Committed migrations the snapshot does not have. */
       readonly missing: readonly string[];
-      /** Committed migrations the snapshot has with another journal entry or other SQL. */
       readonly changed: readonly string[];
-      /** Committed migrations the snapshot has with the same SQL in other line endings. */
       readonly lineEndings: readonly string[];
-      /** Migrations the snapshot has that this checkout does not commit. */
       readonly unknown: readonly string[];
     }
-  /** The snapshot could not be read, so whether it has them is unknown. */
   | { readonly evidence: "unavailable"; readonly reason: string };
 
-/**
- * `appkit db verify --deployed`: whether a target's deployed app is bound to
- * its branch, running, and deployed from a source with the committed
- * migrations. It reads no database, so not whether they ran there.
- */
 interface DeployVerifyReport {
   readonly kind: "deploy";
   readonly target: string;
-  /** The target's workspace; null when databricks.yml declares none. */
   readonly host: string | null;
   readonly branch: string;
-  /** The app the target deploys; null when it declares none. */
   readonly app: string | null;
-  /** null only when neither this checkout nor the deployed snapshot has a migration. */
   readonly migrations: DeployedMigrations | null;
-  /** What keeps the deployed app from using the branch, each with its fix. */
   readonly problems: readonly string[];
-  /** No problem, and the deployed migrations verified or none on either side. */
   readonly ok: boolean;
 }
 
@@ -120,10 +85,8 @@ export type VerifyReport = LocalVerifyReport | DeployVerifyReport;
 
 const DEPLOY = "`databricks apps deploy`";
 const LOGS = "`databricks apps logs`";
-/** What the app's postgres resource needs to create and own its schema. */
 const POSTGRES_PERMISSION = "CAN_CONNECT_AND_CREATE";
 
-/** DataPath.raw over one connection: each interpolation becomes a $n parameter. */
 function rawOn(client: Pick<PoolClient, "query">): Pick<DataPath, "raw"> {
   return {
     async raw<T>(strings: TemplateStringsArray, ...values: unknown[]) {
@@ -136,7 +99,6 @@ function rawOn(client: Pick<PoolClient, "query">): Pick<DataPath, "raw"> {
   };
 }
 
-/** Read-only, as the developer, on the `.env` branch: one READ ONLY transaction, rolled back. */
 async function verifyLocal(ctx: DbContext): Promise<LocalVerifyReport> {
   requireSchemaFile(ctx.root, "verify");
   const env = await resolveEnvBranch(ctx);
@@ -144,16 +106,14 @@ async function verifyLocal(ctx: DbContext): Promise<LocalVerifyReport> {
   const branch = env.branch.name;
   const schema = await loadDatabaseSchema(
     path.join(ctx.root, DEFAULT_SCHEMA_FILE),
-    { showImportError: true },
+    { keepImportErrorAsCause: true },
   );
   return withBranchPool(ctx, async (pool) => {
     const client = await pool.connect();
     try {
       await client.query("begin transaction read only");
-      const { problems: schemaProblems, advice: schemaAdvice } =
+      const { problems: schemaProblems, tablesInPublicAdvice } =
         await diagnoseSchema(rawOn(client), schema);
-      // Only init forks a copy, onto the developer's own branch. Elsewhere,
-      // e.g. production, another owner is the normal state.
       const refusal = takesWrites(env.kind)
         ? forkCopyRefusal(
             branch,
@@ -162,9 +122,8 @@ async function verifyLocal(ctx: DbContext): Promise<LocalVerifyReport> {
             "migrate",
           )
         : undefined;
-      // It names the schema's owner as the catalog reports it.
       const forkCopy = refusal ? shown(refusal) : null;
-      const drift = await readMigrationDrift(client, {
+      const drift = await readMigrationDriftUnlocked(client, {
         migrationsFolder: migrationsFolder(ctx.root),
         schemaName: schema.$schemaName,
         ignoreHashes: [FORK_COPY_TAG],
@@ -175,11 +134,11 @@ async function verifyLocal(ctx: DbContext): Promise<LocalVerifyReport> {
         notYours: takesWrites(env.kind) ? null : (env.reason ?? null),
         refusesEveryBranch: everyBranchRefusal(env.boundary),
         schemaProblems,
-        schemaAdvice,
+        tablesInPublicAdvice,
         pendingMigrations: drift.pending,
         strandedMigrations: drift.stranded,
         editedMigrations: drift.edited,
-        unknownMigrations: drift.unknown,
+        unknownMigrations: drift.unknownRecordedCount,
         forkCopy,
         ok:
           forkCopy === null &&
@@ -187,7 +146,7 @@ async function verifyLocal(ctx: DbContext): Promise<LocalVerifyReport> {
           drift.pending.length === 0 &&
           drift.stranded.length === 0 &&
           drift.edited.length === 0 &&
-          drift.unknown === 0,
+          drift.unknownRecordedCount === 0,
       };
     } finally {
       await client.query("rollback").catch(() => undefined);
@@ -202,12 +161,10 @@ interface DeploymentStatus {
 }
 
 interface Deployment {
-  /** The snapshot of the source the deployment runs. */
   readonly deployment_artifacts?: { readonly source_code_path?: string };
   readonly status?: DeploymentStatus;
 }
 
-/** The fields of GET /api/2.0/apps/{name} that verify reads, in the API's snake_case. */
 interface DeployedApp {
   readonly service_principal_client_id?: string;
   readonly resources?: ReadonlyArray<{
@@ -223,7 +180,6 @@ interface DeployedApp {
   readonly pending_deployment?: Deployment;
 }
 
-/** null when the app does not exist yet. */
 async function readApp(
   ctx: DbContext,
   name: string,
@@ -239,13 +195,10 @@ async function readApp(
       return null;
     }
     const message = error instanceof Error ? error.message : String(error);
-    // No cause: the CLI prints a cause's message as is, and this one is the
-    // API's raw text.
     throw new Error(`Could not read app ${name}: ${shown(message)}`);
   }
 }
 
-/** A workspace file's bytes; null when it does not exist. Throws with the reason when the export fails otherwise or has no content. */
 async function exportFile(
   ctx: DbContext,
   file: string,
@@ -269,7 +222,6 @@ async function exportFile(
   return Buffer.from(content, "base64");
 }
 
-/** Whether a workspace path exists. Throws with the reason when its status cannot be read. */
 async function workspacePathExists(
   ctx: DbContext,
   file: string,
@@ -292,7 +244,6 @@ async function workspacePathExists(
   }
 }
 
-/** A committed migration's journal entry and the bytes of its SQL file. */
 interface CommittedMigration {
   readonly entry: JournalEntry;
   readonly sql: Buffer;
@@ -310,11 +261,6 @@ function readCommitted(folder: string): CommittedMigration[] {
   });
 }
 
-/**
- * The deployed journal's entries: each a migration with a tag, an idx and a
- * when, and no tag listed twice. A journal that breaks that is not evidence
- * of anything, so it throws rather than matching.
- */
 function parseDeployedJournal(bytes: Buffer, label: string): JournalEntry[] {
   let json: unknown;
   try {
@@ -344,13 +290,8 @@ function parseDeployedJournal(bytes: Buffer, label: string): JournalEntry[] {
   return entries;
 }
 
-/** The local folder whose files an app's deployment carries, or why verify cannot tell. */
 type SourceFolder = { readonly folder: string } | { readonly reason: string };
 
-/**
- * The folder the app's source_code_path names, which must hold the
- * migrations. Without one it is the checkout's root.
- */
 function sourceFolder(
   root: string,
   file: string,
@@ -373,15 +314,6 @@ function sourceFolder(
   return { folder };
 }
 
-/**
- * The committed migrations against the snapshot of the source the active
- * deployment runs: each needs the same journal entry (idx, when,
- * breakpoints, and its place in the journal) and byte-identical SQL there,
- * and the snapshot may have no migration the checkout does not commit. A
- * snapshot that exists without a journal has no migration. Only that
- * snapshot is evidence. Anything verify cannot read in it, or a snapshot
- * that does not exist, makes the result unavailable, never a match.
- */
 async function readDeployedMigrations(
   ctx: DbContext,
   deployment: Deployment | undefined,
@@ -433,8 +365,6 @@ async function readDeployedMigrations(
       };
     }
     const deployedByTag = new Map(deployed.map((entry) => [entry.tag, entry]));
-    // The app applies the journal in order, so when both sides list the same
-    // tags each must also be at the same place.
     const sameTags =
       unknown.length === 0 && deployed.length === committed.length;
     const compared = await Promise.all(
@@ -474,7 +404,6 @@ async function readDeployedMigrations(
       ? { evidence: "verified" }
       : { evidence: "differs", missing, changed, lineEndings, unknown };
   } catch (error) {
-    // The message can carry the snapshot's path and tags, or an API's text.
     return {
       evidence: "unavailable",
       reason: shown(error instanceof Error ? error.message : String(error)),
@@ -485,7 +414,6 @@ async function readDeployedMigrations(
 const withLf = (bytes: Buffer) =>
   bytes.toString("utf-8").replace(/\r\n/g, "\n");
 
-/** Why the deployed migrations do not match the committed ones, each with its fix; empty when verified. */
 function migrationsProblems(
   name: string,
   migrations: DeployedMigrations,
@@ -510,8 +438,6 @@ function migrationsProblems(
       `app ${name}'s active deployment has ${changed.join(", ")} with another journal entry or other SQL than this checkout commits. A migration that ran never runs again: restore ${them} to what was deployed, and put the change in a new migration`,
     );
   }
-  // The app's start hashes either line ending as the same file, so a new
-  // migration would be wrong advice; verify still wants the deployed bytes.
   if (lineEndings.length > 0) {
     const it = lineEndings.length === 1 ? "it" : "them";
     problems.push(
@@ -527,12 +453,6 @@ function migrationsProblems(
   return problems;
 }
 
-/**
- * The app's postgres resource against databricks.yml: same branch and
- * database, and the permission to create its schema. `source` is where the
- * branch and database come from: `file`, with variable-overrides.json when
- * the checkout has one.
- */
 function bindingProblems(
   app: DeployedApp,
   name: string,
@@ -566,17 +486,11 @@ function bindingProblems(
   return problems;
 }
 
-/** ": <message>" for an API status message, without its final period; "" without one. */
 function detail(message: string | undefined): string {
   const text = message?.trim().replace(/\.+$/, "");
   return text ? `: ${shown(text)}` : "";
 }
 
-/**
- * Whether the app is up. A running app passed its start, which checks its
- * schema and, with APPKIT_DB_MIGRATE_ON_START=true, applies pending
- * migrations; verify itself reads no database.
- */
 function runningProblems(app: DeployedApp, name: string): string[] {
   const pending = app.pending_deployment?.status;
   if (pending?.state === "IN_PROGRESS") {
@@ -613,7 +527,6 @@ function runningProblems(app: DeployedApp, name: string): string[] {
   ];
 }
 
-/** "a.cloud.databricks.com" for "https://A.cloud.databricks.com/". */
 function hostOf(url: string): string {
   try {
     return new URL(/^[a-z]+:\/\//i.test(url) ? url : `https://${url}`).host;
@@ -622,11 +535,6 @@ function hostOf(url: string): string {
   }
 }
 
-/**
- * The API calls go to the workspace this shell is authenticated against, which
- * must be the target's: its workspace.host, else the host of its
- * workspace.profile. With neither, a deploy uses this shell's auth too.
- */
 async function assertTargetWorkspace(
   ctx: DbContext,
   target: string,
@@ -679,15 +587,6 @@ function selectTarget(
   return fallback;
 }
 
-/**
- * --deployed, through the Databricks API only: no database connection, so no
- * Postgres role on the deploy branch is needed. The target's app must exist,
- * be bound to the branch and database databricks.yml names with
- * CAN_CONNECT_AND_CREATE, have a role on the branch for its service
- * principal, be running, and run a snapshot with the journal entry and SQL of
- * every committed migration. That is the deployed source, not the database:
- * whether the migrations ran there is not checked.
- */
 async function verifyDeploy(
   ctx: DbContext,
   targetName: string | undefined,
@@ -705,15 +604,12 @@ async function verifyDeploy(
     targetName,
     defaultBundleTarget(bundle),
   );
-  // What a deploy from this shell uses: the BUNDLE_VAR_ variables, then
-  // variable-overrides.json's values, as the deploy guard reads them.
   const deploy = target.environment ?? target.overridden ?? target;
   const applied = target.environment
     ? [target.environment.file, target.environment.variables]
     : [target.overridden?.file];
   const values = applied.filter(Boolean).join(" and ");
   const withValues = values ? ` with ${values}` : "";
-  // Where the branch and database come from.
   const source = `${file}${withValues}`;
   const bound = deploy.apps.filter((app) => app.postgres.length > 0);
   if (bound.length > 1) {
@@ -778,7 +674,6 @@ async function verifyDeploy(
       problems.length === 0 &&
       (migrations === null || migrations.evidence === "verified"),
   });
-  /** A report from before verify reads the deployment; its problems say why. */
   const stopped = (name: string | null, problems: string[]) =>
     report(name, problems, {
       evidence: "unavailable",
@@ -838,7 +733,6 @@ async function verifyDeploy(
     );
   }
   const [roles, migrations] = await Promise.all([
-    // Only meaningful once the app is bound to this branch.
     sp && binding.length === 0 ? api.listRoles(branch) : null,
     readDeployedMigrations(
       ctx,
@@ -852,23 +746,12 @@ async function verifyDeploy(
       `the app's service principal ${shown(sp ?? "")} has no Postgres role on ${branchId}: ${DEPLOY} creates it from the app's postgres resource`,
     );
   }
-  // Without an active deployment, runningProblems already says why; the
-  // migrations stay unavailable, so the report is not ok either way.
   if (migrations && deployed.active_deployment) {
     problems.push(...migrationsProblems(name, migrations));
   }
   return report(name, problems, migrations);
 }
 
-/**
- * `appkit db verify`: check the `.env` branch against schema.ts (the plugin's
- * startup check) and the committed migrations, read-only. With `deployed`,
- * check through the Databricks API that a target's deployed app is bound to
- * its branch, running, and deployed from a source with the committed
- * migrations; that reads no database, so it needs no role on the deploy
- * branch and does not tell whether the migrations ran there. Nothing is
- * written or created either way.
- */
 export async function runVerify(
   ctx: DbContext,
   options: VerifyOptions = {},

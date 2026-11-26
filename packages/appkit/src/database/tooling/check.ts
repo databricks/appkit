@@ -20,14 +20,11 @@ import { requireSchemaFile } from "./migrate";
 import { hasUnmigratedChanges, ORIGIN_ID } from "./migrations";
 
 export interface CheckReport {
-  /** Committed migrations, in journal order. */
   readonly migrations: readonly string[];
-  /** What is wrong with the committed history, each with its fix. */
   readonly problems: readonly string[];
   readonly ok: boolean;
 }
 
-/** Entries numbered or ordered in a way the migrator or drizzle-kit misreads. */
 function orderProblems(entries: readonly JournalEntry[]): string[] {
   const problems: string[] = [];
   entries.forEach((entry, index) => {
@@ -36,7 +33,6 @@ function orderProblems(entries: readonly JournalEntry[]): string[] {
         `${entry.tag} is entry ${index} of meta/_journal.json, but its idx is ${entry.idx}, so drizzle-kit reads another snapshot for it. ${MIGRATION_HISTORY_REWRITE}`,
       );
     }
-    // The journal is parsed, not validated, so `when` can hold anything.
     if (!Number.isSafeInteger(entry.when)) {
       problems.push(
         `The when of ${entry.tag} in meta/_journal.json is ${JSON.stringify(entry.when) ?? "missing"}, not an integer timestamp, so the migrator never runs it. ${MIGRATION_HISTORY_REWRITE}`,
@@ -57,13 +53,11 @@ function orderProblems(entries: readonly JournalEntry[]): string[] {
   return problems;
 }
 
-/** The parts of a snapshot that chain it to the one before. */
 interface SnapshotLink {
   readonly id: string;
   readonly prevId: string;
 }
 
-/** drizzle-kit's PostgreSQL v7 snapshot, as far as telling it from a stub needs. */
 const snapshotShape = z.object({
   version: z.literal("7"),
   dialect: z.literal("postgresql"),
@@ -74,7 +68,6 @@ const snapshotShape = z.object({
   schemas: z.record(z.string(), z.unknown()),
 });
 
-/** The snapshot's JSON, or undefined when it is not JSON, as when a merge left conflict markers in it. */
 function readSnapshotJson(file: string): unknown {
   try {
     return readJsonFile<unknown>(file);
@@ -89,15 +82,8 @@ function readSnapshotJson(file: string): unknown {
   }
 }
 
-/** The empty database drizzle-kit diffs the first migration from. */
 const ORIGIN: SnapshotLink = { id: ORIGIN_ID, prevId: "" };
 
-/**
- * Each snapshot must follow the one before it, and the first one the empty
- * database. Two migrations generated from the same snapshot on parallel
- * branches both follow that one, so the later one was written without the
- * other's changes.
- */
 function chainProblems(
   entries: readonly JournalEntry[],
   links: readonly (SnapshotLink | null)[],
@@ -127,12 +113,6 @@ function chainProblems(
   return problems;
 }
 
-/**
- * `appkit db check`: the committed migrations are in order, every file they
- * list is committed, and schema.ts has no change without a migration. It
- * imports schema.ts and needs no Databricks or Lakebase access, so CI runs it
- * on every pull request.
- */
 export async function runCheck(ctx: DbContext): Promise<CheckReport> {
   requireSchemaFile(ctx.root, "check");
   const folder = migrationsFolder(ctx.root);
@@ -179,11 +159,10 @@ export async function runCheck(ctx: DbContext): Promise<CheckReport> {
   }
   problems.push(...chainProblems(entries, links));
 
-  // drizzle-kit diffs from the latest snapshot, which must exist.
   if (entries.length === 0 || links.at(-1)) {
     const schema = await loadDatabaseSchema(
       path.join(ctx.root, DEFAULT_SCHEMA_FILE),
-      { showImportError: true },
+      { keepImportErrorAsCause: true },
     );
     if (await hasUnmigratedChanges(folder, schema)) {
       const last = entries.at(-1)?.tag;

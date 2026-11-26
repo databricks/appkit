@@ -2,9 +2,6 @@ import { z } from "zod";
 
 import type { ToolingRequest, ToolingWorkspaceClient } from "./context";
 
-// Lakebase Postgres REST API through the workspace client's raw requests. Paths,
-// query parameters and bodies mirror the Go SDK (service/postgres/impl.go).
-
 export interface LakebaseBranch {
   name: string;
   status?: {
@@ -62,11 +59,8 @@ interface Operation {
 }
 
 export class LakebaseApiError extends Error {
-  /** HTTP status of the failing call; absent for a failed long-running operation. */
   readonly statusCode?: number;
-  /** The API's error code, e.g. ALREADY_EXISTS, from the call or the operation. */
   readonly errorCode?: string;
-  /** What was being done, e.g. "create branch projects/p/branches/b". */
   readonly operation: string;
 
   constructor(
@@ -103,7 +97,6 @@ export const isPermissionDenied = (error: unknown) =>
 const isNotFound = (error: unknown) =>
   failedWith(error, 404, ["NOT_FOUND", "RESOURCE_DOES_NOT_EXIST"]);
 
-/** The project holds as many branches as it may: "unarchived branches limit exceeded". */
 export function isBranchLimit(error: unknown): boolean {
   return (
     error instanceof LakebaseApiError &&
@@ -113,9 +106,7 @@ export function isBranchLimit(error: unknown): boolean {
 
 const API = "/api/2.0/postgres";
 
-// The guard decides from `default` and `is_protected` whether a command may
-// write to a branch. proto3 JSON omits false values, so a missing one reads as
-// false. A response without `status`, or with a non-boolean value, fails.
+// proto3 JSON omits false values, so a missing one reads as false.
 const branchResponse = z.looseObject({
   name: z.string(),
   status: z.looseObject({
@@ -150,7 +141,6 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Workspace requests take string query values; unset ones are left out. */
 function encodeQuery(
   query: ToolingRequest["query"],
 ): Record<string, string> | undefined {
@@ -164,9 +154,7 @@ const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 interface LakebaseApiOptions {
-  /** First poll delay for long-running operations; doubles up to 5 s. */
   readonly pollIntervalMs?: number;
-  /** Give up waiting for one long-running operation after this long. */
   readonly timeoutMs?: number;
 }
 
@@ -236,7 +224,6 @@ export class LakebaseApi {
     );
   }
 
-  /** A read-write endpoint that suspends after `suspendTimeout` idle (e.g. "300s"). */
   async createEndpoint(
     branch: string,
     endpointId: string,
@@ -257,7 +244,6 @@ export class LakebaseApi {
     return this.wait<LakebaseEndpoint>(operation, op);
   }
 
-  /** A branch that is already gone counts as deleted. */
   async deleteBranch(name: string): Promise<void> {
     await this.deleteResource(`delete branch ${name}`, name);
   }
@@ -295,7 +281,6 @@ export class LakebaseApi {
     return this.wait<LakebaseRole>(operation, op);
   }
 
-  /** Every object the role owns is reassigned first (runs SQL on the branch's compute). */
   async deleteRole(
     role: string,
     options: { reassignOwnedTo: string },
@@ -391,7 +376,6 @@ export class LakebaseApi {
     return items;
   }
 
-  /** Poll GET /api/2.0/postgres/{operation.name} until done. */
   private async wait<T>(operation: string, first: Operation): Promise<T> {
     const deadline = Date.now() + this.timeoutMs;
     let delay = this.pollIntervalMs;

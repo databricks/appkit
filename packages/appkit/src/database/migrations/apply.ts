@@ -481,7 +481,6 @@ function divergence(history: MigrationHistory): HistoryRefusal {
   };
 }
 
-/** The relation at the journal's name, as pg_catalog describes it; null when there is none. */
 export async function readJournalRelation(
   client: QueryClient,
   schemaName: string,
@@ -847,16 +846,11 @@ function duration(ms: number): string {
   return `${ms}ms`;
 }
 
-/** How the branch's recorded migrations differ from the committed ones. */
 interface MigrationDrift {
-  /** Committed, not recorded, newer than every recorded one. */
   readonly pending: readonly string[];
-  /** Committed, not recorded, older than the last recorded one. */
   readonly stranded: readonly string[];
-  /** Recorded, but the committed file changed since: the branch ran another version. */
   readonly edited: readonly string[];
-  /** Recorded rows no committed migration matches: the branch is ahead of the checkout. */
-  readonly unknown: number;
+  readonly unknownRecordedCount: number;
 }
 
 function driftOf(
@@ -866,7 +860,7 @@ function driftOf(
     pending: tags(history.pending),
     stranded: tags(history.stranded),
     edited: tags(history.edited),
-    unknown: history.unknown.length,
+    unknownRecordedCount: history.unknown.length,
   };
 }
 
@@ -875,8 +869,7 @@ function committedMigrations(folder: string): MigrationFile[] {
   return journal ? readMigrations(folder, journal) : [];
 }
 
-/** Read without the lock; markMigrationsApplied checks again under it. */
-export async function readMigrationDrift(
+export async function readMigrationDriftUnlocked(
   client: QueryClient,
   options: ApplyMigrationsOptions & {
     readonly ignoreHashes?: readonly string[];
@@ -892,12 +885,10 @@ export async function readMigrationDrift(
   );
 }
 
-/** The branch ran these migrations as they were before an edit, so the committed history is not what it holds. */
 export function editedReason(edited: readonly string[]): string {
   return `it applied ${edited.join(", ")} before ${edited.length === 1 ? "its file" : "their files"} changed`;
 }
 
-/** Why the branch's history is not the committed one plus toRecord; undefined when it is. */
 function driftReason(
   drift: MigrationDrift,
   toRecord: readonly string[],
@@ -905,8 +896,8 @@ function driftReason(
   const notApplied = drift.pending.filter((tag) => !toRecord.includes(tag));
   const recorded = toRecord.filter((tag) => !drift.pending.includes(tag));
   const reasons = [
-    drift.unknown > 0
-      ? `it records ${drift.unknown} migration${drift.unknown === 1 ? "" : "s"} this checkout does not have`
+    drift.unknownRecordedCount > 0
+      ? `it records ${drift.unknownRecordedCount} migration${drift.unknownRecordedCount === 1 ? "" : "s"} this checkout does not have`
       : "",
     drift.stranded.length > 0 ? `it skipped ${drift.stranded.join(", ")}` : "",
     drift.edited.length > 0 ? editedReason(drift.edited) : "",
@@ -916,11 +907,6 @@ function driftReason(
   return reasons.length > 0 ? reasons.join("; ") : undefined;
 }
 
-/**
- * Record migrations as applied without running them: the branch already holds
- * what they describe. Under the migration lock, and only when they are exactly
- * the branch's pending migrations, so DDL the branch never ran is not recorded.
- */
 export async function markMigrationsApplied(
   pool: Pick<Pool, "connect">,
   options: ApplyMigrationsOptions,

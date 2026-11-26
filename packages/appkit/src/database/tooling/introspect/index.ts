@@ -6,7 +6,7 @@ import { loadDatabaseSchema } from "../../../type-generator/database";
 import {
   editedReason,
   markMigrationsApplied,
-  readMigrationDrift,
+  readMigrationDriftUnlocked,
 } from "../../migrations/apply";
 import { readJournal } from "../../migrations/paths";
 import { DEFAULT_SCHEMA_NAME } from "../../schema-builder/define-schema";
@@ -39,11 +39,8 @@ import {
 } from "./render";
 
 export interface IntrospectOptions {
-  /** false: an ambiguous rename against existing history throws instead of prompting. */
   readonly interactive: boolean;
-  /** Schema to read. Default: the one schema.ts declares, else DEFAULT_SCHEMA_NAME. */
   readonly schemaName?: string;
-  /** Module the written schema.ts imports the builder from. Default "@databricks/appkit/beta". */
   readonly importSource?: string;
   readonly recordAsApplied?: boolean;
 }
@@ -51,24 +48,18 @@ export interface IntrospectOptions {
 export interface IntrospectReport {
   readonly branch: string;
   readonly schemaName: string;
-  /** Tables written to schema.ts. */
   readonly tables: readonly string[];
   readonly schemaFile: string;
-  /** Where the previous schema.ts went, when this run replaced a different one. */
   readonly backupFile: string | null;
   readonly skipped: readonly Skip[];
   readonly warnings: readonly string[];
-  /** What schema.ts declares differently from the database, which keeps it as it is. */
   readonly approximated: readonly string[];
-  /** 0000_baseline without history, NNNN_introspect with it; null when nothing changed. */
   readonly migration: GeneratedMigration | null;
-  /** Tags recorded as applied: the migration, and any an interrupted run wrote but did not record. */
   readonly recorded: readonly string[];
   readonly typesFile: string;
   readonly operationsTypesFile: string;
 }
 
-/** Introspect would record history the branch or the deployed app contradicts. */
 export class IntrospectRefusedError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
@@ -76,10 +67,8 @@ export class IntrospectRefusedError extends Error {
   }
 }
 
-/** Tags introspect writes. A pending one is recorded when introspect would write the same SQL now. */
 const INTROSPECT_TAG = /^\d{4}_(introspect|baseline)$/;
 
-/** File contents, or null when it does not exist. */
 function readIfExists(file: string): string | null {
   return fs.existsSync(file) ? fs.readFileSync(file, "utf-8") : null;
 }
@@ -89,7 +78,6 @@ function writeOrRemove(file: string, contents: string | null): void {
   else writeFileAtomic(file, contents);
 }
 
-/** Introspect replaces `file`, so a link there would be swapped for a plain file or written through. */
 function refuseSymlinkedDestination(root: string, file: string): void {
   try {
     refuseSymlink(path.join(root, file));
@@ -105,7 +93,6 @@ function refuseSymlinkedDestination(root: string, file: string): void {
 const plural = (count: number, word: string) =>
   `${count} ${word}${count === 1 ? "" : "s"}`;
 
-/** How a refusal names it. */
 function described(item: Unexpressed, schemaName: string): string {
   const table = `${schemaName}.${item.name}`;
   switch (item.kind) {
@@ -122,11 +109,6 @@ function described(item: Unexpressed, schemaName: string): string {
   }
 }
 
-/**
- * With history, the migration is recorded here as applied and runs on deploy.
- * A drop of what the branch still has but schema.ts cannot express would be
- * recorded falsely here, and would remove it from every deployed database.
- */
 function refuseDropsOfUnexpressed(
   migration: PlannedMigration,
   unexpressed: readonly Unexpressed[],
@@ -146,16 +128,11 @@ function refuseDropsOfUnexpressed(
   );
 }
 
-/**
- * The schema.ts introspect replaces; null when there is none. The rewrite
- * keeps its private columns and its foreign keys, so a file that does not load
- * refuses the run before anything is read or written.
- */
 async function readPreviousSchema(root: string): Promise<Schema | null> {
   if (!fs.existsSync(path.join(root, DEFAULT_SCHEMA_FILE))) return null;
   try {
     return await loadDatabaseSchema(path.join(root, DEFAULT_SCHEMA_FILE), {
-      showImportError: true,
+      keepImportErrorAsCause: true,
     });
   } catch (error) {
     throw new IntrospectRefusedError(
@@ -165,16 +142,6 @@ async function readPreviousSchema(root: string): Promise<Schema | null> {
   }
 }
 
-/**
- * `appkit db introspect`: read the `.env` branch's app schema from pg_catalog
- * (the one schema.ts declares, unless `--schema-name` names another), write
- * schema.ts (the previous file goes to schema.ts.bak), write the migration
- * that brings history up to the database, and record it as applied. A column
- * the previous schema.ts marks private stays private. Runs only on your dev or
- * session branch, and only when the branch records exactly the committed
- * migrations. A failure puts back schema.ts, the backup, the generated types
- * and the migrations folder. One command at a time owns the checkout's history.
- */
 export async function runIntrospect(
   ctx: DbContext,
   options: IntrospectOptions,
@@ -184,7 +151,6 @@ export async function runIntrospect(
   );
 }
 
-/** runIntrospect for a caller that already holds the checkout's history lock. */
 export async function introspectHolding(
   ctx: DbContext,
   lock: HistoryLock,
@@ -226,11 +192,7 @@ export async function introspectHolding(
         throw new IntrospectRefusedError(`Refusing to introspect: ${refusal}`);
       }
     }
-    // The diff starts from the latest committed snapshot, so the branch must
-    // record exactly the committed migrations: one it lacks would come out
-    // reversed, one the checkout lacks would come out again, and one whose
-    // file changed after it ran left the branch where the snapshot is not.
-    const drift = await readMigrationDrift(pool, {
+    const drift = await readMigrationDriftUnlocked(pool, {
       ...migrationOptions,
       ignoreHashes: [FORK_COPY_TAG],
     });
@@ -238,9 +200,9 @@ export async function introspectHolding(
       new IntrospectRefusedError(
         `Refusing to introspect ${branchId}: ${reason} in schema "${schemaName}". ${advice}`,
       );
-    if (drift.unknown > 0) {
+    if (drift.unknownRecordedCount > 0) {
       throw refuse(
-        `it records ${plural(drift.unknown, "migration")} this checkout does not have`,
+        `it records ${plural(drift.unknownRecordedCount, "migration")} this checkout does not have`,
         "Pull the latest config/database/migrations, then rerun.",
       );
     }
@@ -256,7 +218,6 @@ export async function introspectHolding(
         `Restore ${drift.edited.length === 1 ? "the file" : "the files"} to what the branch ran and put the change in a new migration, or rebuild the branch with \`appkit db clean\`.`,
       );
     }
-    // An interrupted run leaves its migration written but not recorded.
     const unrecorded = drift.pending.every((tag) => INTROSPECT_TAG.test(tag))
       ? drift.pending
       : [];
@@ -279,8 +240,6 @@ export async function introspectHolding(
       importSource: options.importSource,
       previous: previousSchema,
     });
-    // An app on another schema that forgot --schema-name must not lose its
-    // schema.ts to an empty one; with history, an empty schema drops every table.
     if (
       rendered.tables.length === 0 &&
       (hasHistory || fs.existsSync(schemaFile))
@@ -309,7 +268,7 @@ export async function introspectHolding(
       let schema: Schema;
       try {
         schema = await loadDatabaseSchema(schemaFile, {
-          showImportError: true,
+          keepImportErrorAsCause: true,
         });
       } catch (error) {
         throw new Error(
@@ -340,7 +299,6 @@ export async function introspectHolding(
             `Its tables differ from what ${one ? "it describes" : "they describe"}.`,
           );
         }
-        // A file someone edited after introspect wrote it may do more than its snapshot says.
         if (
           !(await generatesPending(
             folder,
@@ -355,7 +313,6 @@ export async function introspectHolding(
         }
       }
       await writeGeneratedTypes(ctx.root, schema);
-      // The database already holds what the migrations describe; recording is the last step.
       recorded = recordAsApplied
         ? [...unrecorded, ...(migration ? [migration.tag] : [])]
         : [];

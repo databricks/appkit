@@ -12,48 +12,30 @@ import type {
   IntrospectedTable,
 } from "./catalog";
 
-/**
- * Something introspect left out of schema.ts, with an `// appkit: skipped …` comment.
- * Display text: catalog names come with control characters escaped (see shown()).
- */
 export interface Skip {
   readonly table: string;
   readonly column?: string;
   readonly reason: string;
 }
 
-/**
- * Something the branch has that schema.ts leaves out. A migration that drops
- * it must not be recorded as applied: the branch keeps it.
- */
 export interface Unexpressed extends SchemaObject {
   readonly reason: string;
 }
 
 interface SchemaSource {
   readonly source: string;
-  /** Tables written to schema.ts. */
   readonly tables: readonly string[];
   readonly skipped: readonly Skip[];
   readonly unexpressed: readonly Unexpressed[];
-  /** Omissions that change behavior, e.g. a NOT NULL column app.database.<table> can no longer fill. */
   readonly warnings: readonly string[];
-  /** What schema.ts declares differently from the database, which keeps it as it is. */
   readonly approximated: readonly string[];
 }
 
 interface RenderOptions {
-  /** Module the builder is imported from. Default "@databricks/appkit/beta". */
   readonly importSource?: string;
-  /**
-   * The schema.ts this render replaces; null when there is none. A column it
-   * declares (same schema, table and column name) keeps its `.private()`, and
-   * of two foreign keys on one column, the one it declares is kept.
-   */
   readonly previous: Schema | null;
 }
 
-/** Storage as the builder sees it; id/bigid are server-generated integer/bigint keys. */
 type Storage =
   | "id"
   | "bigid"
@@ -68,20 +50,16 @@ type Storage =
   | "enum";
 
 interface BaseType {
-  /** Builder call, e.g. `varchar(120)`. */
   readonly call: string;
-  /** Import it needs ("" for the context's enum). */
   readonly importName: string;
   readonly storage: Storage;
   readonly varcharLength?: number;
-  /** How the call differs from the database type. */
   readonly approximation?: string;
 }
 
 interface ColumnPlan {
   readonly column: IntrospectedColumn;
   base: BaseType;
-  /** Set when `fk(() => <table>.<column>)` replaces the base call. */
   fk?: {
     readonly table: string;
     readonly column: string;
@@ -96,9 +74,7 @@ interface ColumnPlan {
 interface TablePlan {
   readonly table: IntrospectedTable;
   readonly columns: ColumnPlan[];
-  /** Table-level comments, rendered first. */
   readonly comments: string[];
-  /** Columns and skipped-column comments, in catalog order. */
   readonly body: Array<ColumnPlan | string>;
   variable: string;
 }
@@ -149,7 +125,6 @@ function pgName(name: string): string {
 const key = (name: string) => (IDENTIFIER.test(name) ? name : q(name));
 const access = (variable: string, name: string) =>
   IDENTIFIER.test(name) ? `${variable}.${name}` : `${variable}[${q(name)}]`;
-/** The server entity client of a table, which inserts through schema.ts. */
 const client = (table: string) => access("app.database", table);
 const list = (names: readonly string[]) => names.join(", ");
 
@@ -226,7 +201,6 @@ function baseType(
 const isSequenceDefault = (expr: string | null) =>
   !!expr && /^nextval\(/.test(expr);
 
-/** id()/bigid(), whose sequence drizzle-kit writes with Postgres' defaults up to the type's bound. */
 const SERVER_KEYS = {
   integer: {
     base: { call: "id()", importName: "id", storage: "id" },
@@ -248,7 +222,6 @@ const SEQUENCE_CLAUSES: ReadonlyArray<
   ["cache", "CACHE"],
 ];
 
-/** What `sequence` has that the defaults do not, and the defaults in its place; null when it has the defaults. */
 function sequenceDifferences(
   sequence: IntrospectedSequence,
   max: string,
@@ -274,7 +247,6 @@ function sequenceDifferences(
  */
 const LITERAL_WITH_CAST = /^'((?:[^']|'')*)'(?:::(?:[\w .]|"(?:[^"]|"")*")+)?$/;
 
-/** A builder default call, or why the database default cannot be expressed. */
 function defaultCall(
   expr: string,
   base: BaseType,
@@ -319,7 +291,6 @@ function defaultCall(
       return { call: `.default(${q(value)})` };
     }
     default:
-      // The builder accepts no literal defaults for bigint and jsonb.
       return unsupported;
   }
 }
@@ -330,7 +301,6 @@ function importLine(names: readonly string[], source: string): string {
   return `import {\n${names.map((name) => `  ${name},`).join("\n")}\n} from ${q(source)};`;
 }
 
-/** Something the branch has that schema.ts leaves out, by raw catalog name. */
 type Omission =
   | { readonly kind: "table"; readonly table: string; readonly reason: string }
   | {
@@ -338,7 +308,6 @@ type Omission =
       readonly table: string;
       readonly column: string;
       readonly reason: string;
-      /** NOT NULL with nothing to fill it: inserts through the entity client fail. */
       readonly failsInserts: boolean;
     }
   | {
@@ -347,40 +316,26 @@ type Omission =
       readonly column: string;
       readonly defaultExpr: string;
       readonly reason: string;
-      /** NOT NULL: inserts through the entity client must give a value. */
       readonly failsInserts: boolean;
     }
   | {
       readonly kind: "constraint";
       readonly table: string;
-      /** The names a migration may drop it by. */
       readonly names: readonly string[];
-      /** The columns the Skipped line names; null: it names only the table. */
       readonly columns: string | null;
-      /** false: the comment of its skipped column already covers it. */
       readonly listed: boolean;
       readonly reason: string;
     }
   | { readonly kind: "type"; readonly name: string; readonly reason: string };
 
-/** Defaults the builder allows only on uuid / timestamp columns, never on fk(). */
 const TYPED_DEFAULTS = new Set([".defaultRandom()", ".defaultNow()"]);
 
-/** The storage an fk() column inherits from its target. */
 function mirrored(target: BaseType): string {
   if (target.storage === "id") return "integer()";
   if (target.storage === "bigid") return "bigint()";
   return target.call;
 }
 
-/**
- * Render pg_catalog tables as a `defineSchema` source the builder accepts.
- * What the builder cannot express is left out with an `// appkit: skipped …`
- * comment; a CHECK, EXCLUDE or index it cannot declare is a warning; what it
- * declares differently (a timestamp without its precision, say) is listed in
- * `approximated`. A column `previous` declares keeps its
- * `.private()`.
- */
 export function renderSchemaSource(
   tables: readonly IntrospectedTable[],
   schemaName: string,
@@ -390,15 +345,10 @@ export function renderSchemaSource(
   const unexpressed: Unexpressed[] = [];
   const warnings: string[] = [];
   const approximated: string[] = [];
-  /** Constraints whose database name is not the one migrations use: "db (migrations)". */
   const renamed: string[] = [];
   const tableComments: string[] = [];
   const qualified = (table: string, column?: string) =>
     `${schemaName}.${table}${column ? `.${column}` : ""}`;
-  /**
-   * Record what schema.ts leaves out: its `Skipped` line, its `Unexpressed`
-   * entry and its warning, and its `// appkit: skipped` comment into `comments`.
-   */
   const omit = (omission: Omission, comments?: Pick<string[], "push">) => {
     const { reason } = omission;
     const skip = (table: string, column?: string) =>
@@ -470,7 +420,6 @@ export function renderSchemaSource(
   };
   const skipTable = (table: string, reason: string) =>
     omit({ kind: "table", table, reason }, tableComments);
-  /** The builder type of a column, or why the builder cannot declare it. */
   const columnBase = (
     column: IntrospectedColumn,
     isPrimaryKey: boolean,
@@ -486,7 +435,6 @@ export function renderSchemaSource(
     return "identity columns other than the primary key are not supported";
   };
   const { previous } = options;
-  // A declaration of another schema declares nothing in this one.
   const previousTables = new Map<string, AppKitTable>(
     previous && previous.$schemaName === schemaName
       ? Object.values(previous.$tables).map((table): [string, AppKitTable] => [
@@ -495,7 +443,6 @@ export function renderSchemaSource(
         ])
       : [],
   );
-  /** Whether `previous` declares this FK; its toMany reverse comes with it. */
   const declaresForeignKey = (
     table: string,
     foreignKey: IntrospectedForeignKey,
@@ -511,13 +458,11 @@ export function renderSchemaSource(
           relation.targetColumn === foreignKey.refColumns[0],
       ) ??
       false);
-  /** Whether `previous` declares this column private. */
   const isPrivate = (table: string, column: string): boolean =>
     Object.values(previousTables.get(table)?.$columns ?? {}).find(
       (meta) => meta.columnName === column,
     )?.isPrivate ?? false;
 
-  // 1. Tables the builder can key: one primary-key column, a usable name.
   const names = new Set(tables.map((table) => table.name));
   const plans = new Map<string, TablePlan>();
   for (const table of tables) {
@@ -549,7 +494,6 @@ export function renderSchemaSource(
     }
   }
 
-  // 2. Columns. A table whose primary-key column cannot be expressed is skipped whole.
   for (const plan of [...plans.values()]) {
     const { table } = plan;
     const pk = table.primaryKey[0] as string;
@@ -563,7 +507,6 @@ export function renderSchemaSource(
       );
       continue;
     }
-    /** Single-column unique constraints, by column. */
     const singleUnique = new Map(
       table.unique
         .filter((unique) => unique.columns.length === 1)
@@ -633,7 +576,6 @@ export function renderSchemaSource(
         generatesKey &&
         (base.storage === "integer" || base.storage === "bigint")
       ) {
-        // A serial or identity key is the builder's server-generated id()/bigid().
         const serverKey = SERVER_KEYS[base.storage];
         columnPlan.base = serverKey.base;
         if (column.identity !== "d") {
@@ -697,7 +639,6 @@ export function renderSchemaSource(
     }
   }
 
-  // 3. Foreign keys the builder can express; the rest stay plain columns.
   const edges = new Map<string, Set<string>>();
   const reaches = (from: string, to: string): boolean => {
     const seen = new Set<string>();
@@ -711,7 +652,6 @@ export function renderSchemaSource(
     }
     return false;
   };
-  /** Why the builder cannot express this FK; null when it can. */
   const fkProblem = (
     plan: TablePlan,
     foreignKey: IntrospectedForeignKey,
@@ -723,14 +663,12 @@ export function renderSchemaSource(
     }
     if (!source) return "its column is skipped";
     if (source.fk) {
-      // One fk() per column; declared keys come first, so a refresh keeps the declared one.
       return `its column already keeps the foreign key to ${source.fk.table}(${source.fk.column})`;
     }
     if (foreignKey.schema !== schemaName) {
       return `it references schema "${foreignKey.schema}"`;
     }
     if (foreignKey.table === plan.table.name) {
-      // The builder takes one with a TableHandle annotation, which introspect does not write.
       return "introspect does not write self-references";
     }
     const target = plans.get(foreignKey.table);
@@ -774,7 +712,6 @@ export function renderSchemaSource(
 
   for (const plan of plans.values()) {
     const targets = new Set<string>();
-    // Declared FKs go first, so an undeclared one to the same table cannot take the relation.
     const foreignKeys = [...plan.table.foreignKeys].sort(
       (a, b) =>
         Number(declaresForeignKey(plan.table.name, b)) -
@@ -786,7 +723,6 @@ export function renderSchemaSource(
       );
       const problem = fkProblem(plan, foreignKey, source, targets);
       if (problem) {
-        // Migrations name it after its column; a schema.ts that declared it gave it that name.
         const names = [foreignKey.name];
         if (foreignKey.columns.length === 1) {
           names.push(
@@ -818,7 +754,6 @@ export function renderSchemaSource(
         sourceColumn.defaultCall &&
         TYPED_DEFAULTS.has(sourceColumn.defaultCall)
       ) {
-        // fk() takes no defaultRandom()/defaultNow(); the key matters more than the default.
         const defaultExpr = sourceColumn.column.defaultExpr as string;
         omit(
           {
@@ -893,7 +828,6 @@ export function renderSchemaSource(
     });
   }
 
-  // 4. Declaration order: targets before the tables that reference them.
   const ordered: TablePlan[] = [];
   const placed = new Set<string>();
   const place = (plan: TablePlan) => {
@@ -907,7 +841,6 @@ export function renderSchemaSource(
   };
   for (const plan of plans.values()) place(plan);
 
-  // 5. Identifiers and imports.
   const imports = new Set<string>(["defineSchema"]);
   for (const plan of ordered) {
     for (const column of plan.columns) {
@@ -931,7 +864,6 @@ export function renderSchemaSource(
     plan.variable = variable;
   }
 
-  // 6. Source.
   const lines: string[] = [
     `// Generated by \`appkit db introspect\` from schema "${shown(schemaName)}". Edit tables here,`,
     "// then run `npx appkit db migrate` on your dev branch.",
@@ -941,7 +873,6 @@ export function renderSchemaSource(
     ),
     "",
   ];
-  // Only a schema other than the default is passed to defineSchema().
   const schemaOption =
     schemaName === DEFAULT_SCHEMA_NAME
       ? undefined
@@ -968,7 +899,6 @@ export function renderSchemaSource(
     return result(lines.join("\n"));
   }
 
-  // The builder's body, indented one level.
   const body: string[] = [];
   for (const plan of ordered) {
     body.push(`  const ${plan.variable} = table(${q(plan.table.name)}, {`);

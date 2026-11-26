@@ -13,7 +13,6 @@ const { createDbContext, runCheck } = vi.hoisted(() => ({
   runCheck: vi.fn(),
 }));
 
-// The tooling is an ambient module loaded with a dynamic import.
 vi.mock("@databricks/appkit/beta/database-tooling", () => ({
   createDbContext,
   runCheck,

@@ -5,8 +5,6 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import { type CatalogQuery, readCatalog, readUnreadObjects } from "../catalog";
 
-// The catalog SQL against a real server. Point it at a scratch database, e.g.
-// APPKIT_TEST_PG_URL=postgres://localhost:5432/postgres
 const url = process.env.APPKIT_TEST_PG_URL;
 
 describe.skipIf(!url)("readCatalog against Postgres", () => {
@@ -150,7 +148,6 @@ describe.skipIf(!url)("readCatalog against Postgres", () => {
         { name: "slug" },
       ],
     });
-    // A serial key owns a sequence with the defaults; a plain column owns none.
     expect(byName.authors?.columns[0]?.sequence).toEqual({
       start: "1",
       increment: "1",
@@ -160,7 +157,6 @@ describe.skipIf(!url)("readCatalog against Postgres", () => {
       cycle: false,
     });
     expect(posts.author_id).not.toHaveProperty("sequence");
-    // A type name with punctuation comes back quoted in the default's cast.
     expect(byName.orders?.columns.find((c) => c.name === "status")).toEqual({
       name: "status",
       type: `${schema}."order-status"`,
@@ -172,7 +168,6 @@ describe.skipIf(!url)("readCatalog against Postgres", () => {
     });
     expect(byName.events?.primaryKey).toEqual(["a", "b"]);
     expect(byName.parts?.partitioned).toBe(true);
-    // One foreign key, not one more per partition of its target.
     expect(byName.refs?.foreignKeys.map((fk) => fk.table)).toEqual(["parts"]);
   });
 

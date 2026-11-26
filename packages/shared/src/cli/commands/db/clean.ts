@@ -7,7 +7,7 @@ import {
   isInteractive,
   ok,
   printCleanReport,
-  shortName,
+  resourceId,
   warn,
 } from "./output";
 
@@ -22,7 +22,7 @@ async function runDbClean(flags: CleanFlags): Promise<void> {
     const ctx = tooling.createDbContext();
     if (flags.deleteBranch) {
       const { branch } = await tooling.deleteSessionBranch(ctx);
-      ok(`Deleted ${shortName(branch)}`);
+      ok(`Deleted ${resourceId(branch)}`);
       info("`appkit db init --session` creates a new one");
       return;
     }
@@ -40,7 +40,7 @@ async function runDbClean(flags: CleanFlags): Promise<void> {
       }
       const { confirm, isCancel } = await import("@clack/prompts");
       const answer = await confirm({
-        message: `Remove every object in schema ${preview.schemaName} on ${shortName(preview.branch)}, including the migration journal?`,
+        message: `Remove every object in schema ${preview.schemaName} on ${resourceId(preview.branch)}, including the migration journal?`,
         initialValue: false,
       });
       if (isCancel(answer) || !answer) {

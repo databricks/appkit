@@ -8,7 +8,11 @@ import { DEFAULT_SCHEMA_FILE } from "../../plugins/database/load-schema";
 import { loadDatabaseSchema } from "../../type-generator/database";
 import { DEFAULT_SCHEMA_NAME } from "../schema-builder/define-schema";
 import { type CleanReport, cleanHolding } from "./clean";
-import { type DbContext, withBranchPool } from "./context";
+import {
+  CERT_VERIFYING_SSL_MODE,
+  type DbContext,
+  withBranchPool,
+} from "./context";
 import {
   ensureDrizzleKit,
   type RunCommand,
@@ -80,24 +84,16 @@ import {
 export type { SchemaStart } from "./schema-state";
 
 export interface InitOptions {
-  /**
-   * Default: this checkout's session branch when .env points at it, or when a
-   * --session run stopped before .env did; else your dev branch.
-   */
   readonly mode?: BranchMode;
   readonly schema?: SchemaStart;
   readonly confirmClean?: (target: {
     readonly branch: string;
     readonly schemaName: string;
   }) => Promise<boolean>;
-  /** A new session branch's TTL as `--ttl` takes it (30m, 1h, 7d); default seven days. */
   readonly ttl?: string;
-  /** Passed to migrate and introspect: false makes an ambiguous rename fail instead of prompting. */
   readonly interactive?: boolean;
-  /** One line per step that calls the Lakebase API or changes a file. */
   readonly onStep?: (message: string) => void;
   readonly onWarning?: (message: string) => void;
-  /** Runs the drizzle-kit install. */
   readonly runCommand?: RunCommand;
 }
 
@@ -105,7 +101,6 @@ type RoleAction = "kept" | "created" | "updated";
 
 type RebuildReason = "fork-copy" | "requested";
 
-/** The app schema dropped, then recreated from the committed migrations. */
 interface Rebuild {
   readonly clean: CleanReport;
   readonly migrate: MigrateReport;
@@ -131,25 +126,17 @@ export interface InitReport {
   readonly mode: BranchMode;
   readonly branch: string;
   readonly created: boolean;
-  /** The branch a new fork was created from. */
   readonly sourceBranch?: string;
-  /** When the branch expires; null for a branch without expiry. */
   readonly expireTime: string | null;
   readonly endpoint: string;
   readonly endpointCreated: boolean;
   readonly host: string;
-  /** The Postgres database .env names, escaped for display. */
   readonly database: string;
   readonly user: string;
   readonly role: { readonly name: string; readonly action: RoleAction };
-  /**
-   * The Postgres role whose copy of the app schema was handed to you; null when
-   * you owned it, the schema is public, or `--schema none` left it alone.
-   */
   readonly handedOff: string | null;
   readonly keptCopy: KeptCopy | null;
   readonly envFile: string;
-  /** The drizzle-kit install init ran; null when it was installed. */
   readonly installed: string | null;
   readonly start: InitStart;
 }
@@ -158,18 +145,9 @@ const ENV_FILE = ".env";
 const DEFAULT_ENDPOINT_ID = "primary";
 /** An idle compute counts against the project's 20 active ones. */
 const SUSPEND_TIMEOUT = "300s";
-/** How long init waits for a read-write endpoint another run is still creating. */
 const ENDPOINT_HOST_WAIT = { intervalMs: 2_000, timeoutMs: 90_000 };
-/** Every Lakebase branch has it; used when nothing names another database. */
 const DEFAULT_DATABASE = "databricks_postgres";
-/**
- * The one PGSSLMODE under which the Lakebase pool checks the server's
- * certificate: it maps prefer to rejectUnauthorized: false, disable to no TLS,
- * and rejects every other value.
- */
-const TLS_MODE = "require";
 
-/** LAKEBASE_PROJECT, else the project of LAKEBASE_ENDPOINT, else of the bundle's postgres_branch. */
 function resolveProject(
   local: LocalTarget,
   deploy: DeployTarget | null,
@@ -186,7 +164,6 @@ function resolveProject(
   return project;
 }
 
-/** Drop .env connection values and a deploy binding that belong to another project than LAKEBASE_PROJECT. */
 function scopeToProject(
   project: string,
   local: LocalTarget,
@@ -202,13 +179,6 @@ function scopeToProject(
   };
 }
 
-/**
- * Session when .env names a session id and points at one of your session
- * branches: this checkout's, or the gone one a rotation replaced before it
- * stopped short of rewriting .env, which the rerun then finishes. Session too
- * when .env points anywhere but your dev branch and the id's branch exists: a
- * --session run that stopped before it rewrote .env. Dev otherwise.
- */
 async function defaultMode(
   ctx: DbContext,
   project: string,
@@ -228,10 +198,6 @@ async function defaultMode(
   return stopped && !isGone(stopped) ? "session" : "dev";
 }
 
-/**
- * A plain rerun picks the dev branch when .env does not point at the session
- * branch yet, so a failed session run's advice names --session.
- */
 function withSessionRerun(error: unknown): unknown {
   if (error instanceof Error) {
     error.message = error.message.replace(
@@ -253,7 +219,6 @@ interface BranchRequest {
   readonly mode: BranchMode;
   readonly identity: Identity;
   readonly session: string | null;
-  /** The API's duration ("3600s"), and how the developer wrote it. */
   readonly ttl: { readonly api: string; readonly label: string };
   readonly boundary: DeployBoundary;
   readonly envFile: string;
@@ -267,10 +232,8 @@ type FoundBranch = {
 } & (
   | { readonly created: false }
   | {
-      /** Forked by this run. */
       readonly created: true;
       readonly sourceBranch: string;
-      /** The bound database's Postgres name, read on the source before the fork. */
       readonly boundDatabase: string | null;
     }
 );
@@ -296,7 +259,6 @@ function branchLimitError(
   return new Error(message, { cause });
 }
 
-/** What init says after refusing a branch, unless every branch is refused. */
 const INIT_SETS_UP =
   "`appkit db init` only sets up your dev branch or this checkout's session branch";
 
@@ -368,7 +330,6 @@ async function findOrCreateBranch(
     if (!parent) {
       throw new Error(`Project ${project} has no default branch to fork from.`);
     }
-    // A fork has its source's databases.
     const boundDatabase = await readBoundDatabase(
       ctx,
       parent.name,
@@ -404,7 +365,6 @@ async function findOrCreateBranch(
         throw branchLimitError(project, branches, identity.userName, error);
       }
       if (!isAlreadyExists(error)) throw error;
-      // Another run created it first, or the name is held by a deleted branch.
       const raced = await api.getBranch(name);
       if (raced && !isGone(raced)) return reuse(raced);
       replaceGone(name);
@@ -424,11 +384,6 @@ function persistSessionIdBeforeFork(
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-/**
- * The branch's read-write endpoint, created when it has none. Another run of
- * init on the same branch can create it first: its 409 is followed by a reread,
- * and an endpoint that is still coming up is waited for until it has a host.
- */
 async function ensureReadWriteEndpoint(
   ctx: DbContext,
   branch: string,
@@ -481,11 +436,6 @@ async function ensureReadWriteEndpoint(
   return { endpoint, created, host };
 }
 
-/**
- * Your role on the branch with DATABRICKS_SUPERUSER, created or updated when
- * needed. Another run of init on the same branch can create it first: its 409
- * is followed by a reread, and the reread role gets the same membership check.
- */
 async function ensureDeveloperRole(
   ctx: DbContext,
   branch: string,
@@ -514,7 +464,6 @@ async function ensureDeveloperRole(
       if (!isAlreadyExists(error)) throw error;
     }
     if (created?.name) return { role: created, action: "created" };
-    // Either the operation response did not carry the role, or another run created it.
     existing = mine(await api.listRoles(branch));
     if (!existing) {
       throw new Error(
@@ -533,12 +482,6 @@ async function ensureDeveloperRole(
   return { role: role?.name ? role : existing, action: "updated" };
 }
 
-/**
- * The Postgres name of the database databricks.yml binds, read on `branch`;
- * null when it binds none. A bound database the branch lacks is refused:
- * pointing .env at another one would run the app on a database its deploy does
- * not use. `forking` names the branch a fork of `branch` would create.
- */
 async function readBoundDatabase(
   ctx: DbContext,
   branch: string,
@@ -564,7 +507,6 @@ async function readBoundDatabase(
   return database.status.postgres_database;
 }
 
-/** The bound database, else the one .env names, else the project's default database. */
 function chooseDatabase(
   bound: string | null,
   local: LocalTarget,
@@ -581,7 +523,6 @@ function chooseDatabase(
 
 const SCHEMA_NAME_ADVICE = "Pass --schema-name <name> to read another schema.";
 
-/** introspectHolding, with advice an init user can follow: init has no --schema-name. */
 async function introspectForInit(
   ctx: DbContext,
   lock: HistoryLock,
@@ -606,7 +547,6 @@ async function introspectForInit(
   }
 }
 
-/** The profile or host init authenticated with, for a .env that names neither. */
 async function authValues(
   ctx: DbContext,
   current: Record<string, string>,
@@ -624,18 +564,12 @@ function readEnvValues(file: string): Record<string, string> {
     : {};
 }
 
-/**
- * One lock on the checkout's history covers the whole run, so no other
- * `appkit db` command runs between its clean and migrate; `--schema none`
- * changes no history and takes none.
- */
 export async function runInit(
   ctx: DbContext,
   options: InitOptions = {},
 ): Promise<InitReport> {
   const requested = options.schema;
   if (requested === "none") return initHolding(ctx, { kind: "none" }, options);
-  // Before the lock, which creates config/database.
   if (requested === "migrate" || requested === "clean") {
     requireSchemaFile(ctx.root, requested);
   }
@@ -665,9 +599,6 @@ async function initHolding(
       ? { api: SESSION_BRANCH_TTL, label: "7 days" }
       : { api: parseTtl(options.ttl), label: options.ttl.trim() };
 
-  // Before any change, check the .env init may write and read the schema the
-  // hand-off and the start are for: the one schema.ts declares, which
-  // introspect reads too. --schema none does neither, so it reads no schema.ts.
   const envFile = path.join(ctx.root, ENV_FILE);
   refuseSymlink(envFile);
   const hasSchema = hasSchemaFile(ctx.root);
@@ -675,7 +606,7 @@ async function initHolding(
     hasSchema && request.kind === "locked"
       ? (
           await loadDatabaseSchema(path.join(ctx.root, DEFAULT_SCHEMA_FILE), {
-            showImportError: true,
+            keepImportErrorAsCause: true,
           })
         ).$schemaName
       : DEFAULT_SCHEMA_NAME;
@@ -743,12 +674,14 @@ async function initHolding(
       ...(before.PGPORT && /^\d+$/.test(before.PGPORT)
         ? {}
         : { PGPORT: "5432" }),
-      ...(before.PGSSLMODE === TLS_MODE ? {} : { PGSSLMODE: TLS_MODE }),
+      ...(before.PGSSLMODE === CERT_VERIFYING_SSL_MODE
+        ? {}
+        : { PGSSLMODE: CERT_VERIFYING_SSL_MODE }),
       ...(await authValues(ctx, before)),
     };
-    if (before.PGSSLMODE && before.PGSSLMODE !== TLS_MODE) {
+    if (before.PGSSLMODE && before.PGSSLMODE !== CERT_VERIFYING_SSL_MODE) {
       onStep(
-        `Setting PGSSLMODE=${TLS_MODE} in .env: it was ${before.PGSSLMODE}, and only ${TLS_MODE} makes every connection use TLS and check the server's certificate`,
+        `Setting PGSSLMODE=${CERT_VERIFYING_SSL_MODE} in .env: it was ${before.PGSSLMODE}, and only ${CERT_VERIFYING_SSL_MODE} makes every connection use TLS and check the server's certificate`,
       );
     }
     onStep(

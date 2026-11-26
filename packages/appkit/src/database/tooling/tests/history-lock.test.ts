@@ -17,10 +17,6 @@ function writeLock(root: string, contents: string): void {
   fs.writeFileSync(path.join(root, LOCK), contents);
 }
 
-/**
- * Run a process that takes the lock in root, runs whileHeld and waits; resolves
- * once it holds the lock, with a promise of the signal that ended it.
- */
 async function holderProcess(root: string, whileHeld = "") {
   const script = `
     const { withHistoryLock } = await import(${JSON.stringify(path.resolve(import.meta.dirname, "../history-lock.ts"))});

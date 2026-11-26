@@ -43,12 +43,6 @@ import {
   tempApp,
 } from "./fakes";
 
-// init end to end. The Lakebase API is the fake, every SQL step is real. The
-// test database models a fork of the deploy branch. The app's service
-// principal owns the app schema, and you connect as a role that inherits
-// pg_read_all_data and pg_write_all_data, as a member of DATABRICKS_SUPERUSER
-// does. APPKIT_TEST_PG_URL is a superuser URL that may create databases and
-// roles, e.g. postgres://localhost:5432/postgres
 const url = process.env.APPKIT_TEST_PG_URL;
 
 const USER = "alice@example.com";

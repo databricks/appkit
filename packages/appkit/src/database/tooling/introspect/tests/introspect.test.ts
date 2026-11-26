@@ -66,7 +66,6 @@ export const schema = defineSchema(({ table }) => ({
 }));
 `;
 
-/** Declares both tables of the default catalog and its foreign key, with email private. */
 const declaredSchema = `import { defineSchema, fk, id, text } from ${JSON.stringify(BUILDER)};
 export const schema = defineSchema(({ table }) => {
   const authors = table("authors", { id: id(), email: text().private() });
@@ -88,11 +87,9 @@ const onProduction = {
 };
 
 let catalog: ReturnType<typeof catalogResponder>;
-/** The journal rows of the branch, as drizzle-orm records them; empty: no journal table. */
 let recorded: Array<{ when: number; hash: string }>;
 let tagged: boolean;
 let schemaOwner: string;
-/** The row the branch records for the last committed migration. */
 const lastCommitted = (root: string) => {
   const folder = path.join(root, MIGRATIONS);
   const entry = readJournal(folder)?.entries.at(-1);
@@ -101,9 +98,7 @@ const lastCommitted = (root: string) => {
 };
 const pool = {
   query: vi.fn(async (text: string, values: unknown[]) => {
-    // readMigrationDrift: whether the journal table exists, then its rows.
     if (text.includes("c.relname = $2")) {
-      // The app's own journal: an ordinary table its role owns.
       const journal = {
         relkind: "r",
         owner: "app-sp",
@@ -186,7 +181,6 @@ const authorsPkey: ConstraintRow = {
   on_update: " ",
 };
 
-/** A catalog with authors(id) plus the given authors columns, and any extra tables. */
 const authorsOnly = (
   columns: ColumnRow[] = [],
   extra: {
@@ -209,7 +203,6 @@ const authorsOnly = (
     indexes: [],
   });
 
-/** A schema.ts of authors and posts, whose author_id is a foreign key to authors. */
 const postsOfAuthors = (schemaOption?: string) =>
   `import { defineSchema, fk, id } from ${JSON.stringify(BUILDER)};
 export const schema = defineSchema(({ table }) => {
@@ -219,7 +212,6 @@ export const schema = defineSchema(({ table }) => {
 }${schemaOption ? `, ${schemaOption}` : ""});
 `;
 
-/** postsOfAuthors' tables, with a foreign key the builder cannot declare: SET NULL on a NOT NULL column. */
 const setNullOnNotNull = (schemaName: string) =>
   authorsOnly([], {
     tables: [{ name: "posts", partitioned: false }],
@@ -244,7 +236,6 @@ const setNullOnNotNull = (schemaName: string) =>
     ],
   });
 
-/** Commit a migration of the current schema.ts; `applied`: the branch has recorded it. */
 async function commitMigration(root: string, applied = true): Promise<void> {
   await withHistoryLock(root, "migrate", async (lock) =>
     generateMigrationFiles(lock, {
@@ -255,7 +246,6 @@ async function commitMigration(root: string, applied = true): Promise<void> {
   if (applied) recorded.push(lastCommitted(root));
 }
 
-/** Every file under config/, with its contents. */
 function tree(root: string): Record<string, string> {
   const files: Record<string, string> = {};
   const walk = (dir: string) => {
@@ -272,7 +262,6 @@ function tree(root: string): Record<string, string> {
 const ctxFor = (root: string) => fakeContext({ root });
 const introspect = (root: string) =>
   runIntrospect(ctxFor(root), { interactive: false, importSource: BUILDER });
-/** The error a run fails with; a run that succeeds fails the test. */
 const rejection = (run: Promise<unknown>) =>
   run.then(
     () => {
@@ -297,7 +286,6 @@ describe("runIntrospect", () => {
     expect(written).toContain(
       'author_id: fk(() => authors.id).notNull().onDelete("cascade"),',
     );
-    // What the replaced schema.ts declares keeps its .private(); the rest renders as the catalog has it.
     expect(written).toContain(
       "email: varchar(255).notNull().unique().private(),",
     );
@@ -338,7 +326,6 @@ describe("runIntrospect", () => {
     );
     expect(fs.readFileSync(report.typesFile, "utf-8")).toContain("authors");
     expect(pool.end).toHaveBeenCalledOnce();
-    // The written schema is what the plugin loads.
     await expect(loadDefaultDatabaseSchema(root)).resolves.toMatchObject({
       $schemaName: "app",
     });
@@ -533,7 +520,6 @@ describe("runIntrospect", () => {
   test("a migration an interrupted run wrote but did not record is recorded when the branch matches it", async () => {
     const root = tempApp({ [SCHEMA]: declaredSchema });
     await introspect(root);
-    // The run stopped after writing 0000_baseline, before recording it.
     recorded = [];
     markMigrationsApplied.mockClear();
 
@@ -569,7 +555,6 @@ describe("runIntrospect", () => {
   test("a pending introspect migration someone edited after introspect wrote it is refused, and nothing changes", async () => {
     const root = tempApp({ [SCHEMA]: previousSchema });
     await commitMigration(root);
-    // A teammate introspected their branch, then edited 0001_introspect before committing it.
     await introspect(root);
     recorded = recorded.slice(0, 1);
     fs.appendFileSync(
@@ -742,7 +727,6 @@ describe("runIntrospect", () => {
 
     expect(catalog.calls.every((call) => call.values[0] === "app")).toBe(true);
     expect(report.schemaName).toBe("app");
-    // sales.authors.email being private says nothing about app.authors.email.
     const written = fs.readFileSync(path.join(root, SCHEMA), "utf-8");
     expect(written).toContain("email: varchar(255).notNull().unique(),");
     expect(written).toContain(
@@ -856,7 +840,6 @@ export const schema = defineSchema(({ table }) => ({
   test("with history, a branch that has not applied every committed migration refuses before reading the catalog", async () => {
     const root = tempApp({ [SCHEMA]: previousSchema });
     await commitMigration(root);
-    // A teammate's migration, pulled but not applied on this branch yet.
     fs.writeFileSync(
       path.join(root, SCHEMA),
       previousSchema.replace(
@@ -1000,7 +983,6 @@ export const schema = defineSchema(
   { schemaName: "public" },
 );
 `,
-      // Only a table introspect cannot key still uses the type.
       authorsOnly([], {
         tables: [{ name: "events", partitioned: false }],
         columns: [

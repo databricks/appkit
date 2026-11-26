@@ -79,7 +79,6 @@ function migrations(ctx: DbContext): string {
   return path.join(ctx.root, "config/database/migrations");
 }
 
-/** generateMigrationFiles under the checkout's history lock, as migrate runs it. */
 function generate(folder: string, tables: Tables) {
   return withHistoryLock(path.resolve(folder, "../../.."), "migrate", (lock) =>
     generateMigrationFiles(lock, {
@@ -168,7 +167,6 @@ describe("runCheck", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const ctx = app({ ...withTags, ...withLikes });
     const main = migrations(ctx);
-    // Another checkout of the same history: the history lock is per checkout.
     const parallel = path.join(ctx.root, "parallel/config/database/migrations");
     vi.setSystemTime(new Date("2026-10-01T00:00:00Z"));
     await generate(main, notes);
@@ -179,7 +177,6 @@ describe("runCheck", () => {
     vi.setSystemTime(new Date("2026-10-03T00:00:00Z"));
     await generate(parallel, withLikes);
 
-    // The merge keeps both, renumbering the parallel one after main's.
     fs.copyFileSync(
       path.join(parallel, "0001_migration.sql"),
       path.join(main, "0002_migration.sql"),
@@ -263,7 +260,6 @@ describe("runCheck", () => {
   ])(
     "a latest snapshot that holds %s fails, and the schema is not compared from it",
     async (_label, content) => {
-      // schema.ts has a change with no migration; check must not pass it.
       const ctx = app({ ...notes, extra: { id: "id" } });
       await generate(migrations(ctx), notes);
       await generate(migrations(ctx), withTags);
@@ -310,7 +306,6 @@ describe("runCheck", () => {
     const folder = migrations(ctx);
     await generate(folder, notes);
     await generate(folder, withTags);
-    // A truncated history: 0000 dropped and 0001 renumbered into its place.
     fs.rmSync(path.join(folder, "0000_migration.sql"));
     fs.rmSync(path.join(folder, "meta/0000_snapshot.json"));
     fs.renameSync(

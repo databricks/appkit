@@ -40,7 +40,6 @@ function closes(text: string, quote: string, from: number): boolean {
 }
 
 interface Entry {
-  /** null for comments, blank lines and lines dotenv does not read as `KEY=`. */
   readonly key: string | null;
   readonly prefix: string;
   readonly lines: readonly string[];
@@ -86,12 +85,6 @@ export function refuseSymlink(file: string): void {
   }
 }
 
-/**
- * Replace `KEY=…` entries, append missing keys, and remove the keys whose
- * value is null. Comments, blank lines, other keys, their order, `export `
- * prefixes and CRLF line endings are kept. Written 0600 through a temporary
- * file; a symbolic link is refused.
- */
 export function updateEnvFile(
   file: string,
   values: Readonly<Record<string, string | null>>,
@@ -111,7 +104,6 @@ export function updateEnvFile(
       continue;
     }
     const value = values[key];
-    // Later duplicates of a managed key are dropped, so the value is unambiguous.
     if (value === null || written.has(key)) continue;
     written.add(key);
     out.push(`${entry.prefix}${key}=${formatValue(key, value ?? "")}`);

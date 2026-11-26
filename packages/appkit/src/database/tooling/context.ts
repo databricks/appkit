@@ -11,7 +11,6 @@ import {
 import { currentIdentity } from "./identity";
 import { LakebaseApi, type LakebaseEndpoint } from "./lakebase-api";
 
-/** One Lakebase REST call, before LakebaseApi encodes it as a workspace request. */
 export interface ToolingRequest {
   path: string;
   method: "GET" | "POST" | "PATCH" | "DELETE";
@@ -19,26 +18,18 @@ export interface ToolingRequest {
   payload?: unknown;
 }
 
-/**
- * The slice of AppKit's workspace client the tooling uses. It is also all the
- * Lakebase pool needs, since token refresh goes through `request`.
- */
 export interface ToolingWorkspaceClient {
   request(request: WorkspaceRequest): Promise<Response>;
   readonly currentUser: {
     me(request: { attributes?: string }): Promise<{ userName?: string }>;
   };
-  /** The resolved workspace host, which init writes to a new .env and verify compares with a target's host. */
   getHost(): Promise<string>;
 }
 
-/** Where a command runs: the app root, its environment and its Databricks identity. */
 export interface DbContext {
   readonly root: string;
   readonly env: NodeJS.ProcessEnv;
-  /** Lazy; the profile comes from DATABRICKS_CONFIG_PROFILE. */
   workspace(): ToolingWorkspaceClient;
-  /** Lazy Lakebase REST client over workspace(). */
   api(): LakebaseApi;
 }
 
@@ -70,7 +61,6 @@ export function createDbContext(
   return ctx;
 }
 
-/** The workspace host a Databricks config profile names, as the SDK resolves it; no API call. */
 export function profileHost(profile: string): Promise<string> {
   return createWorkspaceClient({
     profile,
@@ -78,11 +68,6 @@ export function profileHost(profile: string): Promise<string> {
   }).getHost();
 }
 
-/**
- * The guard checks the branch named by LAKEBASE_ENDPOINT, but the pool connects
- * to PGHOST. The runtime only warns when it cannot verify that PGHOST serves that
- * endpoint; a command that writes refuses instead.
- */
 async function assertHostServesEndpoint(
   ctx: DbContext,
   endpoint: string,
@@ -113,7 +98,6 @@ async function assertHostServesEndpoint(
 export const NO_ENV_BRANCH =
   "no branch is configured in .env (PGHOST, PGDATABASE and LAKEBASE_ENDPOINT); run `appkit db init`";
 
-/** Whether .env names a branch to connect to. */
 export function hasEnvBranch(env: NodeJS.ProcessEnv): boolean {
   return Boolean(env.PGHOST && env.PGDATABASE && env.LAKEBASE_ENDPOINT);
 }
@@ -124,15 +108,12 @@ const UNVERIFIED_SSL_MODES: ReadonlySet<string> = new Set([
   "allow",
 ]);
 
-/**
- * The pool's TLS mode for PGSSLMODE. Of the modes createLakebasePool takes,
- * only require verifies the server's certificate. Unset is passed as require
- * too: createLakebasePool would read process.env.PGSSLMODE instead.
- */
+export const CERT_VERIFYING_SSL_MODE = "require";
+
 function verifyingSslMode(
   mode: string | undefined,
 ): LakebasePoolConfig["sslMode"] {
-  if (mode === undefined || mode === "") return "require";
+  if (mode === undefined || mode === "") return CERT_VERIFYING_SSL_MODE;
   if (UNVERIFIED_SSL_MODES.has(mode)) {
     throw new Error(
       `PGSSLMODE=${mode} does not verify the server's certificate, so it did not connect. Set PGSSLMODE to require, or unset it.`,
@@ -141,10 +122,6 @@ function verifyingSslMode(
   return mode as LakebasePoolConfig["sslMode"];
 }
 
-/**
- * The pool is created directly: initializeLakebasePool would look the endpoint
- * and the user up a second time.
- */
 async function openBranchPool(ctx: DbContext): Promise<Pool> {
   const { PGHOST, PGDATABASE, LAKEBASE_ENDPOINT } = ctx.env;
   if (!PGHOST || !PGDATABASE || !LAKEBASE_ENDPOINT) {
@@ -164,13 +141,11 @@ async function openBranchPool(ctx: DbContext): Promise<Pool> {
     ...(port ? { port } : {}),
     sslMode,
     workspaceClient: ctx.workspace(),
-    // One-shot CLI pools: a small cap, and no lingering idle connections.
     max: 2,
     idleTimeoutMillis: 1_000,
   });
 }
 
-/** Run fn with a pool on the .env branch, and close the pool after. */
 export async function withBranchPool<T>(
   ctx: DbContext,
   fn: (pool: Pool) => Promise<T>,

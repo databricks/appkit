@@ -35,12 +35,10 @@ function tempFolder(): string {
   return path.join(root, "config/database/migrations");
 }
 
-/** The checkout a tempFolder belongs to. */
 function rootOf(folder: string): string {
   return path.resolve(folder, "../../..");
 }
 
-/** generateMigrationFiles under the checkout's history lock, as a command runs it. */
 function generate({
   folder,
   ...options
@@ -50,7 +48,6 @@ function generate({
   );
 }
 
-/** Every file under a folder, relative, sorted — to prove nothing was written. */
 function listFiles(folder: string): string[] {
   if (!fs.existsSync(folder)) return [];
   return (fs.readdirSync(folder, { recursive: true }) as string[])
@@ -119,7 +116,6 @@ describe("generateMigrationFiles", () => {
     expect(sql).toMatch(
       /FOREIGN KEY \("author"\) REFERENCES "app"\."authors"\("id"\) ON DELETE cascade/,
     );
-    // The migrator creates the schema as the identity that applies it; generated SQL never does.
     expect(sql).not.toMatch(/CREATE SCHEMA/i);
     expect(sql).toContain("--> statement-breakpoint\n");
 
@@ -176,7 +172,6 @@ describe("generateMigrationFiles", () => {
       interactive: false,
     });
 
-    // A clock that did not move must still yield a newer journal entry.
     const next = await generate({
       folder,
       schema: blog({ views: integer().notNull().default(0) }),
@@ -283,7 +278,6 @@ describe("generateMigrationFiles", () => {
     expect(migrations.map((migration) => migration.folderMillis)).toEqual(
       journal?.entries.map((entry) => entry.when),
     );
-    // Four statements: the enum, two tables, the FK.
     expect(migrations[0].sql).toHaveLength(4);
     expect(migrations[1].sql).toEqual([
       `ALTER TABLE "app"."posts" ADD COLUMN "views" integer;`,
@@ -404,7 +398,6 @@ describe("breakingStatements", () => {
       'ALTER TABLE "app"."notes" ALTER COLUMN "title" SET NOT NULL;',
       'DROP TYPE "app"."mood";',
       `ALTER TYPE "app"."mood" RENAME VALUE 'sad' TO 'blue';`,
-      // Old instances insert without it, and a populated table rejects it.
       'ALTER TABLE "app"."notes" ADD COLUMN "title" text NOT NULL;',
     ];
     const safe = [
@@ -515,7 +508,6 @@ describe("discardMigrationFiles", () => {
     expect(fs.readFileSync(journalFile, "utf-8")).toBe(journalBefore);
   });
 
-  /** Discard a migration, killed as it deletes the migration's SQL file. */
   async function discardKilledAtSql(
     folder: string,
     schema: Parameters<typeof generateMigrationFiles>[1]["schema"],

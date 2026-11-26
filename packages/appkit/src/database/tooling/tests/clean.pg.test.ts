@@ -10,8 +10,6 @@ import {
   readKeptObjects,
 } from "../clean";
 
-// The clean SQL against a real server, as a superuser that may create
-// databases and roles, e.g. APPKIT_TEST_PG_URL=postgres://localhost:5432/postgres
 const url = process.env.APPKIT_TEST_PG_URL;
 
 async function clean(
@@ -146,7 +144,6 @@ describe.skipIf(!url)("clean against Postgres", () => {
       const { dependents, kept } = await clean(pool, "public");
 
       expect(dependents).toEqual(["view their_view"]);
-      // The other role's table stays with its rows; the extensions' objects are not listed as kept.
       expect(kept).toEqual(["table theirs"]);
       expect(
         await names(

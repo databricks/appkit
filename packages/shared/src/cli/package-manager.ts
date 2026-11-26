@@ -9,10 +9,6 @@ function isPackageManager(value: string): value is PackageManager {
   );
 }
 
-/**
- * The manager a directory's own files name: its package.json's packageManager
- * field, else its lockfile. null when neither names one.
- */
 export function declaredPackageManager(dir: string): PackageManager | null {
   try {
     const pkg = JSON.parse(

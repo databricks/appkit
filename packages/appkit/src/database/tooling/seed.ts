@@ -18,11 +18,6 @@ interface SeedReport {
   readonly file: string;
 }
 
-/**
- * `appkit db seed`: run config/database/seed.sql in one transaction on your
- * dev or session branch, with the app schema first on the search_path so
- * unqualified names resolve to it. Refuses any other branch before connecting.
- */
 export async function runSeed(ctx: DbContext): Promise<SeedReport> {
   const file = path.join(ctx.root, SEED_FILE);
   if (!fs.existsSync(file)) {
@@ -34,7 +29,7 @@ export async function runSeed(ctx: DbContext): Promise<SeedReport> {
   const schemaName = hasSchemaFile(ctx.root)
     ? (
         await loadDatabaseSchema(path.join(ctx.root, DEFAULT_SCHEMA_FILE), {
-          showImportError: true,
+          keepImportErrorAsCause: true,
         })
       ).$schemaName
     : DEFAULT_SCHEMA_NAME;

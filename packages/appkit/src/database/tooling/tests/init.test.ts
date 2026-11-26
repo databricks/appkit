@@ -130,7 +130,6 @@ function project(): FakeLakebase {
   return lakebase;
 }
 
-/** An app that deploys to `deploy` (the default branch unless set), with .env pointing at the default branch. */
 function appOn(
   lakebase: FakeLakebase,
   env: Record<string, string> = {},
@@ -235,7 +234,7 @@ beforeEach(() => {
     branch: DEV,
     schemaName: "app",
     dependents: [],
-    kept: [],
+    keptOwnedByOthers: [],
   });
   introspectHolding.mockReset().mockResolvedValue({ branch: DEV, tables: [] });
 });
@@ -251,7 +250,6 @@ describe("runInit — dev branch", () => {
     expect(lakebase.calls).toContain(
       `createBranch ${devBranchId(USER)} ${JSON.stringify({ source_branch: PRODUCTION, no_expiry: true })}`,
     );
-    // Only the owner of the app schema is deleted; Bob's copied role stays.
     expect(
       lakebase.calls.filter((call) => call.startsWith("deleteRole")),
     ).toEqual([`deleteRole ${DEV}/roles/dbrx-apps-${SP} → ${DEV}/roles/alice`]);
@@ -271,7 +269,12 @@ describe("runInit — dev branch", () => {
       installed: null,
       start: {
         kind: "clean",
-        clean: { branch: DEV, schemaName: "app", dependents: [], kept: [] },
+        clean: {
+          branch: DEV,
+          schemaName: "app",
+          dependents: [],
+          keptOwnedByOthers: [],
+        },
         migrate: migrateReport,
         reason: "fork-copy",
       },
@@ -301,7 +304,6 @@ describe("runInit — dev branch", () => {
     expect(fs.readFileSync(path.join(ctx.root, ".env"), "utf-8")).toMatch(
       /^# Lakebase\n/,
     );
-    // Clean and migrate run against the new branch; the caller's environment is left alone.
     expect(cleanHolding.mock.invocationCallOrder[0]).toBeLessThan(
       migrateHolding.mock.invocationCallOrder[0] ?? 0,
     );
@@ -532,7 +534,6 @@ describe("runInit — the fork's parent", () => {
 });
 
 describe("runInit — a concurrent run on the same branch", () => {
-  /** The API that another run raced: it did `before` first, then this run's call returns 409. */
   function racedApi(
     lakebase: FakeLakebase,
     method: "createEndpoint" | "createRole",
@@ -584,7 +585,6 @@ describe("runInit — a concurrent run on the same branch", () => {
     api.listEndpoints = async (branch) => {
       lists++;
       const endpoints = await list(branch);
-      // The other run's endpoint has no host until the third look.
       return lists < 3
         ? endpoints.map((endpoint) => ({
             ...endpoint,
@@ -596,7 +596,6 @@ describe("runInit — a concurrent run on the same branch", () => {
     vi.useFakeTimers();
     try {
       const run = init(ctx, { schema: "none" });
-      // init reaches its wait in microtasks; the async advance lets them run, then fires the wait's timer.
       await vi.advanceTimersByTimeAsync(2_000);
       const { report, steps } = await run;
 
@@ -772,7 +771,6 @@ describe("runInit — session branch", () => {
   });
 
   test("a rerun without --session resumes a rotation that stopped before .env pointed at the new branch", async () => {
-    // The rotation wrote the new id, then stopped before or after the fork.
     const beforeFork = project();
     beforeFork.addBranch(session("oldaaaaa"), {
       expire_time: "2000-01-01T00:00:00Z",
@@ -1095,7 +1093,12 @@ describe("runInit — schema start", () => {
       kind: "introspect",
       introspect: { branch: DEV, tables: [] },
       rebuilt: {
-        clean: { branch: DEV, schemaName: "app", dependents: [], kept: [] },
+        clean: {
+          branch: DEV,
+          schemaName: "app",
+          dependents: [],
+          keptOwnedByOthers: [],
+        },
         migrate: migrateReport,
         reason: "fork-copy",
       },
@@ -1187,7 +1190,12 @@ describe("runInit — schema start", () => {
     );
     expect(report.start).toEqual({
       kind: "clean",
-      clean: { branch: DEV, schemaName: "app", dependents: [], kept: [] },
+      clean: {
+        branch: DEV,
+        schemaName: "app",
+        dependents: [],
+        keptOwnedByOthers: [],
+      },
       migrate: migrateReport,
       reason: "requested",
     });
@@ -1226,7 +1234,12 @@ describe("runInit — schema start", () => {
       await expect(runMigrate(ctx, { interactive: false })).rejects.toThrow(
         /^Another `appkit db init` \(pid \d+ on .+\) is changing the migration history in config\/database\. /,
       );
-      return { branch: DEV, schemaName: "app", dependents: [], kept: [] };
+      return {
+        branch: DEV,
+        schemaName: "app",
+        dependents: [],
+        keptOwnedByOthers: [],
+      };
     });
 
     await init(ctx, { schema: "clean", runCommand: vi.fn() });

@@ -9,7 +9,6 @@ import {
   LakebaseApiError,
 } from "../lakebase-api";
 
-/** A request as LakebaseApi sent it, with its JSON body decoded. */
 interface Sent {
   method: string;
   path: string;
@@ -20,7 +19,6 @@ interface Sent {
 
 type Reply = unknown | ((request: Sent) => unknown);
 
-/** Workspace client fake: replies in order with JSON, records each request. */
 function client(replies: Reply[]) {
   const requests: Sent[] = [];
   return {

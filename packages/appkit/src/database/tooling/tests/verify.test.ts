@@ -61,7 +61,6 @@ function journal(migrations: Migration[]): string {
   });
 }
 
-/** An app whose schema.ts declares app.notes(id, body), with the given committed migrations. */
 function app(
   migrations: Migration[] = [],
   env: NodeJS.ProcessEnv = ENV,
@@ -88,8 +87,6 @@ function app(
       );
     }
   }
-  // The .env branch is classified through the API, as you: your dev and
-  // session branches, another user's dev branch, and the default branch.
   const lakebase = new FakeLakebase();
   lakebase.addBranch(BRANCH);
   lakebase.addBranch(SESSION);
@@ -111,7 +108,6 @@ function app(
   };
 }
 
-/** Journal rows as the migrator writes them: the file's sha256 and the journal's `when`. */
 function recordedAs(ctx: DbContext, migrations: Migration[]) {
   return migrations.map((m) => ({
     hash: createHash("sha256")
@@ -126,15 +122,9 @@ function recordedAs(ctx: DbContext, migrations: Migration[]) {
   }));
 }
 
-/**
- * A connection answering the catalog and journal queries; it records every
- * statement.
- */
 function branch(state: {
   columns: Record<string, string[]>;
-  /** The journal table's rows; "absent" without the table. */
   recorded: Array<{ hash: string; created_at: string }> | "absent";
-  /** Declared tables that exist in schema public instead. */
   inPublic?: string[];
   schemaOwner?: string;
   failOn?: RegExp;
@@ -144,7 +134,6 @@ function branch(state: {
     query: vi.fn(async (text: string, values?: unknown[]) => {
       statements.push(text);
       if (state.failOn?.test(text)) throw new Error("connection reset");
-      // locateTables: the declared tables found in the target schema or in public.
       if (/n\.nspname::text in \(/.test(text)) {
         return {
           rows: (state.inPublic ?? []).map((table_name) => ({
@@ -177,7 +166,6 @@ function branch(state: {
         };
       }
       if (/from pg_catalog\.pg_class c\s+join/.test(text)) {
-        // The app's own journal: an ordinary table its role owns.
         const journalTable = {
           relkind: "r",
           owner: "app-sp",
@@ -226,7 +214,6 @@ beforeEach(() => {
   });
 });
 
-/** Classify the next .env branch as resolveEnvBranch does, through the Lakebase API and current user app() fakes. */
 async function classifyThroughApi(): Promise<void> {
   const guard = await vi.importActual<typeof import("../guard")>("../guard");
   resolveEnvBranch.mockImplementationOnce(guard.resolveEnvBranch);
@@ -247,7 +234,7 @@ describe("runVerify", () => {
     notYours: null,
     refusesEveryBranch: null,
     schemaProblems: [],
-    schemaAdvice: null,
+    tablesInPublicAdvice: null,
     pendingMigrations: [],
     strandedMigrations: [],
     editedMigrations: [],
@@ -292,7 +279,7 @@ describe("runVerify", () => {
 
     expect(await runVerify(ctx)).toMatchObject({
       schemaProblems: ["table app.notes does not exist"],
-      schemaAdvice: null,
+      tablesInPublicAdvice: null,
       pendingMigrations: ["0000_baseline"],
       ok: false,
     });
@@ -309,7 +296,7 @@ describe("runVerify", () => {
     expect(await runVerify(ctx)).toMatchObject({
       ...clean,
       schemaProblems: ["table app.notes does not exist"],
-      schemaAdvice:
+      tablesInPublicAdvice:
         `Schema public has that table, but defineSchema() puts tables in schema "app" unless told otherwise. ` +
         'To keep them in public, pass { schemaName: "public" } as the second argument of defineSchema() in config/database/schema.ts.',
       ok: false,
@@ -695,7 +682,6 @@ const SP = "11111111-2222-3333-4444-555555555555";
 const HOST = "https://acme.cloud.databricks.com";
 const SNAPSHOT = "/Workspace/Users/sp/src/01f0";
 
-/** The app API's response for a deployed, running app bound to the deploy branch. */
 function runningApp(overrides: Record<string, unknown> = {}) {
   return {
     name: "my-app",
@@ -720,26 +706,18 @@ function runningApp(overrides: Record<string, unknown> = {}) {
   };
 }
 
-/** databricks.yml with a workspace host on its default target. */
 function ymlWithHost(host = HOST): string {
   return `${databricksYml(PRODUCTION, DATABASE)}    workspace:\n      host: ${host}\n`;
 }
 
-/**
- * An app that databricks.yml deploys to the deploy branch. The developer has
- * no Postgres role there: --deployed must not need one.
- */
 function deployedApp(
   options: {
     app?: Record<string, unknown> | "missing" | Error;
     yml?: string;
     spRole?: boolean;
     migrations?: Migration[];
-    /** The deployed snapshot's journal: its entries, its raw text, "unreadable" when its export fails, or "missing" when it does not exist. */
     deployedJournal?: Migration[] | string;
-    /** The deployed SQL by tag, else the committed SQL; "unreadable" or "missing" as for the journal. */
     deployedSql?: Record<string, string>;
-    /** The deployed snapshot folder's status: "unreadable" or "missing" as for the journal; it exists otherwise. */
     snapshot?: "unreadable" | "missing";
     authenticatedHost?: string;
   } = {},
@@ -835,7 +813,6 @@ function deployedApp(
 
 const DEPLOYED: VerifyOptions = { deployed: true };
 
-/** --deployed's problems; fails when the report is not a deploy report. */
 async function deployProblems(
   ctx: DbContext,
   options: VerifyOptions = DEPLOYED,
@@ -845,7 +822,6 @@ async function deployProblems(
   return report.problems;
 }
 
-/** databricks.yml with the given resources block in place of the default app. */
 function ymlWithApps(apps: string): string {
   return databricksYml(PRODUCTION, DATABASE).replace(
     /resources:\n {2}apps:\n(?: {4}.*\n)+/,
@@ -930,7 +906,6 @@ describe("runVerify --deployed", () => {
       ],
       ok: false,
     });
-    // Its journal entry already differs, so its SQL is not read.
     expect(requests).not.toContain(
       `workspace.export ${SNAPSHOT}/${MIGRATIONS}/0001_migration.sql`,
     );
@@ -1025,7 +1000,6 @@ describe("runVerify --deployed", () => {
       migrations: [{ tag: "0000_migration", when: 1000 }],
       app: runningApp({
         active_deployment: {
-          // The live folder the deployment came from, which can change after it.
           source_code_path: "/Workspace/Users/alice@example.com/my-app",
           status: { state: "SUCCEEDED" },
         },
@@ -1468,7 +1442,6 @@ describe("runVerify --deployed", () => {
   });
 
   test("a branch that only variable-overrides.json sets is the one verify checks, as a deploy from this checkout uses it", async () => {
-    // The target gives the variables no value; only the overrides file does.
     const yml = `${databricksYml(PRODUCTION, DATABASE).replace(
       / {4}variables:\n(?: {6}.*\n)+/,
       "",
@@ -1552,7 +1525,6 @@ describe("runVerify --deployed", () => {
   test("a workspace.host the checkout's files do not resolve is refused before any API call, naming where to set it", async () => {
     const { ctx, lakebase, requests } = deployedApp({
       yml: ymlWithHost("${var.host}"),
-      // Any check against this shell's workspace would pass here, so a pass would mean the check was skipped.
       authenticatedHost: "https://other.cloud.databricks.com",
     });
 
@@ -1679,7 +1651,6 @@ describe("runVerify --deployed", () => {
       "app my-app is crashed: App crashed unexpectedly. `databricks apps logs` shows why; a migration that fails stops the app on start",
     ],
     [
-      // As the API returns it: a stopped app has no active_deployment.
       "stopped",
       {
         compute_status: {

@@ -8,10 +8,9 @@ import {
   SESSION_PREFIX,
 } from "../branch-names";
 
-// Branch names AppKit creates. Branch IDs: 1-63 chars, start with a
-// lowercase letter, lowercase letters, digits and hyphens only.
+// Branch IDs: 1-63 chars, start with a lowercase letter, lowercase letters,
+// digits and hyphens only.
 
-/** Seven days: a session branch outlives a working week, then expires on its own. */
 export const SESSION_BRANCH_TTL = "604800s";
 const SESSION_ID = new RegExp(`^[a-z0-9]{1,${SESSION_ID_LENGTH}}$`);
 
@@ -26,7 +25,6 @@ function normalized(userName: string): string {
   return userName.trim().toLowerCase();
 }
 
-/** sha256(userName)[0:6]: the part of a branch name that says whose it is. */
 function userHash(userName: string): string {
   return createHash("sha256")
     .update(normalized(userName))
@@ -34,10 +32,6 @@ function userHash(userName: string): string {
     .slice(0, USER_HASH_HEX_LENGTH);
 }
 
-/**
- * dev-<slug(local part)>-<userHash>. The hash keeps users who share a local
- * part apart; the name is the same on every machine.
- */
 export function devBranchId(userName: string): string {
   const room =
     LAKEBASE_MAX_BRANCH_ID_LENGTH -
@@ -54,7 +48,6 @@ export function isValidSessionId(sessionId: string): boolean {
   return SESSION_ID.test(sessionId);
 }
 
-/** The session id as given; an invalid one throws. */
 export function parseSessionId(sessionId: string): string {
   if (!isValidSessionId(sessionId)) {
     throw new Error(
@@ -64,15 +57,10 @@ export function parseSessionId(sessionId: string): string {
   return sessionId;
 }
 
-/**
- * session-<userHash>-<sessionId>. The id lives in this checkout's .env; the
- * hash makes a copied .env name a branch only its creator passes the guard on.
- */
 export function sessionBranchId(userName: string, sessionId: string): string {
   return `${SESSION_PREFIX}${userHash(userName)}-${parseSessionId(sessionId)}`;
 }
 
-/** Whether a branch id is one of this user's session branches, whatever its session id. */
 export function isUsersSessionBranchId(
   userName: string,
   branchId: string,
@@ -80,7 +68,6 @@ export function isUsersSessionBranchId(
   return branchId.startsWith(`${SESSION_PREFIX}${userHash(userName)}-`);
 }
 
-/** Whether a branch id is one of this user's dev or session branches. */
 export function isUsersBranchId(userName: string, branchId: string): boolean {
   return (
     branchId === devBranchId(userName) ||
@@ -90,7 +77,6 @@ export function isUsersBranchId(userName: string, branchId: string): boolean {
 
 const BASE36 = "0123456789abcdefghijklmnopqrstuvwxyz";
 
-/** 8 random base36 characters, generated once per checkout and kept in .env. */
 export function newSessionId(): string {
   let id = "";
   for (let i = 0; i < 8; i++) id += BASE36[randomInt(BASE36.length)];
@@ -100,7 +86,6 @@ export function newSessionId(): string {
 const TTL = /^(\d+)([smhd])$/;
 const SECONDS = { s: 1, m: 60, h: 3_600, d: 86_400 } as const;
 
-/** `--ttl 30m`, `1h`, `7d` or `3600s` as the API's duration ("3600s"). */
 export function parseTtl(value: string): string {
   const match = TTL.exec(value.trim());
   const amount = Number(match?.[1]);

@@ -65,35 +65,23 @@ function migrationAdvice(migration: MigrateOnStartDecision): string {
 
 interface SchemaCheck {
   readonly problems: string[];
-  /** Declared tables with no relation of that name in the schema. */
-  readonly absent: string[];
+  readonly absentTables: string[];
 }
 
-/** What the database lacks, and the one cause the check can name. */
 interface SchemaDiagnosis {
   readonly problems: readonly string[];
-  /**
-   * Every absent table is in schema public, with how to keep it there;
-   * migrating would create a second, empty copy. null when that is not the
-   * cause.
-   */
-  readonly advice: string | null;
+  readonly tablesInPublicAdvice: string | null;
 }
 
-/**
- * Every declared table or column the database lacks, and every declared table
- * that is a view or another non-table relation, as human-readable problems,
- * with the advice for tables left in public. Setup and `appkit db verify`
- * share it so both name that cause.
- */
 export async function diagnoseSchema(
   dataPath: Pick<DataPath, "raw">,
   schema: Schema,
 ): Promise<SchemaDiagnosis> {
-  const { problems, absent } = await checkSchema(dataPath, schema);
+  const { problems, absentTables } = await checkSchema(dataPath, schema);
   return {
     problems,
-    advice: (await inPublicInstead(dataPath, schema, absent)) ?? null,
+    tablesInPublicAdvice:
+      (await inPublicInstead(dataPath, schema, absentTables)) ?? null,
   };
 }
 
@@ -106,7 +94,7 @@ async function checkSchema(
   schema: Schema,
 ): Promise<SchemaCheck> {
   const tables = Object.values(schema.$tables);
-  if (tables.length === 0) return { problems: [], absent: [] };
+  if (tables.length === 0) return { problems: [], absentTables: [] };
   const schemaName = schema.$schemaName;
   const tableNames = tables.map((table) => table.$name);
   // Include non-tables so setup can report their kind instead of claiming they are absent.
@@ -162,13 +150,12 @@ async function checkSchema(
   }
   return {
     problems,
-    absent: tableNames.filter((name) => !found.has(name)),
+    absentTables: tableNames.filter((name) => !found.has(name)),
   };
 }
 
 /**
  * Confirm every declared table and column exists before routes are published.
- * `migration` says what this start did about migrations, so the advice fits.
  */
 export async function assertSchemaMatchesDatabase(
   dataPath: DataPath,
@@ -177,11 +164,14 @@ export async function assertSchemaMatchesDatabase(
 ): Promise<void> {
   if (Object.keys(schema.$tables).length === 0) return;
   await assertSchemaUsable(dataPath, schema.$schemaName);
-  const { problems, advice } = await diagnoseSchema(dataPath, schema);
+  const { problems, tablesInPublicAdvice } = await diagnoseSchema(
+    dataPath,
+    schema,
+  );
   if (problems.length > 0) {
     throw databaseSetupFailed(
       `the declared schema does not match the database: ${problems.join("; ")}. ${
-        advice ?? migrationAdvice(migration)
+        tablesInPublicAdvice ?? migrationAdvice(migration)
       }`,
     );
   }

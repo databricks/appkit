@@ -41,11 +41,6 @@ const JOURNAL = /c\.relname = \$2/;
 const TAG = /where hash = \$1/;
 const KEPT_IN_PUBLIC = /nspname = 'public'/;
 
-/**
- * A pool whose one client records statements, can fail on one, and answers
- * the dependents query. The app schema is yours unless `schemaOwner` names
- * another role. The reads of the schema's state are answered, not recorded.
- */
 function recordingPool(
   options: {
     failOn?: RegExp;
@@ -132,7 +127,7 @@ describe("runClean", () => {
       branch: devBranch.name,
       schemaName: "app",
       dependents: ["view reporting.recent"],
-      kept: [],
+      keptOwnedByOthers: [],
     });
     expect(writableEnvBranch).toHaveBeenCalledWith(ctx, "clean");
     expect(statements).toEqual([
@@ -251,7 +246,7 @@ describe("previewClean", () => {
       branch: devBranch.name,
       schemaName: "app",
       dependents: ["constraint refs_fk on table reporting.refs"],
-      kept: [],
+      keptOwnedByOthers: [],
     });
     expect(statements).toEqual(["<dependents>"]);
   });

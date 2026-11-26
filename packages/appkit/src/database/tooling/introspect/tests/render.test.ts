@@ -35,7 +35,6 @@ const fk = (
   ...extra,
 });
 
-/** A table with an integer identity key plus the given columns and FKs. */
 const keyed = (
   name: string,
   columns: IntrospectedTable["columns"] = [],
@@ -53,7 +52,6 @@ const keyed = (
     ],
   });
 
-/** A table with a uuid primary key plus the given columns and FKs. */
 const uuidKeyed = (
   name: string,
   columns: IntrospectedTable["columns"] = [],
@@ -69,7 +67,6 @@ const uuidKeyed = (
 const body = (source: string) =>
   source.slice(source.indexOf("export const schema"));
 
-/** A render with no schema.ts to replace: builder defaults, nothing private. */
 const firstRender = (
   tables: readonly IntrospectedTable[],
   schemaName = "app",
@@ -278,7 +275,6 @@ describe("renderSchemaSource", () => {
         skip.reason.startsWith("foreign key"),
       );
       expect(fkSkips, reason).toHaveLength(1);
-      // Exactly one fk() survives only in the cycle case (the first edge).
       expect(out.source.includes("fk(() =>"), reason).toBe(
         reason.includes("cycle"),
       );
@@ -357,7 +353,6 @@ describe("renderSchemaSource", () => {
           'its primary key column "code" cannot be expressed (type "smallint" is not supported)',
       },
     ]);
-    // The table is gone, so its columns produce no warnings.
     expect(out.warnings).toEqual([]);
   });
 
@@ -642,7 +637,6 @@ describe("renderSchemaSource", () => {
       [
         tableOf({
           ...keyed("t", [col(column, "text")]),
-          // "t_" plus 30 two-byte characters is 62 bytes; one more would pass 63.
           unique: [
             {
               name: `t_${"ç".repeat(30)}`,
@@ -817,7 +811,6 @@ describe("renderSchemaSource over the schema.ts it replaces", () => {
       foreignKeys,
     );
 
-  /** Warnings other than the constraint-name one the fixture's `<column>_fkey` names raise. */
   const otherWarnings = (warnings: readonly string[]) =>
     warnings.filter((warning) => !warning.startsWith("Constraint names"));
 

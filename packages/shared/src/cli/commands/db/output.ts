@@ -14,7 +14,6 @@ import type {
   VerifyReport,
 } from "./tooling-contract";
 
-/** Prompts only when a human can answer them. */
 export function isInteractive(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
@@ -23,8 +22,7 @@ export function relative(file: string): string {
   return path.relative(process.cwd(), file) || file;
 }
 
-/** The last segment of a Lakebase resource name: projects/p/branches/dev-a → dev-a. */
-export function shortName(name: string): string {
+export function resourceId(name: string): string {
   return name.slice(name.lastIndexOf("/") + 1);
 }
 
@@ -35,7 +33,6 @@ export const info = (message: string) =>
 export const warn = (message: string) =>
   console.log(`${pc.yellow("!")} ${message}`);
 
-/** Innermost message: drizzle wraps the driver error, whose text names the failing object. */
 function rootCause(error: unknown): string | undefined {
   let current = (error as { cause?: unknown } | undefined)?.cause;
   let message: string | undefined;
@@ -46,7 +43,6 @@ function rootCause(error: unknown): string | undefined {
   return message;
 }
 
-/** Print the error and its root cause, and fail the process. */
 export function fail(error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
   console.error(`${pc.red("✖")} ${message}`);
@@ -104,17 +100,17 @@ export function printMigrateReport(report: MigrateReport): void {
 export function printCleanReport(report: CleanReport): void {
   ok(
     report.schemaName === "public"
-      ? `Removed your objects in schema public on ${shortName(report.branch)}`
-      : `Dropped schema ${report.schemaName} on ${shortName(report.branch)}`,
+      ? `Removed your objects in schema public on ${resourceId(report.branch)}`
+      : `Dropped schema ${report.schemaName} on ${resourceId(report.branch)}`,
   );
   if (report.dependents.length > 0) {
     warn(
       `Also removed, because they depended on it: ${report.dependents.join(", ")}`,
     );
   }
-  if (report.kept.length > 0) {
+  if (report.keptOwnedByOthers.length > 0) {
     warn(
-      `Kept in schema public, with their rows, because other roles own them: ${report.kept.join(", ")}`,
+      `Kept in schema public, with their rows, because other roles own them: ${report.keptOwnedByOthers.join(", ")}`,
     );
   }
 }
@@ -122,10 +118,8 @@ export function printCleanReport(report: CleanReport): void {
 const REBUILD =
   "`appkit db clean` and then `appkit db migrate` rebuild the branch from this checkout's migrations, in order";
 
-/** The one next step for a failed local verify, most fundamental gap first. */
 function localVerifyHint(report: LocalVerifyReport): string {
-  // Tables left in public: migrating would create empty copies in the app schema.
-  if (report.schemaAdvice) return report.schemaAdvice;
+  if (report.tablesInPublicAdvice) return report.tablesInPublicAdvice;
   if (report.editedMigrations.length > 0) {
     return "Restore the edited migrations from version control, and put the change in a new migration.";
   }
@@ -133,14 +127,13 @@ function localVerifyHint(report: LocalVerifyReport): string {
     return `${REBUILD}. If the branch ran migrations you have not pulled yet, pull them instead.`;
   }
   if (report.strandedMigrations.length > 0) return MIGRATION_HISTORY_REWRITE;
-  // Pending migrations explain the gap; without them, schema.ts changed or the branch was edited.
   return report.pendingMigrations.length > 0
     ? "Run `appkit db migrate` to apply the pending migrations."
     : "If you changed schema.ts, run `appkit db migrate`; if the branch was changed by hand, `appkit db clean` and then `appkit db migrate` rebuild it from the migrations.";
 }
 
 function printLocalVerifyReport(report: LocalVerifyReport): void {
-  const branch = shortName(report.branch);
+  const branch = resourceId(report.branch);
   if (report.notYours) {
     warn(
       report.refusesEveryBranch
@@ -186,7 +179,7 @@ function printLocalVerifyReport(report: LocalVerifyReport): void {
 function printDeployVerifyReport(report: DeployVerifyReport): void {
   const where = `target ${report.target}${report.host ? ` on ${report.host}` : ""}`;
   const app = report.app ? `app ${report.app}` : "The deployed app";
-  const branch = shortName(report.branch);
+  const branch = resourceId(report.branch);
   if (report.ok) {
     ok(
       `${app} (${where}) is running, bound to ${branch} with CAN_CONNECT_AND_CREATE, and its service principal has a role there`,
@@ -231,7 +224,7 @@ export function printIntrospectReport(
 ): void {
   const count = report.tables.length;
   ok(
-    `Wrote ${relative(report.schemaFile)} from schema ${report.schemaName} on ${shortName(report.branch)} (${count} table${count === 1 ? "" : "s"})${report.backupFile ? `; the previous file is ${relative(report.backupFile)}` : ""}`,
+    `Wrote ${relative(report.schemaFile)} from schema ${report.schemaName} on ${resourceId(report.branch)} (${count} table${count === 1 ? "" : "s"})${report.backupFile ? `; the previous file is ${relative(report.backupFile)}` : ""}`,
   );
   for (const skip of report.skipped) {
     warn(
@@ -265,7 +258,7 @@ export function printIntrospectReport(
   }
   if (report.recorded.length > 0) {
     ok(
-      `Recorded ${report.recorded.join(", ")} as applied on ${shortName(report.branch)}: the branch already has ${report.recorded.length === 1 ? "what it describes" : "what they describe"}`,
+      `Recorded ${report.recorded.join(", ")} as applied on ${resourceId(report.branch)}: the branch already has ${report.recorded.length === 1 ? "what it describes" : "what they describe"}`,
     );
   }
   ok(`Generated ${relative(report.typesFile)}`);

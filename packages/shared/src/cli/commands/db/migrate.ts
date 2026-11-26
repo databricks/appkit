@@ -7,15 +7,16 @@ import {
   printMigrateReport,
   warnMigration,
 } from "./output";
-import type { UnappliedMigration } from "./tooling-contract";
+import type { UnappliedMigrationError } from "./tooling-contract";
 
-/** The migration a failed run wrote and kept; null when it wrote none. */
-function unappliedMigration(error: unknown): UnappliedMigration | null {
-  const candidate = error as Partial<UnappliedMigration> | null;
+function unappliedMigrationError(
+  error: unknown,
+): UnappliedMigrationError | null {
+  const candidate = error as Partial<UnappliedMigrationError> | null;
   return typeof candidate?.generated?.tag === "string" &&
     Array.isArray(candidate.breaking) &&
     Array.isArray(candidate.dataDependent)
-    ? (candidate as UnappliedMigration)
+    ? (candidate as UnappliedMigrationError)
     : null;
 }
 
@@ -28,7 +29,7 @@ async function runDbMigrate(): Promise<void> {
     printMigrateReport(report);
   } catch (error) {
     fail(error);
-    const kept = unappliedMigration(error);
+    const kept = unappliedMigrationError(error);
     if (kept) warnMigration(kept.generated.tag, kept);
   }
 }

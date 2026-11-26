@@ -9,14 +9,12 @@ import {
 } from "../../../../shared/src/cli/package-manager";
 import { DRIZZLE_KIT_VERSION, drizzleKitVersionAt } from "./migrations";
 
-/** Runs a command in `cwd`; throws when it fails. */
 export type RunCommand = (
   command: string,
   args: readonly string[],
   cwd: string,
 ) => void;
 
-/** Each manager's exact dev-dependency install. */
 const INSTALL_ARGS: Record<PackageManager, readonly string[]> = {
   pnpm: ["add", "-D", "-E"],
   yarn: ["add", "-D", "-E"],
@@ -29,12 +27,6 @@ interface Install {
   readonly args: readonly string[];
 }
 
-/**
- * The install with the manager the app declares, by packageManager field or
- * lockfile, in its own directory or the nearest ancestor's up to the
- * repository root (a workspace member has neither; its root does). Without
- * one, the manager that launched this command, else npm.
- */
 export function drizzleKitInstall(root: string): Install {
   let manager: PackageManager | null = null;
   for (let dir = path.resolve(root); ; dir = path.dirname(dir)) {
@@ -71,11 +63,6 @@ export const runCommand: RunCommand = (command, args, cwd) => {
   }
 };
 
-/**
- * Install drizzle-kit as an exact dev dependency when the app cannot resolve
- * it, or resolves another version. Returns the command it ran; null when the
- * pinned version was there, or there is no package.json to add it to.
- */
 export function ensureDrizzleKit(
   root: string,
   run: RunCommand,

@@ -120,7 +120,6 @@ export async function writeIfChanged(
   }
 }
 
-/** Write the registry types for a schema the caller already loaded. */
 export function writeDatabaseTypes(
   schema: Schema,
   outFile: string,
@@ -135,12 +134,7 @@ async function importSchema(schemaFile: string): Promise<unknown> {
 }
 
 interface LoadDatabaseSchemaOptions {
-  /**
-   * Keep the import error as the failure's `cause`. Only the local `appkit db`
-   * CLI sets it, to show the developer where schema.ts broke; every other
-   * caller gets the bounded message alone.
-   */
-  readonly showImportError?: boolean;
+  readonly keepImportErrorAsCause?: boolean;
 }
 
 /** Load the named, finalized `schema` export; every failure is a safe diagnostic. */
@@ -154,7 +148,7 @@ export async function loadDatabaseSchema(
   } catch (error) {
     throw new DatabaseTypegenError(
       `Database schema "${schemaLabel(schemaFile)}" ${importFailureReason(error)}`,
-      options.showImportError ? { cause: error } : undefined,
+      options.keepImportErrorAsCause ? { cause: error } : undefined,
     );
   }
   if (typeof module !== "object" || module === null || !("schema" in module)) {

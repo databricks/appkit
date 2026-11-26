@@ -24,13 +24,11 @@ select case when s.deptype = 'o' then 'owned' else 'granted' end as kind,
  order by 1, 2`;
 
 interface Dependents {
-  /** Empty for shared objects. */
   readonly database: string;
   readonly count: number;
 }
 
 interface RoleDependencies {
-  /** In other databases, or shared objects such as a database. */
   readonly owned: readonly Dependents[];
   readonly granted: readonly Dependents[];
 }
@@ -49,11 +47,6 @@ export async function readRoleDependencies(
   return { owned: of("owned"), granted: of("granted") };
 }
 
-/**
- * What the role owns in the current database besides the app schema and its
- * contents, which a delete with reassign would hand over as well. System
- * schemas are left out; a schema the role owns is listed by name.
- */
 const OWNED_OUTSIDE_SQL = `
 select o.type || ' ' || o.identity as label
   from pg_catalog.pg_shdepend s
@@ -92,11 +85,9 @@ function describe(dependents: readonly Dependents[]): string {
 }
 
 interface HandOff {
-  /** The branch .env points at. */
   readonly branch: string;
   readonly database: string;
   readonly schemaName: string;
-  /** Your role on the branch, which receives the objects. */
   readonly developer: LakebaseRole;
   readonly roles: readonly LakebaseRole[];
   readonly onStep: (message: string) => void;
@@ -104,17 +95,7 @@ interface HandOff {
 
 /**
  * A fork copies its parent's objects with their owners, so on a fork of the
- * deploy branch the app's service principal owns the app schema. Hand it to
- * you by deleting that owner's copy of its role on this branch, with its
- * objects reassigned to you. Only the app schema's owner is deleted, and only
- * while the app schema is all it owns here: the reassign would hand over its
- * other objects too, so those are listed and the delete is refused. Objects
- * it owns in another database of the branch are refused too, since the
- * reassign cannot reach them. Returns the owner, escaped for display; null
- * when you already own the schema or it does not exist. Schema public is never handed off: it belongs to the database
- * (pg_database_owner on PostgreSQL 15 and later, the bootstrap superuser
- * before), never to an app, so AppKit never deletes its owner or reassigns its
- * objects.
+ * deploy branch the app's service principal owns the app schema.
  */
 export async function handOffAppSchema(
   ctx: DbContext,

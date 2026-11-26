@@ -1,7 +1,6 @@
 import type { DbContext } from "./context";
 import type { IdentityType } from "./lakebase-api";
 
-/** Who runs the command: the Postgres role name is the user name (email or SP client ID). */
 export interface Identity {
   readonly userName: string;
   readonly identityType: IdentityType;
@@ -16,7 +15,6 @@ export function identityTypeOf(userName: string): IdentityType {
 
 const identities = new WeakMap<DbContext, Promise<Identity>>();
 
-/** currentUser.me(), once per context. */
 export function currentIdentity(ctx: DbContext): Promise<Identity> {
   let identity = identities.get(ctx);
   if (!identity) {

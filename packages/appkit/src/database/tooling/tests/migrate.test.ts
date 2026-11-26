@@ -63,7 +63,6 @@ function writeSchema(root: string, tables: string): void {
   );
 }
 
-/** Every file under the migrations folder, by relative path, with its contents. */
 function historyFiles(folder: string): Record<string, string> {
   return Object.fromEntries(
     fs

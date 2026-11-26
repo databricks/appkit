@@ -5,8 +5,6 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import { readOwnedOutsideSchema, readRoleDependencies } from "../hand-off";
 
-// The pg_shdepend query against a real server, as a superuser that may create
-// databases and roles, e.g. APPKIT_TEST_PG_URL=postgres://localhost:5432/postgres
 const url = process.env.APPKIT_TEST_PG_URL;
 
 function databaseUrl(database: string): string {

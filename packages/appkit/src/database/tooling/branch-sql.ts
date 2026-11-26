@@ -3,7 +3,6 @@ import type { PoolClient } from "pg";
 import { inTransaction } from "../migrations/apply";
 import { type DbContext, withBranchPool } from "./context";
 
-/** Run work in one transaction on the `.env` branch. */
 export function runInTransaction<T>(
   ctx: DbContext,
   work: (client: PoolClient) => Promise<T>,

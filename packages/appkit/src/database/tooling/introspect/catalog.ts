@@ -1,7 +1,6 @@
 import { MIGRATIONS_TABLE } from "../../migrations/paths";
 import type { ReferentialAction } from "../../schema-builder/types";
 
-/** Run one parameterized query and return its rows (a pg Pool fits: `(t, v) => pool.query(t, v).then(r => r.rows)`). */
 export type CatalogQuery = <T>(
   text: string,
   values: readonly unknown[],
@@ -13,7 +12,6 @@ export interface IntrospectedEnum {
   readonly values: readonly string[];
 }
 
-/** Options of the sequence behind a serial or identity column, as text so bigint bounds survive JSON. */
 export interface IntrospectedSequence {
   readonly start: string;
   readonly increment: string;
@@ -25,17 +23,13 @@ export interface IntrospectedSequence {
 
 export interface IntrospectedColumn {
   readonly name: string;
-  /** format_type(), e.g. "character varying(120)". */
   readonly type: string;
   readonly notNull: boolean;
   /** attidentity: "" none, "a" always, "d" by default. */
   readonly identity: "" | "a" | "d";
-  /** Generated column, stored or virtual (attgenerated 's' or 'v'). */
   readonly generated: boolean;
-  /** pg_get_expr() of the default (or generation expression). */
   readonly defaultExpr: string | null;
   readonly enum?: IntrospectedEnum;
-  /** The sequence a serial or identity column owns; absent otherwise. */
   readonly sequence?: IntrospectedSequence;
 }
 
@@ -47,7 +41,6 @@ export interface IntrospectedForeignKey {
   readonly refColumns: readonly string[];
   readonly onDelete: ReferentialAction;
   readonly onUpdate: ReferentialAction;
-  /** DEFERRABLE or MATCH FULL, neither of which the builder declares. */
   readonly deferrable: boolean;
   readonly matchFull: boolean;
 }
@@ -55,25 +48,20 @@ export interface IntrospectedForeignKey {
 export interface IntrospectedUnique {
   readonly name: string;
   readonly columns: readonly string[];
-  /** DEFERRABLE, which the builder does not declare. */
   readonly deferrable: boolean;
 }
 
 export interface IntrospectedTable {
   readonly name: string;
-  /** relkind 'p': partitioned in the database. */
   readonly partitioned: boolean;
   readonly columns: readonly IntrospectedColumn[];
   readonly primaryKey: readonly string[];
   readonly unique: readonly IntrospectedUnique[];
   readonly foreignKeys: readonly IntrospectedForeignKey[];
-  /** CHECK and EXCLUDE constraint names. */
   readonly checks: readonly string[];
-  /** Index names, except the indexes behind primary-key, unique and exclusion constraints. */
   readonly indexes: readonly string[];
 }
 
-/** pg_constraint.confdeltype / confupdtype. */
 const ACTIONS: Record<string, ReferentialAction> = {
   a: "no action",
   r: "restrict",
@@ -124,7 +112,7 @@ export interface IndexRow {
 
 // pg_catalog, never information_schema: it hides objects the role cannot access.
 // Ordinary and partitioned tables only; partitions belong to their parent.
-const TABLES_SQL = `
+export const TABLES_SQL = `
 select c.relname::text as name, c.relkind = 'p' as partitioned
   from pg_catalog.pg_class c
   join pg_catalog.pg_namespace n on n.oid = c.relnamespace
@@ -132,7 +120,7 @@ select c.relname::text as name, c.relkind = 'p' as partitioned
    and c.relname <> $2
  order by c.relname`;
 
-const COLUMNS_SQL = `
+export const COLUMNS_SQL = `
 select c.relname::text as table_name, a.attname::text as name,
        pg_catalog.format_type(a.atttypid, a.atttypmod) as type,
        a.attnotnull as not_null, a.attidentity::text as identity,
@@ -168,7 +156,7 @@ select c.relname::text as table_name, a.attname::text as name,
    and c.relname <> $2 and a.attnum > 0 and not a.attisdropped
  order by c.relname, a.attnum`;
 
-const CONSTRAINTS_SQL = `
+export const CONSTRAINTS_SQL = `
 select c.relname::text as table_name, k.conname::text as name, k.contype::text as kind,
        array(select a.attname::text
                from unnest(k.conkey) with ordinality as u(attnum, ord)
@@ -191,8 +179,7 @@ select c.relname::text as table_name, k.conname::text as name, k.contype::text a
    and k.conparentid = 0
  order by c.relname, k.conname`;
 
-// Indexes no constraint stands for: schema.ts cannot declare them.
-const INDEXES_SQL = `
+export const INDEXES_SQL = `
 select c.relname::text as table_name, i.relname::text as name
   from pg_catalog.pg_index x
   join pg_catalog.pg_class c on c.oid = x.indrelid
@@ -205,9 +192,7 @@ select c.relname::text as table_name, i.relname::text as name
         and k.contype in ('p', 'u', 'x'))
  order by c.relname, i.relname`;
 
-// What readCatalog does not read, so the report can name it. Objects an
-// extension owns are left out: the extension recreates them.
-const UNREAD_SQL = `
+export const UNREAD_SQL = `
 with ns as (select oid from pg_catalog.pg_namespace where nspname = $1),
 objects (label, classid, objid) as (
   select case c.relkind when 'v' then 'view ' when 'm' then 'materialized view '
@@ -254,7 +239,6 @@ objects (label, classid, objid) as (
      and (t.typtype in ('d', 'r')
           or (t.typtype = 'c' and exists (
                 select 1 from pg_catalog.pg_class c where c.oid = t.typrelid and c.relkind = 'c'))
-          -- an enum is read through the columns that use it
           or (t.typtype = 'e' and not exists (
                 select 1 from pg_catalog.pg_attribute a
                   join pg_catalog.pg_class c on c.oid = a.attrelid
@@ -289,7 +273,6 @@ function toColumn(row: ColumnRow): IntrospectedColumn {
   };
 }
 
-/** Assemble the model from the catalog result sets (exported for fixture tests). */
 export function buildTables(
   tables: readonly TableRow[],
   columns: readonly ColumnRow[],
@@ -333,7 +316,6 @@ export function buildTables(
   });
 }
 
-/** Tables of one schema from pg_catalog, excluding the migration journal. */
 export async function readCatalog(
   query: CatalogQuery,
   schemaName: string,
@@ -346,7 +328,6 @@ export async function readCatalog(
   return buildTables(tables, columns, constraints, indexes);
 }
 
-/** Objects of the schema readCatalog does not read, e.g. "trigger audit on notes". */
 export async function readUnreadObjects(
   query: CatalogQuery,
   schemaName: string,

@@ -7,7 +7,6 @@ import { parseSessionId } from "./naming";
 
 export type BranchMode = "dev" | "session";
 
-/** Full resource names, e.g. branch = "projects/p/branches/b". */
 interface ResourceName {
   readonly project: string;
   readonly branch?: string;
@@ -18,7 +17,6 @@ interface ResourceName {
 const RESOURCE =
   /^(projects\/[^/\s]+)(?:\/branches\/([^/\s]+)(?:\/(endpoints|databases)\/([^/\s]+))?)?$/;
 
-/** null for anything that is not a Lakebase project/branch/endpoint/database name (e.g. a placeholder). */
 export function parseResourceName(
   name: string | undefined,
 ): ResourceName | null {
@@ -36,17 +34,12 @@ export function parseResourceName(
   };
 }
 
-/** The last path segment of a resource name. */
 export function resourceId(name: string): string {
   return name.slice(name.lastIndexOf("/") + 1);
 }
 
 const PROJECT_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
-/**
- * LAKEBASE_PROJECT as a project resource name: accepts "projects/<id>" or a bare
- * "<id>"; null for anything else (e.g. the .env.example placeholder).
- */
 export function parseProject(value: string | undefined): string | null {
   const trimmed = value?.trim() ?? "";
   const id = trimmed.startsWith("projects/")
@@ -55,13 +48,7 @@ export function parseProject(value: string | undefined): string | null {
   return PROJECT_ID.test(id) ? `projects/${id}` : null;
 }
 
-/**
- * What `.env` says about the local branch. Unparseable values (template
- * placeholders) read as null. APPKIT_DB_SESSION has no placeholder, so an
- * invalid one throws instead of being replaced.
- */
 export interface LocalTarget {
-  /** LAKEBASE_PROJECT, normalized to "projects/<id>". */
   readonly project: string | null;
   readonly endpoint: string | null;
   readonly database: string | null;
@@ -76,13 +63,11 @@ export function readLocalTarget(env: NodeJS.ProcessEnv): LocalTarget {
   return {
     project: parseProject(env.LAKEBASE_PROJECT),
     endpoint,
-    // Without a real endpoint PGDATABASE is a template placeholder too.
     database: endpoint ? env.PGDATABASE || null : null,
     session,
   };
 }
 
-/** The branch the bundle's default target deploys to. */
 export interface DeployTarget {
   readonly branch: string;
   readonly database: string | null;
@@ -111,72 +96,36 @@ function record(value: unknown): Yaml {
     : undefined;
 }
 
-/**
- * A branch, database, workspace host or profile, or source path databricks.yml
- * names, as far as the checkout's files resolve it. A reference that is not
- * declared at all has no value: the binding, variable or host that holds it is
- * absent instead.
- */
 type BundleValue =
-  /** A full resource name, e.g. "projects/p/branches/b", a workspace host or profile, or a path. */
   | { readonly kind: "resolved"; readonly name: string }
-  /** As written: a `${…}` only a deploy resolves, no value, or not a resource name. */
   | { readonly kind: "unresolved"; readonly written: string };
 
-/** One postgres resource of an app. */
 interface PostgresBinding {
-  /**
-   * Where it is in the merged bundle, e.g. "resources.apps.app.resources[0].postgres",
-   * or where a `${…}` stands in for the app's resources, one of them, or a postgres block.
-   */
   readonly at: string;
   readonly branch: BundleValue;
-  /** null when the binding names no database. */
   readonly database: BundleValue | null;
-  /** A `${…}` stands where the structure should be; `branch` holds it, unresolved. */
   readonly whole?: true;
 }
 
-/** An app one target of databricks.yml deploys. */
 export interface BundleApp {
-  /** Its key under resources.apps. */
   readonly key: string;
-  /** Its name as written; null when it has none. */
   readonly declaredName: string | null;
-  /** Its name with bundle references resolved; null when one needs a deploy to resolve. */
   readonly name: string | null;
-  /** Its source_code_path, relative to databricks.yml's folder; null when it declares none. */
   readonly sourceCodePath: BundleValue | null;
-  /**
-   * Every postgres resource it has, and any `${…}` standing where its
-   * resources, one of them, or a postgres block should be.
-   */
   readonly postgres: readonly PostgresBinding[];
 }
 
-/** What one target binds with one set of variable values. */
 interface TargetBindings {
-  /** workspace.host of the target, else of the bundle; null when neither declares one. */
   readonly host: BundleValue | null;
-  /** workspace.profile of the target, else of the bundle; null when neither declares one. */
   readonly profile: BundleValue | null;
   readonly apps: readonly BundleApp[];
-  /** The target's postgres_branch variable; null when the bundle declares none. */
   readonly postgresBranch: BundleValue | null;
-  /** The target's postgres_database variable; null when the bundle declares none. */
   readonly postgresDatabase: BundleValue | null;
 }
 
-/** One target of databricks.yml, with what the files alone can resolve resolved. */
 export interface BundleTarget extends TargetBindings {
   readonly name: string;
-  /** `default: true`, or the one target of a bundle that declares none. */
   readonly isDefault: boolean;
-  /**
-   * The same bindings with this checkout's variable-overrides.json applied,
-   * which a deploy from here uses ahead of the target's own values; null
-   * without the file.
-   */
   readonly overridden: (TargetBindings & { readonly file: string }) | null;
   /**
    * The same bindings with the command's BUNDLE_VAR_ variables applied ahead
@@ -185,21 +134,17 @@ export interface BundleTarget extends TargetBindings {
    */
   readonly environment:
     | (TargetBindings & {
-        /** The BUNDLE_VAR_ variables set, e.g. "BUNDLE_VAR_postgres_branch". */
         readonly variables: string;
-        /** The variable-overrides.json applied under them, if any. */
         readonly file?: string;
       })
     | null;
 }
 
 interface Bundle {
-  /** databricks.yml or databricks.yaml. */
   readonly file: string;
   readonly targets: readonly BundleTarget[];
 }
 
-/** Invalid YAML throws, so no check that reads the bundle passes silently. */
 function parseYaml(file: string): Record<string, unknown> {
   try {
     return record(yaml.load(fs.readFileSync(file, "utf-8"))) ?? {};
@@ -212,11 +157,6 @@ function parseYaml(file: string): Record<string, unknown> {
   }
 }
 
-/**
- * The variable values `databricks bundle` keeps for a target in
- * `.databricks/bundle/<target>/variable-overrides.json`; null without the
- * file. Anything but a JSON object throws.
- */
 function readVariableOverrides(
   root: string,
   target: string,
@@ -250,7 +190,6 @@ function readVariableOverrides(
 
 const BUNDLE_VAR = "BUNDLE_VAR_";
 
-/** The variable values `databricks bundle` takes from BUNDLE_VAR_<name>; null when none is set. */
 function readBundleVariables(env: NodeJS.ProcessEnv): {
   readonly variables: string;
   readonly values: Record<string, string>;
@@ -312,7 +251,6 @@ function includedFiles(root: string, pattern: string): string[] {
   );
 }
 
-/** Mappings merge key by key; lists of named entries (an app's resources) merge by name; anything else is replaced. */
 function merge(base: unknown, override: unknown): unknown {
   const left = record(base);
   const right = record(override);
@@ -359,7 +297,6 @@ function variableOf(
 const REFERENCE = /\$\{([^}]+)\}/g;
 const MAX_REFERENCE_DEPTH = 10;
 
-/** Resolves `${var.*}`, `${bundle.target}` and `${bundle.name}` for one target; null when a reference needs a deploy to resolve. */
 function resolverFor(
   bundle: Record<string, unknown>,
   target: Yaml,
@@ -406,7 +343,6 @@ function bundleValue(
   };
 }
 
-/** null when the value is not declared; unresolved when it is and the files cannot resolve it. */
 function declaredValue(
   written: unknown,
   resolve: (value: unknown) => string | null,
@@ -420,7 +356,6 @@ function declaredValue(
   };
 }
 
-/** An app's source_code_path, relative to databricks.yml's folder once resolved; an absolute one stays as it is. */
 function sourcePathValue(
   written: unknown,
   resolve: (value: unknown) => string | null,
@@ -438,7 +373,6 @@ function sourcePathValue(
   };
 }
 
-/** A `${…}` where only a deploy puts a structure: the files cannot say what it binds. */
 function unresolvedAt(at: string, written: unknown): PostgresBinding {
   return {
     at,
@@ -451,7 +385,6 @@ function unresolvedAt(at: string, written: unknown): PostgresBinding {
   };
 }
 
-/** What an app's `resources:` binds; none when it is absent. */
 function appPostgres(
   at: string,
   resources: unknown,
@@ -508,13 +441,6 @@ export function defaultBundleTarget(bundle: Bundle): BundleTarget | null {
   );
 }
 
-/**
- * The branch and database the default target deploys to from this checkout:
- * its first app binding the files resolve, else its postgres_branch and
- * postgres_database variables, with env's BUNDLE_VAR_ variables and the
- * checkout's variable-overrides.json applied as a deploy would. null without
- * databricks.yml or a branch the files resolve.
- */
 export function readDeployTarget(
   root: string,
   env: NodeJS.ProcessEnv,
@@ -537,10 +463,6 @@ export function readDeployTarget(
   };
 }
 
-/**
- * An included file's app source_code_paths, kept with the file's folder so
- * they resolve against it once their references are resolved.
- */
 function rebaseSourcePaths(
   file: Record<string, unknown>,
   folder: string,
@@ -565,11 +487,7 @@ function rebaseSourcePaths(
   return file;
 }
 
-/**
- * databricks.yml, with the files its `include:` names merged in, per target;
- * null without one. Without `targets:` the bundle has one target, "default".
- * env is the command's, for its BUNDLE_VAR_ variables.
- */
+/** Without `targets:` the bundle has one target, "default". */
 export function readBundle(
   root: string,
   env: NodeJS.ProcessEnv,
@@ -665,31 +583,19 @@ export function readBundle(
   };
 }
 
-/** A reference in databricks.yml the checkout's files cannot resolve to a branch or database. */
 export interface UnresolvedBinding {
   readonly target: string;
-  /** Where it is written, e.g. "resources.apps.app.resources[0].postgres.branch". */
   readonly at: string;
   readonly written: string;
-  /** The variable-overrides.json whose values leave it unresolved; absent for databricks.yml's own values. */
   readonly file?: string;
-  /** The BUNDLE_VAR_ variables whose values leave it unresolved; absent without them. */
   readonly environment?: string;
 }
 
-/** What databricks.yml deploys to, read from this checkout's files, variable-overrides.json included, and the command's BUNDLE_VAR_ variables. */
 export interface DeployBoundary {
-  /** Every branch any target binds, through an app's postgres resources or its postgres_branch variable. */
   readonly branches: ReadonlySet<string>;
-  /** While any exists, any branch may be one a target deploys to. */
   readonly unresolved: readonly UnresolvedBinding[];
 }
 
-/**
- * Every branch databricks.yml can deploy to, across targets, and every
- * reference it cannot resolve. Empty without databricks.yml or a postgres
- * binding. A database counts for the branch it is on.
- */
 export function readDeployBoundary(
   root: string,
   env: NodeJS.ProcessEnv,

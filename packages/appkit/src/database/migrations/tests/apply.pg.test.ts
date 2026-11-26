@@ -21,7 +21,7 @@ import {
   markMigrationsApplied,
   MigrationJournalError,
   migrationLockKey,
-  readMigrationDrift,
+  readMigrationDriftUnlocked,
 } from "../apply";
 import { schemaOwnership } from "../ownership";
 import { MigrationFilesError } from "../paths";
@@ -622,7 +622,6 @@ describe.skipIf(!url)("applyPendingMigrations against Postgres", () => {
           sql: [`ALTER TABLE ${q("notes")} ADD COLUMN "body" text;`],
         },
       ]);
-    /** The branch applied 0000_notes and recorded a 2000 migration this checkout lacks. */
     const aheadOfCheckout = async (folder: string) => {
       await applyPendingMigrations(newPool(), {
         ...options(folder),
@@ -638,29 +637,35 @@ describe.skipIf(!url)("applyPendingMigrations against Postgres", () => {
 
     test("the drift lists unrecorded committed migrations, recorded ones the checkout lacks, and recorded ones whose file changed", async () => {
       const folder = withTags();
-      expect(await readMigrationDrift(newPool(), options(folder))).toEqual({
+      expect(
+        await readMigrationDriftUnlocked(newPool(), options(folder)),
+      ).toEqual({
         pending: ["0000_notes", "0001_introspect"],
         stranded: [],
         edited: [],
-        unknown: 0,
+        unknownRecordedCount: 0,
       });
 
       await aheadOfCheckout(folder);
 
-      expect(await readMigrationDrift(newPool(), options(folder))).toEqual({
+      expect(
+        await readMigrationDriftUnlocked(newPool(), options(folder)),
+      ).toEqual({
         pending: ["0001_introspect"],
         stranded: [],
         edited: [],
-        unknown: 1,
+        unknownRecordedCount: 1,
       });
 
       fs.appendFileSync(path.join(folder, "0000_notes.sql"), "\n-- edited");
 
-      expect(await readMigrationDrift(newPool(), options(folder))).toEqual({
+      expect(
+        await readMigrationDriftUnlocked(newPool(), options(folder)),
+      ).toEqual({
         pending: ["0001_introspect"],
         stranded: [],
         edited: ["0000_notes"],
-        unknown: 1,
+        unknownRecordedCount: 1,
       });
     });
 

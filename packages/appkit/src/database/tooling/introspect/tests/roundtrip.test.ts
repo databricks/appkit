@@ -27,7 +27,6 @@ afterEach(() => {
     fs.rmSync(root, { recursive: true, force: true });
 });
 
-/** Write the source as an app's schema.ts and load it the way the plugin does. */
 async function loadSource(source: string) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "appkit-introspect-"));
   roots.push(root);
@@ -37,7 +36,6 @@ async function loadSource(source: string) {
   return { root, schema: await loadDefaultDatabaseSchema(root) };
 }
 
-/** Render the tables as a first schema.ts and load it. */
 const load = (tables: IntrospectedTable[]) =>
   loadSource(
     renderSchemaSource(tables, "app", { importSource: BUILDER, previous: null })
@@ -68,15 +66,12 @@ interface KitTable {
 }
 
 interface TableShape {
-  /** Column name to "type[ not null][ pk][ default <expr>]". */
   columns: Record<string, string>;
   unique: string[][];
-  /** "<column> -> <table>(<column>)[ on delete <action>]". */
   foreignKeys: string[];
   private: string[];
 }
 
-/** What the schema declares per table, as drizzle-kit sees it, plus which columns are private. */
 async function shape(schema: Schema): Promise<Record<string, TableShape>> {
   const { generateDrizzleJson } = await import("drizzle-kit/api");
   const snapshot = generateDrizzleJson(drizzleKitImports(schema), undefined, [

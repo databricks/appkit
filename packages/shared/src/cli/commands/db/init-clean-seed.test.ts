@@ -252,7 +252,7 @@ describe("appkit db init", () => {
           branch: report.branch,
           schemaName: "app",
           dependents: ["view reports.summary"],
-          kept: [],
+          keptOwnedByOthers: [],
         },
         migrate,
         reason: "requested",
@@ -277,7 +277,7 @@ describe("appkit db init", () => {
           branch: report.branch,
           schemaName: "app",
           dependents: [],
-          kept: [],
+          keptOwnedByOthers: [],
         },
         migrate,
         reason,
@@ -368,7 +368,7 @@ describe("appkit db init", () => {
             branch: report.branch,
             schemaName: "app",
             dependents: [],
-            kept: [],
+            keptOwnedByOthers: [],
           },
           migrate: { ...migrate, applied: ["0000_baseline"] },
           reason: "fork-copy",
@@ -471,7 +471,7 @@ describe("appkit db clean", () => {
     branch: "projects/p/branches/dev-a",
     schemaName: "app",
     dependents: [],
-    kept: [],
+    keptOwnedByOthers: [],
   };
 
   test("refuses without --yes when there is no TTY, before any API call", async () => {
@@ -515,7 +515,7 @@ describe("appkit db clean", () => {
     tooling.runClean.mockResolvedValue({
       ...cleaned,
       schemaName: "public",
-      kept: ["table notes", "table orders"],
+      keptOwnedByOthers: ["table notes", "table orders"],
     });
     await clean("--yes");
 

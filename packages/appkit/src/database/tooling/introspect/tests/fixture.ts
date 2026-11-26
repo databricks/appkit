@@ -11,8 +11,14 @@ import type {
   IntrospectedUnique,
   TableRow,
 } from "../catalog";
+import {
+  COLUMNS_SQL,
+  CONSTRAINTS_SQL,
+  INDEXES_SQL,
+  TABLES_SQL,
+  UNREAD_SQL,
+} from "../catalog";
 
-/** The builder by absolute path, so rendered sources load from a temp root. */
 export const BUILDER = path.resolve(
   import.meta.dirname,
   "../../../schema-builder/index.ts",
@@ -32,7 +38,6 @@ export const col = (
   ...extra,
 });
 
-/** A catalog table; what a test does not set is empty. */
 export const tableOf = (
   table: Pick<IntrospectedTable, "name" | "columns"> &
     Partial<IntrospectedTable>,
@@ -51,7 +56,6 @@ export const foreignKey = (
     Partial<IntrospectedForeignKey>,
 ): IntrospectedForeignKey => ({ deferrable: false, matchFull: false, ...key });
 
-/** A unique constraint with the name Postgres gives it. */
 export const uniqueKey = (
   table: string,
   ...columns: string[]
@@ -67,7 +71,6 @@ const status = {
   values: ["open", "closed"],
 };
 
-/** Supported types, defaults, FKs and enums, plus one of each skip. Listed out of dependency order. */
 export const richTables: IntrospectedTable[] = [
   tableOf({
     name: "posts",
@@ -176,7 +179,6 @@ export const columnRow = (
   ...extra,
 });
 
-/** What the three pg_catalog queries return for a small hand-made schema. */
 export const catalogRows = {
   tables: [
     { name: "authors", partitioned: false },
@@ -261,7 +263,6 @@ export const catalogRows = {
   ] satisfies IndexRow[],
 };
 
-/** A CatalogQuery answering the catalog queries from rows, and the unread-objects query from labels. */
 export function catalogResponder(
   rows: {
     readonly tables: readonly TableRow[];
@@ -277,19 +278,14 @@ export function catalogResponder(
     values: readonly unknown[],
   ) => {
     calls.push({ text, values });
-    // Each query is told apart by text only it has; the index query mentions pg_constraint, so it goes before that one.
-    const result = text.includes("select o.label")
-      ? unread.map((label) => ({ label }))
-      : text.includes("pg_catalog.pg_index")
-        ? rows.indexes
-        : text.includes("pg_catalog.pg_constraint")
-          ? rows.constraints
-          : text.includes("format_type")
-            ? rows.columns
-            : text.includes("select c.relname::text as name")
-              ? rows.tables
-              : [];
-    return result as unknown as T[];
+    const byQuery = new Map<string, readonly unknown[]>([
+      [TABLES_SQL, rows.tables],
+      [COLUMNS_SQL, rows.columns],
+      [CONSTRAINTS_SQL, rows.constraints],
+      [INDEXES_SQL, rows.indexes],
+      [UNREAD_SQL, unread.map((label) => ({ label }))],
+    ]);
+    return (byQuery.get(text) ?? []) as unknown as T[];
   };
   return { calls, respond };
 }

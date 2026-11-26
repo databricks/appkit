@@ -9,7 +9,7 @@ import {
   printCleanReport,
   printIntrospectReport,
   printMigrateReport,
-  shortName,
+  resourceId,
   warn,
 } from "./output";
 import type {
@@ -32,7 +32,7 @@ const confirmClean: NonNullable<InitOptions["confirmClean"]> = async ({
   branch,
   schemaName,
 }) => {
-  const where = `schema ${schemaName} on ${shortName(branch)}`;
+  const where = `schema ${schemaName} on ${resourceId(branch)}`;
   if (!isInteractive()) {
     throw new Error(
       `Refusing to drop ${where}, your working branch's, without confirmation in a non-interactive shell. Pass --yes. .env already points at the branch.`,
@@ -64,15 +64,15 @@ function printInitReport(
   report: InitReport,
   schemaFlag: SchemaStart | undefined,
 ): void {
-  const branch = shortName(report.branch);
+  const branch = resourceId(report.branch);
   const expires = report.expireTime ? `, expires ${report.expireTime}` : "";
   ok(
     report.created
-      ? `Branch ${branch} (created from ${shortName(report.sourceBranch ?? "the default branch")}${expires})`
+      ? `Branch ${branch} (created from ${resourceId(report.sourceBranch ?? "the default branch")}${expires})`
       : `Branch ${branch} (reused${expires})`,
   );
   ok(
-    `Endpoint ${shortName(report.endpoint)}${report.endpointCreated ? " (created)" : ""}: ${report.host}`,
+    `Endpoint ${resourceId(report.endpoint)}${report.endpointCreated ? " (created)" : ""}: ${report.host}`,
   );
   const role = {
     created: "created",
@@ -103,7 +103,7 @@ function printInitReport(
 
   if (keptCopy?.reason === "requested") {
     warn(
-      `Kept the rows the fork copied${keptCopy.from ? ` from ${shortName(keptCopy.from)}` : ""}, as --schema ${schemaFlag} asks. The app schema is yours now, so a plain \`appkit db init\` keeps them. \`appkit db init --schema clean\` drops the app schema with everything in it and rebuilds it from the committed migrations, after a confirmation or with --yes.`,
+      `Kept the rows the fork copied${keptCopy.from ? ` from ${resourceId(keptCopy.from)}` : ""}, as --schema ${schemaFlag} asks. The app schema is yours now, so a plain \`appkit db init\` keeps them. \`appkit db init --schema clean\` drops the app schema with everything in it and rebuilds it from the committed migrations, after a confirmation or with --yes.`,
     );
   } else if (keptCopy?.reason === "public") {
     warn(
@@ -128,7 +128,7 @@ async function runDbInit(flags: InitFlags): Promise<void> {
     const report = await tooling.runInit(tooling.createDbContext(), options);
     if (report.start.kind === "cancelled") {
       info(
-        `Cancelled. Schema ${report.start.schemaName} on ${shortName(report.branch)} is as it was, and .env points at the branch.`,
+        `Cancelled. Schema ${report.start.schemaName} on ${resourceId(report.branch)} is as it was, and .env points at the branch.`,
       );
       process.exitCode = 1;
       return;

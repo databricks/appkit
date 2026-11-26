@@ -75,7 +75,6 @@ function assertName(value: string, label: string): void {
   }
 }
 
-/** Table names defineSchema() refuses. */
 export function isReservedTableName(name: string): boolean {
   return (
     !name ||
@@ -84,12 +83,10 @@ export function isReservedTableName(name: string): boolean {
   );
 }
 
-/** Column keys that collide with the runtime metadata on a table handle. */
 function collidesWithMetadata(key: string): boolean {
   return key.startsWith("$") || key === "and" || key === "or";
 }
 
-/** Column names defineSchema() refuses. */
 export function isReservedColumnName(name: string): boolean {
   return !name || RESERVED_OBJECT_KEYS.has(name) || collidesWithMetadata(name);
 }

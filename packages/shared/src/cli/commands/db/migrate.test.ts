@@ -15,8 +15,6 @@ const { createDbContext, runMigrate } = vi.hoisted(() => ({
   runMigrate: vi.fn(),
 }));
 
-// The tooling is an ambient module loaded with a dynamic import; mock it so the
-// command never touches drizzle-kit or a database.
 vi.mock("@databricks/appkit/beta/database-tooling", () => ({
   createDbContext,
   runMigrate,
@@ -31,6 +29,12 @@ function output(spy: MockInstance): string {
   return spy.mock.calls.map((call) => call.join(" ")).join("\n");
 }
 
+function setTTY(value: boolean | undefined) {
+  Object.defineProperty(process.stdin, "isTTY", { value, configurable: true });
+  Object.defineProperty(process.stdout, "isTTY", { value, configurable: true });
+}
+const ttyBefore = { stdin: process.stdin.isTTY, stdout: process.stdout.isTTY };
+
 beforeEach(() => {
   runMigrate.mockReset();
   createDbContext.mockClear();
@@ -40,6 +44,14 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  Object.defineProperty(process.stdin, "isTTY", {
+    value: ttyBefore.stdin,
+    configurable: true,
+  });
+  Object.defineProperty(process.stdout, "isTTY", {
+    value: ttyBefore.stdout,
+    configurable: true,
+  });
   process.exitCode = undefined;
 });
 
@@ -70,13 +82,13 @@ describe("appkit db migrate", () => {
       typesFile,
       operationsTypesFile,
     });
+    setTTY(false);
 
     await dbCommand.parseAsync(["migrate"], { from: "user" });
 
     expect(createDbContext).toHaveBeenCalledWith();
     expect(runMigrate).toHaveBeenCalledWith(
       { root: "/app", env: {} },
-      // Vitest workers have no TTY, so the run is non-interactive.
       { interactive: false },
     );
     const printed = output(log);

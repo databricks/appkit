@@ -4,9 +4,7 @@ import type { DatabaseTooling } from "../../../../../shared/src/cli/commands/db/
 import type { DbContext } from "../context";
 import * as tooling from "../index";
 
-// The CLI in `shared` types this module with DatabaseTooling and cannot see
-// these exports, so the assignment below is what keeps the two in step.
-const exports: DatabaseTooling<DbContext> = tooling;
+const toolingMatchesCliContract: DatabaseTooling<DbContext> = tooling;
 
 const contractKeys = {
   createDbContext: true,
@@ -23,6 +21,6 @@ const contractKeys = {
 
 test("every function the CLI is typed with is exported", () => {
   for (const key of Object.keys(contractKeys) as (keyof DatabaseTooling)[]) {
-    expect(typeof exports[key]).toBe("function");
+    expect(typeof toolingMatchesCliContract[key]).toBe("function");
   }
 });

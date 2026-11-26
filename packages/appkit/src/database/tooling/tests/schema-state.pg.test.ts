@@ -11,11 +11,6 @@ import {
   untagForkCopy,
 } from "../schema-state";
 
-// The tag and the state read against a real server, with Lakebase's roles
-// modelled. The app's service principal owns the fork's copy, and you connect
-// as a role that inherits pg_read_all_data and pg_write_all_data, as a member
-// of DATABRICKS_SUPERUSER does. APPKIT_TEST_PG_URL is a superuser URL, e.g.
-// postgres://localhost:5432/postgres
 const url = process.env.APPKIT_TEST_PG_URL;
 
 function asRole(role: string, password: string): string {
@@ -149,7 +144,6 @@ describe.skipIf(!url)("the fork-copy tag against Postgres", () => {
   });
 
   test("a journal owned by a role you neither are nor inherit, and that does not own the schema, is never written", async () => {
-    // pg_write_all_data lets you insert there, so only the trust rule stops the write.
     const before = await journalRows(foreign);
     await expect(tagForkCopy(me, foreign)).resolves.toBe(false);
     expect(await journalRows(foreign)).toEqual(before);
@@ -163,10 +157,8 @@ describe.skipIf(!url)("the fork-copy tag against Postgres", () => {
       ...before,
       { hash: FORK_COPY_TAG, created_at: "0" },
     ]);
-    // Without row-level security a read runs no code of the owner's, so the tag is read.
     await expect(isForkCopy(me, foreign)).resolves.toBe(true);
 
-    // With it, a policy of the owner's would run on the read, so the journal is not read.
     await admin.query(`
       alter table "${foreign}".__drizzle_migrations enable row level security;
       create policy everything on "${foreign}".__drizzle_migrations using (true);

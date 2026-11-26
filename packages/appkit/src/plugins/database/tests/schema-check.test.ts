@@ -260,13 +260,16 @@ describe("diagnoseSchema", () => {
       { boards: "v" },
     );
 
-    const { problems, advice } = await diagnoseSchema(path, schema);
+    const { problems, tablesInPublicAdvice } = await diagnoseSchema(
+      path,
+      schema,
+    );
 
     expect(problems).toEqual([
       "table public.boards is a view, not a table",
       "table public.notes is missing columns board_id, author_email",
     ]);
-    expect(advice).toBeNull();
+    expect(tablesInPublicAdvice).toBeNull();
     await expect(
       assertSchemaMatchesDatabase(path, schema, OFF),
     ).rejects.toThrow(
@@ -280,16 +283,19 @@ describe("diagnoseSchema", () => {
     }));
     const { path } = catalog({}, {}, ["notes"]);
 
-    const { problems, advice } = await diagnoseSchema(path, appSchema);
+    const { problems, tablesInPublicAdvice } = await diagnoseSchema(
+      path,
+      appSchema,
+    );
 
     expect(problems).toEqual(["table app.notes does not exist"]);
-    expect(advice).toBe(
+    expect(tablesInPublicAdvice).toBe(
       `Schema public has that table, but defineSchema() puts tables in schema "app" unless told otherwise. ` +
         'To keep them in public, pass { schemaName: "public" } as the second argument of defineSchema() in config/database/schema.ts.',
     );
     await expect(
       assertSchemaMatchesDatabase(path, appSchema, OFF),
-    ).rejects.toThrow(advice as string);
+    ).rejects.toThrow(tablesInPublicAdvice as string);
   });
 
   test("returns no problems for a matching database or an empty schema", async () => {
@@ -299,7 +305,7 @@ describe("diagnoseSchema", () => {
     });
     expect(await diagnoseSchema(path, schema)).toEqual({
       problems: [],
-      advice: null,
+      tablesInPublicAdvice: null,
     });
 
     const empty = catalog({});
@@ -308,7 +314,7 @@ describe("diagnoseSchema", () => {
         empty.path,
         defineSchema(() => ({})),
       ),
-    ).toEqual({ problems: [], advice: null });
+    ).toEqual({ problems: [], tablesInPublicAdvice: null });
     expect(empty.raw).not.toHaveBeenCalled();
   });
 });

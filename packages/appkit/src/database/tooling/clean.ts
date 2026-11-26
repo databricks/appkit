@@ -14,11 +14,6 @@ import { shown } from "./introspect/render";
 import { requireSchemaFile } from "./migrate";
 import { resourceId } from "./targets";
 
-/**
- * Drop the app schema with everything in it, the migration journal included.
- * Schema public is never dropped: only the relations, types and routines the
- * connected role owns go, and objects an extension installed stay.
- */
 export function cleanStatements(schemaName: string): readonly string[] {
   if (schemaName !== "public") {
     return [`DROP SCHEMA IF EXISTS ${quoteIdentifier(schemaName)} CASCADE`];
@@ -178,11 +173,6 @@ export async function readCascadeDependents(
   return rows.map((row) => shown(row.label));
 }
 
-/**
- * The relations, types and routines in schema public that other roles own,
- * which clean leaves with their rows; an extension's objects are not listed.
- * Nothing for another schema, which the drop takes whole.
- */
 const KEPT_SQL = `
 with ns as (
   select oid from pg_catalog.pg_namespace where nspname = 'public'
@@ -221,10 +211,8 @@ export async function readKeptObjects(
 export interface CleanReport {
   readonly branch: string;
   readonly schemaName: string;
-  /** Objects outside the app schema that depend on it, which the drop removes too. */
   readonly dependents: readonly string[];
-  /** In schema public, the objects other roles own, which stay with their rows. */
-  readonly kept: readonly string[];
+  readonly keptOwnedByOthers: readonly string[];
 }
 
 async function cleanTarget(ctx: DbContext) {
@@ -232,15 +220,11 @@ async function cleanTarget(ctx: DbContext) {
   const branch = await writableEnvBranch(ctx, "clean");
   const schema = await loadDatabaseSchema(
     path.join(ctx.root, DEFAULT_SCHEMA_FILE),
-    { showImportError: true },
+    { keepImportErrorAsCause: true },
   );
   return { branch: branch.name, schemaName: schema.$schemaName };
 }
 
-/**
- * An app schema another role owns is the fork's untouched copy. Only its owner
- * may drop it, and init takes it over first.
- */
 async function refuseUntouchedCopy(
   client: Pick<PoolClient, "query">,
   target: { readonly branch: string; readonly schemaName: string },
@@ -256,37 +240,27 @@ async function refuseUntouchedCopy(
   );
 }
 
-/** What `appkit db clean` would drop, read without changing anything. */
 export async function previewClean(ctx: DbContext): Promise<CleanReport> {
   const target = await cleanTarget(ctx);
   return withBranchPool(ctx, async (pool) => {
     await refuseUntouchedCopy(pool, target);
     const dependents = await readCascadeDependents(pool, target.schemaName);
-    // Before the drop, another role's object that depends on yours is still there; it goes.
-    const kept = (await readKeptObjects(pool, target.schemaName)).filter(
-      (label) => !dependents.includes(label),
-    );
-    return { ...target, dependents, kept };
+    const keptOwnedByOthers = (
+      await readKeptObjects(pool, target.schemaName)
+    ).filter((label) => !dependents.includes(label));
+    return { ...target, dependents, keptOwnedByOthers };
   });
 }
 
-/**
- * `appkit db clean`: remove every app-schema object, the migration journal
- * included, on your dev or session branch. Refuses any other branch before
- * connecting. One command at a time owns the checkout's history.
- */
 export async function runClean(ctx: DbContext): Promise<CleanReport> {
-  // Before the lock, which creates config/database.
   requireSchemaFile(ctx.root, "clean");
   return withHistoryLock(ctx.root, "clean", (lock) => cleanHolding(ctx, lock));
 }
 
-/** runClean for a caller that already holds the checkout's history lock. */
 export async function cleanHolding(
   ctx: DbContext,
   lock: HistoryLock,
 ): Promise<CleanReport> {
-  // Dropping the schema drops the branch's migration journal too.
   lock.assertHeld();
   const target = await cleanTarget(ctx);
   return runInTransaction(ctx, async (client) => {
@@ -295,15 +269,11 @@ export async function cleanHolding(
     for (const statement of cleanStatements(target.schemaName)) {
       await client.query(statement);
     }
-    const kept = await readKeptObjects(client, target.schemaName);
-    return { ...target, dependents, kept };
+    const keptOwnedByOthers = await readKeptObjects(client, target.schemaName);
+    return { ...target, dependents, keptOwnedByOthers };
   });
 }
 
-/**
- * `appkit db clean --delete-branch`: delete this checkout's session branch.
- * The dev branch is kept, so the next `appkit db init` finds it.
- */
 export async function deleteSessionBranch(
   ctx: DbContext,
 ): Promise<{ readonly branch: string }> {

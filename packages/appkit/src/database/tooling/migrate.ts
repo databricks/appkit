@@ -32,7 +32,6 @@ import {
 } from "./migrations";
 import { forkCopyRefusal, readSchemaState } from "./schema-state";
 
-/** Whether the checkout has a config/database/schema.ts yet. */
 export function hasSchemaFile(root: string): boolean {
   return fs.existsSync(path.join(root, DEFAULT_SCHEMA_FILE));
 }
@@ -44,7 +43,6 @@ const WITHOUT_SCHEMA = {
   check: "there is nothing to check",
 } as const;
 
-/** Without schema.ts, point to introspect instead of a load error. */
 export function requireSchemaFile(
   root: string,
   command: keyof typeof WITHOUT_SCHEMA,
@@ -57,11 +55,9 @@ export function requireSchemaFile(
 
 const TYPES_DIR = "shared/appkit-types";
 
-/** What migrate and introspect regenerate from schema.ts and server/database/routes. */
 interface GeneratedTypes {
   readonly typesFile: string;
   readonly operationsTypesFile: string;
-  /** The routes registry main's operation generator writes next to the routes. */
   readonly routesFile: string;
 }
 
@@ -77,7 +73,6 @@ export function generatedTypesOf(root: string): GeneratedTypes {
   };
 }
 
-/** Regenerate database.d.ts, then the operation contracts, as `appkit generate-types` does. */
 export async function writeGeneratedTypes(
   root: string,
   schema: Schema,
@@ -92,25 +87,18 @@ export async function writeGeneratedTypes(
 }
 
 export interface MigrateReport {
-  /** The migration written by this run; null when schema.ts matches the latest snapshot. */
   readonly generated: GeneratedMigration | null;
-  /** Tags applied to the `.env` branch by this run. */
   readonly applied: readonly string[];
-  /** Tags recorded without running because their tables already existed (0000_baseline). */
   readonly adopted?: readonly string[];
-  /** Statements of the generated migration that break instances still running the previous release. */
   readonly breaking?: readonly string[];
   readonly dataDependent?: readonly string[];
-  /** Why nothing was applied, when applying was skipped. */
   readonly notApplied?: string;
   readonly typesFile: string;
   readonly operationsTypesFile: string;
 }
 
 export interface MigrateOptions {
-  /** false: an ambiguous rename throws instead of prompting. */
   readonly interactive: boolean;
-  /** false: apply the committed migrations only, without writing one from schema.ts. */
   readonly generate?: boolean;
 }
 
@@ -152,10 +140,6 @@ class UnappliedMigrationError extends Error implements MigrationWarnings {
   }
 }
 
-/**
- * An interrupted `appkit db introspect` leaves its migration written but not
- * recorded, and running it fails on what the branch already has.
- */
 function withIntrospectRecovery(error: unknown): unknown {
   if (
     !(error instanceof MigrationApplyError) ||
@@ -176,7 +160,6 @@ function withIntrospectRecovery(error: unknown): unknown {
  */
 const RETRYABLE_AS_WRITTEN: ReadonlySet<string> = new Set(["55P03", "57014"]);
 
-/** Applying was refused before anything ran: a migration would shadow tables left in public. */
 class TablesLeftInPublicError extends Error {
   constructor(reason: string) {
     super(`Did not apply: ${reason}`);
@@ -184,7 +167,6 @@ class TablesLeftInPublicError extends Error {
   }
 }
 
-/** Apply pending migrations to the `.env` branch, or say why they were not. */
 async function applyToEnvBranch(
   ctx: DbContext,
   folder: string,
@@ -217,7 +199,6 @@ async function applyToEnvBranch(
       "migrate",
     );
     if (refusal) throw new Error(`Did not apply: ${refusal}`);
-    // The deployed app refuses this case on start; refuse it here first.
     const leftInPublic = await detectTablesLeftInPublic(
       catalogSqlOf(pool),
       schema,
@@ -231,12 +212,6 @@ async function applyToEnvBranch(
   });
 }
 
-/**
- * `appkit db migrate`: generate a migration when schema.ts changed, regenerate
- * database.d.ts and database-operations.d.ts, and apply pending migrations to
- * the `.env` branch (only AppKit dev/session branches). One command at a time
- * owns the checkout's history.
- */
 export async function runMigrate(
   ctx: DbContext,
   options: MigrateOptions,
@@ -247,7 +222,19 @@ export async function runMigrate(
   );
 }
 
-/** runMigrate for a caller that already holds the checkout's history lock. */
+function shouldDiscardGenerated(
+  error: unknown,
+  generated: GeneratedMigration,
+): error is TablesLeftInPublicError | MigrationApplyError {
+  if (error instanceof TablesLeftInPublicError) return true;
+  return (
+    error instanceof MigrationApplyError &&
+    error.failed === generated.tag &&
+    !!error.code &&
+    !RETRYABLE_AS_WRITTEN.has(error.code)
+  );
+}
+
 export async function migrateHolding(
   ctx: DbContext,
   lock: HistoryLock,
@@ -255,11 +242,8 @@ export async function migrateHolding(
 ): Promise<MigrateReport> {
   const schema = await loadDatabaseSchema(
     path.join(ctx.root, DEFAULT_SCHEMA_FILE),
-    { showImportError: true },
+    { keepImportErrorAsCause: true },
   );
-  // The types follow schema.ts and server/database/routes alone, so they are
-  // current even if applying fails. Written first, so a route module that
-  // fails to load stops migrate before it writes a migration.
   const { typesFile, operationsTypesFile } = await writeGeneratedTypes(
     ctx.root,
     schema,
@@ -279,32 +263,20 @@ export async function migrateHolding(
     outcome = await applyToEnvBranch(ctx, lock.folder, schema);
   } catch (error) {
     if (!generated) throw withIntrospectRecovery(error);
-    // Nothing ran. A kept migration would create the empty copies the refusal
-    // warns about, and the next run would diff schema.ts against it.
-    if (error instanceof TablesLeftInPublicError) {
-      await discardMigrationFiles(lock, generated);
-      throw error;
-    }
-    const file = path.relative(ctx.root, generated.file);
-    // A failed migration left in the journal runs first on every later try, so a
-    // fix in schema.ts would stack behind it and never apply.
-    if (
-      error instanceof MigrationApplyError &&
-      error.failed === generated.tag &&
-      error.code &&
-      !RETRYABLE_AS_WRITTEN.has(error.code)
-    ) {
-      await discardMigrationFiles(lock, generated);
-      throw new Error(
-        `${error.message} Removed ${file}, so the next run writes it again from ${DEFAULT_SCHEMA_FILE}. Change ${DEFAULT_SCHEMA_FILE} or the branch's data, then rerun \`appkit db migrate\`.`,
-        { cause: error },
+    if (!shouldDiscardGenerated(error, generated)) {
+      throw new UnappliedMigrationError(
+        ctx.root,
+        generated,
+        warnings,
+        withIntrospectRecovery(error),
       );
     }
-    throw new UnappliedMigrationError(
-      ctx.root,
-      generated,
-      warnings,
-      withIntrospectRecovery(error),
+    await discardMigrationFiles(lock, generated);
+    if (error instanceof TablesLeftInPublicError) throw error;
+    const file = path.relative(ctx.root, generated.file);
+    throw new Error(
+      `${error.message} Removed ${file}, so the next run writes it again from ${DEFAULT_SCHEMA_FILE}. Change ${DEFAULT_SCHEMA_FILE} or the branch's data, then rerun \`appkit db migrate\`.`,
+      { cause: error },
     );
   }
   return {
